@@ -18,7 +18,14 @@ from pydantic import BaseModel, Field, model_validator
 logger = get_logger(__name__)
 
 
-FilterLiteral = Literal["metadata", "predicate", "complex", "datapoint_id", "attribute"]
+FilterLiteral = Literal[
+    "metadata",
+    "predicate",
+    "complex",
+    "datapoint_id",
+    "attribute",
+    "transcript_contains",
+]
 
 
 class FrameFilter(BaseModel):
@@ -315,6 +322,36 @@ class AttributeFilter(FrameFilter):
         ]
 
 
+class TranscriptContainsFilter(FrameFilter):
+    """Filter frames by exact substring match on the full transcript text."""
+
+    type: Literal["transcript_contains"] = "transcript_contains"
+    substring: str
+
+    async def apply(
+        self,
+        data: list[Datapoint],
+        indexed_matching_data_ids: list[str] | None = None,
+        judgment_callback: JudgmentStreamingCallback | None = None,
+        return_all: bool = False,
+    ) -> list[list[Judgment]]:
+        """Applies a transcript substring filter to the data.
+
+        Matches if `substring` appears in `datapoint.text` exactly.
+        """
+        return [
+            [
+                Judgment(
+                    matches=b,
+                    reason=f"transcript contains '{self.substring}'",
+                    data_id=d.id,
+                )
+            ]
+            for d in data
+            if (b := (self.substring in d.text)) or return_all
+        ]
+
+
 async def _cli_callback(proposals: list[list[str]]):
     print("\nProposed clusters:")
     if len(proposals) == 0:
@@ -502,7 +539,12 @@ class FrameDimension(BaseModel):
 
 
 FrameFilterTypes = (
-    MetadataFilter | FramePredicate | ComplexFrameFilter | DatapointIdFilter | AttributeFilter
+    MetadataFilter
+    | FramePredicate
+    | ComplexFrameFilter
+    | DatapointIdFilter
+    | AttributeFilter
+    | TranscriptContainsFilter
 )
 
 
@@ -1338,6 +1380,8 @@ def parse_filter_dict(filter_dict: dict[str, Any]) -> FrameFilterTypes:
         return DatapointIdFilter(**filter_dict)
     elif filter_type == "attribute":
         return AttributeFilter(**filter_dict)
+    elif filter_type == "transcript_contains":
+        return TranscriptContainsFilter(**filter_dict)
     else:
         raise ValueError(f"Unknown filter type: {filter_type}")
 
