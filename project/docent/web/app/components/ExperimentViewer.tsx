@@ -26,16 +26,18 @@ import {
 import InnerCard from './InnerCard';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { TaskStats } from '@/app/types/docent';
+import { AttributeFeedback } from '@/app/types/docent';
 import { Button } from '@/components/ui/button';
 import { BASE_DOCENT_PATH } from '../constants';
 
 interface ExperimentViewerProps {
   onShowDatapoint?: (datapointId: string, blockId?: number) => void;
+  onRewrittenQuery?: (query: string) => void;
 }
 
 export default function ExperimentViewer({
   onShowDatapoint,
+  onRewrittenQuery,
 }: ExperimentViewerProps) {
   // Use global state from context
   const {
@@ -56,6 +58,7 @@ export default function ExperimentViewer({
     perSampleStats,
     perExperimentStats,
     interventionDescriptions,
+    submitAttributeFeedback,
   } = useFrameGrid();
   const router = useRouter();
   // Get search params for handling query parameters
@@ -189,71 +192,45 @@ export default function ExperimentViewer({
     }
   }, [experimentViewerScrollPosition]);
 
-  // // Scroll to a specific item when scrollToItem prop changes
-  // const scrollToItemById = useCallback(
-  //   (id: string, type: 'experiment' | 'sample') => {
-  //     // Only scroll if the organization method matches the item type
-  //     if (
-  //       (organizationMethod === 'experiment' && type === 'experiment') ||
-  //       (organizationMethod === 'sample' && type === 'sample')
-  //     ) {
-  //       // If the item is an outer item in the current organization
-  //       if (
-  //         (organizationMethod === 'experiment' && type === 'experiment') ||
-  //         (organizationMethod === 'sample' && type === 'sample')
-  //       ) {
-  //         // Expand the item if it's not already expanded
-  //         if (!expandedOuter.has(id)) {
-  //           setExpandedOuter((prev) => {
-  //             const newSet = new Set(prev);
-  //             newSet.add(id);
-  //             return newSet;
-  //           });
-  //         }
+  // Add these new state variables
+  const [attributeFeedback, setAttributeFeedback] = useState<AttributeFeedback[]>([]);
+  const [missingQueries, setMissingQueries] = useState<string>('');
 
-  //         // Scroll to the item with a small delay to ensure it's rendered
-  //         setTimeout(() => {
-  //           const element = itemRefs.current[id];
-  //           if (element && containerRef.current) {
-  //             element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  //           }
-  //         }, 250);
-  //       }
-  //     }
-  //   },
-  //   [organizationMethod, expandedOuter, setExpandedOuter, setExpandedInner]
-  // );
+  const [waitingOnNewQuery, setWaitingOnNewQuery] = useState(false);
 
-  // // Check for expId in query parameters and scroll to that experiment
-  // useEffect(() => {
-  //   const expId = searchParams.get('expId');
-  //   const sampleId = searchParams.get('sampleId');
+  // Add this function to handle feedback submission
+  const handleFeedbackSubmit = useCallback(async () => {
+    // Here you would send the feedback to the server
+    // Include both the original query and the feedback
+    if (!curAttributeQuery) return;
+    if (attributeFeedback.length === 0 && !missingQueries) return;
 
-  //   console.log('effect triggered!');
+    setWaitingOnNewQuery(true);
+    onRewrittenQuery?.("");
 
-  //   if (expId) {
-  //     // Switch to experiment organization if needed
-  //     if (organizationMethod !== 'experiment') {
-  //       handleOrganizationModeChange('experiment');
-  //     }
+    submitAttributeFeedback(curAttributeQuery, attributeFeedback, missingQueries).then((rewrittenQuery) => {
+      if (onRewrittenQuery) {
+          onRewrittenQuery(rewrittenQuery);
+        }
+      });
 
-  //     // Scroll to the specified experiment
-  //     scrollToItemById(expId, 'experiment');
-  //   } else if (sampleId) {
-  //     // Switch to sample organization if needed
-  //     if (organizationMethod !== 'sample') {
-  //       handleOrganizationModeChange('sample');
-  //     }
+    // Reset feedback state
+    setAttributeFeedback([]);
+    setMissingQueries('');
+    setWaitingOnNewQuery(false);
+  }, [curAttributeQuery, attributeFeedback, missingQueries, onRewrittenQuery]);
 
-  //     // Scroll to the specified sample
-  //     scrollToItemById(sampleId, 'sample');
-  //   }
-  // }, [
-  //   searchParams,
-  //   scrollToItemById,
-  //   organizationMethod,
-  //   handleOrganizationModeChange,
-  // ]);
+  const handleVoteUpdate = (s: string, v: 'up' | 'down' | null) => {
+    const filteredFeedback = attributeFeedback.filter((feedback) => feedback.attribute !== s);
+    if (v === null) {
+      setAttributeFeedback(filteredFeedback);
+    } else {
+      setAttributeFeedback([
+        ...filteredFeedback,
+        { attribute: s, vote: v },
+      ]);
+    }
+  }
 
   // Return early with loading if data isn't available
   if (!expBins || !expStatMarginals || !expIdMarginals) {
@@ -404,12 +381,29 @@ export default function ExperimentViewer({
 
       {/* Hint for refining search queries */}
       {curAttributeQuery && (
-        <div className="text-xs text-indigo-800 italic flex items-center gap-1.5 p-1.5 rounded-md border border-indigo-100">
-          <HelpCircle className="h-3 w-3 text-indigo-500" />
-          <span>
-            Not seeing what you expected? You can edit your search query with
-            more details to refine the results.
-          </span>
+        <div className="text-xs text-indigo-800 italic flex items-center justify-between gap-1.5 p-1.5 rounded-md border border-indigo-100">
+          {
+            waitingOnNewQuery ? <div className="flex items-center justify-between w-full">
+              <span>Search query is being refined with your feedback...</span>
+            </div> :
+              <div className="flex items-center justify-between w-full">
+                <input
+                  type="text"
+                  placeholder="Relevant queries that are entirely missing from the search results"
+                  className="text-xs px-2 py-1 border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 w-[400px]"
+                  value={missingQueries}
+                  onChange={(e) => setMissingQueries(e.target.value)}
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs text-green-600 hover:text-green-800"
+                  onClick={handleFeedbackSubmit}
+                >
+                  Submit feedback
+                </Button>
+              </div>
+          }
         </div>
       )}
 
@@ -570,6 +564,7 @@ export default function ExperimentViewer({
                             ? (experimentsBySample.get(innerId)?.length ?? 0)
                             : undefined
                         }
+                        onAttributeVote={handleVoteUpdate}
                       />
                     );
                   })}

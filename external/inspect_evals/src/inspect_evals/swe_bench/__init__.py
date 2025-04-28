@@ -5,6 +5,7 @@ from .scorers import (
     swe_bench_scorer,
 )
 from .swe_bench import swe_bench
+from .claude_tools import str_replace, insert, view, create
 
 __all__ = [
     "swe_bench",
@@ -12,4 +13,8 @@ __all__ = [
     "swe_bench_baseline_scorer",
     "swe_bench_scorer",
     "save_outputs_to_swebench_format",
+    "str_replace",
+    "insert",
+    "view",
+    "create",
 ]

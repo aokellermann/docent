@@ -1,5 +1,6 @@
 from frames.transcript import format_chat_message
 from llm_util.prod_llms import get_llm_completions_async
+from llm_util.provider_preferences import PROVIDER_PREFERENCES
 from llm_util.types import ChatMessage, LLMApiKeys
 
 
@@ -24,8 +25,8 @@ Return the description on the first line, and nothing else.
         messages_list=[
             [{"role": "user", "content": prompt}],
         ],
-        model_category="smart",
         llm_api_keys=api_keys,
+        **PROVIDER_PREFERENCES.describe_insertion_intervention.create_shallow_dict(),
     )
     return output[0].first_text
 
@@ -55,7 +56,7 @@ Return the description on the first line, and nothing else.
         messages_list=[
             [{"role": "user", "content": prompt}],
         ],
-        model_category="smart",
         llm_api_keys=api_keys,
+        **PROVIDER_PREFERENCES.describe_replacement_intervention.create_shallow_dict(),
     )
     return output[0].first_text

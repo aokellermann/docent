@@ -74,10 +74,21 @@ def swe_bench_scorer() -> Scorer:
             eval_script_stdout + "\n" + eval_script_stderr, state
         )
 
-        eval_stdout = eval_script_stdout
-        # beginning of pytest output. TODO(vincent): figure out non-pytest outputs
-        if "============================= test session starts ==============================" in eval_stdout:
-            eval_stdout = eval_stdout.split("============================= test session starts ==============================")[1]
+        from swebench.harness.constants import TEST_PYTEST, TEST_DJANGO, TEST_SPHINX, TEST_SYMPY
+
+        eval_stdout = eval_script_stdout + "\n" + eval_script_stderr
+        # different testers put important info in different places
+        if TEST_PYTEST in eval_script:
+            eval_stdout = eval_script_stdout
+            if "============================= test session starts ==============================" in eval_stdout:
+                eval_stdout = eval_stdout.split("============================= test session starts ==============================")[1]
+        elif TEST_DJANGO in eval_script:
+            eval_stdout = eval_script_stderr
+        elif TEST_SPHINX in eval_script:
+            eval_stdout = eval_script_stdout
+        elif TEST_SYMPY in eval_script:
+            if "============================= test process starts ==============================" in eval_stdout:
+                eval_stdout = eval_stdout.split("============================= test process starts ==============================")[1]
 
         return Score(
             value=value,

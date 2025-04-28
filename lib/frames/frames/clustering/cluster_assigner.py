@@ -8,6 +8,7 @@ from typing import Literal, cast
 import torch
 from frames.types import AssignmentStreamingCallback
 from llm_util.prod_llms import get_llm_completions_async
+from llm_util.provider_preferences import PROVIDER_PREFERENCES
 from llm_util.types import LLMApiKeys, LLMOutput
 from log_util import get_logger
 from tqdm.auto import tqdm
@@ -73,61 +74,35 @@ class ClusterAssignerFromLLM(ClusterAssigner):
     def __init__(
         self,
         system_prompt: str | None,
-        model_category: str,
-        default_provider: str,
+        model_name: str,
         max_new_tokens: int = 512,
         temperature: float = 0.25,
-        reasoning_effort: Literal["low", "medium", "high"] | None = None,
     ) -> None:
         super().__init__()
         self.system_prompt = system_prompt
-        self.model_category = model_category
-        self.default_provider = default_provider
+        self.model_name = model_name
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
-        self.reasoning_effort: Literal["low", "medium", "high"] | None = reasoning_effort
+        assert (
+            model_name in PROVIDER_PREFERENCES.cluster_assignment
+        ), f"Model name {model_name} not found in PROVIDER_PREFERENCES.cluster_assignment"
 
     @classmethod
     def from_o3_mini(cls):
         return cls(
             system_prompt=None,
-            model_category="reasoning_fast",
-            default_provider="openai",
             max_new_tokens=8192,
             temperature=1,
-            reasoning_effort="medium",
-        )
-
-    @classmethod
-    def from_o1(cls):
-        return cls(
-            system_prompt=None,
-            model_category="reasoning_smart",
-            default_provider="openai",
-            max_new_tokens=8192,
-            temperature=1,
-            reasoning_effort="medium",
+            model_name="o3-mini",
         )
 
     @classmethod
     def from_sonnet_37_thinking(cls):
         return cls(
             system_prompt=None,
-            model_category="smart",
-            default_provider="anthropic",
             max_new_tokens=4096,
-            temperature=0.6,
-            reasoning_effort="medium",
-        )
-
-    @classmethod
-    def from_4o_mini(cls):
-        return cls(
-            system_prompt=None,
-            model_category="fast",
-            default_provider="openai",
-            max_new_tokens=512,
-            temperature=0.2,
+            temperature=1.0,
+            model_name="sonnet-37-thinking",
         )
 
     async def assign(
@@ -176,12 +151,10 @@ class ClusterAssignerFromLLM(ClusterAssigner):
 
         outputs = await get_llm_completions_async(
             queries,
-            model_category=self.model_category,
+            **PROVIDER_PREFERENCES.cluster_assignment[self.model_name].create_shallow_dict(),
             max_new_tokens=self.max_new_tokens,
             temperature=self.temperature,
-            reasoning_effort=self.reasoning_effort,
             timeout=30,
-            default_provider=self.default_provider,
             completion_callback=llm_callback,
             use_cache=True,
             llm_api_keys=llm_api_keys,
@@ -291,7 +264,15 @@ class FinetunedModernBertClusterAssigner(ClusterAssigner):
 
                 cls = modal.Cls.from_name("cluster-assigner", "ModalClusterAssigner")
                 obj = cls()
-                batch_predictions, batch_probs = obj.assign.remote(encoded_inputs)
+                try:
+                    batch_predictions, batch_probs = obj.assign.remote(encoded_inputs)
+                except modal.exception.AuthError:
+                    logger.warning(
+                        f"Modal credentials not configured, falling back to other models"
+                    )
+                    return [
+                        None,
+                    ] * len(items)
             else:
                 encoded_inputs.to(self.device)
                 # Get model predictions
@@ -326,9 +307,7 @@ class FinetunedModernBertClusterAssigner(ClusterAssigner):
 
 BASE_ASSIGNERS = {
     "o3-mini": ClusterAssignerFromLLM.from_o3_mini(),
-    "gpt-4o-mini": ClusterAssignerFromLLM.from_4o_mini(),
     "sonnet-37-thinking": ClusterAssignerFromLLM.from_sonnet_37_thinking(),
-    "o1": ClusterAssignerFromLLM.from_o1(),
     "finetuned": FinetunedModernBertClusterAssigner(
         model_path="/home/ubuntu/artifacts/vincent/checkpoints/cluster_assignment_032225",
         device_id="MODAL",
@@ -340,7 +319,7 @@ class HybridClusterAssigner(ClusterAssigner):
     def __init__(
         self,
         finetuned_path: str,
-        backup_model: Literal["o3-mini", "gpt-4o-mini", "sonnet-37-thinking", "o1"],
+        backup_model: str,
         device_id: int | Literal["MODAL"] = 0,
     ):
         self.primary = FinetunedModernBertClusterAssigner(finetuned_path, device_id=device_id)
@@ -372,7 +351,7 @@ class HybridClusterAssigner(ClusterAssigner):
         # If we have any low confidence results, process them with backup
         if reassign_indices:
             logger.info(
-                f"Falling back to {self.backup.model_category} LLM for {len(reassign_indices)}/{len(items)} items marked YES by BERT"
+                f"Falling back to {self.backup.model_name} LLM for {len(reassign_indices)}/{len(items)} items marked YES by BERT"
             )
 
             # Compute assignments
@@ -405,14 +384,14 @@ class HybridClusterAssigner(ClusterAssigner):
 ############
 
 
-ASSIGNERS = {
+ASSIGNERS: dict[str, ClusterAssigner] = {
     **BASE_ASSIGNERS,
     "hybrid": HybridClusterAssigner(
         finetuned_path="/home/ubuntu/artifacts/vincent/checkpoints/cluster_assignment_032225",
-        backup_model="o3-mini",
+        backup_model=PROVIDER_PREFERENCES.assignment_model,
         device_id="MODAL",
     ),
 }
 
-DEFAULT_ASSIGNER = "o3-mini"  # FIXME: restore vincent's hybrid model once hosted elsewhere
-AssignerType = Literal["o3-mini", "gpt-4o-mini", "sonnet-37-thinking", "o1", "finetuned", "hybrid"]
+DEFAULT_ASSIGNER = PROVIDER_PREFERENCES.assignment_model
+AssignerType = Literal["o3-mini", "sonnet-37-thinking", "finetuned", "hybrid"]

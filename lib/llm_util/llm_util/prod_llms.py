@@ -30,6 +30,7 @@ from llm_util.types import (
     ChatMessage,
     LLMApiKeys,
     LLMOutput,
+    ModelCallParams,
     RateLimitException,
     ToolInfo,
     get_single_streaming_callback,
@@ -313,11 +314,13 @@ class LLMManager:
 
         self.current_provider_index = 0
         self.provider = self.providers[self.provider_order[self.current_provider_index]]
+        self.model_name_index = 0
 
     async def get_completions(
         self,
         messages_list: list[list[ChatMessage]],
-        model_category: str,
+        model_category: str | None = None,
+        model_call_params: list[ModelCallParams] | None = None,
         tools: list[ToolInfo] | None = None,
         tool_choice: Literal["auto", "required"] | None = None,
         max_new_tokens: int = 32,
@@ -336,17 +339,22 @@ class LLMManager:
         results: list[LLMOutput | None] = [None] * len(messages_list)
         providers_rate_limited = {p: False for p in self.providers.keys()}
 
+        model_call_params_passed_explicitly = model_call_params is not None
+        if model_call_params_passed_explicitly:
+            model_name = model_call_params[0].model_name
+            reasoning_effort = model_call_params[0].reasoning_effort
+
         while True:
             try:
                 client = self.provider["async_client"]
                 client.api_key = self.provider["keys"][self.provider["current_key_index"]]
-                model_name = self.provider["models"].get(model_category)
-
-                # This should trigger if reasoning is used for Anthropic
-                if model_name is None:
-                    raise AllOutputsErroredException(
-                        f"Model category '{model_category}' not found in provider '{self.provider_order[self.current_provider_index]}'"
-                    )
+                if not model_call_params_passed_explicitly:
+                    if model_category in self.provider["models"]:
+                        model_name = self.provider["models"][model_category]
+                    else:
+                        raise AllOutputsErroredException(
+                            f"Model category '{model_category}' not found in provider '{self.provider_order[self.current_provider_index]}'"
+                        )
 
                 # Check cache if available
                 if self.cache is not None:
@@ -443,10 +451,21 @@ class LLMManager:
 
                 break  # Break to return the results
             except AllOutputsErroredException:
-                if not self._rotate_keys_and_swap_provider():
-                    if all(providers_rate_limited.values()):
-                        raise RateLimitException("All providers were rate limited")
-                    break  # Break to return the results as is
+                if not self._rotate_key_for_provider():
+                    if not model_call_params_passed_explicitly:
+                        rotation_succeeded = self._rotate_provider()
+                    else:
+                        new_model_params = self._rotate_model_name(model_call_params)
+                        if new_model_params is None:
+                            rotation_succeeded = False
+                        else:
+                            model_name = new_model_params.model_name
+                            reasoning_effort = new_model_params.reasoning_effort
+                            rotation_succeeded = True
+                    if not rotation_succeeded:
+                        if all(providers_rate_limited.values()):
+                            raise RateLimitException("All providers were rate limited")
+                        break  # Break to return the results as is
 
         # If any results are None, set them to an error result
         final_results: list[LLMOutput] = []
@@ -464,13 +483,11 @@ class LLMManager:
 
         return final_results
 
-    def _rotate_keys_and_swap_provider(self) -> bool:
+    def _rotate_key_for_provider(self) -> bool:
         """
         Rotate to the next API key for the current provider.
-        If all keys for the current provider are exhausted, move to the next provider.
-        Return True if there is a new key/provider to try, False if all are exhausted.
+        If all keys for the current provider are exhausted, return False, otherwise return True.
         """
-
         # Move to the next key index
         self.provider["current_key_index"] += 1
 
@@ -480,24 +497,55 @@ class LLMManager:
             logger.warning(f"Switched to next key for provider '{provider_name}'.")
             return True
         else:
-            # No more keys in the current provider, reset and move to next provider
-            self.provider["current_key_index"] = 0  # Reset key index for this provider
-            self.current_provider_index += 1
-            if self.current_provider_index < len(self.provider_order):
-                # Move to next provider
-                provider_name = self.provider_order[self.current_provider_index]
-                self.provider = self.providers[provider_name]
-                logger.warning(f"Switched to next provider '{provider_name}'.")
-                return True
-            else:
-                # All providers and their keys have been exhausted
-                logger.error("All providers and their keys have been exhausted.")
-                return False
+            # No more keys in this provider
+            logger.warning(
+                f"No more keys in provider '{self.provider_order[self.current_provider_index]}'."
+            )
+            return False
+
+    def _rotate_provider(self) -> bool:
+        """
+        Rotate to the next provider, as the previous provider's keys are exhausted.
+        If all providers are exhausted, return False, otherwise return True.
+        """
+        # No more keys in the current provider, reset and move to next provider
+        self.provider["current_key_index"] = 0  # Reset key index for this provider
+        self.current_provider_index += 1
+        if self.current_provider_index < len(self.provider_order):
+            # Move to next provider
+            provider_name = self.provider_order[self.current_provider_index]
+            self.provider = self.providers[provider_name]
+            logger.warning(f"Switched to next provider '{provider_name}'.")
+            return True
+        else:
+            # All providers and their keys have been exhausted
+            logger.error("All providers and their keys have been exhausted.")
+            return False
+
+    def _rotate_model_name(
+        self, model_call_params: list[ModelCallParams]
+    ) -> ModelCallParams | None:
+        """
+        Rotate to the next model name.
+        If all model names are done, return None, otherwise return the next model name.
+        """
+        self.model_name_index += 1
+        if self.model_name_index == len(model_call_params):
+            return None
+        self.provider["current_key_index"] = 0  # Reset key index for prev provider
+        new_model_params = model_call_params[self.model_name_index]
+        provider_name = new_model_params.provider
+        self.provider = self.providers[provider_name]
+        logger.warning(
+            f"Switched to next provider '{provider_name}', model '{new_model_params.model_name}'."
+        )
+        return new_model_params
 
 
 async def get_llm_completions_async(
     messages_list: Sequence[Sequence[ChatMessage | dict[str, Any]]],
-    model_category: str,
+    model_category: str | None = None,
+    model_call_params: list[ModelCallParams] | None = None,
     tools: list[ToolInfo] | None = None,
     tool_choice: Literal["auto", "required"] | None = None,
     max_new_tokens: int = 1024,
@@ -514,6 +562,11 @@ async def get_llm_completions_async(
     use_cache: bool = False,
     llm_api_keys: LLMApiKeys | None = None,
 ) -> list[LLMOutput]:
+    if model_category is None and model_call_params is None:
+        raise ValueError("Either model_category or model_call_params must be provided")
+    if model_category is not None and model_call_params is not None:
+        raise ValueError("Only one of model_category or model_call_params can be provided")
+
     if logprobs:
         print("Adding `anthropic` to provider blacklist since logprobs are not supported.")
         if provider_blacklist is None:
@@ -540,6 +593,7 @@ async def get_llm_completions_async(
     return await llm_manager.get_completions(
         parsed_messages_list,
         model_category,
+        model_call_params,
         tools=tools,
         tool_choice=tool_choice,
         max_new_tokens=max_new_tokens,
