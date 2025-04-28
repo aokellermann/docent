@@ -38,6 +38,12 @@ class LLMApiKeys(TypedDict):
     anthropic_key: str | None
 
 
+class ModelCallParams(BaseModel):
+    provider: str
+    model_name: str
+    reasoning_effort: Literal["low", "medium", "high"] | None = None
+
+
 @dataclass
 class ToolCallPartial:
     id: str | None

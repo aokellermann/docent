@@ -320,7 +320,7 @@ async def send_datapoint(
     Raises:
         ValueError: If payload is incomplete, or if datapoint_id is not found.
     """
-    datapoint_id = message.payload["datapoint_id"]
+    datapoint_id = message.payload["datapoint_id"].replace("%20", " ")
     data = fg.all_data_dict[datapoint_id]
 
     await cm.send(

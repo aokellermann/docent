@@ -24,6 +24,7 @@ import {
   FrameFilter,
   SolutionSummary,
   TranscriptComparison,
+  AttributeFeedback,
 } from '@/app/types/docent';
 import React, {
   createContext,
@@ -273,12 +274,12 @@ interface FrameGridContextType {
   startNewEval: (evalId: EvalId) => void;
   curEvalId: EvalId | null;
   rewriteSearchQuery: (query: string) => Promise<string>;
-
   // Regex Search
   regexQuery: string;
   setRegexQuery: React.Dispatch<React.SetStateAction<string>>;
   regexSnippets: Record<string, RegexSnippet[]>;
   setRegexSnippets: React.Dispatch<React.SetStateAction<Record<string, RegexSnippet[]>>>;
+  submitAttributeFeedback: (originalQuery: string, attributeFeedback: AttributeFeedback[], missingQueries: string) => Promise<string>;
 }
 
 const FrameGridContext = createContext<FrameGridContextType | null>(null);
@@ -1031,6 +1032,38 @@ export function FrameGridProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  const submitAttributeFeedback = useCallback(
+    async (originalQuery: string, attributeFeedback: AttributeFeedback[], missingQueries: string): Promise<string> => {
+      try {
+        const response = await fetch(
+          `http://${(BASE_URL || '').replace('http://', '')}/submit_attribute_feedback`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              original_query: originalQuery,
+              attribute_feedback: attributeFeedback,
+              missing_queries: missingQueries,
+            }),
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`Error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.rewritten_query;
+      } catch (error) {
+        console.error('Error submitting attribute feedback:', error);
+      }
+      return originalQuery;
+    },
+    []
+  );
+
   // Fetch eval IDs from the server
   const fetchEvalIds = useCallback(async (): Promise<EvalId[]> => {
     try {
@@ -1566,6 +1599,7 @@ export function FrameGridProvider({ children }: { children: React.ReactNode }) {
         startNewEval,
         curEvalId,
         rewriteSearchQuery,
+        submitAttributeFeedback,
         searchHistory,
         addToSearchHistory,
         setSearchHistory,

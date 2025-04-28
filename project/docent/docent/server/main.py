@@ -8,6 +8,7 @@ import sentry_sdk
 from docent.loader import EVALS
 from docent.server.task_manager import TaskManager
 from docent.server.ws_handlers.assistant import (
+    generate_new_queries,
     handle_create_ta_session,
     handle_diff_transcripts,
     handle_summarize_transcript,
@@ -108,6 +109,37 @@ async def api_rewrite_search_query(request: SearchQueryRequest) -> SearchQueryRe
     """
     rewritten_query = await rewrite_search_query(request.query)
     return SearchQueryResponse(rewritten_query=rewritten_query)
+
+
+from typing import Literal
+
+
+class AttributeFeedback(BaseModel):
+    attribute: str
+    vote: Literal["up", "down"]
+
+
+class SubmitAttributeFeedbackRequest(BaseModel):
+    original_query: str
+    attribute_feedback: list[AttributeFeedback]
+    missing_queries: str
+
+
+class SubmitAttributeFeedbackResponse(BaseModel):
+    rewritten_query: str
+
+
+@asgi_app.post("/submit_attribute_feedback")
+async def submit_attribute_feedback(
+    request: SubmitAttributeFeedbackRequest,
+) -> SubmitAttributeFeedbackResponse:
+    rewritten_query = await generate_new_queries(
+        request.original_query,
+        [a.attribute for a in request.attribute_feedback if a.vote == "down"],
+        [a.attribute for a in request.attribute_feedback if a.vote == "up"],
+        request.missing_queries,
+    )
+    return SubmitAttributeFeedbackResponse(rewritten_query=rewritten_query)
 
 
 # These are all local variables! So we don't have to remote them for Modal.

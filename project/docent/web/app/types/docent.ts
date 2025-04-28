@@ -130,6 +130,7 @@ interface TranscriptMetadata {
   // Outcome
   scores: Record<string, number | boolean>;
   default_score_key: string | null;
+  scoring_metadata: Record<string, any> | null;
 
   // Inspect metadata
   inspect_metadata: Record<string, any> | null;
@@ -361,6 +362,11 @@ export interface TranscriptComparison {
   citations: Citation[];
 }
 
+interface AttributeFeedback {
+  attribute: string;
+  vote: 'up' | 'down';
+}
+
 export type {
   Content,
   ToolCallError,
@@ -394,4 +400,5 @@ export type {
   StreamedAttribute,
   DatapointIdFilter,
   AttributeFilter,
+  AttributeFeedback,
 };

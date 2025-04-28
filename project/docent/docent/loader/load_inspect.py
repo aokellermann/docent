@@ -108,6 +108,12 @@ FRONTIER_MATH_LOGS: dict[str, str | tuple[str, dict[str, Any]]] = {
     "frontier-math-sonnet-3-7": f"{LOG_DIR_PREFIX}/Rfy7A5TbRK343mTyQkeGt7.eval",
 }
 
+SWE_BENCH_LOGS: dict[str, str | tuple[str, dict[str, Any]]] = {
+    # "swebench-sonnet37-old": f"/home/ubuntu/artifacts/vincent/swe_bench_logs/2025-04-09T21-09-59+00-00_swe-bench_8AcW4AHxbhgtoqEbe5FQcT.eval",
+    # "swebench-sonnet37-new": f"/home/ubuntu/artifacts/vincent/swe_bench_logs/2025-04-10T21-39-15+00-00_swe-bench_TZrCQjagGBxzuSrXnE3fqj.eval",
+    "swebench-sonnet37-tools": "/home/ubuntu/clarity/logs/2025-04-15T00-09-38+00-00_swe-bench_NzHKupvJR28drNXGB63DEM.eval",
+}
+
 
 def load_inspect_experiment(
     experiment_id: str,
@@ -164,6 +170,14 @@ def load_inspect_experiment(
         # Evaluate verification code (Frontier Math)
         if s.scores and "verification_code" in s.scores:
             scores["correct"] = s.scores["verification_code"].value == "C"
+            default_score_key = "correct"
+        # SWE-Bench scoring
+        if s.scores and "swe_bench_scorer" in s.scores:
+            scores["correct"] = s.scores["swe_bench_scorer"].value == 1.0
+            default_score_key = "correct"
+        #  Mock AIME scoring
+        if s.scores and "model_graded" in s.scores:
+            scores["correct"] = s.scores["model_graded"].value == "C"
             default_score_key = "correct"
         # Set metadata
         metadata = TranscriptMetadata(
@@ -234,6 +248,10 @@ def load_cybench() -> list[Transcript]:
 
 def load_k8s() -> list[Transcript]:
     return load_inspect_eval(K8S_LOGS)
+
+
+def load_swebench() -> list[Transcript]:
+    return load_inspect_eval(SWE_BENCH_LOGS)
 
 
 def load_frontier_math() -> list[Transcript]:

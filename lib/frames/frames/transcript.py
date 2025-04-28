@@ -13,7 +13,7 @@ TRANSCRIPT_BLOCK_TEMPLATE = """
 """.strip()
 SINGLE_BLOCK_CITE_INSTRUCTION = "Each transcript block has a unique index; cite the relevant block index in brackets when relevant, like [B<idx>]. Use multiple tags to cite multiple blocks, like [B<idx1>][B<idx2>]. Use dashes to cite ranges, like [B<idx1>-B<idx2>], but cite ranges sparingly; do your best to be specific."
 MULTI_BLOCK_CITE_INSTRUCTION = "Each transcript block has a unique index; cite the relevant block index in brackets when relevant, like [T<idx>B<idx>]. Use multiple tags to cite multiple blocks, like [T<idx1>B<idx1>][T<idx2>B<idx2>]. Use dashes to cite ranges, like [T<idx1>B<idx1>-T<idx2>B<idx2>], but cite ranges sparingly; do your best to be specific."
-DEFAULT_TO_STR_METADATA_FIELDS = ["scores", "additional_metadata"]
+DEFAULT_TO_STR_METADATA_FIELDS = ["scores", "additional_metadata", "scoring_metadata"]
 
 
 class TranscriptMetadata(BaseModel):

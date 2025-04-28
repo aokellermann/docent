@@ -4,6 +4,7 @@ from typing import Protocol
 from frames.transcript import SINGLE_BLOCK_CITE_INSTRUCTION
 from frames.types import Datapoint
 from llm_util.prod_llms import get_llm_completions_async
+from llm_util.provider_preferences import PROVIDER_PREFERENCES
 from llm_util.types import LLMApiKeys, LLMOutput
 
 ATTRIBUTE_EXTRACTION_PROMPT = f"""
@@ -95,14 +96,12 @@ async def extract_attributes(
             ]
             for prompt in prompts
         ],
-        model_category="reasoning_smart",
-        reasoning_effort="medium",
         max_new_tokens=4096,
         timeout=180.0,
-        default_provider="anthropic",
         use_cache=True,
         completion_callback=llm_callback,
         llm_api_keys=llm_api_keys,
+        **PROVIDER_PREFERENCES.extract_attributes.create_shallow_dict(),
     )
 
     ans: list[list[str] | None] = []
