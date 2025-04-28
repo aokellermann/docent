@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from itertools import chain, product
 from time import perf_counter
 from typing import Any, Awaitable, Callable, Literal, Sequence, cast
@@ -18,7 +19,14 @@ from pydantic import BaseModel, Field, model_validator
 logger = get_logger(__name__)
 
 
-FilterLiteral = Literal["metadata", "predicate", "complex", "datapoint_id", "attribute"]
+FilterLiteral = Literal[
+    "metadata",
+    "predicate",
+    "complex",
+    "datapoint_id",
+    "attribute",
+    "transcript_contains",
+]
 
 
 class FrameFilter(BaseModel):
@@ -315,6 +323,34 @@ class AttributeFilter(FrameFilter):
         ]
 
 
+class TranscriptContainsFilter(FrameFilter):
+    """Filter frames by regex match on the full transcript text (case-insensitive)."""
+
+    type: Literal["transcript_contains"] = "transcript_contains"
+    substring: str
+
+    async def apply(
+        self,
+        data: list[Datapoint],
+        indexed_matching_data_ids: list[str] | None = None,
+        judgment_callback: JudgmentStreamingCallback | None = None,
+        return_all: bool = False,
+    ) -> list[list[Judgment]]:
+        """Applies a case insensitive regex filter to the data."""
+        pattern = re.compile(self.substring, flags=re.IGNORECASE)
+        return [
+            [
+                Judgment(
+                    matches=b,
+                    reason=f"transcript matches regex '{self.substring}' (case-insensitive)",
+                    data_id=d.id,
+                )
+            ]
+            for d in data
+            if (b := bool(pattern.search(d.text))) or return_all
+        ]
+
+
 async def _cli_callback(proposals: list[list[str]]):
     print("\nProposed clusters:")
     if len(proposals) == 0:
@@ -346,7 +382,7 @@ async def _cli_callback(proposals: list[list[str]]):
                 if 0 <= choice_idx < len(proposals):
                     return choice_idx
                 else:
-                    print(f"Please enter a valid number between 0 and {len(proposals)-1}")
+                    print(f"Please enter a valid number between 0 and {len(proposals) - 1}")
             except ValueError:
                 print("Please enter a valid number, 'feedback', 'retry', or 'stop'")
 
@@ -416,7 +452,10 @@ class FrameDimension(BaseModel):
         # Collect attributes to cluster
         # Use the new streaming callback so that attribute extraction updates are sent as soon as they're available.
         await _unlocked_compute_and_set_attributes_if_needed(
-            data, self.attribute, attribute_callback=attribute_callback, llm_api_keys=llm_api_keys
+            data,
+            self.attribute,
+            attribute_callback=attribute_callback,
+            llm_api_keys=llm_api_keys,
         )
         to_cluster = list(chain(*[d.attributes[self.attribute] for d in data]))
 
@@ -493,7 +532,9 @@ class FrameDimension(BaseModel):
         # Create a MetadataFilter for each unique value
         bins = [
             MetadataFilter(
-                id=f"{self.metadata_key}_{str(value).zfill(3)}", key=self.metadata_key, value=value
+                id=f"{self.metadata_key}_{str(value).zfill(3)}",
+                key=self.metadata_key,
+                value=value,
             )
             for value in unique_values
         ]
@@ -502,7 +543,12 @@ class FrameDimension(BaseModel):
 
 
 FrameFilterTypes = (
-    MetadataFilter | FramePredicate | ComplexFrameFilter | DatapointIdFilter | AttributeFilter
+    MetadataFilter
+    | FramePredicate
+    | ComplexFrameFilter
+    | DatapointIdFilter
+    | AttributeFilter
+    | TranscriptContainsFilter
 )
 
 
@@ -521,6 +567,11 @@ class Frame:
 
         # Hashtable index for metadata filters
         self._metadata_index: dict[Any, list[str]] | None = None
+
+    @property
+    def data(self) -> list[Datapoint]:
+        """Public accessor for the frame's data."""
+        return self._data
 
     async def _init_metadata_index(self):
         if self._filter and isinstance(self._filter, MetadataFilter):
@@ -547,7 +598,13 @@ class Frame:
         if self._filter is None:
             # If no filter, create "match all" judgments
             self._judgments = [
-                [Judgment(matches=True, reason="No filter - matches everything", data_id=d.id)]
+                [
+                    Judgment(
+                        matches=True,
+                        reason="No filter - matches everything",
+                        data_id=d.id,
+                    )
+                ]
                 for d in self._data
             ]
             return
@@ -880,7 +937,9 @@ class FrameGrid(BaseModel):
             self._marginals[dim.id] = await dim.get_frames(await self._unlocked_get_base_data())
 
     async def _unlocked_populate_marginals(
-        self, dim_ids: list[str] | None, has_update: Callable[[], Awaitable[None]] | None = None
+        self,
+        dim_ids: list[str] | None,
+        has_update: Callable[[], Awaitable[None]] | None = None,
     ):
         assert self._marginals, "Call compute_marginal_views first"
 
@@ -1255,7 +1314,9 @@ class FrameGrid(BaseModel):
         self._unlocked_invalidate_dimension_marginals(dim_id)
 
 
-def _transpose_judgment_lists(lists_FNA: list[list[list[Judgment]]]) -> list[list[list[Judgment]]]:  # type: ignore
+def _transpose_judgment_lists(
+    lists_FNA: list[list[list[Judgment]]],
+) -> list[list[list[Judgment]]]:  # type: ignore
     """
     Turns lists_FNA into lists_NAF by transposing dimensions (0, 2).
 
@@ -1338,6 +1399,8 @@ def parse_filter_dict(filter_dict: dict[str, Any]) -> FrameFilterTypes:
         return DatapointIdFilter(**filter_dict)
     elif filter_type == "attribute":
         return AttributeFilter(**filter_dict)
+    elif filter_type == "transcript_contains":
+        return TranscriptContainsFilter(**filter_dict)
     else:
         raise ValueError(f"Unknown filter type: {filter_type}")
 
