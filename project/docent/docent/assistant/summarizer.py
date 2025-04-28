@@ -8,6 +8,7 @@ from frames.transcript import (
     parse_citations_single_transcript,
 )
 from llm_util.prod_llms import get_llm_completions_async
+from llm_util.provider_preferences import PROVIDER_PREFERENCES
 from llm_util.types import LLMApiKeys, LLMOutput
 
 USER_BACKGROUND = "a general (not domain-specific) CS background"
@@ -67,7 +68,7 @@ Return your response in the following format:
                 },
             ]
         ],
-        model_category="smart",
+        **PROVIDER_PREFERENCES.summarize_intended_solution.create_shallow_dict(),
         max_new_tokens=8192,
         timeout=180.0,
         streaming_callback=llm_callback,
@@ -157,8 +158,7 @@ Follow these guidelines: {SINGLE_BLOCK_CITE_INSTRUCTION}. The citation should be
                 },
             ]
         ],
-        model_category="reasoning_smart",
-        reasoning_effort="low",
+        **PROVIDER_PREFERENCES.summarize_agent_actions.create_shallow_dict(),
         max_new_tokens=8192,
         timeout=180.0,
         streaming_callback=llm_streaming_callback,
@@ -286,8 +286,7 @@ comma-separated list of action unit indices
                 },
             ]
         ],
-        model_category="reasoning_smart",
-        reasoning_effort="low",
+        **PROVIDER_PREFERENCES.group_actions_into_high_level_steps.create_shallow_dict(),
         max_new_tokens=8192,
         timeout=180.0,
         streaming_callback=llm_streaming_callback,
@@ -429,8 +428,7 @@ The format for each observation should be:
                 },
             ]
         ],
-        model_category="reasoning_smart",
-        reasoning_effort="medium",
+        **PROVIDER_PREFERENCES.interesting_agent_observations.create_shallow_dict(),
         max_new_tokens=8192,
         timeout=180.0,
         streaming_callback=llm_streaming_callback,

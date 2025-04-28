@@ -8,6 +8,7 @@ from frames.transcript import (
     parse_citations_multi_transcript,
 )
 from llm_util.prod_llms import get_llm_completions_async
+from llm_util.provider_preferences import PROVIDER_PREFERENCES
 from llm_util.types import LLMApiKeys, LLMOutput
 
 USER_BACKGROUND = "a general CS background"
@@ -93,8 +94,7 @@ Explanation: <explanation>
             ]
             for prompt in prompts
         ],
-        model_category="reasoning_smart",
-        reasoning_effort="medium",
+        **PROVIDER_PREFERENCES.diff_transcripts.create_shallow_dict(),
         max_new_tokens=8192,
         timeout=180.0,
         streaming_callback=llm_streaming_callback,
@@ -222,8 +222,7 @@ Format your output in markdown. You are encouraged to cite evidence from the tra
                 },
             ]
         ],
-        model_category="reasoning_smart",
-        reasoning_effort="medium",
+        **PROVIDER_PREFERENCES.compare_transcripts.create_shallow_dict(),
         max_new_tokens=8192 * 2,
         timeout=180.0,
         streaming_callback=llm_streaming_callback,

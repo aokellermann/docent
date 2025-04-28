@@ -22,6 +22,8 @@ from inspect_ai.tool import bash
 from inspect_ai.util import SandboxEnvironmentSpec
 from platformdirs import user_cache_dir
 
+from .claude_tools import str_replace, insert, view, create
+
 from .scorers import swe_bench_scorer
 
 COMPOSE_FILES_DIR = Path(user_cache_dir("inspect_swebench_eval")) / "compose_files/"
@@ -36,7 +38,7 @@ def swe_bench(
     dataset: str = "princeton-nlp/SWE-bench_Verified",
     split: str = "test",
     solver: Solver | None = None,
-    max_messages: int = 30,
+    max_messages: int = 50,
     input_prompt: str = DEFAULT_INPUT_PROMPT,
     instance_ids: list[str] | None = None,
     scorer: Scorer | list[Scorer] | None = None,
@@ -108,6 +110,8 @@ def swe_bench(
 
     if instance_ids is not None:
         samples = samples.filter(lambda x: x.id in instance_ids)
+    
+    samples.shuffle(42)
 
     if build_docker_images:
         if sandbox_type != "docker":
@@ -139,7 +143,7 @@ def swe_bench(
 
     return Task(
         dataset=samples,
-        solver=solver or default_solver(max_messages),
+        solver=solver or advanced_solver(max_messages),
         epochs=epochs,
         scorer=scorer or swe_bench_scorer(),
     )
@@ -154,6 +158,27 @@ def default_solver(max_messages: int = 30) -> Solver:
         max_messages=max_messages,
     )
 
+def advanced_solver(max_messages: int = 50) -> Solver:
+    return basic_agent(
+        init=system_message(
+"""
+I've uploaded a python code repository in a directory. In the next message, you will be given a PR description for a coding task that you should solve.
+
+Please implement the necessary changes to the repository so that the requirements specified in the description are met
+I've already taken care of all changes to any of the test files described in the description. This means you DON'T have to modify the testing logic or any of the tests in any way!
+
+Your task is to make the minimal changes to non-tests files in the existing repository to ensure the PR description is satisfied.
+
+Follow these steps to resolve the issue:
+1. As a first step, it might be a good idea to explore the repo to familiarize yourself with its structure.
+2. Create a script to reproduce the error and execute it with `python <filename.py>` using the BashTool, to confirm the error
+3. Edit the sourcecode of the repo to resolve the issue
+4. Rerun your reproduce script and confirm that the error is fixed!
+5. Think about edgecases and make sure your fix handles them as well."""
+        ),
+        tools=[bash(timeout=600), str_replace(), insert(), view(), create()],
+        max_messages=max_messages,
+    )
 
 def get_compose_file(
     instance_id: str,

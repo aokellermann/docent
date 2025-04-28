@@ -17,20 +17,24 @@ interface InnerCard {
   onToggle?: () => void;
   organizationMethod: OrganizationMethod;
   experimentCount?: number;
+  onAttributeVote?: (attribute: string, vote: 'up' | 'down' | null) => void;
 }
 
 interface AttributeSectionProps {
   dataId: string;
   attributeMap: Map<string, Map<string, AttributeWithCitation[]>>;
   onShowDatapoint?: (datapointId: string, blockId?: number) => void;
+  onAttributeVote?: (attribute: string, vote: 'up' | 'down' | null) => void;
 }
 
 const AttributeSection: React.FC<AttributeSectionProps> = ({
   dataId,
   attributeMap,
   onShowDatapoint,
+  onAttributeVote,
 }) => {
   const { curAttributeQuery } = useFrameGrid();
+  const [voteState, setVoteState] = React.useState<Record<string, 'up' | 'down' | null>>({});
 
   if (
     !curAttributeQuery ||
@@ -47,6 +51,15 @@ const AttributeSection: React.FC<AttributeSectionProps> = ({
     return null;
   }
 
+  const handleVote = (attribute: string, vote: 'up' | 'down') => {
+    const currentVote = voteState[attribute];
+    const newVote = currentVote === vote ? null : vote;
+    setVoteState(prev => ({ ...prev, [attribute]: newVote }));
+    if (onAttributeVote) {
+      onAttributeVote(attribute, newVote);
+    }
+  };
+
   return (
     <div className="mt-2 pt-1.5 border-t border-indigo-100 text-xs">
       <div className="flex items-center mb-1">
@@ -61,6 +74,7 @@ const AttributeSection: React.FC<AttributeSectionProps> = ({
         {attributeValues.map((attributeValue, idx) => {
           const attributeText = attributeValue.attribute;
           const citations = attributeValue.citations || [];
+          const currentVote = voteState[attributeText];
 
           // Create a component that renders text with citations highlighted
           const renderTextWithCitations = () => {
@@ -132,9 +146,53 @@ const AttributeSection: React.FC<AttributeSectionProps> = ({
                 }
               }}
             >
-              <p className="mb-0.5">{renderTextWithCitations()}</p>
-              <div className="flex items-center gap-1 text-[10px] text-indigo-600 mt-1">
-                <span className="opacity-70">{curAttributeQuery}</span>
+              <div className="flex flex-col">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="mb-0.5 flex-1">{renderTextWithCitations()}</p>
+                  { onAttributeVote && (
+                    <div className="flex gap-1 shrink-0">
+                      <button
+                        className={`p-1 rounded transition-colors ${
+                          currentVote === 'up'
+                            ? 'bg-indigo-300 text-indigo-900 shadow-sm'
+                            : 'hover:bg-indigo-200 hover:text-indigo-800'
+                        }`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleVote(attributeText, 'up');
+                        }}
+                        title="This result is relevant"
+                      >
+                        <span className={`${
+                          currentVote === 'up'
+                            ? 'text-indigo-900'
+                            : 'text-indigo-600 group-hover:text-indigo-800'
+                        }`}>↑</span>
+                      </button>
+                      <button
+                        className={`p-1 rounded transition-colors ${
+                          currentVote === 'down'
+                            ? 'bg-indigo-300 text-indigo-900 shadow-sm'
+                            : 'hover:bg-indigo-200 hover:text-indigo-800'
+                        }`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleVote(attributeText, 'down');
+                        }}
+                        title="This result is not relevant"
+                      >
+                        <span className={`${
+                          currentVote === 'down'
+                            ? 'text-indigo-900'
+                            : 'text-indigo-600 group-hover:text-indigo-800'
+                        }`}>↓</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 text-[10px] text-indigo-600 mt-1">
+                  <span className="opacity-70">{curAttributeQuery}</span>
+                </div>
               </div>
             </div>
           );
@@ -155,6 +213,7 @@ const InnerCard: React.FC<InnerCard> = ({
   onToggle,
   organizationMethod,
   experimentCount,
+  onAttributeVote,
 }) => {
   const {
     transcriptMetadata,
@@ -533,6 +592,7 @@ const InnerCard: React.FC<InnerCard> = ({
                 dataId={dataId}
                 attributeMap={attributeMap}
                 onShowDatapoint={onShowDatapoint}
+                onAttributeVote={onAttributeVote}
               />
             </div>
           ))}

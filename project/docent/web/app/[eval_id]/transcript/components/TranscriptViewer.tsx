@@ -7,6 +7,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -37,6 +38,10 @@ import React, {
 } from 'react';
 import { useFrameGrid } from '../../../contexts/FrameGridContext';
 import { useRouter } from 'next/navigation';
+
+import AnsiToHtml from 'ansi-to-html';
+
+const ansiToHtml = new AnsiToHtml();
 
 // Add this helper function near the top of the file
 const formatMetadataValue = (value: any): string => {
@@ -256,6 +261,13 @@ const TranscriptViewer = forwardRef<
     setCurrentBlockIndex(null);
   }, [transcript?.id]);
 
+  const getScore = () => {
+    if (transcript?.metadata.scoring_metadata) {
+      return Object.values(transcript.metadata.scoring_metadata)[0];
+    }
+    return null;
+  }
+
   return (
     <div className="flex flex-col space-y-2 min-h-0 relative h-full">
       {/* Transcript metadata */}
@@ -437,6 +449,59 @@ const TranscriptViewer = forwardRef<
                   {transcript.messages.length} message
                   {transcript.messages.length !== 1 ? 's' : ''}
                 </span>
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs hover:bg-gray-100"
+                    >
+                      Score Details
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-5xl">
+                    <DialogHeader>
+                      <DialogTitle>Score Details</DialogTitle>
+                      <DialogDescription>
+                        Detailed information about the transcript score
+                      </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="grid grid-cols-1 gap-4 py-4">
+                      {getScore()?.metadata?.model_patch && (
+                        <div>
+                          <label className="text-sm font-medium mb-2 block">
+                            Model Patch
+                          </label>
+                          <ScrollArea className="h-[300px] w-full rounded-md border p-4">
+                            <div className="text-sm whitespace-pre-wrap font-mono">
+                              {getScore().metadata.model_patch}
+                            </div>
+                          </ScrollArea>
+                        </div>
+                      )}
+
+                      {getScore()?.metadata?.raw_test_output && (
+                        <div>
+                          <label className="text-sm font-medium mb-2 block">
+                            Raw Test Output
+                          </label>
+                          <ScrollArea className="h-[300px] w-full rounded-md border p-4">
+                            <div className="text-sm whitespace-pre-wrap font-mono"
+                            dangerouslySetInnerHTML={{__html: ansiToHtml.toHtml(getScore().metadata.raw_test_output) }}>
+                            </div>
+                          </ScrollArea>
+                        </div>
+                      )}
+
+                      {!getScore()?.metadata && (
+                        <div className="text-sm text-gray-500 text-center py-4">
+                          No score details available for this transcript
+                        </div>
+                      )}
+                    </div>
+                  </DialogContent>
+                </Dialog>
               </>
             )}
           </div>

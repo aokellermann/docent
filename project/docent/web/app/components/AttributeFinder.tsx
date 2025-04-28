@@ -35,6 +35,7 @@ import ClusterProposalDialog from './ClusterProposalDialog';
 
 interface AttributeFinderProps {
   onShowDatapoint?: (datapointId: string, blockId?: number) => void;
+  rewrittenQuery?: string;
 }
 
 // Preset search queries with custom icons
@@ -72,6 +73,7 @@ const DEFAULT_PLACEHOLDER_TEXT =
 
 const AttributeFinder: React.FC<AttributeFinderProps> = ({
   onShowDatapoint,
+  rewrittenQuery,
 }) => {
   const fg = useFrameGrid();
   const { sendMessage } = fg;
@@ -255,6 +257,16 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
   };
 
   const [isPresetHovered, setIsPresetHovered] = useState(false);
+
+  // Add useEffect to handle rewrittenQuery
+  useEffect(() => {
+    if (rewrittenQuery) {
+      setNewAttribute(rewrittenQuery);
+      if (activeDimState) {
+        fg.handleClearAttribute(activeDimState.dim.id);
+      }
+    }
+  }, [rewrittenQuery]);
 
   const handleSelectPreset = (query: string) => {
     setNewAttribute(query);

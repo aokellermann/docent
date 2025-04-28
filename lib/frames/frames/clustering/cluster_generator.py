@@ -5,6 +5,7 @@ from typing import TypedDict, cast
 import numpy as np
 import tiktoken
 from llm_util.prod_llms import get_llm_completions_async
+from llm_util.provider_preferences import PROVIDER_PREFERENCES
 from llm_util.types import LLMApiKeys
 
 
@@ -133,13 +134,12 @@ async def propose_clusters(
     # Make a single batch call to get_llm_completions_async
     outputs = await get_llm_completions_async(
         prompts,
-        model_category="smart",
         max_new_tokens=4096,
         temperature=1.0,
         timeout=120.0,
-        default_provider="anthropic",
         use_cache=True,
         llm_api_keys=llm_api_keys,
+        **PROVIDER_PREFERENCES.propose_clusters.create_shallow_dict(),
     )
 
     # Parse all results

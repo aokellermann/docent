@@ -124,3 +124,9 @@ Here's a quick guide to the codebase:
 - We use `uv` to manage Python dependencies. In addition, we've written `luce`, a helpful command-line utility which makes it easy to install projects and enter virtual environments
 
 This is an early preview of the codebase, so we apologize for any messiness! Let us know if you see obvious room for improvement.
+
+## Customizing LLM Calls
+
+Many users have requested a simpler way to manage LLM providers and API calls. This is now done in `lib/llm_util/llm_util/provider_preferences.py`. This file reads from an *LLM preferences config*, expected to be located in the project root and named `docent_llm_prefs.json`; for convenience, we've provided an example config (containing the settings we use in the deployed Docent) that you can start with. The `docent_llm_prefs.json` config controls which LLM providers and models are used for each Docent feature. In the `model_options` field you should specify a list of models you would like to use (along with the provider and the `reasoning_effort` parameter if applicable), in order of priority; by default the first model in the list will be used for each query, and the other models in the list exist for fallback reasons (eg. in case an API is unavailable).
+
+We have implemented providers for the OpenAI and Anthropic APIs; you can find the implementations in `lib/llm_util/llm_util/openai.py` and `lib/llm_util/llm_util/anthropic.py`. If you'd like to add a new LLM provider, you can do so by implementing the `SingleOutputGetter` and `SingleStreamingOutputGetter` protocols for the new provider (see our example implementations as a reference) and registering a new `ProviderConfig` in the `LLMManager`'s `self.providers` (located in `lib/llm_util/llm_util/prod_llms.py`).

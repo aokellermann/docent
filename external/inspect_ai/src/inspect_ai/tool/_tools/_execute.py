@@ -5,14 +5,21 @@ from .._tool_call import ToolCall, ToolCallContent, ToolCallView, ToolCallViewer
 
 
 # custom viewer for bash and python code blocks
-def code_viewer(language: str, code_param: str) -> ToolCallViewer:
+def code_viewer(
+    language: str, code_param: str, other_args: list[str] | None = None
+) -> ToolCallViewer:
     def viewer(tool_call: ToolCall) -> ToolCallView:
         code = tool_call.arguments.get(code_param, None)
         code = (code or tool_call.function).strip()
+        other_arg_values = (
+            []
+            if other_args is None
+            else [f"{arg}={tool_call.arguments.get(arg, '')}" for arg in other_args]
+        )
         call = ToolCallContent(
             title=language,
             format="markdown",
-            content=f"```{language}\n" + code + "\n```\n",
+            content=f"```{language} {' '.join(other_arg_values)}\n" + code + "\n```\n",
         )
         return ToolCallView(call=call)
 
