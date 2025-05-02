@@ -98,14 +98,14 @@ export default function ExperimentViewer({
   );
   const experimentIds = useMemo(() => {
     if (!experiments) return [];
-    return experiments.map((exp) => exp.id);
+    return Object.keys(experiments);
   }, [experiments]);
   const samples = useAppSelector(
     (state) => state.experimentViewer.sampleFilters
   );
   const sampleIds = useMemo(() => {
     if (!samples) return [];
-    return samples.map((sample) => sample.id);
+    return Object.keys(samples);
   }, [samples]);
 
   // Marginals
@@ -182,7 +182,7 @@ export default function ExperimentViewer({
   // For each experiment, get the samples that have non-null stats
   const samplesByExperiment = useMemo(() => {
     const validMap = new Map<string, string[]>();
-    if (!statMarginals) return validMap;
+    if (!statMarginals || !experiments || !samples) return validMap;
 
     experimentIds.forEach((expId) => {
       const validSamples = sampleIds.filter((sampleId) => {
@@ -202,7 +202,7 @@ export default function ExperimentViewer({
   // For each sample, get the experiments that have non-null stats
   const experimentsBySample = useMemo(() => {
     const validMap = new Map<string, string[]>();
-    if (!statMarginals) return validMap;
+    if (!statMarginals || !experiments || !samples) return validMap;
 
     sampleIds.forEach((sampleId) => {
       const validExperiments = experimentIds.filter((expId) => {
@@ -285,7 +285,7 @@ export default function ExperimentViewer({
   const getFirstItem = useCallback(
     (mode: OrganizationMethod) => {
       const items = mode === 'experiment' ? experimentIds : sampleIds;
-      return items.length > 0 ? items[0] : null;
+      return items && items.length > 0 ? items[0] : null;
     },
     [experimentIds, sampleIds]
   );
@@ -410,7 +410,9 @@ export default function ExperimentViewer({
 
   // Get the appropriate data based on organization method
   const {
-    outerItems,
+    outerFilters,
+    innerFilters,
+    outerFilterIds,
     outerAverages,
     innerMap,
     outerLabel,
@@ -420,7 +422,9 @@ export default function ExperimentViewer({
   } = useMemo(() => {
     if (organizationMethod === 'experiment') {
       return {
-        outerItems: experimentIds.filter(
+        outerFilters: experiments,
+        innerFilters: samples,
+        outerFilterIds: experimentIds.filter(
           (expId) => (samplesByExperiment.get(expId)?.length ?? 0) > 0
         ),
         outerAverages: !curAttributeQuery ? experimentStatMarginals : undefined, // Only show stats if not filtering
@@ -432,7 +436,9 @@ export default function ExperimentViewer({
       };
     } else {
       return {
-        outerItems: sampleIds.filter(
+        outerFilters: samples,
+        innerFilters: experiments,
+        outerFilterIds: sampleIds.filter(
           (sampleId) => (experimentsBySample.get(sampleId)?.length ?? 0) > 0
         ),
         outerAverages: !curAttributeQuery ? sampleStatMarginals : undefined, // Only show stats if not filtering
@@ -445,8 +451,8 @@ export default function ExperimentViewer({
     }
   }, [
     organizationMethod,
-    experimentIds,
-    sampleIds,
+    experiments,
+    samples,
     curAttributeQuery,
     experimentStatMarginals,
     sampleStatMarginals,
@@ -532,9 +538,9 @@ export default function ExperimentViewer({
       {/* Content area */}
       <ScrollArea className="text-sm" containerRef={containerRef}>
         <div className="space-y-2">
-          {outerItems.map((outerId, index) => (
+          {outerFilterIds?.map((outerId, index) => (
             <Card
-              key={outerId}
+              key={index}
               className={cn(
                 getCardStyles(expandedOuter?.[outerId] ?? false),
                 'space-y-2'
@@ -559,7 +565,7 @@ export default function ExperimentViewer({
                         {outerLabel}{' '}
                         <span className="font-mono">
                           {outerPrefix}
-                          {outerId}
+                          {outerFilters?.[outerId]?.name || outerId}
                         </span>
                         <span className="text-xxs text-gray-500 font-light ml-2">
                           {innerMap.get(outerId)?.length || 0} {innerLabel}
@@ -651,8 +657,8 @@ export default function ExperimentViewer({
                     return (
                       <InnerCard
                         key={innerId}
-                        sampleId={sampleId}
                         innerId={innerId}
+                        innerName={innerFilters?.[innerId]?.name || innerId}
                         organizationMethod={organizationMethod}
                         stats={statMarginals[getMarginalKey(sampleId, expId)]}
                         datapointIds={
@@ -675,7 +681,7 @@ export default function ExperimentViewer({
               )}
             </Card>
           ))}
-          {outerItems.length === 0 && (
+          {outerFilterIds?.length === 0 && (
             <div className="text-xs text-gray-500">
               {loadingAttributesForId ? (
                 <div className="flex items-center space-x-2">

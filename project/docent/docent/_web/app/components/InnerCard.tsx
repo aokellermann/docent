@@ -40,8 +40,8 @@ import {
 import { updateRegexSnippets } from '../store/experimentViewerSlice';
 
 interface InnerCard {
-  sampleId: string;
   innerId: string;
+  innerName?: string;
   stats: TaskStats | null;
   datapointIds: string[];
   onShowDatapoint?: (datapointId: string, blockId?: number) => void;
@@ -313,8 +313,8 @@ const RegexSnippetsSection: React.FC<{
 };
 
 const InnerCard: React.FC<InnerCard> = ({
-  sampleId,
   innerId,
+  innerName,
   stats,
   datapointIds,
   onShowDatapoint,
@@ -500,7 +500,7 @@ const InnerCard: React.FC<InnerCard> = ({
               <div className="flex items-center">
                 <span className="font-medium text-gray-600">
                   {organizationMethod === 'experiment' ? 'Task' : 'Experiment'}{' '}
-                  <span className="font-mono">{innerId}</span>
+                  <span className="font-mono">{innerName || innerId}</span>
                   {curAttributeQuery && (
                     <span className="text-xxs text-gray-500 font-light ml-2">
                       {datapointIds.length} datapoint

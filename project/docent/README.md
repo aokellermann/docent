@@ -32,8 +32,9 @@ The API will run on port 8889, and the frontend will run on port 3001. Build + c
 ### Option 2: Manual
 
 You must have Postgres and Redis both installed and running.
-- [[Official Postgres instructions](https://www.postgresql.org/download/)] On Debian Linux, that's `sudo apt install postgresql`. Make note of the username and password you use to install Postgres; record them in `.env`.
-  - To verify that Postgres is running, run `psql -U postgres`.
+- [[Official Postgres instructions](https://www.postgresql.org/download/)] On Debian Linux, that's `sudo apt install postgresql`.
+  - By default, Postgres ships with a user `postgres`. Access the Postgres CLI with `sudo -u postgres psql`.
+  - Then run `CREATE USER $user WITH PASSWORD '$password';` to create a new user. Record the user and password in `.env`.
 - [[Official Redis instructions](https://redis.io/docs/latest/operate/oss_and_stack/install/archive/install-redis/)] For Linux, specific instructions are [here](https://redis.io/docs/latest/operate/oss_and_stack/install/archive/install-redis/install-redis-on-linux/).
   - To verify that Redis is running, run `redis-cli ping`.
 

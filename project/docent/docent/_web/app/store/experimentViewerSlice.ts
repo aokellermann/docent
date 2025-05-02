@@ -24,8 +24,8 @@ export interface ExperimentViewerState {
   experimentStatMarginals?: Record<string, TaskStats>;
   interventionDescriptionMarginals?: Record<string, string[]>;
   // Global filters
-  sampleFilters?: PrimitiveFilter[];
-  experimentFilters?: PrimitiveFilter[];
+  sampleFilters?: Record<string, PrimitiveFilter>;
+  experimentFilters?: Record<string, PrimitiveFilter>;
   // UI state of the viewer
   expandedOuter?: Record<string, boolean>; // Object replacement for Set
   expandedInner?: Record<string, Record<string, boolean>>;
@@ -57,22 +57,32 @@ export const setStatMarginalsAndFilters = createAsyncThunk(
     const state = getState() as RootState;
     const { sampleDimId, experimentDimId } = state.frame;
 
-    // Update sample and experiment filters
+    // Keep track of the filters and experiments in a dict
     if (sampleDimId) {
       const sampleFilters = marginalizationResult.dim_ids_to_filter_ids[
         sampleDimId
-      ].map(
-        (filter_id) =>
-          marginalizationResult.filters_dict[filter_id] as PrimitiveFilter
+      ].reduce(
+        (acc, filter_id) => {
+          acc[filter_id] = marginalizationResult.filters_dict[
+            filter_id
+          ] as PrimitiveFilter;
+          return acc;
+        },
+        {} as Record<string, PrimitiveFilter>
       );
       dispatch(setSampleFilters(sampleFilters));
     }
     if (experimentDimId) {
       const experimentFilters = marginalizationResult.dim_ids_to_filter_ids[
         experimentDimId
-      ].map(
-        (filter_id) =>
-          marginalizationResult.filters_dict[filter_id] as PrimitiveFilter
+      ].reduce(
+        (acc, filter_id) => {
+          acc[filter_id] = marginalizationResult.filters_dict[
+            filter_id
+          ] as PrimitiveFilter;
+          return acc;
+        },
+        {} as Record<string, PrimitiveFilter>
       );
       dispatch(setExperimentFilters(experimentFilters));
     }
@@ -107,10 +117,16 @@ export const experimentViewerSlice = createSlice({
     ) => {
       state.interventionDescriptionMarginals = action.payload.marginals;
     },
-    setSampleFilters: (state, action: PayloadAction<PrimitiveFilter[]>) => {
+    setSampleFilters: (
+      state,
+      action: PayloadAction<Record<string, PrimitiveFilter>>
+    ) => {
       state.sampleFilters = action.payload;
     },
-    setExperimentFilters: (state, action: PayloadAction<PrimitiveFilter[]>) => {
+    setExperimentFilters: (
+      state,
+      action: PayloadAction<Record<string, PrimitiveFilter>>
+    ) => {
       state.experimentFilters = action.payload;
     },
     clearExpandedOuter: (state) => {
