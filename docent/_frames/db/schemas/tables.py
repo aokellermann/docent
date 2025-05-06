@@ -90,7 +90,9 @@ class SQLAFrameGrid(SQLABase):
     sample_dim_id = mapped_column(String(36), ForeignKey(f"{TABLE_FRAME_DIMENSION}.id"))
     experiment_dim_id = mapped_column(String(36), ForeignKey(f"{TABLE_FRAME_DIMENSION}.id"))
 
-    created_at = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    created_at = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False
+    )
 
 
 class SQLAFrameDimension(SQLABase):
