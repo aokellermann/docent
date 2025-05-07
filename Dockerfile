@@ -62,7 +62,7 @@ RUN pip install .
 CMD bash -c "\
     if [ -f /root/.bashrc ]; then source /root/.bashrc; fi && \
     service postgresql start && \
-    service redis-server start && \
+    redis-server --daemonize yes && \
     docent server --port $SERVER_PORT --env .env --workers 4 & \
     docent web --build --port $WEB_PORT --backend-url http://localhost:$SERVER_PORT & \
     tail -f /dev/null"
