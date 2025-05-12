@@ -37,6 +37,7 @@ def web(
     backend_url: str = typer.Option("http://localhost:8888", help="Backend URL to query"),
     port: int = typer.Option(3000, help="Port to bind to"),
     build: bool = typer.Option(False, help="Build the web app"),
+    install: bool = typer.Option(True, help="Install dependencies"),
 ):
     # `cd` to the web directory; this is where we run npm from
     file_path = Path(__file__).parent.parent.parent.absolute() / "docent" / "_web"
@@ -46,8 +47,11 @@ def web(
     env = os.environ.copy()
     env["NEXT_PUBLIC_API_HOST"] = backend_url
 
+    # Install dependencies if requested
+    if install:
+        subprocess.run(["npm", "install"], check=True)
+
     # Either build or run in debug mode
-    subprocess.run(["npm", "install"], check=True)
     if build:
         subprocess.run(["npm", "run", "build"], env=env, check=True)
         subprocess.run(["npm", "run", "start", "--", "--port", str(port)], env=env, check=True)

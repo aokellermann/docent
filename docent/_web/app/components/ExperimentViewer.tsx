@@ -182,7 +182,7 @@ export default function ExperimentViewer({
   // For each experiment, get the samples that have non-null stats
   const samplesByExperiment = useMemo(() => {
     const validMap = new Map<string, string[]>();
-    if (!statMarginals || !experiments || !samples) return validMap;
+    if (!statMarginals || !experimentIds || !sampleIds) return validMap;
 
     experimentIds.forEach((expId) => {
       const validSamples = sampleIds.filter((sampleId) => {
@@ -202,7 +202,7 @@ export default function ExperimentViewer({
   // For each sample, get the experiments that have non-null stats
   const experimentsBySample = useMemo(() => {
     const validMap = new Map<string, string[]>();
-    if (!statMarginals || !experiments || !samples) return validMap;
+    if (!statMarginals || !experimentIds || !sampleIds) return validMap;
 
     sampleIds.forEach((sampleId) => {
       const validExperiments = experimentIds.filter((expId) => {
@@ -451,8 +451,8 @@ export default function ExperimentViewer({
     }
   }, [
     organizationMethod,
-    experiments,
-    samples,
+    experimentIds,
+    sampleIds,
     curAttributeQuery,
     experimentStatMarginals,
     sampleStatMarginals,

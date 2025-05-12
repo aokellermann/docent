@@ -16,5 +16,13 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 COPY cli/ cli/
 COPY docent/_web docent/_web
 
-# Install the cli only, so that the webapp can be run
+# Run npm install while still root
+RUN cd docent/_web && npm install
+
+# Install the cli to run the webapp
 RUN uv pip install --system -e cli/
+
+# Create and set the docent user
+RUN groupadd -r docent && useradd -r -g docent docent
+RUN chown -R docent:docent /app
+USER docent

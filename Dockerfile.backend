@@ -14,8 +14,13 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 COPY pyproject.toml .
 RUN uv pip install --system .
 
-# Copy the application code
+# Copy the application code with the correct permissions
 COPY . .
 
-# Install the project in editable mode.
+# Install the project in editable mode
 RUN uv pip install --system -e .
+
+# Create and set the docent user
+RUN groupadd -r docent && useradd -r -g docent docent
+RUN chown -R docent:docent /app
+USER docent
