@@ -205,8 +205,8 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
     }
   }, [metadataValue, metadataType, metadataKey, onUpdateMetadataFilter]);
 
-  const handleSearch = () => {
-    if (!attributeQueryTextboxValue?.trim()) {
+  const handleSearch = (query?: string, existingDimId?: string) => {
+    if (!query?.trim()) {
       toast({
         title: 'Missing search query',
         description: 'Please enter a search query',
@@ -215,9 +215,9 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
       return;
     }
 
-    // Search history is now handled in the context via requestAttributes
-    const trimmedQuery = attributeQueryTextboxValue.trim();
-    dispatch(requestAttributes(trimmedQuery));
+    // Request attributes
+    const trimmedQuery = query.trim();
+    dispatch(requestAttributes({ attribute: trimmedQuery, existingDimId }));
 
     // Reset form
     dispatch(setAttributeQueryTextboxValue(''));
@@ -651,7 +651,7 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
                     ) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
-                        handleSearch();
+                        handleSearch(attributeQueryTextboxValue);
                       }
                     }}
                   />
@@ -660,7 +660,7 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
                       type="button"
                       size="sm"
                       className="gap-1 h-8 text-xs"
-                      onClick={handleSearch}
+                      onClick={() => handleSearch(attributeQueryTextboxValue)}
                       disabled={!attributeQueryTextboxValue?.trim()}
                     >
                       Search
@@ -707,9 +707,7 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
                             className="font-mono text-gray-800 truncate flex-1 cursor-pointer"
                             title={search.attribute}
                             onClick={() => {
-                              dispatch(
-                                setAttributeQueryTextboxValue(search.attribute)
-                              );
+                              handleSearch(search.attribute, search.dim_id);
                             }}
                           >
                             {search.attribute}

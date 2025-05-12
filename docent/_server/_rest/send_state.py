@@ -70,12 +70,12 @@ def _format_bin_combination(bin_combination: tuple[tuple[str, str], ...]) -> str
     return "|".join(",".join(pair) for pair in bin_combination)
 
 
-async def publish_dims(db: DBService, fg_id: str, dim_ids: list[str] | None = None):
+async def publish_dims(db: DBService, fg_id: str):
     await publish_to_broker(
         fg_id,
         {
             "action": "dimensions",
-            "payload": await db.get_dims(fg_id, dim_ids),
+            "payload": await db.get_dims(fg_id),
         },
     )
 
@@ -252,6 +252,6 @@ async def publish_homepage_state(db: DBService, fg_id: str):
         raise ValueError("Sample or experiment dimension not found")
 
     await publish_base_filter(db, fg_id)
-    await publish_dims(db, fg_id, dim_ids=[sample_dim_id, experiment_dim_id])
+    await publish_dims(db, fg_id)
     await publish_homepage_marginals(db, fg_id, sample_dim_id, experiment_dim_id)
     await publish_attribute_searches(db, fg_id)

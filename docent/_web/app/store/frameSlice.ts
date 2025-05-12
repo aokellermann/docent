@@ -235,6 +235,43 @@ export const getTranscriptMetadata = createAsyncThunk(
   }
 );
 
+export const getDimensions = createAsyncThunk(
+  'frame/getDimensions',
+  async (dimIds: string[] | undefined, { dispatch, getState }) => {
+    const state = getState() as { frame: FrameState };
+    const frameGridId = state.frame.frameGridId;
+
+    if (!frameGridId) {
+      dispatch(
+        setToastNotification({
+          title: 'Configuration error',
+          description: 'No frame grid ID available',
+          variant: 'destructive',
+        })
+      );
+      throw new Error('No frame grid ID available');
+    }
+
+    try {
+      const response = await apiRestClient.post('/get_dimensions', {
+        fg_id: frameGridId,
+        dim_ids: dimIds,
+      });
+      dispatch(setDimensions(response.data));
+      return response.data;
+    } catch (error) {
+      dispatch(
+        setToastNotification({
+          title: 'Error fetching dimensions',
+          description: 'Failed to retrieve dimensions',
+          variant: 'destructive',
+        })
+      );
+      throw error;
+    }
+  }
+);
+
 export const addAttributeDimension = createAsyncThunk(
   'frame/addAttributeDimension',
   async (attribute: string, { dispatch, getState }) => {

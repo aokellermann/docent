@@ -19,6 +19,15 @@ from typing import (
 from uuid import uuid4
 
 import anyio
+from sqlalchemy import URL, delete, distinct, exists, func, select, text, update
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+
 from docent._env_util import ENV
 from docent._frames.attributes import AttributeStreamingCallback, extract_attributes
 from docent._frames.clustering.cluster_generator import propose_clusters
@@ -42,14 +51,6 @@ from docent._frames.filters import (
 from docent._frames.transcript import TranscriptMetadata
 from docent._frames.types import Attribute, Datapoint, Judgment
 from docent._log_util import get_logger
-from sqlalchemy import URL, delete, distinct, exists, func, select, text, update
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
 
 logger = get_logger(__name__)
 
@@ -877,6 +878,19 @@ class DBService:
             result = await session.execute(query)
             datapoints = result.scalars().all()
             return [dp.to_datapoint() for dp in datapoints]
+
+    async def get_attributes(
+        self,
+        fg_id: str,
+        attribute: str,
+        base_data_only: bool = True,
+    ) -> list[Attribute]:
+        base_filter = await self.get_base_filter(fg_id) if base_data_only else None
+        return await self._get_attributes(
+            fg_id,
+            attribute,
+            base_filter=base_filter,
+        )
 
     async def _get_attributes(
         self,

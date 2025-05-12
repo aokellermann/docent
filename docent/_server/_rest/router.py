@@ -186,7 +186,7 @@ async def post_dimension(request: PostDimensionRequest):
     if request.is_experiment_dim:
         await db.set_experiment_dim(request.fg_id, request.dim.id)
 
-    await publish_dims(db, request.fg_id, dim_ids=[request.dim.id])
+    await publish_dims(db, request.fg_id)
     await publish_attribute_searches(db, request.fg_id)
 
     return request.dim.id
@@ -275,7 +275,7 @@ async def delete_dimension(fg_id: str, dim_id: str):
 
     async with db.advisory_lock(fg_id, action_id="mutation"):
         await db.delete_dimension(fg_id, dim_id)
-        await publish_dims(db, fg_id, dim_ids=[dim_id])
+        await publish_dims(db, fg_id)
         await publish_attribute_searches(db, fg_id)
 
 
@@ -285,7 +285,7 @@ async def delete_filter(fg_id: str, dim_id: str, filter_id: str):
 
     async with db.advisory_lock(fg_id, action_id="mutation"):
         await db.delete_filter(fg_id, filter_id)
-        await publish_dims(db, fg_id, dim_ids=[dim_id])
+        await publish_dims(db, fg_id)
         await publish_marginals(db, fg_id, dim_ids=[dim_id], ensure_fresh=True)
 
 
@@ -317,7 +317,7 @@ async def post_filter(request: PostFilterRequest):
             # Publish the initial marginals (without recompute) which should be empty for the new filter
             # Otherwise the frontend will show the old filter's marginals
             await publish_marginals(db, fg_id, dim_ids=[request.dim_id], ensure_fresh=False)
-            await publish_dims(db, fg_id, dim_ids=[request.dim_id])
+            await publish_dims(db, fg_id)
             await publish_marginals(db, fg_id, dim_ids=[request.dim_id], ensure_fresh=True)
 
         return new_filter.id
@@ -517,7 +517,7 @@ async def listen_cluster_dimension(job_id: str):
             try:
                 # Send new dim state indicating that clusters are being loaded
                 await db.set_dim_loading_state(fg_id, dim_id, loading_clusters=True)
-                await publish_dims(db, fg_id, dim_ids=[dim_id])
+                await publish_dims(db, fg_id)
 
                 # TODO(mengk): assert that all datapoints have the associated attribute
                 # This should be guaranteed by the frontend, but just make sure.
@@ -534,7 +534,7 @@ async def listen_cluster_dimension(job_id: str):
                 await db.set_dim_loading_state(
                     fg_id, dim_id, loading_clusters=False, loading_marginals=True
                 )
-                await publish_dims(db, fg_id, dim_ids=[dim_id])
+                await publish_dims(db, fg_id)
 
                 # Compute marginals while sending them to the client
                 async with anyio.create_task_group() as tg:
@@ -570,7 +570,7 @@ async def listen_cluster_dimension(job_id: str):
                     await db.set_dim_loading_state(
                         fg_id, dim_id, loading_clusters=False, loading_marginals=False
                     )
-                    await publish_dims(db, fg_id, dim_ids=[dim_id])
+                    await publish_dims(db, fg_id)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

@@ -17,7 +17,11 @@ import {
   ExperimentViewerState,
 } from './experimentViewerSlice';
 import { RootState } from './store';
-import { addAttributeDimension, deleteDimension } from './frameSlice';
+import {
+  addAttributeDimension,
+  deleteDimension,
+  getDimensions,
+} from './frameSlice';
 import { apiRestClient } from '../services/apiService';
 import { setToastNotification } from './toastSlice';
 import { v4 as uuid4 } from 'uuid';
@@ -94,7 +98,10 @@ export const requestRegexSnippetsIfExist = createAsyncThunk(
 
 export const requestAttributes = createAsyncThunk(
   'experimentViewer/requestAttributes',
-  async (attribute: string, { dispatch, getState }) => {
+  async (
+    { attribute, existingDimId }: { attribute: string; existingDimId?: string },
+    { dispatch, getState }
+  ) => {
     try {
       // Cancel any existing attribute task
       dispatch(cancelCurrentAttributeRequest());
@@ -104,11 +111,19 @@ export const requestAttributes = createAsyncThunk(
       dispatch(setLoadingAttributesForId(attribute));
       dispatch(setLoadingProgress([0, 0]));
 
-      // Add a dimension corresponding to the attribute and store the ID
-      const dimId = await dispatch(addAttributeDimension(attribute)).unwrap();
+      let dimId: string;
+      if (existingDimId) {
+        dimId = existingDimId;
+        // We also need to explicitly get the corresponding dimension
+        dispatch(getDimensions());
+      } else {
+        // If there isn't an existing dimension, add one corresponding to the attribute
+        // This method auto-triggers the push of a new filter
+        dimId = await dispatch(addAttributeDimension(attribute)).unwrap();
+      }
       dispatch(setAttributeQueryDimId(dimId));
 
-      // 5. Send the request via REST API
+      // Send the request via REST API
       const state = getState() as { frame: { frameGridId?: string } };
       const frameGridId = state.frame.frameGridId;
 
