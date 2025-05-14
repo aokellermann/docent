@@ -1,6 +1,4 @@
-<p align="center" style="font-size: 24px; font-weight: bold;">
-  Transluce Docent
-</p>
+# Transluce Docent
 
 <p align="center">
   <a href="https://www.gnu.org/licenses/lgpl-3.0"><img alt="License: LGPL v3" src="https://img.shields.io/badge/License-LGPL%20v3-blue.svg"/></a>
@@ -10,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://posthog.com/docs">Docs</a> - Community - Roadmap - Changelog - <a href="https://github.com/TransluceAI/docent/issues/new?assignees=&labels=bug">Bug reports</a>
+  <a href="https://transluce.mintlify.app">Docs</a> - Community - Roadmap - Changelog - <a href="https://github.com/TransluceAI/docent/issues/new?assignees=&labels=bug">Bug reports</a>
 </p>
 
 ## Docent helps summarize, cluster, and search over agent transcripts
