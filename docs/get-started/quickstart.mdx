@@ -3,7 +3,7 @@ title: 'Quickstart'
 description: 'Self-host Docent in under 5 minutes'
 ---
 
-We currently don't offer a hosted version of Docent but plan to soon. Luckily, self-hosting is easy and free. For larger organizations, we provide white-glove hosting services; please [reach out](mailto:kevin@transluce.org) if you're interested.
+We don't offer a hosted version of Docent yet, but we plan to soon. Luckily, self-hosting is easy and free. For larger organizations, we provide white-glove hosting services; please [reach out](mailto:kevin@transluce.org) if you're interested.
 
 ### 1. Clone the repo and configure `.env`
 
@@ -13,7 +13,7 @@ cd docent
 cp .env.template .env
 ```
 
-You should now have a `.env` file at the project root. See [here](/get-started/envvars) for details on how to fill it in.
+You should now have a `.env` file at the project root. See [here](/concepts/environment-variables) for details on how to fill it in.
 
 ### 2. Start the backend server and frontend UI
 
@@ -52,12 +52,12 @@ f9d86be37643   redis:alpine      "docker-entrypoint.s…"   34 seconds ago   Up 
   </Accordion>
   <Accordion icon="rectangle-terminal" title="Manual">
 
-If you don't already have Postgres and Redis installed, you can star them using Docker:
+If you don't already have Postgres and Redis installed, you can start them with Docker:
 ```bash
 docker compose -f docker-compose-db.yml up --build
 ```
 
-after which Postgres and Redis will be available at the addresses set in [`.env`](/get-started/envvars). If you'd like to set up your own databases, please visit the official docs for [Postgres](https://www.postgresql.org/download/) and [Redis](https://redis.io/docs/latest/operate/oss_and_stack/install/archive/install-redis/).
+after which Postgres and Redis will be available at the addresses set in [`.env`](/get-started/envvars). To set up your own databases, visit the official docs for [Postgres](https://www.postgresql.org/download/) and [Redis](https://redis.io/docs/latest/operate/oss_and_stack/install/archive/install-redis/).
 
 Once your databases are up, run:
 
