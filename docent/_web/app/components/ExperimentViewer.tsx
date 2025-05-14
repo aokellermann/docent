@@ -43,6 +43,7 @@ import { toast } from '@/hooks/use-toast';
 import {
   clearAttributeQuery,
   clearVoteState,
+  requestAttributes,
   setAttributeQueryTextboxValue,
   submitAttributeFeedback,
 } from '../store/attributeFinderSlice';
@@ -55,7 +56,6 @@ export default function ExperimentViewer({
   onShowDatapoint,
 }: ExperimentViewerProps) {
   const dispatch = useAppDispatch();
-  const router = useRouter();
 
   /**
    * Get state
@@ -71,9 +71,18 @@ export default function ExperimentViewer({
   const loadingAttributesForId = useAppSelector(
     (state) => state.attributeFinder.loadingAttributesForId
   );
-  const curAttributeQuery = useAppSelector(
-    (state) => state.attributeFinder.curAttributeQuery
+  const dimensionsMap = useAppSelector((state) => state.frame.dimensionsMap);
+  const attributeQueryDimId = useAppSelector(
+    (state) => state.attributeFinder.attributeQueryDimId
   );
+  const curAttributeQuery = useMemo(
+    () =>
+      attributeQueryDimId
+        ? dimensionsMap?.[attributeQueryDimId]?.attribute
+        : undefined,
+    [attributeQueryDimId, dimensionsMap]
+  );
+
   const attributeMap = useAppSelector(
     (state) => state.attributeFinder.attributeMap
   );
@@ -180,7 +189,7 @@ export default function ExperimentViewer({
   }, [rawStatMarginals, curAttributeQuery, idMarginals]);
 
   // For each experiment, get the samples that have non-null stats
-  const samplesByExperiment = useMemo(() => {
+  const experimentToSamples = useMemo(() => {
     const validMap = new Map<string, string[]>();
     if (!statMarginals || !experimentIds || !sampleIds) return validMap;
 
@@ -193,14 +202,16 @@ export default function ExperimentViewer({
           Object.values(stats)[0]?.n > 0
         );
       });
-      validMap.set(expId, validSamples);
+      if (validSamples.length > 0) {
+        validMap.set(expId, validSamples);
+      }
     });
 
     return validMap;
   }, [experimentIds, sampleIds, statMarginals, getMarginalKey]);
 
   // For each sample, get the experiments that have non-null stats
-  const experimentsBySample = useMemo(() => {
+  const sampleToExperiments = useMemo(() => {
     const validMap = new Map<string, string[]>();
     if (!statMarginals || !experimentIds || !sampleIds) return validMap;
 
@@ -213,7 +224,9 @@ export default function ExperimentViewer({
           Object.values(stats)[0]?.n > 0
         );
       });
-      validMap.set(sampleId, validExperiments);
+      if (validExperiments.length > 0) {
+        validMap.set(sampleId, validExperiments);
+      }
     });
 
     return validMap;
@@ -236,9 +249,7 @@ export default function ExperimentViewer({
     );
   }, [voteState]);
   const [missingQueries, setMissingQueries] = useState<string>('');
-
   const [waitingOnNewQuery, setWaitingOnNewQuery] = useState(false);
-
   const handleFeedbackSubmit = useCallback(async () => {
     if (!curAttributeQuery) return;
     if (attributeFeedback.length === 0 && !missingQueries) {
@@ -284,10 +295,15 @@ export default function ExperimentViewer({
   // Get first item so we can expand it
   const getFirstItem = useCallback(
     (mode: OrganizationMethod) => {
-      const items = mode === 'experiment' ? experimentIds : sampleIds;
-      return items && items.length > 0 ? items[0] : null;
+      const items =
+        mode === 'experiment'
+          ? experimentToSamples.keys()
+          : sampleToExperiments.keys();
+      // Get first item from the iterator if it exists
+      const firstItem = items?.next();
+      return firstItem && !firstItem.done ? firstItem.value : null;
     },
-    [experimentIds, sampleIds]
+    [sampleToExperiments, experimentToSamples]
   );
 
   // Handle organization mode change
@@ -339,56 +355,51 @@ export default function ExperimentViewer({
     if (alreadyExpanded.current) return;
 
     const firstItem = getFirstItem(organizationMethod);
+    console.log('firstItem', firstItem);
     if (
       firstItem &&
       (expandedOuter === undefined || Object.keys(expandedOuter).length === 0)
     ) {
       dispatch(addExpandedOuter(firstItem));
+      alreadyExpanded.current = true;
     }
-    alreadyExpanded.current = true;
   }, [getFirstItem, organizationMethod, dispatch, expandedOuter]);
 
-  // When the samples or experiments change, we need to clear the expansion states
-  useEffect(() => {
-    alreadyExpanded.current = false;
-    dispatch(clearExpandedOuter());
-    dispatch(clearExpandedInner());
-  }, [sampleIds, experimentIds, dispatch]);
+  // // When the samples or experiments change, we need to clear the expansion states
+  // // But only if the component has mounted already
+  // useEffect(() => {
+  //   console.log('clearing');
+  //   alreadyExpanded.current = false; // Reset this as well, so the above useEffect can re-expand if needed after a refresh.
+  //   dispatch(clearExpandedOuter());
+  //   dispatch(clearExpandedInner());
+  // }, [samples, experiments, dispatch]);
 
   /**
    * Scrolling
    */
 
-  // Create refs for outer items to enable scrolling to specific items
-  const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  // Create a ref for the container to track scroll position
-  const containerRef = useRef<HTMLDivElement>(null);
+  // Create a ref for the container that tracks and sets scroll position
+  const scrolledOnceRef = useRef(false);
+  const containerRef = useCallback(
+    (node: HTMLDivElement) => {
+      if (!node) return;
 
-  // Save scroll position when user scrolls
-  useEffect(() => {
-    const handleScroll = () => {
-      if (containerRef.current) {
-        dispatch(
-          setExperimentViewerScrollPosition(containerRef.current.scrollTop)
-        );
+      // If there is an existing scroll position, set it
+      if (experimentViewerScrollPosition && !scrolledOnceRef.current) {
+        node.scrollTop = experimentViewerScrollPosition;
+        scrolledOnceRef.current = true;
       }
-    };
 
-    const container = containerRef.current;
-    if (container) {
-      container.addEventListener('scroll', handleScroll);
+      // Save scroll position when user scrolls
+      const handleScroll = () =>
+        dispatch(setExperimentViewerScrollPosition(node.scrollTop));
+      node.addEventListener('scroll', handleScroll);
       return () => {
-        container.removeEventListener('scroll', handleScroll);
+        node.removeEventListener('scroll', handleScroll);
       };
-    }
-  }, [dispatch]);
-
-  // Restore scroll position when component mounts or when experimentViewerScrollPosition changes
-  useEffect(() => {
-    if (containerRef.current && experimentViewerScrollPosition) {
-      containerRef.current.scrollTop = experimentViewerScrollPosition;
-    }
-  }, [experimentViewerScrollPosition]);
+    },
+    [dispatch, experimentViewerScrollPosition]
+  );
 
   /**
    * Construct options that determine the order in which data is displayed
@@ -425,11 +436,11 @@ export default function ExperimentViewer({
         outerFilters: experiments,
         innerFilters: samples,
         outerFilterIds: experimentIds.filter(
-          (expId) => (samplesByExperiment.get(expId)?.length ?? 0) > 0
+          (expId) => (experimentToSamples.get(expId)?.length ?? 0) > 0
         ),
         outerAverages: !curAttributeQuery ? experimentStatMarginals : undefined, // Only show stats if not filtering
         getOuterKey: (outerId: string) => getMarginalKey(null, outerId),
-        innerMap: samplesByExperiment,
+        innerMap: experimentToSamples,
         outerLabel: 'Experiment',
         innerLabel: 'task',
         outerPrefix: '',
@@ -439,10 +450,10 @@ export default function ExperimentViewer({
         outerFilters: samples,
         innerFilters: experiments,
         outerFilterIds: sampleIds.filter(
-          (sampleId) => (experimentsBySample.get(sampleId)?.length ?? 0) > 0
+          (sampleId) => (sampleToExperiments.get(sampleId)?.length ?? 0) > 0
         ),
         outerAverages: !curAttributeQuery ? sampleStatMarginals : undefined, // Only show stats if not filtering
-        innerMap: experimentsBySample,
+        innerMap: sampleToExperiments,
         getOuterKey: (outerId: string) => getMarginalKey(outerId, null),
         outerLabel: 'Task',
         innerLabel: 'experiment',
@@ -451,15 +462,16 @@ export default function ExperimentViewer({
     }
   }, [
     organizationMethod,
+    experiments,
+    samples,
     experimentIds,
     sampleIds,
     curAttributeQuery,
     experimentStatMarginals,
     sampleStatMarginals,
     getMarginalKey,
-    samplesByExperiment,
-    experimentsBySample,
-    evalId,
+    experimentToSamples,
+    sampleToExperiments,
   ]);
 
   // If data isn't available, show a loading spinner
@@ -545,9 +557,6 @@ export default function ExperimentViewer({
                 getCardStyles(expandedOuter?.[outerId] ?? false),
                 'space-y-2'
               )}
-              ref={(el: HTMLDivElement | null) => {
-                itemRefs.current[outerId] = el;
-              }}
             >
               <div
                 className="flex items-center justify-between cursor-pointer group"
@@ -671,7 +680,7 @@ export default function ExperimentViewer({
                         onToggle={() => toggleInner(outerId, innerId)}
                         experimentCount={
                           organizationMethod === 'experiment'
-                            ? (experimentsBySample.get(innerId)?.length ?? 0)
+                            ? (sampleToExperiments.get(innerId)?.length ?? 0)
                             : undefined
                         }
                       />

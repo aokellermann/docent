@@ -23,7 +23,7 @@ import {
   Sparkles,
   XOctagon,
 } from 'lucide-react';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import type { MetadataType, PrimitiveFilter } from '@/app/types/frameTypes';
 import BinEditor from './BinEditor';
 import {
@@ -35,7 +35,6 @@ import {
   requestClusters,
   cancelCurrentClusterRequest,
   setAttributeQueryTextboxValue,
-  setCurAttributeQuery,
   setAttributeQueryDimId,
 } from '../store/attributeFinderSlice';
 import { useAppDispatch } from '../store/hooks';
@@ -72,13 +71,6 @@ const PRESET_QUERIES = [
       'cases where the agent did not follow instructions given to it or directly disobeyed them',
     icon: AlertTriangle,
   },
-  // {
-  //   id: 'hallucination',
-  //   label: 'Hallucinations',
-  //   query:
-  //     'cases where agent hallucinated a correct or near correct flag without having derived it from a prior tool output.\n\n(the correct flag is the last one that the agent submitted)',
-  //   icon: AlertTriangle,
-  // },
 ];
 
 const DEFAULT_PLACEHOLDER_TEXT =
@@ -92,14 +84,16 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
   const frameGridId = useSelector(
     (state: RootState) => state.frame.frameGridId
   );
-  const dimensions = useSelector((state: RootState) => state.frame.dimensions);
   const baseFilter = useSelector((state: RootState) => state.frame.baseFilter);
   const transcriptMetadataFields = useSelector(
     (state: RootState) => state.frame.transcriptMetadataFields
   );
   const marginals = useSelector((state: RootState) => state.frame.marginals);
-  const curAttributeQuery = useSelector(
-    (state: RootState) => state.attributeFinder.curAttributeQuery
+  const dimensionsMap = useSelector(
+    (state: RootState) => state.frame.dimensionsMap
+  );
+  const attributeQueryDimId = useSelector(
+    (state: RootState) => state.attributeFinder.attributeQueryDimId
   );
   const loadingAttributesForId = useSelector(
     (state: RootState) => state.attributeFinder.loadingAttributesForId
@@ -107,36 +101,42 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
   const loadingProgress = useSelector(
     (state: RootState) => state.attributeFinder.loadingProgress
   );
-  const searchHistory = useSelector(
-    (state: RootState) => state.attributeFinder.searchHistory
-  );
   const attributeSearches = useSelector(
     (state: RootState) => state.attributeFinder.attributeSearches
   );
   const attributeQueryTextboxValue = useSelector(
     (state: RootState) => state.attributeFinder.attributeQueryTextboxValue
   );
+
+  // Pull out the dimension that is currently being used for the attribute query
+  const activeDim = useMemo(() => {
+    return attributeQueryDimId
+      ? dimensionsMap?.[attributeQueryDimId]
+      : undefined;
+  }, [dimensionsMap, attributeQueryDimId]);
+  // Along with its attribute value
+  const curAttributeQuery = useMemo(
+    () => activeDim && activeDim.attribute,
+    [activeDim]
+  );
+
+  /**
+   * Local state for UI components
+   */
+  // Metadata filters
   const [metadataKey, setMetadataKey] = useState('');
   const [metadataValue, setMetadataValue] = useState('');
   const [metadataType, setMetadataType] = useState<MetadataType | undefined>(
     undefined
   );
   const [metadataOp, setMetadataOp] = useState<string>('==');
-  const [isEnhancingQuery, setIsEnhancingQuery] = useState(false);
+  // Attribute search box
   const [placeholderText, setPlaceholderText] = useState(
     DEFAULT_PLACEHOLDER_TEXT
   );
+  // Cluster feedback
   const [clusterFeedback, setClusterFeedback] = useState('');
   const [showFeedbackInput, setShowFeedbackInput] = useState(false);
-
-  // Find the active dimension state based on the current attribute query
-  const attributeQueryDimId = useSelector(
-    (state: RootState) => state.attributeFinder.attributeQueryDimId
-  );
-  const activeDim =
-    curAttributeQuery && dimensions
-      ? dimensions.find((dim) => dim.id === attributeQueryDimId)
-      : null;
 
   // Metadata filter manipulation
   const onUpdateMetadataFilter = useCallback(() => {
@@ -269,6 +269,28 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
   const handlePresetLeave = () => {
     setIsPresetHovered(false);
     setPlaceholderText(DEFAULT_PLACEHOLDER_TEXT);
+  };
+
+  /**
+   * Handle share button
+   */
+  const handleShare = (dimId: string) => {
+    navigator.clipboard
+      .writeText(`${window.location.href}?attributeDimId=${dimId}`)
+      .then(() => {
+        toast({
+          title: 'Search URL copied',
+          description: 'Copied a shareable link to the clipboard',
+          variant: 'default',
+        });
+      })
+      .catch(() => {
+        toast({
+          title: 'Failed to copy',
+          description: 'Could not copy to clipboard',
+          variant: 'destructive',
+        });
+      });
   };
 
   return (
@@ -486,6 +508,14 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
                 </div>
                 <div className="flex ml-2 space-x-1">
                   <button
+                    onClick={() => handleShare(activeDim.id)}
+                    className="inline-flex items-center gap-x-1 text-xs bg-blue-50 text-blue-500 border border-blue-100 px-1.5 py-0.5 rounded-md hover:bg-blue-100 transition-colors"
+                    title="Share this search"
+                  >
+                    <Share2 className="h-3 w-3" />
+                    Share
+                  </button>
+                  <button
                     onClick={handleEditAttribute}
                     className="inline-flex items-center gap-x-1 text-xs bg-indigo-50 text-indigo-500 border border-indigo-100 px-1.5 py-0.5 rounded-md hover:bg-indigo-100 transition-colors"
                   >
@@ -645,7 +675,6 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
                     onChange={(e) =>
                       dispatch(setAttributeQueryTextboxValue(e.target.value))
                     }
-                    disabled={isEnhancingQuery}
                     onKeyDown={(
                       e: React.KeyboardEvent<HTMLTextAreaElement>
                     ) => {
@@ -731,11 +760,26 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
                               className="hover:bg-indigo-50 rounded p-0.5 text-indigo-400 hover:text-indigo-600 transition-colors"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                // No action for now
+                                handleShare(search.dim_id);
                               }}
                               title="Share this search"
                             >
                               <Share2 className="h-3 w-3" />
+                            </button>
+                            <button
+                              className="hover:bg-indigo-50 rounded p-0.5 text-indigo-400 hover:text-indigo-600 transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                dispatch(
+                                  setAttributeQueryTextboxValue(
+                                    search.attribute
+                                  )
+                                );
+                                dispatch(clearAttributeQuery());
+                              }}
+                              title="Edit this search query"
+                            >
+                              <Pencil className="h-3 w-3" />
                             </button>
                             <button
                               className="hover:bg-red-50 rounded p-0.5 text-red-400 hover:text-red-600 transition-colors"

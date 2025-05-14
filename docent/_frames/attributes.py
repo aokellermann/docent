@@ -1,11 +1,11 @@
 import re
-from typing import Protocol
+from typing import Protocol, TypedDict
 
 from docent._frames.transcript import SINGLE_BLOCK_CITE_INSTRUCTION
 from docent._frames.types import Datapoint
 from docent._llm_util.prod_llms import get_llm_completions_async
 from docent._llm_util.provider_preferences import PROVIDER_PREFERENCES
-from docent._llm_util.types import LLMApiKeys, LLMOutput
+from docent._llm_util.types import LLMOutput
 
 ATTRIBUTE_EXTRACTION_PROMPT = f"""
 Your task is to check for instances of a search query in some text:
@@ -33,12 +33,20 @@ description
 """.strip()
 
 
+class AttributeStreamingEvent(TypedDict):
+    datapoint_id: str
+    attribute: str
+    attributes: list[str] | None
+
+
 class AttributeStreamingCallback(Protocol):
+    """Supports batched streaming for cases where many attributes are pre-computed.
+    This avoids invoking the callback separately for each datapoint.
+    """
+
     async def __call__(
         self,
-        datapoint_id: str,
-        attribute: str,
-        attributes: list[str] | None,
+        events: list[AttributeStreamingEvent],
     ) -> None: ...
 
 
@@ -49,7 +57,15 @@ def _get_llm_streaming_callback(
 ):
     async def _streaming_callback(batch_index: int, llm_output: LLMOutput):
         attributes = _parse_llm_output(llm_output)
-        await attribute_streaming_callback(datapoint_ids[batch_index], attribute, attributes)
+        await attribute_streaming_callback(
+            [
+                {
+                    "datapoint_id": datapoint_ids[batch_index],
+                    "attribute": attribute,
+                    "attributes": attributes,
+                }
+            ]
+        )
 
     return _streaming_callback
 
@@ -70,7 +86,6 @@ async def extract_attributes(
     datapoints: list[Datapoint],
     attribute: str,
     attribute_callback: AttributeStreamingCallback | None = None,
-    llm_api_keys: LLMApiKeys | None = None,
 ):
     """
     Processes items sequentially and calls streaming_callback with the

@@ -90,6 +90,14 @@ class DocentClient:
         logger.info(f"Successfully added {len(datapoints)} datapoints to FrameGrid '{fg_id}'")
         return response.json()
 
+    def get_base_filter(self, fg_id: str) -> dict[str, Any] | None:
+        url = f"{self._server_url}/rest/base_filter/{fg_id}"
+        response = self._session.get(url)
+        response.raise_for_status()
+        # The endpoint returns the filter model directly or null
+        filter_data = response.json()
+        return filter_data
+
     def set_base_filter(self, fg_id: str, filter: FrameFilterTypes | None) -> dict[str, Any]:
         url = f"{self._server_url}/rest/base_filter"
         payload = {
@@ -101,4 +109,45 @@ class DocentClient:
         response.raise_for_status()
 
         logger.info(f"Successfully set base filter for FrameGrid '{fg_id}'")
+        return response.json()
+
+    def list_framegrids(self) -> list[dict[str, Any]]:
+        url = f"{self._server_url}/rest/framegrids"
+        response = self._session.get(url)
+        response.raise_for_status()
+        return response.json()
+
+    def get_dimensions(self, fg_id: str, dim_ids: list[str] | None = None) -> list[dict[str, Any]]:
+        url = f"{self._server_url}/rest/get_dimensions"
+        payload = {
+            "fg_id": fg_id,
+            "dim_ids": dim_ids,
+        }
+        response = self._session.post(url, json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    def list_attribute_searches(
+        self, fg_id: str, base_data_only: bool = True
+    ) -> list[dict[str, Any]]:
+        url = f"{self._server_url}/rest/attribute_searches"
+        params = {
+            "fg_id": fg_id,
+            "base_data_only": base_data_only,
+        }
+        response = self._session.get(url, params=params)
+        response.raise_for_status()
+        return response.json()
+
+    def get_search_results_for_id(
+        self, fg_id: str, dim_id: str, base_data_only: bool = True
+    ) -> list[dict[str, Any]]:
+        url = f"{self._server_url}/rest/dimension_attributes"
+        params = {
+            "fg_id": fg_id,
+            "dim_id": dim_id,
+            "base_data_only": base_data_only,
+        }
+        response = self._session.get(url, params=params)
+        response.raise_for_status()
         return response.json()

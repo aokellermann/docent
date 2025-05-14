@@ -2,79 +2,16 @@
 
 import Breadcrumbs from '../components/Breadcrumbs';
 import React, { useEffect, Suspense, useState, useRef } from 'react';
-import { useParams } from 'next/navigation';
-import { RotateCcw } from 'lucide-react';
-import { ZoomOut } from 'lucide-react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
+
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { initSession, resetFrameSlice } from '../store/frameSlice';
-
-function ResponsiveCheck({ children }: { children: React.ReactNode }) {
-  const [dimensions, setDimensions] = useState<{
-    width?: number;
-    isPortrait?: boolean;
-  }>({});
-
-  useEffect(() => {
-    // Function to update window dimensions
-    const updateDimensions = () => {
-      setDimensions({
-        width: window.innerWidth,
-        isPortrait: window.innerHeight > window.innerWidth,
-      });
-    };
-
-    // Set initial dimensions and add event listener
-    updateDimensions();
-    window.addEventListener('resize', updateDimensions);
-
-    // Clean up
-    return () => window.removeEventListener('resize', updateDimensions);
-  }, []);
-
-  // Don't render anything during SSR or if dimensions aren't available
-  if (typeof dimensions.width === 'undefined') {
-    return <>{children}</>;
-  }
-
-  // If screen is wide enough, just render children
-  const MIN_WIDTH = 900;
-  if (dimensions.width >= MIN_WIDTH) {
-    return <>{children}</>;
-  }
-
-  // Mobile detection
-  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  const isPortraitMobile = isMobile && dimensions.isPortrait;
-
-  return (
-    <div className="fixed inset-0 bg-black/90 text-white flex flex-col justify-center items-center z-50 p-6 text-center">
-      <div className="max-w-md space-y-4">
-        <h2 className="text-xl font-semibold">Display Size Warning</h2>
-
-        <div className="space-y-2">
-          <p className="text-sm">
-            This dashboard is designed for larger screens.
-          </p>
-          <p className="text-sm">
-            {isPortraitMobile
-              ? 'Please rotate your device to landscape mode for a better experience.'
-              : 'Please use a device with a wider display or zoom out for a better experience.'}
-          </p>
-        </div>
-
-        <div className="flex justify-center mt-4">
-          {isPortraitMobile ? (
-            <div className="animate-[spin_2s_ease-in-out_infinite]">
-              <RotateCcw className="h-10 w-10 text-blue-400" />
-            </div>
-          ) : (
-            <ZoomOut className="h-8 w-8 text-blue-400" />
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
+import {
+  initSession,
+  resetFrameSlice,
+  setHasInitAttributeDimId,
+} from '../store/frameSlice';
+import ResponsiveCheck from '../components/ResponsiveCheck';
+import { requestAttributes } from '../store/attributeFinderSlice';
 
 function DocentLayoutContent({ children }: { children: React.ReactNode }) {
   const dispatch = useAppDispatch();
@@ -91,6 +28,65 @@ function DocentLayoutContent({ children }: { children: React.ReactNode }) {
     console.log(`Starting eval with ID from URL: ${evalId}`);
     dispatch(initSession(evalId));
   }, [evalId, dispatch]);
+
+  /**
+   * Handle shared persisted search
+   */
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const frameGridId = useAppSelector((state) => state.frame.frameGridId);
+  const dimensionsMap = useAppSelector((state) => state.frame.dimensionsMap);
+
+  const [initAttributeDimId, setInitAttributeDimId] = useState<
+    string | undefined
+  >(undefined);
+
+  // Check if the URL contains an attributeDimId parameter
+  const searchParamsCheckedRef = useRef(false);
+  useEffect(() => {
+    if (searchParamsCheckedRef.current) return;
+
+    const attributeDimId = searchParams.get('attributeDimId');
+    if (attributeDimId) {
+      setInitAttributeDimId(attributeDimId);
+      dispatch(setHasInitAttributeDimId(true));
+      console.log('Found attributeDimId in URL:', attributeDimId);
+
+      // Create a new URLSearchParams object without the attributeQuery
+      const newSearchParams = new URLSearchParams(searchParams.toString());
+      newSearchParams.delete('attributeDimId');
+
+      // Update the URL without adding to history
+      router.replace(
+        `${window.location.pathname}?${newSearchParams.toString()}`
+      );
+    } else {
+      dispatch(setHasInitAttributeDimId(false));
+      console.log('No attributeDimId found in URL');
+    }
+
+    searchParamsCheckedRef.current = true;
+  }, [searchParams, router, dispatch]);
+
+  const alreadyRequestedInitAttribute = useRef(false);
+  useEffect(() => {
+    if (
+      !alreadyRequestedInitAttribute.current &&
+      frameGridId &&
+      initAttributeDimId &&
+      dimensionsMap
+    ) {
+      console.log('Getting attribute dim ID:', initAttributeDimId);
+      dispatch(
+        requestAttributes({
+          attribute: undefined,
+          existingDimId: initAttributeDimId,
+        })
+      );
+      alreadyRequestedInitAttribute.current = true;
+    }
+  }, [initAttributeDimId, dispatch, frameGridId, dimensionsMap]);
 
   return (
     <div className="flex flex-col h-screen p-3 pt-2 space-y-2">

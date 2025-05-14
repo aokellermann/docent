@@ -29,7 +29,11 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from docent._env_util import ENV
-from docent._frames.attributes import AttributeStreamingCallback, extract_attributes
+from docent._frames.attributes import (
+    AttributeStreamingCallback,
+    AttributeStreamingEvent,
+    extract_attributes,
+)
 from docent._frames.clustering.cluster_generator import propose_clusters
 from docent._frames.db.schemas.base import SQLABase
 from docent._frames.db.schemas.tables import (
@@ -955,12 +959,16 @@ class DBService:
                 if attr.value is not None:
                     arr.append(attr.value)
 
-            for (data_id, attribute), values in attr_dict.items():
-                await attribute_callback(
-                    data_id,
-                    attribute,
-                    values,
-                )
+            await attribute_callback(
+                [
+                    {
+                        "datapoint_id": data_id,
+                        "attribute": attribute,
+                        "attributes": values,
+                    }
+                    for (data_id, attribute), values in attr_dict.items()
+                ]
+            )
 
         # Figure out which datapoints don't have the attribute
         datapoints = await self.get_datapoints_without_attribute(
@@ -972,41 +980,60 @@ class DBService:
         else:
             logger.info(f"Computing attributes for {len(datapoints)} datapoints")
 
-        # Compute the attributes
-        extracted = await extract_attributes(
-            datapoints, attribute, attribute_callback=attribute_callback
-        )
+        extracted: list[list[str] | None] = []
 
-        # Save attributes to the database
-        to_upload: list[SQLAAttribute] = []
-        for i, attrs in enumerate(extracted):
-            if attrs is None:
-                continue
+        async def _save_and_callback(events: list[AttributeStreamingEvent]):
+            nonlocal extracted
 
-            if len(attrs) == 0:
-                to_upload.append(
-                    SQLAAttribute.from_attribute(
-                        datapoint_id=datapoints[i].id,
-                        attribute=attribute,
-                        attribute_idx=None,
-                        value=None,
-                        fg_id=fg_id,
-                    )
-                )
-            else:
-                for j, attr in enumerate(attrs):
-                    to_upload.append(
-                        SQLAAttribute.from_attribute(
-                            datapoint_id=datapoints[i].id,
-                            attribute=attribute,
-                            attribute_idx=j,
-                            value=attr,
-                            fg_id=fg_id,
+            logger.info("got events!!!!!!")
+
+            extracted.extend([e["attributes"] for e in events])
+            if attribute_callback:
+                await attribute_callback(events)
+
+        async def _upload():
+            nonlocal extracted
+
+            with anyio.CancelScope(shield=True):
+                # Save attributes to the database
+                to_upload: list[SQLAAttribute] = []
+                for i, attrs in enumerate(extracted):
+                    if attrs is None:
+                        continue
+
+                    if len(attrs) == 0:
+                        to_upload.append(
+                            SQLAAttribute.from_attribute(
+                                datapoint_id=datapoints[i].id,
+                                attribute=attribute,
+                                attribute_idx=None,
+                                value=None,
+                                fg_id=fg_id,
+                            )
                         )
-                    )
-        async with self.session() as session:
-            session.add_all(to_upload)
-            logger.info(f"Pushed {len(to_upload)} attributes")
+                    else:
+                        for j, attr in enumerate(attrs):
+                            to_upload.append(
+                                SQLAAttribute.from_attribute(
+                                    datapoint_id=datapoints[i].id,
+                                    attribute=attribute,
+                                    attribute_idx=j,
+                                    value=attr,
+                                    fg_id=fg_id,
+                                )
+                            )
+                async with self.session() as session:
+                    session.add_all(to_upload)
+
+                logger.info(f"Pushed {len(to_upload)} attributes")
+
+        try:
+            await extract_attributes(datapoints, attribute, attribute_callback=_save_and_callback)
+        except anyio.get_cancelled_exc_class():
+            logger.info("Attribute computation cancelled")
+        finally:
+            # Upload what we have, even given cancellation
+            await _upload()
 
     async def _get_datapoints_without_judgments(
         self, fg_id: str, filter_id: str, base_filter: FrameFilterTypes | None = None

@@ -175,10 +175,6 @@ async def _parallelize_calls(
                     errors=["rate_limit" if isinstance(e, RateLimitException) else "other"],
                 )
 
-                # # Call the completion callback for errors too if provided
-                # if completion_callback:
-                #     await completion_callback(i, error_output)
-
             # Set the result in either case
             responses[i] = result
 
@@ -222,8 +218,7 @@ async def _parallelize_calls(
         raise
 
     # Cache results if available
-    if cache is not None:
-        _cache_responses()
+    _cache_responses()
 
     # At this point, all indices should have a result
     assert all(

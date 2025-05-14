@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { useAppDispatch, useAppSelector } from './store/hooks';
 import {
-  fetchEvalIds,
   fetchFrameGrids,
   resetFrameSlice,
   setEvalId,
@@ -29,7 +28,6 @@ const DocentDashboard = () => {
   useEffect(() => {
     // Fetch data when component mounts
     dispatch(fetchFrameGrids());
-    dispatch(fetchEvalIds());
 
     // Clear out old state
     socketService.closeSocket();

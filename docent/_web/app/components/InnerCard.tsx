@@ -324,11 +324,20 @@ const InnerCard: React.FC<InnerCard> = ({
 }) => {
   const dispatch = useAppDispatch();
 
+  const attributeQueryDimId = useAppSelector(
+    (state) => state.attributeFinder.attributeQueryDimId
+  );
+  const dimensionsMap = useAppSelector((state) => state.frame.dimensionsMap);
+  const curAttributeQuery = useMemo(
+    () =>
+      attributeQueryDimId
+        ? dimensionsMap?.[attributeQueryDimId]?.attribute
+        : undefined,
+    [attributeQueryDimId, dimensionsMap]
+  );
+
   const attributeMap = useSelector(
     (state: RootState) => state.attributeFinder.attributeMap
-  );
-  const curAttributeQuery = useSelector(
-    (state: RootState) => state.attributeFinder.curAttributeQuery
   );
   const loadingAttributesForId = useSelector(
     (state: RootState) => state.attributeFinder.loadingAttributesForId
@@ -477,7 +486,7 @@ const InnerCard: React.FC<InnerCard> = ({
 
   const getAttributeValues = useCallback(
     (dataId: string) => {
-      if (curAttributeQuery === undefined) return null;
+      if (!curAttributeQuery) return null;
       const values = attributeMap?.[dataId]?.[curAttributeQuery];
       if (values === undefined || values.length === 0) return null;
       return values;

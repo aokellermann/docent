@@ -38,7 +38,6 @@ export function FrameGridsTable({
 }: FrameGridsTableProps) {
   const router = useRouter();
   const [hoveredRowId, setHoveredRowId] = useState<string | null>(null);
-  const [copyingId, setCopyingId] = useState<string | null>(null);
 
   const handleOpenFrameGrid = (gridId: string) => {
     router.push(`${BASE_DOCENT_PATH}/${gridId}`);
@@ -49,16 +48,10 @@ export function FrameGridsTable({
     navigator.clipboard
       .writeText(id)
       .then(() => {
-        setCopyingId(id);
         toast({
           title: 'FrameGrid ID Copied',
           description: `Copied ${id} to clipboard`,
         });
-
-        // Reset the copying state after a short delay
-        setTimeout(() => {
-          setCopyingId(null);
-        }, 1000);
       })
       .catch((err) => {
         console.error('Failed to copy: ', err);
@@ -150,11 +143,9 @@ export function FrameGridsTable({
                   <ClipboardCopyIcon
                     className={cn(
                       'h-3 w-3',
-                      copyingId === grid.id
-                        ? 'text-green-500'
-                        : hoveredRowId === grid.id
-                          ? 'text-blue-500'
-                          : 'text-gray-400'
+                      hoveredRowId === grid.id
+                        ? 'text-blue-500'
+                        : 'text-gray-400'
                     )}
                   />
                 </Button>

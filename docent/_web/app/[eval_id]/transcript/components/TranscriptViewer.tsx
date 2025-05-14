@@ -33,6 +33,7 @@ import {
   Loader2,
   MessageSquarePlus,
   Pencil,
+  Share2,
 } from 'lucide-react';
 import React, {
   forwardRef,
@@ -141,12 +142,6 @@ const TranscriptViewer = forwardRef<
   const scrollToBlock = useCallback((blockIndex: number) => {
     const tryScrolling = (attempts = 0, maxAttempts = 5) => {
       const blockElement = document.getElementById(`block-${blockIndex}`);
-      console.log('Scrolling to block', blockElement);
-      console.log(
-        'Transcript scroll area ref',
-        transcriptScrollAreaRef.current
-      );
-
       if (blockElement && transcriptScrollAreaRef.current) {
         const scrollViewport = transcriptScrollAreaRef.current.querySelector(
           '[data-radix-scroll-area-viewport]'
@@ -590,33 +585,68 @@ const AttributeDisplay: React.FC<{
   blockIndex: number;
   scrollToBlock?: (blockIndex: number) => void;
 }> = ({ datapointId, blockIndex, scrollToBlock }) => {
-  const curAttributeQuery = useAppSelector(
-    (state) => state.attributeFinder.curAttributeQuery
+  const attributeQueryDimId = useAppSelector(
+    (state) => state.attributeFinder.attributeQueryDimId
+  );
+  const dimensionsMap = useAppSelector((state) => state.frame.dimensionsMap);
+  const curAttributeQuery = useMemo(
+    () =>
+      attributeQueryDimId
+        ? dimensionsMap?.[attributeQueryDimId]?.attribute
+        : undefined,
+    [attributeQueryDimId, dimensionsMap]
   );
   const attributeMap = useAppSelector(
     (state) => state.attributeFinder.attributeMap
   );
 
-  if (!curAttributeQuery || !attributeMap || !attributeMap[datapointId]) {
-    return null;
-  }
-
-  const attributeValues = attributeMap[datapointId]?.[curAttributeQuery];
-
-  if (!attributeValues || attributeValues.length === 0) {
-    return null;
-  }
-
-  // Filter attributes that have citations referencing this specific block
-  const relevantAttributes = attributeValues.filter(
-    (attr) =>
-      attr.citations &&
+  // Get all attributes that reference this specific block
+  const relevantAttributes = useMemo(() => {
+    if (!curAttributeQuery || !attributeMap || !attributeMap[datapointId]) {
+      return [];
+    }
+    const attributeValues = attributeMap[datapointId]?.[curAttributeQuery];
+    if (!attributeValues) {
+      return [];
+    }
+    return attributeValues.filter((attr) =>
       attr.citations.some((citation) => citation.block_idx === blockIndex)
-  );
-
+    );
+  }, [attributeMap, datapointId, curAttributeQuery, blockIndex]);
   if (relevantAttributes.length === 0) {
     return null;
   }
+
+  const handleShareAttribute = () => {
+    if (!attributeQueryDimId) {
+      toast({
+        title: 'Error',
+        description: 'Attribute Dimension ID not found.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const currentUrl = new URL(window.location.href);
+    currentUrl.searchParams.set('attributeDimId', attributeQueryDimId);
+
+    navigator.clipboard
+      .writeText(currentUrl.toString())
+      .then(() => {
+        toast({
+          title: 'Search URL copied',
+          description: 'Copied a shareable link to the clipboard',
+          variant: 'default',
+        });
+      })
+      .catch(() => {
+        toast({
+          title: 'Failed to copy',
+          description: 'Could not copy to clipboard',
+          variant: 'destructive',
+        });
+      });
+  };
 
   // Render the attribute section with exact same styling as InnerCard.tsx
   return (
@@ -626,6 +656,15 @@ const AttributeDisplay: React.FC<{
         <span className="text-xs font-medium text-indigo-700">
           Attributes from your query
         </span>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-5 w-5 ml-auto"
+          onClick={handleShareAttribute}
+          title="Share attribute search"
+        >
+          <Share2 className="h-3 w-3 text-indigo-600 hover:text-indigo-800" />
+        </Button>
       </div>
 
       <div>
@@ -664,15 +703,10 @@ const AttributeDisplay: React.FC<{
                 citation.end_idx
               );
               // Use different style for current block vs. other blocks
-              const isCurrentBlock = citation.block_idx === blockIndex;
               parts.push(
                 <button
                   key={`citation-${i}`}
-                  className={`px-0.5 py-0.25 ${
-                    isCurrentBlock
-                      ? 'bg-indigo-200 text-indigo-800 hover:bg-indigo-400'
-                      : 'bg-blue-100 text-blue-800 hover:bg-blue-300'
-                  } rounded hover:text-white transition-colors font-medium`}
+                  className={`px-0.5 py-0.25 bg-indigo-200 text-indigo-800 hover:bg-indigo-400 rounded hover:text-white transition-colors font-medium`}
                   onClick={(e) => {
                     e.stopPropagation();
                     scrollToBlock?.(citation.block_idx);
@@ -698,14 +732,7 @@ const AttributeDisplay: React.FC<{
           return (
             <div
               key={`${curAttributeQuery}-${idx}`}
-              className="group bg-indigo-50 rounded-md p-1 text-xs text-indigo-900 leading-snug mt-1 hover:bg-indigo-100 transition-colors cursor-pointer border border-transparent hover:border-indigo-200"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (scrollToBlock && citations.length > 0) {
-                  const firstCitation = citations[0];
-                  scrollToBlock(firstCitation.block_idx);
-                }
-              }}
+              className="group bg-indigo-50 rounded-md p-1 text-xs text-indigo-900 leading-snug mt-1 hover:bg-indigo-100 transition-colors border border-transparent hover:border-indigo-200"
             >
               <p className="mb-0.5">{renderTextWithCitations()}</p>
               <div className="flex items-center gap-1 text-[10px] text-indigo-600 mt-1">

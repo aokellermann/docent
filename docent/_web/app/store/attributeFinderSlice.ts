@@ -34,7 +34,6 @@ export interface AttributeFinderState {
   searchHistory?: string[];
   attributeMap?: Record<string, Record<string, AttributeWithCitation[]>>;
   // Current attribute query
-  curAttributeQuery?: string;
   attributeQueryDimId?: string;
   // Clustering
   activeClusterTaskId?: string;
@@ -66,13 +65,6 @@ export const requestRegexSnippetsIfExist = createAsyncThunk(
       const frameGridId = state.frame.frameGridId;
 
       if (!frameGridId) {
-        dispatch(
-          setToastNotification({
-            title: 'Configuration error',
-            description: 'No frame grid ID available',
-            variant: 'destructive',
-          })
-        );
         throw new Error('No frame grid ID available');
       }
 
@@ -99,42 +91,58 @@ export const requestRegexSnippetsIfExist = createAsyncThunk(
 export const requestAttributes = createAsyncThunk(
   'experimentViewer/requestAttributes',
   async (
-    { attribute, existingDimId }: { attribute: string; existingDimId?: string },
+    {
+      attribute,
+      existingDimId,
+    }: { attribute?: string; existingDimId?: string },
     { dispatch, getState }
   ) => {
     try {
-      // Cancel any existing attribute task
-      dispatch(cancelCurrentAttributeRequest());
+      const state = getState() as RootState;
 
-      // Set the UI loading state
-      dispatch(setCurAttributeQuery(attribute));
-      dispatch(setLoadingAttributesForId(attribute));
+      // Cancel any existing attribute task
+      await dispatch(cancelCurrentAttributeRequest());
+
+      // Set the UI loading state that doesn't depend on `attribute`
       dispatch(setLoadingProgress([0, 0]));
 
       let dimId: string;
       if (existingDimId) {
         dimId = existingDimId;
-        // We also need to explicitly get the corresponding dimension
-        dispatch(getDimensions());
+        // We also need to explicitly get the corresponding dimension to extract the relevant attribute
+        await dispatch(getDimensions());
+        // Parse the attribute out
+        const dimensionsMap = state.frame.dimensionsMap;
+        if (!dimensionsMap) {
+          throw new Error('No dimensions map available');
+        }
+        const dim = dimensionsMap[dimId];
+        if (!dim) {
+          throw new Error('Could not find search with the provided ID');
+        }
+        if (!dim.attribute) {
+          throw new Error('No attribute found for existing dimension');
+        }
+        attribute = dim.attribute;
       } else {
+        if (!attribute) {
+          throw new Error(
+            'No attribute, nor existing dimension ID provided. This should never happen!'
+          );
+        }
+
         // If there isn't an existing dimension, add one corresponding to the attribute
         // This method auto-triggers the push of a new filter
         dimId = await dispatch(addAttributeDimension(attribute)).unwrap();
       }
+
+      // Set the UI loading state that depends on `attribute`
+      dispatch(setLoadingAttributesForId(attribute));
       dispatch(setAttributeQueryDimId(dimId));
 
       // Send the request via REST API
-      const state = getState() as { frame: { frameGridId?: string } };
       const frameGridId = state.frame.frameGridId;
-
       if (!frameGridId) {
-        dispatch(
-          setToastNotification({
-            title: 'Configuration error',
-            description: 'No frame grid ID available',
-            variant: 'destructive',
-          })
-        );
         throw new Error('No frame grid ID available');
       }
 
@@ -177,8 +185,11 @@ export const requestAttributes = createAsyncThunk(
       dispatch(setActiveAttributeTaskId(undefined));
       dispatch(
         setToastNotification({
-          title: 'Error requesting attributes',
-          description: 'Failed to compute attributes for the query',
+          title: 'Error performing search',
+          description:
+            error instanceof Error
+              ? error.message
+              : 'Failed with unknown error',
           variant: 'destructive',
         })
       );
@@ -197,21 +208,14 @@ export const requestClusters = createAsyncThunk(
     const state = getState() as { frame: { frameGridId?: string } };
     const frameGridId = state.frame.frameGridId;
 
-    if (!frameGridId) {
-      dispatch(
-        setToastNotification({
-          title: 'Configuration error',
-          description: 'No frame grid ID available',
-          variant: 'destructive',
-        })
-      );
-      throw new Error('No frame grid ID available');
-    }
-
-    // Cancel any previous cluster requests
-    dispatch(cancelCurrentClusterRequest());
-
     try {
+      if (!frameGridId) {
+        throw new Error('No frame grid ID available');
+      }
+
+      // Cancel any previous cluster requests
+      await dispatch(cancelCurrentClusterRequest());
+
       // Start the cluster dimension job
       const response = await apiRestClient.post('/start_cluster_dimension', {
         fg_id: frameGridId,
@@ -264,7 +268,6 @@ export const clearAttributeQuery = createAsyncThunk(
   'experimentViewer/clearAttributeQuery',
   async (_, { dispatch, getState }) => {
     dispatch(setAttributeQueryDimId(undefined));
-    dispatch(setCurAttributeQuery(undefined));
     dispatch(cancelCurrentAttributeRequest());
     dispatch(clearAttributeMap());
   }
@@ -277,7 +280,7 @@ export const cancelCurrentAttributeRequest = createAsyncThunk(
     const { activeAttributeTaskId } = state.attributeFinder;
 
     // Also cancel any active cluster task when cancelling attribute requests
-    dispatch(cancelCurrentClusterRequest());
+    await dispatch(cancelCurrentClusterRequest());
 
     if (activeAttributeTaskId) {
       // If there's an active cancel function, call it
@@ -289,7 +292,7 @@ export const cancelCurrentAttributeRequest = createAsyncThunk(
           dispatch(
             setToastNotification({
               title: 'Error cancelling request',
-              description: 'Failed to cancel the attribute request',
+              description: 'Failed with unknown error',
               variant: 'destructive',
             })
           );
@@ -308,6 +311,7 @@ export const cancelCurrentAttributeRequest = createAsyncThunk(
       // Reset the state
       dispatch(setLoadingAttributesForId(undefined));
       dispatch(setActiveAttributeTaskId(undefined));
+      dispatch(setLoadingProgress(undefined));
     }
   }
 );
@@ -491,39 +495,36 @@ export const attributeFinderSlice = createSlice({
     ) => {
       state.activeClusterTaskId = action.payload;
     },
-    setCurAttributeQuery: (
-      state,
-      action: PayloadAction<string | undefined>
-    ) => {
-      state.curAttributeQuery = action.payload;
-    },
     handleAttributesUpdate: (
       state,
       action: PayloadAction<StreamedAttribute>
     ) => {
-      const {
-        datapoint_id,
-        attribute,
-        attributes,
-        num_datapoints_done,
-        num_datapoints_total,
-      } = action.payload;
+      const { events, num_datapoints_done, num_datapoints_total } =
+        action.payload;
 
       // Update the progress counters
       state.loadingProgress = [num_datapoints_done, num_datapoints_total];
 
-      if (datapoint_id === null || attribute === null || attributes === null) {
-        return;
-      }
       if (!state.attributeMap) {
         state.attributeMap = {};
       }
 
-      // Update dict with new attribute
-      // We assume that each update contains *all* attributes for that (datapoint_id, attribute) pair
-      const attrIds = state.attributeMap[datapoint_id] || {};
-      attrIds[attribute] = attributes;
-      state.attributeMap[datapoint_id] = attrIds;
+      for (const event of events) {
+        const { datapoint_id, attribute, attributes } = event;
+        if (
+          datapoint_id === null ||
+          attribute === null ||
+          attributes === null
+        ) {
+          continue; // or return, depending on desired behavior for partial events
+        }
+
+        // Update dict with new attribute
+        // We assume that each update contains *all* attributes for that (datapoint_id, attribute) pair
+        const attrIds = state.attributeMap[datapoint_id] || {};
+        attrIds[attribute] = attributes;
+        state.attributeMap[datapoint_id] = attrIds;
+      }
     },
     setLoadingAttributesForId: (
       state,
@@ -609,7 +610,6 @@ export const attributeFinderSlice = createSlice({
 
 export const {
   setActiveClusterTaskId,
-  setCurAttributeQuery,
   handleAttributesUpdate,
   setLoadingAttributesForId,
   setActiveAttributeTaskId,

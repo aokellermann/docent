@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.inspection import inspect as sqla_inspect
 
+from docent._frames.attributes import AttributeStreamingEvent
 from docent._frames.db.service import DBService
 from docent._frames.filters import (
     ComplexFrameFilter,
@@ -19,7 +20,7 @@ from docent._frames.filters import (
     parse_filter_dict,
 )
 from docent._frames.transcript import Citation, parse_citations_single_transcript
-from docent._frames.types import Datapoint, RegexSnippet
+from docent._frames.types import Attribute, Datapoint, RegexSnippet
 from docent._llm_util.prod_llms import get_llm_completions_async
 from docent._llm_util.provider_preferences import PROVIDER_PREFERENCES
 from docent._llm_util.types import LLMOutput
@@ -211,6 +212,13 @@ async def post_base_filter(request: PostBaseFilterRequest):
         return request.filter.id if request.filter else None
 
 
+@rest_router.get("/base_filter/{fg_id}", response_model=FrameFilterTypes | None)
+async def get_base_filter_endpoint(fg_id: str):
+    db = await get_db()
+    base_filter = await db.get_base_filter(fg_id)
+    return base_filter
+
+
 class GetRegexSnippetsRequest(BaseModel):
     fg_id: str
     filter_id: str
@@ -256,6 +264,34 @@ async def get_regex_snippets(request: GetRegexSnippetsRequest) -> dict[str, list
 async def get_state(fg_id: str):
     db = await get_db()
     await publish_homepage_state(db, fg_id)
+
+
+@rest_router.get("/attribute_searches")
+async def get_attribute_searches(fg_id: str, base_data_only: bool = True):
+    db = await get_db()
+    # The service method returns a list of dicts, which is fine for JSON response
+    return await db.get_attribute_searches_with_judgment_counts(fg_id, base_data_only)
+
+
+@rest_router.get("/dimension_attributes", response_model=list[Attribute])
+async def get_attributes_for_dimension_endpoint(
+    fg_id: str, dim_id: str, base_data_only: bool = True
+):
+    db = await get_db()
+    dim = await db.get_dim(fg_id, dim_id)
+    if not dim:
+        raise ValueError(f"Dimension with ID {dim_id} not found for FrameGrid {fg_id}")
+
+    if not dim.attribute:
+        # Or return empty list, depends on desired behavior
+        raise ValueError(f"Dimension {dim_id} does not have an associated attribute string.")
+
+    attributes_data = await db.get_attributes(
+        fg_id=fg_id,
+        attribute=dim.attribute,
+        base_data_only=base_data_only,
+    )
+    return attributes_data
 
 
 class GetDimensionsRequest(BaseModel):
@@ -346,10 +382,14 @@ class AttributeWithCitation(TypedDict):
     citations: list[Citation]
 
 
-class StreamedAttribute(TypedDict):
-    datapoint_id: str | None
-    attribute: str | None
+class AttributeStreamingEventWithCitations(TypedDict):
+    datapoint_id: str
+    attribute: str
     attributes: list[AttributeWithCitation] | None
+
+
+class StreamedAttribute(TypedDict):
+    events: list[AttributeStreamingEventWithCitations]
     num_datapoints_done: int
     num_datapoints_total: int
 
@@ -392,29 +432,32 @@ async def listen_compute_attributes(job_id: str):
     progress_lock = anyio.Lock()
     num_done, num_total = 0, await db.count_base_data(fg_id)
 
-    async def _ws_attribute_streaming_callback(
-        datapoint_id: str, attribute: str, attributes: list[str] | None
-    ) -> None:
+    async def _ws_attribute_streaming_callback(events: list[AttributeStreamingEvent]) -> None:
         nonlocal num_done
 
-        if attributes is None:
-            return
-
         async with progress_lock:
-            num_done += 1
-            payload: StreamedAttribute = {
-                "datapoint_id": datapoint_id,
-                "attribute": attribute,
-                "attributes": [
-                    {
-                        "attribute": attr,
-                        "citations": parse_citations_single_transcript(attr),
-                    }
-                    for attr in attributes
-                ],
-                "num_datapoints_done": num_done,
-                "num_datapoints_total": num_total,
-            }
+            events_with_citations = [
+                AttributeStreamingEventWithCitations(
+                    datapoint_id=e["datapoint_id"],
+                    attribute=e["attribute"],
+                    attributes=[
+                        {
+                            "attribute": attr,
+                            "citations": parse_citations_single_transcript(attr),
+                        }
+                        for attr in e["attributes"]
+                    ],
+                )
+                for e in events
+                if e["attributes"] is not None
+            ]
+
+            num_done += len(events_with_citations)
+            payload = StreamedAttribute(
+                events=events_with_citations,
+                num_datapoints_done=num_done,
+                num_datapoints_total=num_total,
+            )
 
         # Send to event_stream so it can be sent back to the client
         await send_stream.send(payload)
@@ -425,18 +468,20 @@ async def listen_compute_attributes(job_id: str):
 
     async def _execute():
         async with db.advisory_lock(fg_id, action_id="mutation"):
-            # Send initial 0% state message
-            init_data = StreamedAttribute(
-                datapoint_id=None,
-                attribute=None,
-                attributes=None,
-                num_datapoints_done=0,
-                num_datapoints_total=num_total,
-            )
-            await send_stream.send(init_data)
+            try:
+                # Send initial 0% state message
+                init_data = StreamedAttribute(
+                    events=[],
+                    num_datapoints_done=0,
+                    num_datapoints_total=num_total,
+                )
+                await send_stream.send(init_data)
 
-            # Compute attributes
-            await db.compute_attributes(fg_id, attribute, _ws_attribute_streaming_callback)
+                # Compute attributes
+                await db.compute_attributes(fg_id, attribute, _ws_attribute_streaming_callback)
+            finally:
+                with anyio.CancelScope(shield=True):
+                    await publish_attribute_searches(db, fg_id)
 
     return StreamingResponse(
         sse_event_stream(_execute, recv_stream), media_type="text/event-stream"
@@ -557,11 +602,11 @@ async def listen_cluster_dimension(job_id: str):
 
                 yield "data: [DONE]\n\n"
 
+            except anyio.get_cancelled_exc_class():
+                logger.info("Cluster dimension task cancelled")
+
             # Even if the task was cancelled, we want to publish the latest dims and marginals
             finally:
-                logger.info("Cleaning up cluster dimension task")
-
-                # Prevent cascading cancellation if this task was killed
                 with anyio.CancelScope(shield=True):
                     # Publish latest marginals in case there was an update
                     await publish_marginals(db, fg_id, dim_ids=[dim_id], ensure_fresh=False)

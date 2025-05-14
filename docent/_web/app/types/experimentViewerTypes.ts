@@ -20,10 +20,14 @@ export interface AttributeWithCitation {
   citations: Citation[];
 }
 
-export interface StreamedAttribute {
-  datapoint_id: string | null;
-  attribute: string | null;
+export interface AttributeStreamingEvent {
+  datapoint_id: string;
+  attribute: string;
   attributes: AttributeWithCitation[] | null;
+}
+
+export interface StreamedAttribute {
+  events: AttributeStreamingEvent[];
   num_datapoints_done: number;
   num_datapoints_total: number;
 }

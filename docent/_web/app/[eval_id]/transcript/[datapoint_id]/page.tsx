@@ -30,20 +30,33 @@ function DatapointPageContent() {
 
   // Scroll to block once datapoint is loaded
   const alreadyScrolledRef = useRef(false);
+  const hasInitAttributeDimId = useAppSelector(
+    (state) => state.frame.hasInitAttributeDimId
+  );
+  const attributeMap = useAppSelector(
+    (state) => state.attributeFinder.attributeMap
+  );
   useEffect(() => {
     if (alreadyScrolledRef.current) return;
+
+    // We wait until hasInitAttributeDimId is known before continuing
+    if (hasInitAttributeDimId === undefined) return;
+    // If there is an initial attributeDimId, then we wait until the attributes have populated
+    if (hasInitAttributeDimId === true && !attributeMap) return;
+    // Else, if it's false, then we don't need to wait
+
     if (
       transcriptViewerRef.current &&
       curDatapoint?.id === datapointId &&
       blockId
     ) {
+      alreadyScrolledRef.current = true;
       setTimeout(() => {
         console.log('Scrolling to block', blockId);
         transcriptViewerRef.current?.scrollToBlock(blockId);
-        alreadyScrolledRef.current = true;
       }, 100); // Small delay to allow for DOM rendering
     }
-  }, [curDatapoint, blockId, datapointId]);
+  }, [curDatapoint, blockId, datapointId, hasInitAttributeDimId, attributeMap]);
 
   // Get datapoint once
   const fetchRef = useRef(false);

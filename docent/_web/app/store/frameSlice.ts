@@ -22,13 +22,15 @@ import { resetTranscriptSlice } from './transcriptSlice';
 import { resetAttributeFinderSlice } from './attributeFinderSlice';
 
 export interface FrameState {
-  // Available eval IDs
-  evalIds?: string[];
+  // Jank state necessary to auto-scroll correctly:
+  //   If there is an initial attributeDimId, then we wait until the attributes have loaded
+  //   before we scroll to the specified transcript block
+  hasInitAttributeDimId?: boolean;
   // Available frame grids
   frameGrids?: FrameGrid[];
   isLoadingFrameGrids: boolean;
   // FrameGrid state
-  dimensions?: FrameDimension[];
+  dimensionsMap?: Record<string, FrameDimension>;
   baseFilter?: ComplexFrameFilter;
   // Metadata
   transcriptMetadataFields?: TranscriptMetadataField[];
@@ -64,25 +66,6 @@ export const fetchFrameGrids = createAsyncThunk(
       throw error;
     } finally {
       dispatch(setIsLoadingFrameGrids(false));
-    }
-  }
-);
-
-export const fetchEvalIds = createAsyncThunk(
-  'frame/fetchEvalIds',
-  async (_, { dispatch }) => {
-    try {
-      const response = await apiBaseClient.get('/eval_ids');
-      dispatch(setEvalIds(response.data));
-    } catch (error) {
-      dispatch(
-        setToastNotification({
-          title: 'Error fetching evaluation IDs',
-          description: 'Please try again in a moment',
-          variant: 'destructive',
-        })
-      );
-      throw error;
     }
   }
 );
@@ -426,7 +409,13 @@ export const frameSlice = createSlice({
       state.marginals = action.payload;
     },
     setDimensions: (state, action: PayloadAction<FrameDimension[]>) => {
-      state.dimensions = action.payload;
+      state.dimensionsMap = action.payload.reduce(
+        (map, dimension) => {
+          map[dimension.id] = dimension;
+          return map;
+        },
+        {} as Record<string, FrameDimension>
+      );
     },
     setBaseFilter: (
       state,
@@ -461,14 +450,14 @@ export const frameSlice = createSlice({
     setExperimentDimId: (state, action: PayloadAction<string | undefined>) => {
       state.experimentDimId = action.payload;
     },
-    setEvalIds: (state, action: PayloadAction<string[]>) => {
-      state.evalIds = action.payload;
-    },
     setFrameGrids: (state, action: PayloadAction<FrameGrid[]>) => {
       state.frameGrids = action.payload;
     },
     setIsLoadingFrameGrids: (state, action: PayloadAction<boolean>) => {
       state.isLoadingFrameGrids = action.payload;
+    },
+    setHasInitAttributeDimId: (state, action: PayloadAction<boolean>) => {
+      state.hasInitAttributeDimId = action.payload;
     },
     resetFrameSlice: () => initialState,
   },
@@ -484,9 +473,9 @@ export const {
   setEvalId,
   setSampleDimId,
   setExperimentDimId,
-  setEvalIds,
   setFrameGrids,
   setIsLoadingFrameGrids,
+  setHasInitAttributeDimId,
   resetFrameSlice,
 } = frameSlice.actions;
 
