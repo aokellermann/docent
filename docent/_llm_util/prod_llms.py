@@ -82,6 +82,26 @@ class SingleStreamingOutputGetter(Protocol):
     ) -> LLMOutput: ...
 
 
+def _get_offset_streaming_callback(
+    streaming_callback: AsyncStreamingCallback,
+    original_indices: list[int],
+):
+    async def _offset_streaming_callback(batch_index: int, llm_output: LLMOutput):
+        await streaming_callback(original_indices[batch_index], llm_output)
+
+    return _offset_streaming_callback
+
+
+def _get_offset_completion_callback(
+    completion_callback: AsyncStreamingCallback,
+    original_indices: list[int],
+):
+    async def _offset_completion_callback(batch_index: int, llm_output: LLMOutput):
+        await completion_callback(original_indices[batch_index], llm_output)
+
+    return _offset_completion_callback
+
+
 class ProviderConfig(TypedDict):
     async_client_getter: Callable[[], AsyncOpenAI | AsyncAnthropic]
     single_output_getter: SingleOutputGetter
@@ -277,7 +297,9 @@ class LLMManager:
 
                 # Collect inputs that don't have a result yet
                 null_inputs = [
-                    (i, messages_list[i]) for i, result in enumerate(results) if result is None
+                    (batch_index, messages_list[batch_index])
+                    for batch_index, result in enumerate(results)
+                    if result is None
                 ]
 
                 # Check cache if available
@@ -286,7 +308,7 @@ class LLMManager:
                     uncached_messages: list[list[ChatMessage]] = []
                     hits = 0
 
-                    for i, messages in null_inputs:
+                    for batch_index, messages in null_inputs:
                         cached_result = self.cache.get(
                             messages,
                             model_name,
@@ -298,36 +320,46 @@ class LLMManager:
                             top_logprobs=top_logprobs,
                         )
                         if cached_result is not None:
-                            results[i] = cached_result
+                            results[batch_index] = cached_result
                             hits += 1
 
                             # Call completion and streaming callbacks for cache hits
                             # TODO(mengk): we should make the callbacks batchable
                             if completion_callback:
-                                await completion_callback(i, cached_result)
+                                await completion_callback(batch_index, cached_result)
                             if streaming_callback:
-                                await streaming_callback(i, cached_result)
+                                await streaming_callback(batch_index, cached_result)
                         else:
-                            uncached_indices.append(i)
+                            uncached_indices.append(batch_index)
                             uncached_messages.append(messages)
 
                     misses = len(messages_list) - hits
                     logger.info(f"{model_name}: {hits} cache hits, {misses} misses")
                 # Otherwise, everything is uncached
                 else:
-                    uncached_indices = [i for i, _ in null_inputs]
+                    uncached_indices = [batch_index for batch_index, _ in null_inputs]
                     uncached_messages = [messages for _, messages in null_inputs]
 
-                # Get completions for uncached messages
                 if uncached_messages:
+                    # Get completions for uncached messages
                     outputs = await _parallelize_calls(
                         (
                             single_output_getter
                             if streaming_callback is None
                             else single_streaming_output_getter
                         ),
-                        streaming_callback,
-                        completion_callback,
+                        # We need to offset the callback indices, so when they're called from within
+                        # _parallelize_calls, the indices correspond to the original messages_list
+                        (
+                            _get_offset_streaming_callback(streaming_callback, uncached_indices)
+                            if streaming_callback is not None
+                            else None
+                        ),
+                        (
+                            _get_offset_completion_callback(completion_callback, uncached_indices)
+                            if completion_callback is not None
+                            else None
+                        ),
                         client,
                         uncached_messages,
                         model_name,
@@ -344,8 +376,10 @@ class LLMManager:
                         use_tqdm=len(uncached_messages) >= 5,
                         cache=self.cache,
                     )
-                    for i, (messages, output) in enumerate(zip(uncached_messages, outputs)):
-                        results[uncached_indices[i]] = output if not output.did_error else None
+                    for batch_index, messages, output in zip(
+                        uncached_indices, uncached_messages, outputs
+                    ):
+                        results[batch_index] = output if not output.did_error else None
 
                 # If there are still some None results, rotate model options
                 num_error = sum(1 for result in results if result is None)

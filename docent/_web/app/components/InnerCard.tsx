@@ -23,10 +23,7 @@ import { BASE_DOCENT_PATH } from '../constants';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { useSelector } from 'react-redux';
 import { RootState } from '../store/store';
-import {
-  AttributeWithCitation,
-  TaskStats,
-} from '../types/experimentViewerTypes';
+import { TaskStats } from '../types/experimentViewerTypes';
 import { getTranscriptMetadata } from '../store/frameSlice';
 import {
   requestRegexSnippetsIfExist,
@@ -38,6 +35,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { updateRegexSnippets } from '../store/experimentViewerSlice';
+import { AttributeWithCitations } from '../types/frameTypes';
 
 interface InnerCard {
   innerId: string;
@@ -54,20 +52,20 @@ interface InnerCard {
 interface AttributeSectionProps {
   dataId: string;
   curAttributeQuery: string;
-  attributeValues: AttributeWithCitation[];
+  attributes: AttributeWithCitations[];
   onShowDatapoint?: (datapointId: string, blockId?: number) => void;
 }
 
 const AttributeSection: React.FC<AttributeSectionProps> = ({
   dataId,
   curAttributeQuery,
-  attributeValues,
+  attributes: attributes,
   onShowDatapoint,
 }) => {
   const dispatch = useAppDispatch();
   const voteState = useAppSelector((state) => state.attributeFinder.voteState);
 
-  if (attributeValues.length === 0) {
+  if (attributes.length === 0) {
     return null;
   }
 
@@ -81,9 +79,12 @@ const AttributeSection: React.FC<AttributeSectionProps> = ({
       </div>
 
       {/* Render only the attributes for the current query */}
-      {attributeValues.map((attributeValue, idx) => {
-        const attributeText = attributeValue.attribute;
-        const citations = attributeValue.citations || [];
+      {attributes.map((attribute, idx) => {
+        const attributeText = attribute.value;
+        if (!attributeText) {
+          return null;
+        }
+        const citations = attribute.citations || [];
         const currentVote = voteState?.[dataId]?.[attributeText];
 
         // Create a component that renders text with citations highlighted
@@ -484,12 +485,14 @@ const InnerCard: React.FC<InnerCard> = ({
     interventionDescriptionMarginals[interventionKey] &&
     interventionDescriptionMarginals[interventionKey].length > 0;
 
-  const getAttributeValues = useCallback(
+  const getAttributes = useCallback(
     (dataId: string) => {
       if (!curAttributeQuery) return null;
-      const values = attributeMap?.[dataId]?.[curAttributeQuery];
-      if (values === undefined || values.length === 0) return null;
-      return values;
+      const attributes = attributeMap?.[dataId]?.[curAttributeQuery].filter(
+        (attr) => attr.value !== null
+      );
+      if (attributes === undefined || attributes.length === 0) return null;
+      return attributes;
     },
     [curAttributeQuery, attributeMap]
   );
@@ -601,8 +604,8 @@ const InnerCard: React.FC<InnerCard> = ({
           <div className="flex flex-col gap-1 mt-1.5 ml-5 pl-0.5">
             {datapointIds.map((dataId) => {
               // Skip if there is an active query but there are no matching attribute values
-              const attributeValues = getAttributeValues(dataId);
-              if (curAttributeQuery && attributeValues === null) return null;
+              const attributes = getAttributes(dataId);
+              if (curAttributeQuery && attributes === null) return null;
 
               return (
                 <div
@@ -733,11 +736,11 @@ const InnerCard: React.FC<InnerCard> = ({
                   />
 
                   {/* Replace the inline attribute section with the new component */}
-                  {attributeValues && curAttributeQuery && (
+                  {attributes && curAttributeQuery && (
                     <AttributeSection
                       dataId={dataId}
                       curAttributeQuery={curAttributeQuery}
-                      attributeValues={attributeValues}
+                      attributes={attributes}
                       onShowDatapoint={onShowDatapoint}
                     />
                   )}

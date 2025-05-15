@@ -605,12 +605,14 @@ const AttributeDisplay: React.FC<{
     if (!curAttributeQuery || !attributeMap || !attributeMap[datapointId]) {
       return [];
     }
-    const attributeValues = attributeMap[datapointId]?.[curAttributeQuery];
-    if (!attributeValues) {
+    const attributes = attributeMap[datapointId]?.[curAttributeQuery].filter(
+      (attr) => attr.value !== null
+    );
+    if (!attributes) {
       return [];
     }
-    return attributeValues.filter((attr) =>
-      attr.citations.some((citation) => citation.block_idx === blockIndex)
+    return attributes.filter((attr) =>
+      attr.citations?.some((citation) => citation.block_idx === blockIndex)
     );
   }, [attributeMap, datapointId, curAttributeQuery, blockIndex]);
   if (relevantAttributes.length === 0) {
@@ -668,15 +670,19 @@ const AttributeDisplay: React.FC<{
       </div>
 
       <div>
-        {relevantAttributes.map((attributeValue, idx) => {
-          const attributeText = attributeValue.attribute;
+        {relevantAttributes.map((attribute, idx) => {
+          const attributeValue = attribute.value;
+          if (!attributeValue) {
+            return null;
+          }
+
           // Use all citations for the attribute, not just those for this block
-          const citations = attributeValue.citations || [];
+          const citations = attribute.citations || [];
 
           // Create a component that renders text with citations highlighted
           const renderTextWithCitations = () => {
             if (!citations.length) {
-              return attributeText;
+              return attributeValue;
             }
 
             // Sort citations by start index to process them in order
@@ -692,13 +698,13 @@ const AttributeDisplay: React.FC<{
               if (citation.start_idx > lastIndex) {
                 parts.push(
                   <span key={`text-${i}`}>
-                    {attributeText.slice(lastIndex, citation.start_idx)}
+                    {attributeValue.slice(lastIndex, citation.start_idx)}
                   </span>
                 );
               }
 
               // Add the cited text as a clickable element
-              const citedText = attributeText.slice(
+              const citedText = attributeValue.slice(
                 citation.start_idx,
                 citation.end_idx
               );
@@ -720,9 +726,9 @@ const AttributeDisplay: React.FC<{
             });
 
             // Add any remaining text
-            if (lastIndex < attributeText.length) {
+            if (lastIndex < attributeValue.length) {
               parts.push(
-                <span key={`text-end`}>{attributeText.slice(lastIndex)}</span>
+                <span key={`text-end`}>{attributeValue.slice(lastIndex)}</span>
               );
             }
 

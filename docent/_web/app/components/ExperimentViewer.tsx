@@ -162,7 +162,9 @@ export default function ExperimentViewer({
       (result, [key, datapointsList]) => {
         // Filter datapoints to ones that have the attributes
         const filteredDatapoints = datapointsList.filter((datapointId) => {
-          const attrs = attributeMap?.[datapointId]?.[curAttributeQuery];
+          const attrs = attributeMap?.[datapointId]?.[curAttributeQuery].filter(
+            (attr) => attr.value !== null
+          );
           return attrs && attrs.length > 0;
         });
 

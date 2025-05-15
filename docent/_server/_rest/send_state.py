@@ -1,11 +1,12 @@
 from typing import Any, Awaitable, Callable, cast
 
 import anyio
+from sqlalchemy.inspection import inspect as sqla_inspect
+
 from docent._frames.db.service import DBService, MarginalizationResult
 from docent._frames.transcript import TranscriptMetadata
 from docent._log_util import get_logger
 from docent._server._broker.redis_client import publish_to_broker
-from sqlalchemy.inspection import inspect as sqla_inspect
 
 logger = get_logger(__name__)
 
@@ -169,8 +170,8 @@ async def publish_homepage_marginals(
         to_send = dict(marginal)
         to_send["marginals"] = {
             _format_bin_combination(bin_combination): await map_fn(
-                [j.data_id for j in judgments],
-                [metadata_dict[j.data_id] for j in judgments],
+                [j.datapoint_id for j in judgments],
+                [metadata_dict[j.datapoint_id] for j in judgments],
             )
             for bin_combination, judgments in marginal["marginals"].items()
         }

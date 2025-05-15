@@ -148,7 +148,7 @@ async def test_add_datapoints(db_service: DBService):
 
         # Check judgments for this filter
         judgments = await db_service.get_matching_judgments(fg_id, db_filter.id)
-        judged_datapoint_ids = {j.data_id for j in judgments}
+        judged_datapoint_ids = {j.datapoint_id for j in judgments}
 
         # Efficiently get the expected datapoints for the current filter value
         current_expected_datapoint_ids = expected_datapoints_by_value.get(filter_value, set())

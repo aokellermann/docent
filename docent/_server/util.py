@@ -3,6 +3,7 @@ from typing import Any, Awaitable, Callable
 
 import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream
+from pydantic_core import to_jsonable_python
 
 
 async def sse_event_stream(
@@ -25,7 +26,7 @@ async def sse_event_stream(
         tg.start_soon(execute)
 
         async for payload in recv_stream:
-            data = json.dumps(payload)
+            data = json.dumps(to_jsonable_python(payload))
             yield f"data: {data}\n\n"
 
     yield "data: [DONE]\n\n"

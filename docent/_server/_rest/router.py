@@ -5,7 +5,11 @@ from typing import Any, Literal, TypedDict, cast
 from uuid import uuid4
 
 import anyio
-from docent._frames.attributes import AttributeStreamingEvent
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from sqlalchemy.inspection import inspect as sqla_inspect
+
 from docent._frames.db.service import DBService
 from docent._frames.filters import (
     ComplexFrameFilter,
@@ -15,7 +19,7 @@ from docent._frames.filters import (
     parse_filter_dict,
 )
 from docent._frames.transcript import Citation, parse_citations_single_transcript
-from docent._frames.types import Attribute, Datapoint, RegexSnippet
+from docent._frames.types import Attribute, AttributeWithCitations, Datapoint, RegexSnippet
 from docent._llm_util.prod_llms import get_llm_completions_async
 from docent._llm_util.provider_preferences import PROVIDER_PREFERENCES
 from docent._llm_util.types import LLMOutput
@@ -40,10 +44,6 @@ from docent._server._rest.send_state import (
     publish_marginals,
 )
 from docent._server.util import sse_event_stream
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from sqlalchemy.inspection import inspect as sqla_inspect
 
 logger = get_logger(__name__)
 
@@ -419,14 +419,8 @@ class AttributeWithCitation(TypedDict):
     citations: list[Citation]
 
 
-class AttributeStreamingEventWithCitations(TypedDict):
-    datapoint_id: str
-    attribute: str
-    attributes: list[AttributeWithCitation] | None
-
-
 class StreamedAttribute(TypedDict):
-    events: list[AttributeStreamingEventWithCitations]
+    data_dict: dict[str, dict[str, list[AttributeWithCitations]]]
     num_datapoints_done: int
     num_datapoints_total: int
 
@@ -469,29 +463,22 @@ async def listen_compute_attributes(job_id: str):
     progress_lock = anyio.Lock()
     num_done, num_total = 0, await db.count_base_data(fg_id)
 
-    async def _ws_attribute_streaming_callback(events: list[AttributeStreamingEvent]) -> None:
+    async def _ws_attribute_streaming_callback(attributes: list[Attribute]) -> None:
         nonlocal num_done
 
         async with progress_lock:
-            events_with_citations = [
-                AttributeStreamingEventWithCitations(
-                    datapoint_id=e["datapoint_id"],
-                    attribute=e["attribute"],
-                    attributes=[
-                        {
-                            "attribute": attr,
-                            "citations": parse_citations_single_transcript(attr),
-                        }
-                        for attr in e["attributes"]
-                    ],
+            # Construct a map from datapoint_id -> attribute -> list of AttributeWithCitations
+            data_dict: dict[str, dict[str, list[AttributeWithCitations]]] = {}
+            for attr in attributes:
+                data_dict.setdefault(attr.datapoint_id, {}).setdefault(attr.attribute, []).append(
+                    AttributeWithCitations.from_attribute(attr)
                 )
-                for e in events
-                if e["attributes"] is not None
-            ]
 
-            num_done += len(events_with_citations)
+            # Each datapoint is only included in one attribute callback
+            num_done += len(data_dict.keys())
+
             payload = StreamedAttribute(
-                events=events_with_citations,
+                data_dict=data_dict,
                 num_datapoints_done=num_done,
                 num_datapoints_total=num_total,
             )
@@ -508,7 +495,7 @@ async def listen_compute_attributes(job_id: str):
             try:
                 # Send initial 0% state message
                 init_data = StreamedAttribute(
-                    events=[],
+                    data_dict={},
                     num_datapoints_done=0,
                     num_datapoints_total=num_total,
                 )
@@ -821,7 +808,7 @@ async def create_ta_session(request: CreateTASessionRequest):
             raise ValueError("Multiple transcripts found for TA session")
         elif len(judgments) == 0:
             raise ValueError("No transcripts found for TA session")
-        datapoints = [d for d in datapoints if d.id == judgments[0][0].data_id]
+        datapoints = [d for d in datapoints if d.id == judgments[0][0].datapoint_id]
 
     # Create system prompt with all matching transcripts
     system_prompt = make_single_tasst_system_prompt(datapoints[0])

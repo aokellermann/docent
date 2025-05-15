@@ -1,6 +1,5 @@
 import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
 import {
-  AttributeWithCitation,
   MarginalizationResult,
   RegexSnippet,
   StreamedAttribute,
@@ -365,7 +364,11 @@ export const deleteFilter = createAsyncThunk(
 export const updateFrameGrid = createAsyncThunk(
   'frame/updateFrameGrid',
   async (
-    { fg_id, name, description }: { fg_id: string; name?: string; description?: string },
+    {
+      fg_id,
+      name,
+      description,
+    }: { fg_id: string; name?: string; description?: string },
     { dispatch }
   ) => {
     try {

@@ -83,7 +83,7 @@ class DatapointIdFilter(FrameFilter):
                 Judgment(
                     matches=b,
                     reason=f"datapoint_id {'matches' if b else 'does not match'} {self.value}",
-                    data_id=d.id,
+                    datapoint_id=d.id,
                 )
             ]
             for d in data
@@ -230,7 +230,7 @@ class PrimitiveFilter(FrameFilter):
                 Judgment(
                     matches=b,
                     reason=f"metadata {'.'.join(self.key_path)} {self.op} {self.value}",
-                    data_id=d.id,
+                    datapoint_id=d.id,
                 )
             ]
             for d in data
@@ -321,7 +321,7 @@ class FramePredicate(FrameFilter):
                 Judgment(
                     matches=m[0],
                     reason=m[1],
-                    data_id=data[i].id,
+                    datapoint_id=data[i].id,
                     attribute=self.attribute,
                     attribute_idx=j,
                 )
@@ -329,7 +329,7 @@ class FramePredicate(FrameFilter):
                 else Judgment(
                     matches=False,
                     reason="API error; default false",
-                    data_id=data[i].id,
+                    datapoint_id=data[i].id,
                     attribute=self.attribute,
                     attribute_idx=j,
                 )
@@ -425,7 +425,7 @@ class ComplexFrameFilter(FrameFilter):
             cur_matching_set: set[str] = set()
             for judgments_A in judgments_NA:
                 if any(judgment.matches for judgment in judgments_A):
-                    cur_matching_set.add(judgments_A[0].data_id)
+                    cur_matching_set.add(judgments_A[0].datapoint_id)
             matching_datapoint_ids.append(cur_matching_set)
 
         return _combine_filter_judgments_partial(
@@ -474,7 +474,7 @@ def _combine_filter_judgments_partial(
     matching_ids_FN: list[set[str]],
     op: Literal["and", "or"],
     return_all: bool = False,
-    all_data_ids: list[str] | None = None,
+    all_datapoint_ids: list[str] | None = None,
 ):
     if op == "and":
         matching_ids = set[str].intersection(*matching_ids_FN)
@@ -486,23 +486,23 @@ def _combine_filter_judgments_partial(
     # Normal case: return only matching judgments
     if not return_all:
         return [
-            [Judgment(matches=True, reason=f"Matched {op} of filters", data_id=i)]
+            [Judgment(matches=True, reason=f"Matched {op} of filters", datapoint_id=i)]
             for i in matching_ids
         ]
     # When return_all is True, return judgments for all datapoints
     else:
-        if all_data_ids is None:
-            raise ValueError("all_data_ids must be provided if return_all is True")
+        if all_datapoint_ids is None:
+            raise ValueError("all_datapoint_ids must be provided if return_all is True")
 
         return [
             [
                 Judgment(
                     matches=i in matching_ids,
                     reason=f"{'Matched' if i in matching_ids else 'Did not match'} {op} of filters",
-                    data_id=i,
+                    datapoint_id=i,
                 )
             ]
-            for i in all_data_ids
+            for i in all_datapoint_ids
         ]
 
 

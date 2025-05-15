@@ -4,7 +4,6 @@ FIXME(mengk): add indices to commonly-filtered columns
 
 import json
 from datetime import UTC, datetime
-from uuid import uuid4
 
 from pydantic_core import to_jsonable_python
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text
@@ -227,16 +226,14 @@ class SQLAJudgment(SQLABase):
 
     @classmethod
     def from_judgment(cls, judgment: Judgment, fg_id: str, filter_id: str) -> "SQLAJudgment":
-        uniqueness_key = (
-            f"{fg_id}|{filter_id}|{judgment.data_id}|{judgment.attribute}|{judgment.attribute_idx}"
-        )
+        uniqueness_key = f"{fg_id}|{filter_id}|{judgment.datapoint_id}|{judgment.attribute}|{judgment.attribute_idx}"
 
         return cls(
             id=judgment.id,
             frame_grid_id=fg_id,
             uniqueness_key=uniqueness_key,
             filter_id=filter_id,
-            datapoint_id=judgment.data_id,
+            datapoint_id=judgment.datapoint_id,
             matches=judgment.matches,
             attribute=judgment.attribute,
             attribute_idx=judgment.attribute_idx,
@@ -246,7 +243,7 @@ class SQLAJudgment(SQLABase):
     def to_judgment(self) -> Judgment:
         return Judgment(
             id=self.id,
-            data_id=self.datapoint_id,
+            datapoint_id=self.datapoint_id,
             attribute=self.attribute,
             attribute_idx=self.attribute_idx,
             matches=self.matches,
@@ -286,25 +283,22 @@ class SQLAAttribute(SQLABase):
     @classmethod
     def from_attribute(
         cls,
-        datapoint_id: str,
-        attribute: str,
-        attribute_idx: int | None,
-        value: str | None,
+        attribute: Attribute,
         fg_id: str,
     ):
         return cls(
-            id=str(uuid4()),
+            id=attribute.id,
             frame_grid_id=fg_id,
-            datapoint_id=datapoint_id,
-            attribute=attribute,
-            attribute_idx=attribute_idx,
-            value=value,
+            datapoint_id=attribute.datapoint_id,
+            attribute=attribute.attribute,
+            attribute_idx=attribute.attribute_idx,
+            value=attribute.value,
         )
 
     def to_attribute(self) -> Attribute:
         return Attribute(
             id=self.id,
-            data_id=self.datapoint_id,
+            datapoint_id=self.datapoint_id,
             attribute=self.attribute,
             attribute_idx=self.attribute_idx,
             value=self.value,

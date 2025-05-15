@@ -1,3 +1,5 @@
+import { Citation } from './experimentViewerTypes';
+
 export interface Marginals {
   [dimId: string]: {
     [filterId: string]: Judgment[];
@@ -6,7 +8,7 @@ export interface Marginals {
 
 export interface Judgment {
   id: string;
-  data_id: string;
+  datapoint_id: string;
   attribute: string | null;
   attribute_idx: number | null;
   matches: boolean;
@@ -25,10 +27,14 @@ export interface FrameGrid {
 
 export interface Attribute {
   id: string;
-  data_id: string;
+  datapoint_id: string;
   attribute: string;
-  attribute_idx: number;
-  value: string;
+  attribute_idx: number | null;
+  value: string | null;
+}
+
+export interface AttributeWithCitations extends Attribute {
+  citations: Citation[] | null;
 }
 
 export type FilterLiteral =
@@ -82,6 +88,6 @@ export interface FrameDimension {
 }
 
 export interface Judgment {
-  data_id: string;
+  datapoint_id: string;
   matches: boolean;
 }

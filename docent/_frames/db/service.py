@@ -19,12 +19,17 @@ from typing import (
 from uuid import uuid4
 
 import anyio
-from docent._env_util import ENV
-from docent._frames.attributes import (
-    AttributeStreamingCallback,
-    AttributeStreamingEvent,
-    extract_attributes,
+from sqlalchemy import URL, delete, distinct, exists, func, select, text, update
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
 )
+
+from docent._env_util import ENV
+from docent._frames.attributes import AttributeStreamingCallback, extract_attributes
 from docent._frames.clustering.cluster_generator import propose_clusters
 from docent._frames.db.schemas.base import SQLABase
 from docent._frames.db.schemas.tables import (
@@ -46,14 +51,6 @@ from docent._frames.filters import (
 from docent._frames.transcript import TranscriptMetadata
 from docent._frames.types import Attribute, Datapoint, Judgment
 from docent._log_util import get_logger
-from sqlalchemy import URL, delete, distinct, exists, func, select, text, update
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
 
 logger = get_logger(__name__)
 
@@ -495,7 +492,6 @@ class DBService:
                 query = query.join(
                     SQLADatapoint, SQLADatapoint.id == SQLAAttribute.datapoint_id
                 ).where(where_clause)
-            print(query.compile(compile_kwargs={"literal_binds": True}))
             result = await session.execute(query)
         counts = {attr: count for attr, count in result.all()}
 
@@ -756,6 +752,19 @@ class DBService:
             filter_ids = cast(list[str], result.scalars().all())
         await self._delete_filters(fg_id, filter_ids)
 
+        # Get the attributes for the dimensions to be deleted
+        async with self.session() as session:
+            result = await session.execute(
+                select(SQLAFrameDimension.attribute)
+                .where(
+                    SQLAFrameDimension.id.in_(dim_ids),
+                    SQLAFrameDimension.frame_grid_id == fg_id,
+                    SQLAFrameDimension.attribute.isnot(None),
+                )
+                .distinct()
+            )
+            attributes_to_check = result.scalars().all()
+
         # Then delete the dimensions
         async with self.session() as session:
             result = await session.execute(
@@ -764,6 +773,33 @@ class DBService:
                 )
             )
             logger.info(f"Deleted {result.rowcount} dimensions")
+
+        # If this is the only dimension with this attribute, then clear attributes
+        for attribute in attributes_to_check:
+            # Check if any other dimensions use this attribute
+            async with self.session() as session:
+                result = await session.execute(
+                    select(func.count())
+                    .select_from(SQLAFrameDimension)
+                    .where(
+                        SQLAFrameDimension.frame_grid_id == fg_id,
+                        SQLAFrameDimension.attribute == attribute,
+                    )
+                )
+                remaining_count = result.scalar_one()
+
+            # If no dimensions use this attribute anymore, delete all attributes with this name
+            if remaining_count == 0:
+                async with self.session() as session:
+                    delete_result = await session.execute(
+                        delete(SQLAAttribute).where(
+                            SQLAAttribute.frame_grid_id == fg_id,
+                            SQLAAttribute.attribute == attribute,
+                        )
+                    )
+                    logger.info(
+                        f"Cleared {delete_result.rowcount} attributes for '{attribute}' as no dimensions use it anymore"
+                    )
 
     ##############
     # Datapoints #
@@ -989,22 +1025,7 @@ class DBService:
         # So, retrieve them and send them
         if attribute_callback is not None:
             attrs = await self._get_attributes(fg_id, attribute, ensure_fresh=False)
-            attr_dict: dict[tuple[str, str], list[str]] = {}
-            for attr in attrs:
-                arr = attr_dict.setdefault((attr.data_id, attr.attribute), [])
-                if attr.value is not None:
-                    arr.append(attr.value)
-
-            await attribute_callback(
-                [
-                    {
-                        "datapoint_id": data_id,
-                        "attribute": attribute,
-                        "attributes": values,
-                    }
-                    for (data_id, attribute), values in attr_dict.items()
-                ]
-            )
+            await attribute_callback(attrs)
 
         # Figure out which datapoints don't have the attribute
         datapoints = await self.get_datapoints_without_attribute(
@@ -1016,48 +1037,30 @@ class DBService:
         else:
             logger.info(f"Computing attributes for {len(datapoints)} datapoints")
 
-        extracted: list[list[str] | None] = []
+        extracted_attrs: list[Attribute] = []
 
-        async def _save_and_callback(events: list[AttributeStreamingEvent]):
-            nonlocal extracted
+        async def _save_and_callback(attributes: list[Attribute]):
+            """When each attribute comes back, both call the callback and also save to
+            a running list of attributes that will be uploaded to the database.
+            """
+            nonlocal extracted_attrs
 
-            logger.info("got events!!!!!!")
-
-            extracted.extend([e["attributes"] for e in events])
+            extracted_attrs.extend(attributes)
             if attribute_callback:
-                await attribute_callback(events)
+                await attribute_callback(attributes)
 
         async def _upload():
-            nonlocal extracted
+            """Upload the attributes we have to the database."""
+            nonlocal extracted_attrs
 
             with anyio.CancelScope(shield=True):
-                # Save attributes to the database
-                to_upload: list[SQLAAttribute] = []
-                for i, attrs in enumerate(extracted):
-                    if attrs is None:
-                        continue
-
-                    if len(attrs) == 0:
-                        to_upload.append(
-                            SQLAAttribute.from_attribute(
-                                datapoint_id=datapoints[i].id,
-                                attribute=attribute,
-                                attribute_idx=None,
-                                value=None,
-                                fg_id=fg_id,
-                            )
-                        )
-                    else:
-                        for j, attr in enumerate(attrs):
-                            to_upload.append(
-                                SQLAAttribute.from_attribute(
-                                    datapoint_id=datapoints[i].id,
-                                    attribute=attribute,
-                                    attribute_idx=j,
-                                    value=attr,
-                                    fg_id=fg_id,
-                                )
-                            )
+                to_upload: list[SQLAAttribute] = [
+                    SQLAAttribute.from_attribute(
+                        attribute=attr,
+                        fg_id=fg_id,
+                    )
+                    for attr in extracted_attrs
+                ]
                 async with self.session() as session:
                     session.add_all(to_upload)
 
@@ -1223,7 +1226,7 @@ class DBService:
                 datapoint_ids = result.scalars().all()
 
             # Convert into judgments
-            judgments = [Judgment(data_id=id, matches=True) for id in datapoint_ids]
+            judgments = [Judgment(datapoint_id=id, matches=True) for id in datapoint_ids]
         else:
             # Which datapoints do not have judgments for this filter? Early exit if all fresh
             datapoints = await self._get_datapoints_without_judgments(fg_id, filter_id, base_filter)
@@ -1244,8 +1247,8 @@ class DBService:
                     fg_id, filter.attribute, base_filter=base_filter
                 )
                 for attr in attributes:
-                    if attr.data_id in datapoints_dict:
-                        arr = datapoints_dict[attr.data_id].attributes.setdefault(
+                    if attr.datapoint_id in datapoints_dict:
+                        arr = datapoints_dict[attr.datapoint_id].attributes.setdefault(
                             attr.attribute, []
                         )
                         if attr.value is not None:
@@ -1316,7 +1319,7 @@ class DBService:
         for value, datapoint_ids in value_to_datapoint_ids.items():
             matching_judgments = [
                 SQLAJudgment.from_judgment(
-                    Judgment(data_id=id, matches=True),
+                    Judgment(datapoint_id=id, matches=True),
                     fg_id=fg_id,
                     filter_id=filters[value].id,
                 )
@@ -1524,7 +1527,8 @@ class DBService:
         # Convert marginals to sets
         marginals = {
             dim_id: {
-                filter_id: set([j.data_id for j in js]) for filter_id, js in dim_marginals.items()
+                filter_id: set([j.datapoint_id for j in js])
+                for filter_id, js in dim_marginals.items()
             }
             for dim_id, dim_marginals in marginals.items()
         }
@@ -1566,7 +1570,7 @@ class DBService:
 
             if matching_ids is not None and len(matching_ids) > 0:
                 result[bin_combination] = [
-                    Judgment(data_id=id, matches=True) for id in matching_ids
+                    Judgment(datapoint_id=id, matches=True) for id in matching_ids
                 ]
 
         # Collect the actual dim and filter objects

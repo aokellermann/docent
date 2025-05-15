@@ -1,13 +1,13 @@
 import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
 import {
   AttributeFeedback,
-  AttributeWithCitation,
   RegexSnippet,
   StreamedAttribute,
 } from '../types/experimentViewerTypes';
 import socketService from '../services/socketService';
 import sseService from '../services/sseService';
 import {
+  AttributeWithCitations,
   ComplexFrameFilter,
   FrameDimension,
   FrameFilter,
@@ -32,7 +32,7 @@ const cancelFunctionsMap: Record<string, () => void> = {};
 export interface AttributeFinderState {
   attributeQueryTextboxValue?: string;
   searchHistory?: string[];
-  attributeMap?: Record<string, Record<string, AttributeWithCitation[]>>;
+  attributeMap?: Record<string, Record<string, AttributeWithCitations[]>>;
   // Current attribute query
   attributeQueryDimId?: string;
   // Clustering
@@ -499,31 +499,26 @@ export const attributeFinderSlice = createSlice({
       state,
       action: PayloadAction<StreamedAttribute>
     ) => {
-      const { events, num_datapoints_done, num_datapoints_total } =
+      const { data_dict, num_datapoints_done, num_datapoints_total } =
         action.payload;
 
       // Update the progress counters
       state.loadingProgress = [num_datapoints_done, num_datapoints_total];
 
+      // Update the attribute map
       if (!state.attributeMap) {
         state.attributeMap = {};
       }
+      for (const datapoint_id in data_dict) {
+        for (const attribute in data_dict[datapoint_id]) {
+          if (!state.attributeMap[datapoint_id]) {
+            state.attributeMap[datapoint_id] = {};
+          }
 
-      for (const event of events) {
-        const { datapoint_id, attribute, attributes } = event;
-        if (
-          datapoint_id === null ||
-          attribute === null ||
-          attributes === null
-        ) {
-          continue; // or return, depending on desired behavior for partial events
+          // Replace the old values at (datapoint_id, attribute)
+          state.attributeMap[datapoint_id][attribute] =
+            data_dict[datapoint_id][attribute];
         }
-
-        // Update dict with new attribute
-        // We assume that each update contains *all* attributes for that (datapoint_id, attribute) pair
-        const attrIds = state.attributeMap[datapoint_id] || {};
-        attrIds[attribute] = attributes;
-        state.attributeMap[datapoint_id] = attrIds;
       }
     },
     setLoadingAttributesForId: (

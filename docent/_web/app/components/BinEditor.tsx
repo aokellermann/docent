@@ -39,14 +39,9 @@ const JudgmentList: React.FC<{
   judgments: Judgment[];
   onShowDatapoint: (datapointId: string, blockId?: number) => void;
 }> = ({ binId, judgments, onShowDatapoint }) => {
-  const [showOnlyMatches, setShowOnlyMatches] = useState(true);
   const attributeMap = useSelector(
     (state: RootState) => state.attributeFinder.attributeMap
   );
-
-  const filteredJudgments = useMemo(() => {
-    return showOnlyMatches ? judgments.filter((j) => j.matches) : judgments;
-  }, [judgments, showOnlyMatches]);
 
   const renderAttributeValue = (value: string, dataId: string) => {
     const blockPattern = /B(\d+)/g;
@@ -106,33 +101,36 @@ const JudgmentList: React.FC<{
         </span>
       </div>
 
-      {filteredJudgments &&
-        filteredJudgments.map((judgment, i) => {
+      {judgments &&
+        judgments.map((judgment, i) => {
           if (!judgment) return null;
           const attributeValue =
-            attributeMap?.[judgment.data_id]?.[judgment.attribute || '']?.[
+            attributeMap?.[judgment.datapoint_id]?.[judgment.attribute || '']?.[
               judgment.attribute_idx || 0
-            ]?.attribute;
+            ]?.value;
+          if (!attributeValue) {
+            return null;
+          }
 
           return (
             <div
               key={i}
               className={`group bg-indigo-50 rounded-md p-1.5 text-xs text-indigo-900 leading-snug mt-1 hover:bg-indigo-100 transition-colors cursor-pointer border border-transparent hover:border-indigo-200`}
               onClick={() => {
-                onShowDatapoint(judgment.data_id);
+                onShowDatapoint(judgment.datapoint_id);
                 // If there's a block citation in the attribute value, scroll to the first one
                 if (attributeValue) {
                   const match = attributeValue.match(/B(\d+)/);
                   if (match && onShowDatapoint) {
                     const blockIndex = parseInt(match[1], 10);
-                    onShowDatapoint(judgment.data_id, blockIndex);
+                    onShowDatapoint(judgment.datapoint_id, blockIndex);
                   }
                 }
               }}
             >
               {attributeValue !== undefined && (
                 <p className="mb-0.5">
-                  {renderAttributeValue(attributeValue, judgment.data_id)}
+                  {renderAttributeValue(attributeValue, judgment.datapoint_id)}
                 </p>
               )}
               <div className="flex items-center gap-1 text-[10px] text-indigo-600 mt-1">
@@ -143,7 +141,7 @@ const JudgmentList: React.FC<{
                   )}
                 </span>
                 <span className="ml-1 opacity-70">
-                  data_id: {judgment.data_id}
+                  datapoint_id: {judgment.datapoint_id}
                 </span>
               </div>
             </div>

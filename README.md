@@ -1,3 +1,5 @@
+## Docent helps summarize, cluster, and search over agent transcripts
+
 <p align="center">
   <a href="https://www.gnu.org/licenses/lgpl-3.0"><img alt="License: LGPL v3" src="https://img.shields.io/badge/License-LGPL%20v3-blue.svg"/></a>
   <a href='https://github.com/TransluceAI/docent/pulls'><img alt='PRs Welcome' src='https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=shields'/></a>
@@ -6,9 +8,21 @@
 </p>
 
 <p align="center">
-  <a href="https://transluce.mintlify.app">Docs</a> - Community - Roadmap - Changelog - <a href="https://github.com/TransluceAI/docent/issues/new?assignees=&labels=bug">Bug reports</a>
+  <a href="https://transluce.mintlify.app">Docs</a> - <a href="https://github.com/TransluceAI/docent/issues/new?assignees=&labels=bug">Bug reports</a> - <a href="#community">Community</a> - <a href="#roadmap">Roadmap</a> - <a href="#changelog">Changelog</a>
 </p>
 
-## Docent helps summarize, cluster, and search over agent transcripts
+### Quickstart
 
 To get started, check out the [quickstart guide](https://transluce.mintlify.app/get-started/quickstart).
+
+### Community
+
+We'll release a Slack channel for community support soon! Stay tuned.
+
+### Roadmap
+
+Reach out to kevin@transluce.org to find out! We'll be publicizing it soon.
+
+### Changelog
+
+We'll start semantically versioning Docent soon, once we're out of private alpha.
