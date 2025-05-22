@@ -2,6 +2,7 @@
 
 import { Loader2, PlusIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -28,14 +29,12 @@ import {
   resetAttributeFinderSlice,
 } from './store/attributeFinderSlice';
 import { resetExperimentViewerSlice } from './store/experimentViewerSlice';
-import {
-  fetchFrameGrids,
-  resetFrameSlice,
-} from './store/frameSlice';
+import { fetchFrameGrids, resetFrameSlice } from './store/frameSlice';
 import { useAppDispatch, useAppSelector } from './store/hooks';
 import { resetTranscriptSlice } from './store/transcriptSlice';
 
 const DocentDashboard = () => {
+  const router = useRouter();
   const evalId = useAppSelector((state) => state.frame.evalId);
   const frameGrids = useAppSelector((state) => state.frame.frameGrids);
   const isLoadingFrameGrids = useAppSelector(
@@ -107,14 +106,23 @@ const DocentDashboard = () => {
                 Create a new FrameGrid for each benchmark or set of experiments.
               </div>
             </div>
-            <Button
-              className="flex items-center gap-1"
-              size="sm"
-              onClick={() => setIsNewGridDialogOpen(true)}
-            >
-              <PlusIcon className="h-3.5 w-3.5" />
-              Create New Frame Grid
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => router.push('/signup')}
+              >
+                Sign Up
+              </Button>
+              <Button
+                className="flex items-center gap-1"
+                size="sm"
+                onClick={() => setIsNewGridDialogOpen(true)}
+              >
+                <PlusIcon className="h-3.5 w-3.5" />
+                Create New Frame Grid
+              </Button>
+            </div>
           </div>
         </div>
 

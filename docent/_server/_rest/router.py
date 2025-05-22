@@ -40,6 +40,7 @@ from docent.data_models.agent_run import AgentRun
 from docent.data_models.citation import Citation, parse_citations_single_transcript
 from docent.data_models.filters import ComplexFilter, FrameDimension, FrameFilter, parse_filter_dict
 from docent.data_models.regex import RegexSnippet, get_regex_snippets
+from docent.data_models.user import UserCreateRequest, UserResponse
 
 logger = get_logger(__name__)
 
@@ -58,6 +59,22 @@ async def get_db():
 @rest_router.get("/ping")
 async def ping():
     return {"status": "ok", "message": "pong"}
+
+
+@rest_router.post("/signup")
+async def signup(request: UserCreateRequest) -> UserResponse:
+    """
+    User signup endpoint. Creates a new user or returns an existing user if one already exists with that email.
+
+    Args:
+        request: UserCreateRequest containing email
+
+    Returns:
+        UserResponse with user_id and email
+    """
+    db = await get_db()
+    user = await db.create_user(request.email)
+    return UserResponse(user_id=user.id, email=user.email)
 
 
 @rest_router.get("/framegrids")

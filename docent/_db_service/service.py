@@ -45,6 +45,7 @@ from docent._db_service.schemas.tables import (
     SQLAJob,
     SQLAJudgment,
     SQLATranscript,
+    SQLAUser,
 )
 from docent._env_util import ENV
 from docent._log_util import get_logger
@@ -59,6 +60,7 @@ from docent.data_models.filters import (
 )
 from docent.data_models.metadata import BaseAgentRunMetadata
 from docent.data_models.transcript import Transcript
+from docent.data_models.user import User
 
 logger = get_logger(__name__)
 
@@ -1671,6 +1673,69 @@ class DBService:
             result = await session.execute(select(SQLAJob).where(SQLAJob.id == job_id))
             job = result.scalar_one_or_none()
             return job.job_json if job else None
+
+    #########
+    # Users #
+    #########
+
+    async def create_user(self, email: str) -> User:
+        """
+        Create a new user or return an existing user with the given email.
+
+        Args:
+            email: The email address of the user
+
+        Returns:
+            The User object (new or existing)
+        """
+        # Check if user already exists
+        existing_user = await self.get_user_by_email(email)
+        if existing_user:
+            logger.info(f"User with email {email} already exists, returning existing user")
+            return existing_user
+
+        # Create new user
+        new_user = User(email=email)
+        async with self.session() as session:
+            session.add(
+                SQLAUser(id=new_user.id, email=new_user.email, created_at=new_user.created_at)
+            )
+        logger.info(f"Created new user with ID: {new_user.id} and email: {email}")
+        return new_user
+
+    async def get_user_by_email(self, email: str) -> User | None:
+        """
+        Retrieve a user by email address.
+
+        Args:
+            email: The email address to search for
+
+        Returns:
+            The User object if found, None otherwise
+        """
+        async with self.session() as session:
+            result = await session.execute(select(SQLAUser).where(SQLAUser.email == email))
+            sqla_user = result.scalar_one_or_none()
+            if sqla_user:
+                return User(id=sqla_user.id, email=sqla_user.email, created_at=sqla_user.created_at)
+            return None
+
+    async def get_user_by_id(self, user_id: str) -> User | None:
+        """
+        Retrieve a user by ID.
+
+        Args:
+            user_id: The user ID to search for
+
+        Returns:
+            The User object if found, None otherwise
+        """
+        async with self.session() as session:
+            result = await session.execute(select(SQLAUser).where(SQLAUser.id == user_id))
+            sqla_user = result.scalar_one_or_none()
+            if sqla_user:
+                return User(id=sqla_user.id, email=sqla_user.email, created_at=sqla_user.created_at)
+            return None
 
     @asynccontextmanager
     async def advisory_lock(self, fg_id: str, action_id: str) -> AsyncIterator[None]:
