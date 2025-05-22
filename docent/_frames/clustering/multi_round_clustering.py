@@ -22,15 +22,6 @@ class Cluster:
         return len(self.indices & other.indices) / len(self.indices)
 
 
-class ClusterResult:
-    def __init__(
-        self, clusters: list[Cluster], centroid_indices: list[int], running_centroids: list[str]
-    ):
-        self.clusters = clusters
-        self.centroid_indices = centroid_indices
-        self.running_centroids = running_centroids
-
-
 class ClusterProcessor:
     def __init__(self, assigner: ClusterAssigner, llm_api_keys: LLMApiKeys | None = None):
         self.assigner = assigner
@@ -38,10 +29,7 @@ class ClusterProcessor:
         self.SUBSET_THRESHOLD = 300
 
     async def run_attributes_through_clusters(
-        self,
-        attribs: list[str],
-        cluster_centroids: list[str],
-        centroid_indices: list[int] | None = None,
+        self, attribs: list[str], cluster_centroids: list[str]
     ) -> list[Cluster]:
         logger.info(f"Running {len(attribs)} attributes through {len(cluster_centroids)} clusters")
         full_items: list[str] = []
@@ -55,12 +43,8 @@ class ClusterProcessor:
             full_items, full_centroids, llm_api_keys=self.llm_api_keys
         )
 
-        if centroid_indices is None:
-            centroid_indices = list(range(len(cluster_centroids)))
-
         clusters: list[Cluster] = []
-        for i in centroid_indices:
-            centroid = cluster_centroids[i]
+        for i, centroid in enumerate(cluster_centroids):
             indices: set[int] = set()
             start_idx = i * len(results) // len(cluster_centroids)
             end_idx = (i + 1) * len(results) // len(cluster_centroids)
@@ -70,39 +54,15 @@ class ClusterProcessor:
             clusters.append(Cluster(centroid=centroid, indices=indices))
         return clusters
 
-    def remove_very_large_clusters(
-        self, clusters: list[Cluster], centroids: list[str], exclusive_threshold: float = 0.5
-    ) -> list[int]:
-        bad_indices: list[int] = []
-        if len(centroids) > 3:
-            for i, cluster in enumerate(clusters):
-                match_count = len(cluster.indices)
-                match_threshold = exclusive_threshold * len(cluster.indices)
-                if match_count >= match_threshold:
-                    logger.info(
-                        f"Found oversized cluster {i} with {match_count} >= {match_threshold} matches"
-                    )
-                    bad_indices.append(i)
-        logger.info(f"Identified {len(bad_indices)} oversized clusters to remove")
-        return bad_indices
-
     def find_high_overlap_pairs(
-        self,
-        clusters: list[Cluster],
-        centroids: list[str],
-        centroid_indices: list[int],
-        exclusive_threshold: float,
-    ) -> tuple[dict[int, int], list[tuple[float, int, int]]]:
-        cluster_pair_counts: dict[int, int] = {}
-        bad_pairs: list[tuple[float, int, int]] = []
+        self, clusters: list[Cluster], exclusive_threshold: float
+    ) -> list[tuple[float, Cluster, Cluster]]:
+        bad_pairs: list[tuple[float, Cluster, Cluster]] = []
 
-        for i, c1_idx in enumerate(centroid_indices):
-            for j, c2_idx in enumerate(centroid_indices):
+        for i, cluster1 in enumerate(clusters):
+            for j, cluster2 in enumerate(clusters):
                 if i == j:
                     continue
-
-                cluster1 = clusters[i]
-                cluster2 = clusters[j]
 
                 if not cluster1.indices:
                     continue
@@ -113,52 +73,39 @@ class ClusterProcessor:
                 if len(cluster1) > len(cluster2):
                     continue
 
-                cluster_pair_counts[c1_idx] = cluster_pair_counts.get(c1_idx, 0) + 1
-                cluster_pair_counts[c2_idx] = cluster_pair_counts.get(c2_idx, 0) + 1
-                bad_pairs.append((ratio, c1_idx, c2_idx))
+                bad_pairs.append((ratio, cluster1, cluster2))
 
-        return cluster_pair_counts, bad_pairs
+        return bad_pairs
 
     def prune_clusters_of_high_overlap(
-        self, clusters: list[Cluster], centroids: list[str], exclusive_threshold: float = 0.4
-    ) -> ClusterResult:
-        centroid_indices = list(range(len(centroids)))
-        bad_indices = self.remove_very_large_clusters(clusters, centroids, exclusive_threshold=0.5)
-
-        for index in bad_indices:
-            centroid_indices.remove(index)
-            logger.info(f"Removed {centroids[index]}")
-
+        self, clusters: list[Cluster], exclusive_threshold: float = 0.5
+    ) -> list[Cluster]:
         while True:
-            cluster_pair_counts, bad_pairs = self.find_high_overlap_pairs(
-                clusters, centroids, centroid_indices, exclusive_threshold
-            )
-
+            bad_pairs = self.find_high_overlap_pairs(clusters, exclusive_threshold)
             if not bad_pairs:
                 break
 
             bad_pairs.sort(key=lambda x: x[0], reverse=True)
-            removed = False
-
-            # Remove large clusters that are in many high-overlap pairs
+            centroid_counts: dict[str, int] = {}
             for bad_pair in bad_pairs:
-                if cluster_pair_counts[bad_pair[2]] > 1:
-                    centroid_indices.remove(bad_pair[2])
-                    removed = True
-                    logger.info(f"Removed {centroids[bad_pair[2]]}")
+                _, cluster1, cluster2 = bad_pair
+                centroid_counts[cluster1.centroid] = centroid_counts.get(cluster1.centroid, 0) + 1
+                centroid_counts[cluster2.centroid] = centroid_counts.get(cluster2.centroid, 0) + 1
+
+            for centroid, count in centroid_counts.items():
+                if count > 1:
+                    cluster = next(c for c in clusters if c.centroid == centroid)
+                    clusters.remove(cluster)
+                    logger.info(f"Removed {cluster.centroid} due to high overlap")
                     break
+            else:
+                ratio, cluster1, cluster2 = bad_pairs[0]
+                clusters.remove(cluster1)
+                logger.info(
+                    f"Removed {cluster1.centroid} due to high overlap ({ratio:.2f}) with {cluster2.centroid}"
+                )
 
-            if removed:
-                continue
-
-            # Remove small clusters that are in high-overlap pairs
-            for bad_pair in bad_pairs:
-                centroid_indices.remove(bad_pair[1])
-                logger.info(f"Removed {centroids[bad_pair[1]]}")
-                break
-
-        running_centroids = [centroids[i] for i in centroid_indices]
-        return ClusterResult(clusters, centroid_indices, running_centroids)
+        return clusters
 
     def display_cluster_overlap_info(self, clusters: list[Cluster]) -> None:
         counts: dict[int, int] = {}
@@ -189,52 +136,22 @@ class ClusterProcessor:
     def prune_small_clusters(
         self,
         clusters: list[Cluster],
-        centroids: list[str],
         exclusive_threshold: float = 0.5,
-        remove_majorities: bool = True,
-    ) -> ClusterResult:
-        centroid_indices = list(range(len(centroids)))
-        bad_indices = []
-
-        if remove_majorities:
-            bad_indices = self.remove_very_large_clusters(
-                clusters, centroids, exclusive_threshold=0.5
-            )
-
-        for index in bad_indices:
-            centroid_indices.remove(index)
-            logger.info(f"Removed {centroids[index]}")
+    ) -> list[Cluster]:
 
         while True:
-            max_ratio = 0.0
-            max_ratio_centroid = 0
-
-            for i, c1_idx in enumerate(centroid_indices):
-                for j, c2_idx in enumerate(centroid_indices):
-                    if i == j:
-                        continue
-
-                    cluster1 = clusters[i]
-                    cluster2 = clusters[j]
-
-                    if not cluster1.indices:
-                        continue
-
-                    ratio = cluster1.overlap_ratio(cluster2)
-                    if ratio < exclusive_threshold:
-                        continue
-                    if ratio > max_ratio:
-                        max_ratio = ratio
-                        max_ratio_centroid = c1_idx
-
-            if max_ratio < exclusive_threshold:
+            bad_pairs = self.find_high_overlap_pairs(clusters, exclusive_threshold)
+            if not bad_pairs:
                 break
 
-            centroid_indices.remove(max_ratio_centroid)
-            logger.info(f"Removed {centroids[max_ratio_centroid]}")
+            bad_pairs.sort(key=lambda x: x[0], reverse=True)
+            ratio, cluster1, cluster2 = bad_pairs[0]
+            clusters.remove(cluster1)
+            logger.info(
+                f"Removed {cluster1.centroid} due to high overlap ({ratio:.2f}) with {cluster2.centroid}"
+            )
 
-        running_centroids = [centroids[i] for i in centroid_indices]
-        return ClusterResult(clusters, centroid_indices, running_centroids)
+        return clusters
 
     async def cluster_from_initial_proposal(
         self, attribs: list[str], attribute: str, cluster_centroids: list[str], num_rounds: int = 1
@@ -253,26 +170,19 @@ class ClusterProcessor:
         else:
             attribs_subset = attribs
 
-        initial_clusters = await self.run_attributes_through_clusters(
-            attribs_subset, cluster_centroids
-        )
-        cluster_result = self.prune_clusters_of_high_overlap(
-            initial_clusters, cluster_centroids, exclusive_threshold=0.4
-        )
+        clusters = await self.run_attributes_through_clusters(attribs_subset, cluster_centroids)
+        clusters = self.prune_clusters_of_high_overlap(clusters, exclusive_threshold=0.4)
 
-        running_centroids = cluster_result.running_centroids
+        running_centroids = [cluster.centroid for cluster in clusters]
         logger.info(
-            f"After pruning: kept {len(running_centroids)} centroids, removed {len(cluster_centroids) - len(running_centroids)}"
+            f"After pruning: kept {len(clusters)} clusters, removed {len(cluster_centroids) - len(clusters)}"
         )
 
         if large:
-            initial_clusters = await self.run_attributes_through_clusters(
-                attribs, running_centroids, cluster_result.centroid_indices
-            )
-            cluster_result.clusters = initial_clusters
+            clusters = await self.run_attributes_through_clusters(attribs, running_centroids)
 
-        self.display_cluster_overlap_info(cluster_result.clusters)
-        new_residuals, finished = self.get_residuals(cluster_result.clusters, attribs)
+        self.display_cluster_overlap_info(clusters)
+        new_residuals, finished = self.get_residuals(clusters, attribs)
         all_finished.extend(finished)
 
         logger.info(
@@ -306,14 +216,12 @@ class ClusterProcessor:
             new_clusters = await self.run_attributes_through_clusters(
                 new_residuals_subset, new_centroids
             )
-            new_cluster_result = self.prune_small_clusters(
+            new_clusters = self.prune_small_clusters(
                 new_clusters,
-                new_centroids,
                 exclusive_threshold=0.5,
-                remove_majorities=(not final_round) or num_rounds > 3,
             )
 
-            running_new_centroids = new_cluster_result.running_centroids
+            running_new_centroids = [cluster.centroid for cluster in new_clusters]
 
             # Skip queries for already finished items if using HybridClusterAssigner
             if isinstance(self.assigner, HybridClusterAssigner):
@@ -322,12 +230,11 @@ class ClusterProcessor:
 
             if large:
                 new_clusters = await self.run_attributes_through_clusters(
-                    new_residuals, running_new_centroids, new_cluster_result.centroid_indices
+                    new_residuals, running_new_centroids
                 )
-                new_cluster_result.clusters = new_clusters
 
-            self.display_cluster_overlap_info(new_cluster_result.clusters)
-            new_residuals, finished = self.get_residuals(new_cluster_result.clusters, new_residuals)
+            self.display_cluster_overlap_info(new_clusters)
+            new_residuals, finished = self.get_residuals(new_clusters, new_residuals)
             all_finished.extend(finished)
 
             logger.info(
