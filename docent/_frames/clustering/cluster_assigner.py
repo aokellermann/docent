@@ -4,7 +4,7 @@ TODO(mengk) do not load these defaults at import time? makes things very slow"""
 import os
 import re
 from abc import abstractmethod
-from typing import Literal, cast
+from typing import Literal, cast, Callable
 
 import torch
 from tqdm.auto import tqdm
@@ -21,7 +21,7 @@ from docent._log_util import get_logger
 
 logger = get_logger(__name__)
 
-ASSIGNMENT_PROMPT2 = """
+ASSIGNMENT_PROMPT = """
 You are given a cluster label C of an item I.
 Your task is to perform membership testing: determine whether the description of C matches I.
 
@@ -34,23 +34,6 @@ Return two lines in the following exact format:
 Here is your input:
 C: {cluster}
 I: {item}
-""".strip()
-
-ASSIGNMENT_PROMPT = """
-You are given a claim C and a behavior B.
-Your task is to determine whether B is a direct example of C.
-
-The claim may come with examples, which you shouldn't treat as strict requirements.
-
-Return two lines in the following exact format:
-- ANSWER: <YES/NO>
-- EXPLANATION: <concise but specific explanation; no more than a few high-information words>
-
-Only reply yes if B is a direct example of C; if B and C are correlated but distinct behaviors, this does not count.
-
-Here is your input:
-C: {cluster}
-B: {item}
 """.strip()
 
 
@@ -98,29 +81,33 @@ class ClusterAssignerFromLLM(ClusterAssigner):
         model_options: list[ModelOption],
         max_new_tokens: int = 512,
         temperature: float = 0.25,
+        assign_prompt_fn: Callable[[str, str], str] | None = None,
     ) -> None:
         super().__init__()
         self.system_prompt = system_prompt
         self.model_options = model_options
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
+        self.assign_prompt_fn = assign_prompt_fn
 
     @classmethod
-    def from_o3_mini(cls):
+    def from_o3_mini(cls, assign_prompt_fn: Callable[[str, str], str] | None = None):
         return cls(
             system_prompt=None,
             max_new_tokens=8192,
             temperature=1,
             model_options=PROVIDER_PREFERENCES.cluster_assign_o3_mini,
+            assign_prompt_fn=assign_prompt_fn,
         )
 
     @classmethod
-    def from_sonnet_37_thinking(cls):
+    def from_sonnet_37_thinking(cls, assign_prompt_fn: Callable[[str, str], str] | None = None):
         return cls(
             system_prompt=None,
             max_new_tokens=4096,
             temperature=1.0,
             model_options=PROVIDER_PREFERENCES.cluster_assign_sonnet_37_thinking,
+            assign_prompt_fn=assign_prompt_fn,
         )
 
     async def skip_queries(self, items: list[str], cluster: str) -> None:
@@ -133,7 +120,11 @@ class ClusterAssignerFromLLM(ClusterAssigner):
                 ),
                 {
                     "role": "user",
-                    "content": ASSIGNMENT_PROMPT.format(item=item, cluster=cluster),
+                    "content": (
+                        self.assign_prompt_fn(item, cluster)
+                        if self.assign_prompt_fn
+                        else ASSIGNMENT_PROMPT.format(item=item, cluster=cluster)
+                    ),
                 },
             ]
             for item in items
@@ -180,11 +171,16 @@ class ClusterAssignerFromLLM(ClusterAssigner):
                 ),
                 {
                     "role": "user",
-                    "content": ASSIGNMENT_PROMPT.format(item=item, cluster=cluster),
+                    "content": (
+                        self.assign_prompt_fn(item, cluster)
+                        if self.assign_prompt_fn
+                        else ASSIGNMENT_PROMPT.format(item=item, cluster=cluster)
+                    ),
                 },
             ]
             for item, cluster in zip(items, clusters, strict=True)
         ]
+        print(queries[-1][-1]["content"])
 
         # Get the LLM callback if we're streaming
         llm_callback = (

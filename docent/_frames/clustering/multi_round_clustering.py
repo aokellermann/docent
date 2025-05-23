@@ -1,10 +1,10 @@
 import random
-
-from docent._frames.clustering.cluster_assigner import ClusterAssigner
+from typing import Any, Callable, Coroutine
+from docent._frames.clustering.cluster_assigner import ClusterAssignerFromLLM
 from docent._frames.clustering.cluster_generator import propose_clusters, parse_cluster_output
 from docent._llm_util.types import LLMApiKeys
 from docent._log_util import get_logger
-from typing import Callable
+
 
 logger = get_logger(__name__)
 
@@ -24,13 +24,15 @@ class Cluster:
 
 
 class ClusterProcessor:
-    def __init__(self, assigner: ClusterAssigner, llm_api_keys: LLMApiKeys | None = None):
+    def __init__(self, assigner: ClusterAssignerFromLLM, llm_api_keys: LLMApiKeys | None = None):
         self.assigner = assigner
         self.llm_api_keys = llm_api_keys
         self.SUBSET_THRESHOLD = 300
 
     async def run_attributes_through_clusters(
-        self, attribs: list[str], cluster_centroids: list[str]
+        self,
+        attribs: list[str],
+        cluster_centroids: list[str],
     ) -> list[Cluster]:
         logger.info(f"Running {len(attribs)} attributes through {len(cluster_centroids)} clusters")
         full_items: list[str] = []
@@ -41,7 +43,9 @@ class ClusterProcessor:
             full_centroids.extend([centroid] * len(attribs))
 
         results = await self.assigner.assign(
-            full_items, full_centroids, llm_api_keys=self.llm_api_keys
+            full_items,
+            full_centroids,
+            llm_api_keys=self.llm_api_keys,
         )
 
         clusters: list[Cluster] = []
@@ -161,6 +165,7 @@ class ClusterProcessor:
         self,
         attribs: list[str],
         attribute: str,
+        prune_fn: Callable[[str, list[str], ClusterAssignerFromLLM], Coroutine[Any, Any, bool]],
         num_rounds: int = 1,
         clustering_prompt_fn: Callable[[str, list[str]], str] | None = None,
         output_extractor: Callable[[str], list[str]] = parse_cluster_output,
@@ -195,6 +200,9 @@ class ClusterProcessor:
             attribs_subset = attribs
 
         clusters = await self.run_attributes_through_clusters(attribs_subset, cluster_centroids)
+        clusters = [
+            c for c in clusters if await prune_fn(c.centroid, attribs_subset, self.assigner)
+        ]
         clusters = self.prune_clusters_of_high_overlap(clusters, exclusive_threshold=0.4)
 
         running_centroids = [cluster.centroid for cluster in clusters]
@@ -242,6 +250,11 @@ class ClusterProcessor:
             new_clusters = await self.run_attributes_through_clusters(
                 new_residuals_subset, new_centroids
             )
+            new_clusters = [
+                c
+                for c in new_clusters
+                if await prune_fn(c.centroid, new_residuals_subset, self.assigner)
+            ]
             new_clusters = self.prune_small_clusters(
                 new_clusters,
                 exclusive_threshold=0.5,
@@ -287,7 +300,8 @@ class ClusterProcessor:
 async def cluster_from_initial_proposal(
     attribs: list[str],
     attribute: str,
-    assigner: ClusterAssigner,
+    assigner: ClusterAssignerFromLLM,
+    prune_fn: Callable[[str, list[str], ClusterAssignerFromLLM], Coroutine[Any, Any, bool]],
     llm_api_keys: LLMApiKeys | None = None,
     num_rounds: int = 1,
     clustering_prompt_fn: Callable[[str, list[str]], str] | None = None,
@@ -297,7 +311,8 @@ async def cluster_from_initial_proposal(
     return await processor.multiround_cluster(
         attribs,
         attribute,
-        num_rounds,
+        prune_fn=prune_fn,
+        num_rounds=num_rounds,
         clustering_prompt_fn=clustering_prompt_fn,
         output_extractor=output_extractor,
     )
