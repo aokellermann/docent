@@ -2,7 +2,6 @@
 
 import { Loader2, PlusIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -21,6 +20,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
 
 import { FrameGridsTable } from './components/FrameGridsTable';
+import { UserProfile } from './components/auth/UserProfile';
 import { apiRestClient } from './services/apiService';
 import socketService from './services/socketService';
 import {
@@ -34,7 +34,6 @@ import { useAppDispatch, useAppSelector } from './store/hooks';
 import { resetTranscriptSlice } from './store/transcriptSlice';
 
 const DocentDashboard = () => {
-  const router = useRouter();
   const evalId = useAppSelector((state) => state.frame.evalId);
   const frameGrids = useAppSelector((state) => state.frame.frameGrids);
   const isLoadingFrameGrids = useAppSelector(
@@ -108,13 +107,6 @@ const DocentDashboard = () => {
             </div>
             <div className="flex items-center gap-2">
               <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => router.push('/signup')}
-              >
-                Sign Up
-              </Button>
-              <Button
                 className="flex items-center gap-1"
                 size="sm"
                 onClick={() => setIsNewGridDialogOpen(true)}
@@ -122,6 +114,7 @@ const DocentDashboard = () => {
                 <PlusIcon className="h-3.5 w-3.5" />
                 Create New Frame Grid
               </Button>
+              <UserProfile />
             </div>
           </div>
         </div>

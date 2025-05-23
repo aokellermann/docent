@@ -1,8 +1,8 @@
 'use client';
 
+import { Suspense, useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,27 +11,22 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from '@/hooks/use-toast';
 
 import { apiRestClient } from '../services/apiService';
-import { UserCreateRequest, UserResponse } from '../types/userTypes';
+import { UserResponse } from '../types/userTypes';
 import { useUser } from '../contexts/UserContext';
 
-const SignupPage = () => {
+function LoginPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const emailParam = searchParams.get('email') || '';
   const { setUser } = useUser();
-  const [email, setEmail] = useState('');
+
+  // Form state
+  const [email, setEmail] = useState(emailParam);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSignupSuccess = (user: UserResponse) => {
-    // Update the user context for immediate authentication
-    setUser(user);
-
-    toast({
-      title: 'Welcome to Docent!',
-      description: 'Your account has been created successfully.',
-    });
-
-    // Redirect to dashboard after successful signup
-    router.push('/');
-  };
+  useEffect(() => {
+    setEmail(emailParam);
+  }, [emailParam]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,32 +42,37 @@ const SignupPage = () => {
 
     setIsSubmitting(true);
     try {
-      const request: UserCreateRequest = { email: email.trim() };
-      const response = await apiRestClient.post<UserResponse>(
-        '/signup',
-        request
+      const loginRequest = { email: email.trim() };
+      const loginResponse = await apiRestClient.post<UserResponse>(
+        '/login',
+        loginRequest
       );
 
-      console.log('User signup result:', response.data);
-      handleSignupSuccess(response.data);
-    } catch (error: any) {
-      console.error('Failed to sign up:', error);
+      // Update the user context
+      setUser(loginResponse.data);
 
-      // Handle specific error cases
-      if (error.response?.status === 409) {
+      toast({
+        title: 'Success',
+        description: `Welcome back!`,
+      });
+
+      // Redirect to dashboard after successful login
+      router.push('/');
+    } catch (error: any) {
+      console.error('Failed to log in:', error);
+
+      // Handle different error cases
+      if (error.response?.status === 404) {
         toast({
-          title: 'Account Already Exists',
+          title: 'User not found',
           description:
-            'A user with this email already exists. Please log in instead.',
+            'No account found with that email address. Please sign up first.',
           variant: 'destructive',
         });
-
-        // consider redirecting to login page after a delay
-        // and autofill the email field
       } else {
         toast({
           title: 'Error',
-          description: 'Failed to create account. Please try again.',
+          description: 'Failed to log in. Please try again.',
           variant: 'destructive',
         });
       }
@@ -88,14 +88,14 @@ const SignupPage = () => {
           {/* Header */}
           <div className="text-center space-y-2">
             <h1 className="text-2xl font-bold tracking-tight">
-              Sign up for Docent
+              Sign in to Docent
             </h1>
             <p className="text-sm text-gray-600">
-              Enter your email address to get started
+              Enter your email address to sign in
             </p>
           </div>
 
-          {/* Signup Form */}
+          {/* Login Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email Address</Label>
@@ -118,28 +118,40 @@ const SignupPage = () => {
               {isSubmitting ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Creating account...
+                  Signing in...
                 </>
               ) : (
-                'Create Account'
+                'Sign In'
               )}
             </Button>
           </form>
 
-          {/* Link to Login */}
+          {/* Link to Signup */}
           <div className="text-center">
             <Button
               variant="ghost"
-              onClick={() => router.push('/login')}
+              onClick={() => router.push('/signup')}
               className="text-sm"
             >
-              Already have an account? Log in
+              Don&apos;t have an account? Sign up
             </Button>
           </div>
         </div>
       </div>
     </ScrollArea>
   );
-};
+}
 
-export default SignupPage;
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center">
+          <div>Loading...</div>
+        </div>
+      }
+    >
+      <LoginPageContent />
+    </Suspense>
+  );
+}

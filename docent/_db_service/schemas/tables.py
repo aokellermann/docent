@@ -22,6 +22,7 @@ TABLE_JUDGMENT = "judgments"
 TABLE_JOB = "jobs"
 TABLE_TRANSCRIPT = "transcripts"
 TABLE_USER = "users"
+TABLE_SESSION = "sessions"
 
 
 def _sanitize_pg_text(text: str) -> str:
@@ -373,3 +374,15 @@ class SQLAUser(SQLABase):
     created_at = mapped_column(
         DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False
     )
+
+
+class SQLASession(SQLABase):
+    __tablename__ = TABLE_SESSION
+
+    id = mapped_column(String(36), primary_key=True)
+    user_id = mapped_column(String(36), ForeignKey(f"{TABLE_USER}.id"), nullable=False, index=True)
+    created_at = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False
+    )
+    expires_at = mapped_column(DateTime, nullable=False, index=True)
+    is_active = mapped_column(Boolean, default=True, nullable=False, index=True)

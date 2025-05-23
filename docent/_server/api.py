@@ -5,11 +5,35 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from docent._env_util import ENV
 from docent._log_util import get_logger
 from docent._server._broker.router import broker_router
 from docent._server._rest.router import rest_router
 
 logger = get_logger(__name__)
+
+
+def get_allowed_origins() -> list[str]:
+    """
+    Get allowed CORS origins based on environment configuration.
+    """
+    # Check if specific origins are configured
+    cors_origins = ENV.get("DOCENT_CORS_ORIGINS")
+    if cors_origins:
+        # Split comma-separated origins and strip whitespace
+        origins = [origin.strip() for origin in cors_origins.split(",")]
+        logger.info(f"Using configured CORS origins: {origins}")
+        return origins
+
+    # Default development origins
+    default_origins = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+    ]
+    logger.info(f"Using default development CORS origins: {default_origins}")
+    return default_origins
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
@@ -35,7 +59,9 @@ asgi_app = FastAPI()
 asgi_app.add_middleware(RequestLoggingMiddleware)
 asgi_app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    # we have to specify specific origins because we are making requests from the frontend
+    # that include credentials (cookies). wildcard origins are not allowed.
+    allow_origins=get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

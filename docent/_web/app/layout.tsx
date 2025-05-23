@@ -6,11 +6,12 @@ import { Toaster } from '@/components/ui/toaster';
 import { cn } from '@/lib/utils';
 
 import WebsocketProvider from './contexts/WebsocketContext';
+import { UserProvider } from './contexts/UserContext';
+import { AuthWrapper } from './components/auth/AuthWrapper';
 import { CSPostHogProvider, ReduxProvider } from './providers';
 
 import { Metadata } from 'next';
 import { TooltipProvider } from '@radix-ui/react-tooltip';
-
 
 const openSans = Open_Sans({
   subsets: ['latin'],
@@ -41,11 +42,13 @@ export default function RootLayout({
         <CSPostHogProvider>
           <ReduxProvider>
             <WebsocketProvider>
-              <TooltipProvider>
-                {children}
-                <Toaster />
-                <ReduxToastHandler />
-              </TooltipProvider>
+              <UserProvider>
+                <TooltipProvider>
+                  <AuthWrapper>{children}</AuthWrapper>
+                  <Toaster />
+                  <ReduxToastHandler />
+                </TooltipProvider>
+              </UserProvider>
             </WebsocketProvider>
           </ReduxProvider>
         </CSPostHogProvider>
