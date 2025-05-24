@@ -10,24 +10,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.inspection import inspect as sqla_inspect
 
-from docent._frames.db.service import DBService
-from docent._frames.db.schemas.tables import SQLADatapoint
-from docent._frames.filters import (
-    ComplexFrameFilter,
-    FrameDimension,
-    FrameFilterTypes,
-    PrimitiveFilter,
-    parse_filter_dict,
-)
-from docent._frames.transcript import (
-    Citation,
-    parse_citations_multi_transcript,
-    parse_citations_single_transcript,
-)
-from docent._frames.types import Datapoint, RegexSnippet
+from docent._db_service.service import DBService
+from docent.data_models.agent_run import AgentRun
+from docent._ai_tools.attribute_extraction import Attribute, AttributeWithCitations
+from docent._llm_util.data_models.llm_output import LLMOutput
 from docent._llm_util.prod_llms import get_llm_completions_async
-from docent._llm_util.provider_preferences import PROVIDER_PREFERENCES
-from docent._llm_util.types import LLMOutput
+from docent._llm_util.providers.preferences import PROVIDER_PREFERENCES
 from docent._log_util.logger import get_logger
 from docent._server._assistant.chat import make_single_tasst_system_prompt
 from docent._server._assistant.feedback import generate_new_queries
@@ -40,15 +28,25 @@ from docent._server._assistant.summarizer import (
     summarize_agent_actions,
     summarize_intended_solution,
 )
+from docent._server._broker.redis_client import publish_to_broker
 from docent._server._rest.send_state import (
     publish_attribute_searches,
     publish_dims,
+    publish_framegrids,
     publish_homepage_state,
     publish_marginals,
 )
 from docent._server.util import sse_event_stream
 from sqlalchemy.sql import select
 
+
+from docent.data_models.citation import (
+    Citation,
+    parse_citations_single_transcript,
+    parse_citations_multi_transcript,
+)
+from docent.data_models.filters import ComplexFilter, FrameDimension, FrameFilter, parse_filter_dict
+from docent.data_models.regex import RegexSnippet, get_regex_snippets
 
 logger = get_logger(__name__)
 
@@ -73,8 +71,8 @@ async def ping():
 async def get_framegrids():
     db = await get_db()
     sqla_fgs = await db.get_fgs()
-
     return [
+        # Get all columns from the SQLAlchemy object
         {c.key: getattr(obj, c.key) for c in sqla_inspect(obj).mapper.column_attrs}
         for obj in sqla_fgs
     ]
@@ -90,7 +88,43 @@ class CreateFrameGridRequest(BaseModel):
 async def create(request: CreateFrameGridRequest = CreateFrameGridRequest()):
     db = await get_db()
     fg_id = await db.create(fg_id=request.fg_id, name=request.name, description=request.description)
+    # Publish updated framegrids list to all clients
+    await publish_framegrids(db)
     return {"fg_id": fg_id}
+
+
+class UpdateFrameGridRequest(BaseModel):
+    fg_id: str
+    name: str | None = None
+    description: str | None = None
+
+
+@rest_router.put("/framegrid")
+async def update_framegrid(request: UpdateFrameGridRequest):
+    db = await get_db()
+    await db.update_framegrid(request.fg_id, name=request.name, description=request.description)
+    # Publish homepage state for this specific framegrid
+    await publish_homepage_state(db, request.fg_id)
+    # Also publish updated framegrids list to all clients
+    await publish_framegrids(db)
+    return {"fg_id": request.fg_id}
+
+
+@rest_router.delete("/framegrid")
+async def delete_framegrid(fg_id: str):
+    db = await get_db()
+    await db.delete_framegrid(fg_id)
+    # Notify about the specific deleted framegrid
+    await publish_to_broker(
+        None,  # Broadcast to all connections
+        {
+            "action": "framegrid_deleted",
+            "payload": {"fg_id": fg_id},
+        },
+    )
+    # Also publish the updated list of framegrids
+    await publish_framegrids(db)
+    return {"status": "success", "fg_id": fg_id}
 
 
 class JoinFrameGridRequest(BaseModel):
@@ -102,81 +136,69 @@ async def join(request: JoinFrameGridRequest):
     db = await get_db()
     if not await db.exists(request.fg_id):
         raise HTTPException(status_code=404, detail=f"Frame grid with ID {request.fg_id} not found")
-    return {
-        "fg_id": request.fg_id,
-        "sample_dim_id": await db.get_sample_dim_id(request.fg_id),
-        "experiment_dim_id": await db.get_experiment_dim_id(request.fg_id),
-    }
+
+    return {"fg_id": request.fg_id}
 
 
-@rest_router.get("/transcript_metadata_fields")
-async def transcript_metadata_fields(fg_id: str):
+@rest_router.get("/agent_run_metadata_fields")
+async def agent_run_metadata_fields(fg_id: str):
     db = await get_db()
 
-    # Get any datapoint to get the metadata fields
-    any_data = await db.get_any_datapoint(fg_id)
-    if any_data:
-        score_types = [
-            {
-                "name": f"metadata.scores.{k}",
-                "type": type(v).__name__,
-            }
-            for k, v in any_data.metadata.scores.items()
-        ]
+    # Get any agent_run to get the metadata fields
+    any_data = await db.get_any_agent_run(fg_id)
+    if any_data is not None:
+        fields = any_data.get_filterable_fields()
     else:
-        score_types = []
+        fields = []
 
-    return {
-        "fields": [
-            {
-                "name": "text",
-                "type": "str",
-            },
-            {
-                "name": "metadata.task_id",
-                "type": "str",
-            },
-            {
-                "name": "metadata.sample_id",
-                "type": "str",
-            },
-            {
-                "name": "metadata.epoch_id",
-                "type": "int",
-            },
-            {
-                "name": "metadata.experiment_id",
-                "type": "str",
-            },
-            {
-                "name": "metadata.model",
-                "type": "str",
-            },
-        ]
-        + score_types,
-    }
+    return {"fields": fields}
 
 
-class PostDatapointsRequest(BaseModel):
+class SetIODimsRequest(BaseModel):
     fg_id: str
-    datapoints: list[Datapoint]
+    inner_dim_id: str | None = None
+    outer_dim_id: str | None = None
 
 
-@rest_router.post("/datapoints")
-async def post_datapoints(request: PostDatapointsRequest):
+@rest_router.post("/io_dims")
+async def set_io_dims_endpoint(request: SetIODimsRequest):
+    db = await get_db()
+    async with db.advisory_lock(request.fg_id, action_id="mutation"):
+        await db.set_io_dims(request.fg_id, request.inner_dim_id, request.outer_dim_id)
+        await publish_homepage_state(db, request.fg_id)
+
+
+class SetIODimWithMetadataKeyRequest(BaseModel):
+    fg_id: str
+    metadata_key: str
+    type: Literal["inner", "outer"]
+
+
+@rest_router.post("/io_dims_with_metadata_key")
+async def set_io_dim_with_metadata_key_endpoint(request: SetIODimWithMetadataKeyRequest):
+    db = await get_db()
+    async with db.advisory_lock(request.fg_id, action_id="mutation"):
+        await db.set_io_dim_with_metadata_key(request.fg_id, request.metadata_key, request.type)
+        await publish_homepage_state(db, request.fg_id)
+
+
+class PostAgentRunsRequest(BaseModel):
+    fg_id: str
+    agent_runs: list[AgentRun]
+
+
+@rest_router.post("/agent_runs")
+async def post_agent_runs(request: PostAgentRunsRequest):
     db = await get_db()
 
     async with db.advisory_lock(request.fg_id, action_id="mutation"):
-        num_added = await db.add_datapoints(request.fg_id, request.datapoints)
+        await db.add_agent_runs(request.fg_id, request.agent_runs)
         await publish_homepage_state(db, request.fg_id)
-        return {"num_added": num_added}
 
 
 class PostDimensionRequest(BaseModel):
     fg_id: str
     dim: FrameDimension
-    is_sample_dim: bool = False
-    is_experiment_dim: bool = False
 
 
 @rest_router.post("/dimension")
@@ -185,15 +207,7 @@ async def post_dimension(request: PostDimensionRequest):
 
     await db.upsert_dim(request.fg_id, request.dim)
 
-    # Set special dimension if applicable
-    if request.is_sample_dim and request.is_experiment_dim:
-        raise ValueError("Cannot set both sample and experiment dimensions")
-    if request.is_sample_dim:
-        await db.set_sample_dim(request.fg_id, request.dim.id)
-    if request.is_experiment_dim:
-        await db.set_experiment_dim(request.fg_id, request.dim.id)
-
-    await publish_dims(db, request.fg_id, dim_ids=[request.dim.id])
+    await publish_dims(db, request.fg_id)
     await publish_attribute_searches(db, request.fg_id)
 
     return request.dim.id
@@ -201,7 +215,7 @@ async def post_dimension(request: PostDimensionRequest):
 
 class PostBaseFilterRequest(BaseModel):
     fg_id: str
-    filter: ComplexFrameFilter | None
+    filter: ComplexFilter | None
 
 
 @rest_router.post("/base_filter")
@@ -218,16 +232,25 @@ async def post_base_filter(request: PostBaseFilterRequest):
         return request.filter.id if request.filter else None
 
 
+@rest_router.get("/base_filter/{fg_id}", response_model=FrameFilter | None)
+async def get_base_filter_endpoint(fg_id: str):
+    db = await get_db()
+    base_filter = await db.get_base_filter(fg_id)
+    return base_filter
+
+
 class GetRegexSnippetsRequest(BaseModel):
     fg_id: str
     filter_id: str
-    datapoint_ids: list[str]
+    agent_run_ids: list[str]
 
 
 @rest_router.post("/get_regex_snippets")
-async def get_regex_snippets(request: GetRegexSnippetsRequest) -> dict[str, list[RegexSnippet]]:
+async def get_regex_snippets_endpoint(
+    request: GetRegexSnippetsRequest,
+) -> dict[str, list[RegexSnippet]]:
     db = await get_db()
-    fg_id, filter_id, datapoint_ids = request.fg_id, request.filter_id, request.datapoint_ids
+    fg_id, filter_id, agent_run_ids = request.fg_id, request.filter_id, request.agent_run_ids
 
     filter = await db.get_filter(fg_id, filter_id)
     if filter is None:
@@ -240,7 +263,7 @@ async def get_regex_snippets(request: GetRegexSnippetsRequest) -> dict[str, list
     elif filter.type == "complex":
 
         # Recursively search for all primitive filters
-        def _search(f: FrameFilterTypes):
+        def _search(f: FrameFilter):
             if f.type == "primitive" and f.op == "~*":
                 patterns.append(str(f.value))
             elif f.type == "complex":
@@ -252,10 +275,9 @@ async def get_regex_snippets(request: GetRegexSnippetsRequest) -> dict[str, list
     if not patterns:
         return {}
 
-    datapoints = await db.get_datapoints_by_ids(fg_id, datapoint_ids)
+    agent_runs = await db.get_agent_runs(fg_id, agent_run_ids=agent_run_ids)
     return {
-        d.id: [item for p in patterns for item in PrimitiveFilter.get_regex_snippets(d.text, p)]
-        for d in datapoints
+        d.id: [item for p in patterns for item in get_regex_snippets(d.text, p)] for d in agent_runs
     }
 
 
@@ -263,6 +285,34 @@ async def get_regex_snippets(request: GetRegexSnippetsRequest) -> dict[str, list
 async def get_state(fg_id: str):
     db = await get_db()
     await publish_homepage_state(db, fg_id)
+
+
+@rest_router.get("/attribute_searches")
+async def get_attribute_searches(fg_id: str, base_data_only: bool = True):
+    db = await get_db()
+    # The service method returns a list of dicts, which is fine for JSON response
+    return await db.get_attribute_searches_with_judgment_counts(fg_id, base_data_only)
+
+
+@rest_router.get("/dimension_attributes", response_model=list[Attribute])
+async def get_attributes_for_dimension_endpoint(
+    fg_id: str, dim_id: str, base_data_only: bool = True
+):
+    db = await get_db()
+    dim = await db.get_dim(fg_id, dim_id)
+    if not dim:
+        raise ValueError(f"Dimension with ID {dim_id} not found for FrameGrid {fg_id}")
+
+    if not dim.attribute:
+        # Or return empty list, depends on desired behavior
+        raise ValueError(f"Dimension {dim_id} does not have an associated attribute string.")
+
+    attributes_data = await db.get_attributes(
+        fg_id=fg_id,
+        attribute=dim.attribute,
+        base_data_only=base_data_only,
+    )
+    return attributes_data
 
 
 class GetDimensionsRequest(BaseModel):
@@ -282,7 +332,7 @@ async def delete_dimension(fg_id: str, dim_id: str):
 
     async with db.advisory_lock(fg_id, action_id="mutation"):
         await db.delete_dimension(fg_id, dim_id)
-        await publish_dims(db, fg_id, dim_ids=[dim_id])
+        await publish_dims(db, fg_id)
         await publish_attribute_searches(db, fg_id)
 
 
@@ -292,7 +342,7 @@ async def delete_filter(fg_id: str, dim_id: str, filter_id: str):
 
     async with db.advisory_lock(fg_id, action_id="mutation"):
         await db.delete_filter(fg_id, filter_id)
-        await publish_dims(db, fg_id, dim_ids=[dim_id])
+        await publish_dims(db, fg_id)
         await publish_marginals(db, fg_id, dim_ids=[dim_id], ensure_fresh=True)
 
 
@@ -324,27 +374,27 @@ async def post_filter(request: PostFilterRequest):
             # Publish the initial marginals (without recompute) which should be empty for the new filter
             # Otherwise the frontend will show the old filter's marginals
             await publish_marginals(db, fg_id, dim_ids=[request.dim_id], ensure_fresh=False)
-            await publish_dims(db, fg_id, dim_ids=[request.dim_id])
+            await publish_dims(db, fg_id)
             await publish_marginals(db, fg_id, dim_ids=[request.dim_id], ensure_fresh=True)
 
         return new_filter.id
 
 
-@rest_router.get("/datapoint")
-async def get_datapoint(fg_id: str, datapoint_id: str):
+@rest_router.get("/agent_run")
+async def get_agent_run(fg_id: str, agent_run_id: str):
     db = await get_db()
-    return await db.get_datapoint(fg_id, datapoint_id)
+    return await db.get_agent_run(fg_id, agent_run_id)
 
 
-class DatapointMetadataRequest(BaseModel):
+class AgentRunMetadataRequest(BaseModel):
     fg_id: str
-    datapoint_ids: list[str]
+    agent_run_ids: list[str]
 
 
-@rest_router.post("/datapoint_metadata")
-async def get_datapoint_metadata(request: DatapointMetadataRequest):
+@rest_router.post("/agent_run_metadata")
+async def get_agent_run_metadata(request: AgentRunMetadataRequest):
     db = await get_db()
-    data = await db.get_datapoints_by_ids(request.fg_id, request.datapoint_ids)
+    data = await db.get_agent_runs(request.fg_id, agent_run_ids=request.agent_run_ids)
     return {d.id: d.metadata for d in data}
 
 
@@ -359,11 +409,9 @@ class EvidenceWithCitation(TypedDict):
 
 
 class StreamedAttribute(TypedDict):
-    datapoint_id: str | None
-    attribute: str | None
-    attributes: list[AttributeWithCitation] | None
-    num_datapoints_done: int
-    num_datapoints_total: int
+    data_dict: dict[str, dict[str, list[AttributeWithCitations]]]
+    num_agent_runs_done: int
+    num_agent_runs_total: int
 
 
 class ComputeAttributesRequest(BaseModel):
@@ -402,31 +450,27 @@ async def listen_compute_attributes(job_id: str):
 
     # Track intermediate progress
     progress_lock = anyio.Lock()
-    num_done, num_total = 0, await db.count_base_data(fg_id)
+    num_done, num_total = 0, await db.count_base_agent_runs(fg_id)
 
-    async def _ws_attribute_streaming_callback(
-        datapoint_id: str, attribute: str, attributes: list[str] | None
-    ) -> None:
+    async def _ws_attribute_streaming_callback(attributes: list[Attribute]) -> None:
         nonlocal num_done
 
-        if attributes is None:
-            return
-
         async with progress_lock:
-            num_done += 1
-            payload: StreamedAttribute = {
-                "datapoint_id": datapoint_id,
-                "attribute": attribute,
-                "attributes": [
-                    {
-                        "attribute": attr,
-                        "citations": parse_citations_single_transcript(attr),
-                    }
-                    for attr in attributes
-                ],
-                "num_datapoints_done": num_done,
-                "num_datapoints_total": num_total,
-            }
+            # Construct a map from agent_run_id -> attribute -> list of AttributeWithCitations
+            data_dict: dict[str, dict[str, list[AttributeWithCitations]]] = {}
+            for attr in attributes:
+                data_dict.setdefault(attr.agent_run_id, {}).setdefault(attr.attribute, []).append(
+                    AttributeWithCitations.from_attribute(attr)
+                )
+
+            # Each agent_run is only included in one attribute callback
+            num_done += len(data_dict.keys())
+
+            payload = StreamedAttribute(
+                data_dict=data_dict,
+                num_agent_runs_done=num_done,
+                num_agent_runs_total=num_total,
+            )
 
         # Send to event_stream so it can be sent back to the client
         await send_stream.send(payload)
@@ -437,18 +481,20 @@ async def listen_compute_attributes(job_id: str):
 
     async def _execute():
         async with db.advisory_lock(fg_id, action_id="mutation"):
-            # Send initial 0% state message
-            init_data = StreamedAttribute(
-                datapoint_id=None,
-                attribute=None,
-                attributes=None,
-                num_datapoints_done=0,
-                num_datapoints_total=num_total,
-            )
-            await send_stream.send(init_data)
+            try:
+                # Send initial 0% state message
+                init_data = StreamedAttribute(
+                    data_dict={},
+                    num_agent_runs_done=0,
+                    num_agent_runs_total=num_total,
+                )
+                await send_stream.send(init_data)
 
-            # Compute attributes
-            await db.compute_attributes(fg_id, attribute, _ws_attribute_streaming_callback)
+                # Compute attributes
+                await db.compute_attributes(fg_id, attribute, _ws_attribute_streaming_callback)
+            finally:
+                with anyio.CancelScope(shield=True):
+                    await publish_attribute_searches(db, fg_id)
 
     return StreamingResponse(
         sse_event_stream(_execute, recv_stream), media_type="text/event-stream"
@@ -529,9 +575,9 @@ async def listen_cluster_dimension(job_id: str):
             try:
                 # Send new dim state indicating that clusters are being loaded
                 await db.set_dim_loading_state(fg_id, dim_id, loading_clusters=True)
-                await publish_dims(db, fg_id, dim_ids=[dim_id])
+                await publish_dims(db, fg_id)
 
-                # TODO(mengk): assert that all datapoints have the associated attribute
+                # TODO(mengk): assert that all agent_runs have the associated attribute
                 # This should be guaranteed by the frontend, but just make sure.
 
                 await db.cluster_attributes(
@@ -546,7 +592,7 @@ async def listen_cluster_dimension(job_id: str):
                 await db.set_dim_loading_state(
                     fg_id, dim_id, loading_clusters=False, loading_marginals=True
                 )
-                await publish_dims(db, fg_id, dim_ids=[dim_id])
+                await publish_dims(db, fg_id)
 
                 # Compute marginals while sending them to the client
                 async with anyio.create_task_group() as tg:
@@ -556,7 +602,7 @@ async def listen_cluster_dimension(job_id: str):
                         nonlocal is_done
                         await publish_marginals(
                             db, fg_id, dim_ids=[dim_id], ensure_fresh=True
-                        )  # Force recompute
+                        )  # `ensure_fresh=True` will force computation of the filters
                         is_done = True
 
                     # Compute state in the background
@@ -569,11 +615,11 @@ async def listen_cluster_dimension(job_id: str):
 
                 yield "data: [DONE]\n\n"
 
+            except anyio.get_cancelled_exc_class():
+                logger.info("Cluster dimension task cancelled")
+
             # Even if the task was cancelled, we want to publish the latest dims and marginals
             finally:
-                logger.info("Cleaning up cluster dimension task")
-
-                # Prevent cascading cancellation if this task was killed
                 with anyio.CancelScope(shield=True):
                     # Publish latest marginals in case there was an update
                     await publish_marginals(db, fg_id, dim_ids=[dim_id], ensure_fresh=False)
@@ -582,19 +628,21 @@ async def listen_cluster_dimension(job_id: str):
                     await db.set_dim_loading_state(
                         fg_id, dim_id, loading_clusters=False, loading_marginals=False
                     )
-                    await publish_dims(db, fg_id, dim_ids=[dim_id])
+                    await publish_dims(db, fg_id)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @rest_router.get("/actions_summary")
-async def get_actions_summary(fg_id: str, datapoint_id: str):
+async def get_actions_summary(fg_id: str, agent_run_id: str):
     db = await get_db()
 
-    datapoint = await db.get_datapoint(fg_id, datapoint_id)
-    if not datapoint:
-        raise ValueError(f"Datapoint {datapoint_id} not found")
-    transcript = datapoint.obj
+    agent_run = await db.get_agent_run(fg_id, agent_run_id)
+    if not agent_run:
+        raise ValueError(f"AgentRun {agent_run_id} not found")
+    transcript = next(
+        iter(agent_run.transcripts.values())
+    )  # Get first transcript TODO(mengk): generalize
 
     # Result variables; hashes prevent updating with identical content multiple times
     low_level_actions: list[LowLevelAction] = []
@@ -609,13 +657,13 @@ async def get_actions_summary(fg_id: str, datapoint_id: str):
     lock = anyio.Lock()  # Only one payload can be sent at a time
 
     def _get_payload():
-        nonlocal low_level_actions, high_level_actions, agent_observations, datapoint_id
+        nonlocal low_level_actions, high_level_actions, agent_observations, agent_run_id
 
         payload = {
             "low_level": low_level_actions,
             "high_level": high_level_actions,
             "observations": agent_observations,
-            "datapoint_id": datapoint_id,
+            "agent_run_id": agent_run_id,
         }
         payload_hash = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
         return payload, payload_hash
@@ -681,13 +729,15 @@ async def get_actions_summary(fg_id: str, datapoint_id: str):
 
 
 @rest_router.get("/solution_summary")
-async def get_solution_summary(fg_id: str, datapoint_id: str):
+async def get_solution_summary(fg_id: str, agent_run_id: str):
     db = await get_db()
 
-    datapoint = await db.get_datapoint(fg_id, datapoint_id)
-    if not datapoint:
-        raise ValueError(f"Datapoint {datapoint_id} not found")
-    transcript = datapoint.obj
+    agent_run = await db.get_agent_run(fg_id, agent_run_id)
+    if not agent_run:
+        raise ValueError(f"Agent run {agent_run_id} not found")
+    transcript = next(
+        iter(agent_run.transcripts.values())
+    )  # Get first transcript TODO(mengk): generalize
 
     # AnyIO queue that we can write intermediate results to
     send_stream, recv_stream = anyio.create_memory_object_stream[dict[str, Any]](
@@ -699,7 +749,7 @@ async def get_solution_summary(fg_id: str, datapoint_id: str):
             {
                 "summary": summary,
                 "parts": parts,
-                "datapoint_id": datapoint_id,
+                "agent_run_id": agent_run_id,
             }
         )
 
@@ -729,7 +779,7 @@ class TaChatMessage(TypedDict):
 class TASession(BaseModel):
     id: str
     messages: list[TaChatMessage]
-    datapoint_ids: list[str]
+    agent_run_ids: list[str]
 
 
 TA_SESSIONS: dict[str, TASession] = {}  # session_id -> TASession
@@ -741,32 +791,32 @@ async def create_ta_session(request: CreateTASessionRequest):
     base_filter_raw = request.base_filter
     base_filter = parse_filter_dict(base_filter_raw) if base_filter_raw else None
 
-    datapoints = await db.get_base_data(request.fg_id)
-    if not datapoints:
-        raise ValueError("No matching transcripts found")
+    agent_runs = await db.get_base_agent_runs(request.fg_id)
+    if not agent_runs:
+        raise ValueError("No matching agent runs found")
 
     if base_filter:
-        judgments = await base_filter.apply(data=datapoints, return_all=False)
+        judgments = await base_filter.apply(agent_runs=agent_runs, return_all=False)
         if len(judgments) > 1:
-            raise ValueError("Multiple transcripts found for TA session")
+            raise ValueError("Multiple agent runs found for TA session")
         elif len(judgments) == 0:
-            raise ValueError("No transcripts found for TA session")
-        datapoints = [d for d in datapoints if d.id == judgments[0][0].data_id]
+            raise ValueError("No agent runs found for TA session")
+        agent_runs = [d for d in agent_runs if d.id == judgments[0].agent_run_id]
 
     # Create system prompt with all matching transcripts
-    system_prompt = make_single_tasst_system_prompt(datapoints[0])
+    system_prompt = make_single_tasst_system_prompt(agent_runs[0])
 
     # Generate session ID and store session
     session_id = str(uuid4())
     TA_SESSIONS[session_id] = TASession(
         id=session_id,
         messages=[{"role": "system", "content": system_prompt, "citations": []}],
-        datapoint_ids=[datapoint.id for datapoint in datapoints],
+        agent_run_ids=[agent_run.id for agent_run in agent_runs],
     )
 
     return {
         "session_id": session_id,
-        "num_transcripts": len(datapoints),
+        "num_transcripts": len(agent_runs),
     }
 
 
@@ -879,7 +929,9 @@ async def listen_compute_diffs(job_id: str):
     )
 
     # Create AnyIO queue that we can write intermediate results to
-    send_stream, recv_stream = anyio.create_memory_object_stream(max_buffer_size=100_000)
+    send_stream, recv_stream = anyio.create_memory_object_stream[StreamedDiffs](
+        max_buffer_size=100_000
+    )
 
     # Track intermediate progress
     progress_lock = anyio.Lock()
@@ -922,22 +974,16 @@ async def listen_compute_diffs(job_id: str):
     async def _execute():
         async with db.advisory_lock(fg_id, action_id="mutation"):
             # Get total number of pairs to compute
-            async with db.session() as session:
-                sqla_datapoints = (
-                    (
-                        await session.execute(
-                            select(SQLADatapoint).where(SQLADatapoint.frame_grid_id == fg_id)
-                        )
-                    )
-                    .scalars()
-                    .all()
-                )
-            datapoints = [dp.to_datapoint() for dp in sqla_datapoints]
+            datapoints = await db.get_agent_runs(fg_id)
 
             # group by sample_id, task_id, epoch_id
-            datapoints_by_sample_task_epoch: dict[tuple[str, str, int], list[Datapoint]] = {}
+            datapoints_by_sample_task_epoch: dict[tuple[str, str, str], list[AgentRun]] = {}
             for dp in datapoints:
-                key = (dp.metadata.sample_id, dp.metadata.task_id, dp.metadata.epoch_id)
+                key = (
+                    str(dp.metadata.get("sample_id")),
+                    str(dp.metadata.get("task_id")),
+                    str(dp.metadata.get("epoch_id")),
+                )
                 if key not in datapoints_by_sample_task_epoch:
                     datapoints_by_sample_task_epoch[key] = []
                 datapoints_by_sample_task_epoch[key].append(dp)
@@ -946,10 +992,14 @@ async def listen_compute_diffs(job_id: str):
             nonlocal num_total
             for datapoint_lists in datapoints_by_sample_task_epoch.values():
                 first_pair_candidates = [
-                    dp for dp in datapoint_lists if dp.metadata.experiment_id == experiment_id_1
+                    dp
+                    for dp in datapoint_lists
+                    if dp.metadata.get("experiment_id") == experiment_id_1
                 ]
                 second_pair_candidates = [
-                    dp for dp in datapoint_lists if dp.metadata.experiment_id == experiment_id_2
+                    dp
+                    for dp in datapoint_lists
+                    if dp.metadata.get("experiment_id") == experiment_id_2
                 ]
                 if len(first_pair_candidates) > 0 and len(second_pair_candidates) > 0:
                     num_total += 1
@@ -979,13 +1029,13 @@ async def listen_compute_diffs(job_id: str):
     )
 
 
-# def _make_forest_for_sample(sample_id: str | int, datapoints: list[Datapoint]):
+# def _make_forest_for_sample(sample_id: str | int, agent_runs: list[AgentRun]):
 #     # Create a TranscriptForest from the FrameGrid data
 #     forest = TranscriptForest()
 
 #     # Filter and add transcripts with the matching sample_id
 #     at_least_one_transcript = False
-#     for d in datapoints:
+#     for d in agent_runs:
 #         # Cast sample_id: str | int to the same type as d_sample_id for proper comparison
 #         d_sample_id = d.obj.metadata.sample_id
 #         if isinstance(d_sample_id, int):
@@ -1015,10 +1065,10 @@ async def listen_compute_diffs(job_id: str):
 # @rest_router.get("/merged_experiment_tree")
 # async def get_merged_experiment_tree(fg_id: str, sample_id: str):
 #     db = await get_db()
-#     datapoints = await db.get_base_data(fg_id)
-#     if not datapoints:
+#     agent_runs = await db.get_base_data(fg_id)
+#     if not agent_runs:
 #         raise ValueError("No matching transcripts found")
-#     forest = _make_forest_for_sample(sample_id, datapoints)
+#     forest = _make_forest_for_sample(sample_id, agent_runs)
 
 #     # Build the merged experiment tree
 #     G, experiment_to_transcripts = forest.build_merged_experiment_tree()
@@ -1035,11 +1085,11 @@ async def listen_compute_diffs(job_id: str):
 # @rest_router.get("/transcript_derivation_tree")
 # async def handle_get_transcript_derivation_tree(fg_id: str, sample_id: str):
 #     db = await get_db()
-#     datapoints = await db.get_base_data(fg_id)
-#     if not datapoints:
+#     agent_runs = await db.get_base_data(fg_id)
+#     if not agent_runs:
 #         raise ValueError("No matching transcripts found")
 
-#     forest = _make_forest_for_sample(sample_id, datapoints)
+#     forest = _make_forest_for_sample(sample_id, agent_runs)
 
 #     # Build the transcript derivation tree
 #     G = forest.build_transcript_derivation_tree()
@@ -1059,7 +1109,7 @@ async def listen_compute_diffs(job_id: str):
 
 #     Expected payload:
 #     {
-#         "datapoint_id": str,  # ID of the datapoint to modify
+#         "agent_run_id": str,  # ID of the agent_run to modify
 #         "message_index": int,  # Index of the message to replace/insert at
 #         "new_message": dict,   # New message object to insert with format matching ChatMessage
 #         "insert": bool = False # If True, insert the message at index, otherwise replace
@@ -1068,7 +1118,7 @@ async def listen_compute_diffs(job_id: str):
 #     Raises:
 #         ValueError: If payload is incomplete or malformed.
 #     """
-#     datapoint_id = msg.payload["datapoint_id"]
+#     agent_run_id = msg.payload["agent_run_id"]
 #     message_index = msg.payload["message_index"]
 #     new_message_data = msg.payload["new_message"]
 #     num_additional_messages = msg.payload.get("num_additional_messages", None)
@@ -1087,8 +1137,8 @@ async def listen_compute_diffs(job_id: str):
 
 #     logger.info(f"Received conversation intervention: {msg.payload}")
 
-#     if not isinstance(datapoint_id, str):
-#         raise ValueError("datapoint_id must be a string")
+#     if not isinstance(agent_run_id, str):
+#         raise ValueError("agent_run_id must be a string")
 #     if not isinstance(message_index, int):
 #         raise ValueError("message_index must be an integer")
 #     if not isinstance(new_message_data, dict):
@@ -1096,9 +1146,9 @@ async def listen_compute_diffs(job_id: str):
 #     if not isinstance(is_insert, bool):
 #         raise ValueError("insert must be a boolean")
 
-#     # Get the transcript from the datapoint
-#     datapoint = fg.all_data_dict[datapoint_id]
-#     transcript = datapoint.obj
+#     # Get the transcript from the agent_run
+#     agent_run = fg.all_data_dict[agent_run_id]
+#     transcript = agent_run.obj
 
 #     # Parameters for the experiment
 #     task_id = transcript.metadata.task_id
@@ -1181,9 +1231,9 @@ async def listen_compute_diffs(job_id: str):
 
 #     # {sample_id: {epoch_id: transcript}}
 #     timestamp = datetime.now().isoformat()
-#     result_datapoints: dict[str | int, dict[int, Datapoint]] = {
+#     result_agent_runs: dict[str | int, dict[int, AgentRun]] = {
 #         sample_id: {
-#             epoch_id: Datapoint.from_transcript(
+#             epoch_id: AgentRun.from_transcript(
 #                 Transcript(
 #                     messages=[],
 #                     metadata=TranscriptMetadata(
@@ -1207,16 +1257,16 @@ async def listen_compute_diffs(job_id: str):
 #             for epoch_id in range(1, epochs + 1)
 #         }
 #     }
-#     # Send the new datapoints to the client
-#     await fg.add_datapoints(
-#         [d for epoch_datapoints in result_datapoints.values() for d in epoch_datapoints.values()]
+#     # Send the new agent_runs to the client
+#     await fg.add_agent_runs(
+#         [d for epoch_agent_runs in result_agent_runs.values() for d in epoch_agent_runs.values()]
 #     )
 #     await handle_get_state(cm, websocket, fg)
 
 #     async def _message_stream_callback(
 #         task_id: str, sample_id: str | int, epoch_id: int, messages: list[ChatMessage]
 #     ):
-#         """Create temporary datapoints for each message in the stream, update its data, and send it to the client."""
+#         """Create temporary agent_runs for each message in the stream, update its data, and send it to the client."""
 
 #         logger.info(
 #             "Message update from task_id %s, sample_id %s, epoch_id %s",
@@ -1225,9 +1275,9 @@ async def listen_compute_diffs(job_id: str):
 #             epoch_id,
 #         )
 
-#         dp = result_datapoints[sample_id][epoch_id]
-#         await fg.update_datapoint_content(dp.id, messages=messages)
-#         await send_datapoints_updated(cm, websocket, [dp.id])
+#         dp = result_agent_runs[sample_id][epoch_id]
+#         await fg.update_agent_run_content(dp.id, messages=messages)
+#         await send_agent_runs_updated(cm, websocket, [dp.id])
 
 #     # Validate args and run experiment
 #     task_args = TASK_ARGS_DICT[task_id].model_validate(task_args_dict)
@@ -1249,19 +1299,19 @@ async def listen_compute_diffs(job_id: str):
 #     )
 #     logger.info("Experiment result paths: %s", experiment_result["results"])
 
-#     # Update the existing datapoints with the new transcripts
+#     # Update the existing agent_runs with the new transcripts
 #     if experiment_result["results"]:
 #         new_transcripts: list[Transcript] = []
 #         for result_fpath in experiment_result["results"]:
 #             new_transcripts.extend(load_inspect_experiment(experiment_id, result_fpath))
 
-#         # Update existing datapoints
+#         # Update existing agent_runs
 #         for t in new_transcripts:
 #             sample_id = t.metadata.sample_id
 #             epoch_id = t.metadata.epoch_id
 
-#             # Get the datapoint ID
-#             dp_id = result_datapoints[sample_id][epoch_id].id
+#             # Get the agent_run ID
+#             dp_id = result_agent_runs[sample_id][epoch_id].id
 
 #             # Re-add metadata fields so they're not dropped
 #             metadata_dict = t.metadata.model_dump() | {
@@ -1272,14 +1322,14 @@ async def listen_compute_diffs(job_id: str):
 #             }
 #             metadata = TranscriptMetadata.model_validate(metadata_dict)
 
-#             # Use the lightweight update_datapoint method to update with the new transcript data
-#             await fg.update_datapoint_content(
+#             # Use the lightweight update_agent_run method to update with the new transcript data
+#             await fg.update_agent_run_content(
 #                 dp_id,
 #                 messages=t.messages,
 #                 metadata=metadata,
 #             )
 
-#         # Send updated state; this should include the updated datapoints
+#         # Send updated state; this should include the updated agent_runs
 #         await handle_get_state(cm, websocket, fg)
 
 #     # fg.to_json("/home/ubuntu/scratch/fg.json")
@@ -1290,7 +1340,7 @@ async def listen_compute_diffs(job_id: str):
 #     data: Any
 
 
-#     datapoint_id: str
+#     agent_run_id: str
 #     action_unit_idx: int
 #     starting_block_idx: int
 
@@ -1304,9 +1354,9 @@ async def listen_compute_diffs(job_id: str):
 
 
 # def _create_graph(
-#     datapoint_1: Datapoint,
+#     agent_run_1: AgentRun,
 #     summary_1: dict[int, LowLevelAction],
-#     datapoint_2: Datapoint,
+#     agent_run_2: AgentRun,
 #     summary_2: dict[int, LowLevelAction],
 #     all_diff_results: dict[int, list[DiffResult | None]],
 # ):
@@ -1314,21 +1364,21 @@ async def listen_compute_diffs(job_id: str):
 #     edges: list[TranscriptDiffEdge] = []
 
 #     # Create nodes
-#     for datapoint, summary in [(datapoint_1, summary_1), (datapoint_2, summary_2)]:
+#     for agent_run, summary in [(agent_run_1, summary_1), (agent_run_2, summary_2)]:
 #         for unit_idx, action in summary.items():
 #             nodes.append(
 #                 {
-#                     "id": f"{datapoint.id}-{unit_idx}",
+#                     "id": f"{agent_run.id}-{unit_idx}",
 #                     "data": action,
-#                     "datapoint_id": datapoint.id,
+#                     "agent_run_id": agent_run.id,
 #                     "action_unit_idx": unit_idx,
-#                     "starting_block_idx": datapoint.obj.units_of_action[unit_idx][0],
+#                     "starting_block_idx": agent_run.obj.units_of_action[unit_idx][0],
 #                 }
 #             )
 
-#     # Add chain edges for both datapoints
-#     for idx, (datapoint, summary) in enumerate(
-#         [(datapoint_1, summary_1), (datapoint_2, summary_2)]
+#     # Add chain edges for both agent_runs
+#     for idx, (agent_run, summary) in enumerate(
+#         [(agent_run_1, summary_1), (agent_run_2, summary_2)]
 #     ):
 #         transcript_num = idx + 1
 #         for i in range(len(summary) - 1):
@@ -1336,9 +1386,9 @@ async def listen_compute_diffs(job_id: str):
 #             unit_idx_1, unit_idx_2 = action_1["action_unit_idx"], action_2["action_unit_idx"]
 #             edges.append(
 #                 {
-#                     "id": f"{datapoint.id}-edge-{unit_idx_1}-{unit_idx_2}",
-#                     "source": f"{datapoint.id}-{unit_idx_1}",
-#                     "target": f"{datapoint.id}-{unit_idx_2}",
+#                     "id": f"{agent_run.id}-edge-{unit_idx_1}-{unit_idx_2}",
+#                     "source": f"{agent_run.id}-{unit_idx_1}",
+#                     "target": f"{agent_run.id}-{unit_idx_2}",
 #                     "type": "chain",
 #                     "explanation": f"Sequential action in transcript {transcript_num}: {i} → {i+1}",
 #                 }
@@ -1358,9 +1408,9 @@ async def listen_compute_diffs(job_id: str):
 #                     # Add edge between matching action units
 #                     edges.append(
 #                         {
-#                             "id": f"match-{datapoint_1.id}-{t1_idx}-{datapoint_2.id}-{t2_idx}",
-#                             "source": f"{datapoint_1.id}-{t1_idx}",
-#                             "target": f"{datapoint_2.id}-{t2_idx}",
+#                             "id": f"match-{agent_run_1.id}-{t1_idx}-{agent_run_2.id}-{t2_idx}",
+#                             "source": f"{agent_run_1.id}-{t1_idx}",
+#                             "target": f"{agent_run_2.id}-{t2_idx}",
 #                             "type": match_type,
 #                             "explanation": explanation,
 #                         }
@@ -1376,12 +1426,12 @@ async def listen_compute_diffs(job_id: str):
 
 #     Expected payload:
 #     {
-#         "datapoint_id_1": str,  # ID of the first transcript
-#         "datapoint_id_2": str,  # ID of the second transcript
+#         "agent_run_id_1": str,  # ID of the first transcript
+#         "agent_run_id_2": str,  # ID of the second transcript
 #     }
 #     """
-#     datapoint_1 = fg.all_data_dict[msg.payload["datapoint_id_1"]]
-#     datapoint_2 = fg.all_data_dict[msg.payload["datapoint_id_2"]]
+#     agent_run_1 = fg.all_data_dict[msg.payload["agent_run_id_1"]]
+#     agent_run_2 = fg.all_data_dict[msg.payload["agent_run_id_2"]]
 
 #     async def compare_callback(batch_index: int, results: ComparisonResult):
 #         await cm.send(
@@ -1394,7 +1444,7 @@ async def listen_compute_diffs(job_id: str):
 
 #     # First get textual comparison
 #     asyncio.create_task(
-#         compare_transcripts(datapoint_1.obj, datapoint_2.obj, streaming_callback=compare_callback)
+#         compare_transcripts(agent_run_1.obj, agent_run_2.obj, streaming_callback=compare_callback)
 #     )
 
 #     summary_1: dict[int, LowLevelAction] = {}
@@ -1403,7 +1453,7 @@ async def listen_compute_diffs(job_id: str):
 
 #     async def _create_graph_and_send():
 #         nonlocal summary_1, summary_2, diff_result
-#         nodes, edges = _create_graph(datapoint_1, summary_1, datapoint_2, summary_2, diff_result)
+#         nodes, edges = _create_graph(agent_run_1, summary_1, agent_run_2, summary_2, diff_result)
 #         await cm.send(
 #             websocket,
 #             WSMessage(
@@ -1448,16 +1498,16 @@ async def listen_compute_diffs(job_id: str):
 #     # Dispatch tasks to compute all these in parallel
 #     await asyncio.gather(
 #         summarize_agent_actions(
-#             datapoint_1.obj,
+#             agent_run_1.obj,
 #             streaming_callback=lambda actions: actions_callback(actions, "1"),
 #             api_keys=api_keys,
 #         ),
 #         summarize_agent_actions(
-#             datapoint_2.obj,
+#             agent_run_2.obj,
 #             streaming_callback=lambda actions: actions_callback(actions, "2"),
 #             api_keys=api_keys,
 #         ),
 #         diff_transcripts(
-#             datapoint_1.obj, datapoint_2.obj, completion_callback=diff_callback, api_keys=api_keys
+#             agent_run_1.obj, agent_run_2.obj, completion_callback=diff_callback, api_keys=api_keys
 #         ),
 #     )

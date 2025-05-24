@@ -1,26 +1,27 @@
 // import { FrameFilter, FramePredicate, Judgment } from '@/app/types/docent';
 
+import { ChevronDown, ChevronRight, Pencil, Trash2, X } from 'lucide-react';
+import React, { useState } from 'react';
+import { useSelector } from 'react-redux';
+
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ChevronDown, ChevronRight, Pencil, Trash2, X } from 'lucide-react';
-import React, { useEffect, useMemo, useState } from 'react';
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { FramePredicate, Judgment } from '../types/frameTypes';
-import { FrameFilter } from '../types/frameTypes';
-import { useSelector } from 'react-redux';
-import { RootState } from '../store/store';
+
 import { deleteFilter, editFilter } from '../store/frameSlice';
 import { useAppDispatch } from '../store/hooks';
+import { RootState } from '../store/store';
+import { PredicateFilter, Judgment, FrameFilter } from '../types/frameTypes';
 
 interface BinEditorProps {
   bin: FrameFilter;
   marginalJudgments?: Judgment[];
-  onShowDatapoint: (datapointId: string, blockId?: number) => void;
+  onShowAgentRun: (agentRunId: string, blockId?: number) => void;
   loading?: boolean;
 }
 
@@ -37,16 +38,11 @@ function countTotalAttributes(judgments: Judgment[]): number {
 const JudgmentList: React.FC<{
   binId: string;
   judgments: Judgment[];
-  onShowDatapoint: (datapointId: string, blockId?: number) => void;
-}> = ({ binId, judgments, onShowDatapoint }) => {
-  const [showOnlyMatches, setShowOnlyMatches] = useState(true);
+  onShowAgentRun: (agentRunId: string, blockId?: number) => void;
+}> = ({ binId, judgments, onShowAgentRun }) => {
   const attributeMap = useSelector(
     (state: RootState) => state.attributeFinder.attributeMap
   );
-
-  const filteredJudgments = useMemo(() => {
-    return showOnlyMatches ? judgments.filter((j) => j.matches) : judgments;
-  }, [judgments, showOnlyMatches]);
 
   const renderAttributeValue = (value: string, dataId: string) => {
     const blockPattern = /B(\d+)/g;
@@ -73,8 +69,8 @@ const JudgmentList: React.FC<{
           key={`block-ref-${partIndex}`}
           onClick={(e) => {
             e.stopPropagation(); // Prevent triggering the parent div's onClick
-            if (onShowDatapoint) {
-              onShowDatapoint(dataId, blockIndex);
+            if (onShowAgentRun) {
+              onShowAgentRun(dataId, blockIndex);
             }
           }}
           className="px-0.5 py-0.25 bg-indigo-200 text-indigo-800 rounded hover:bg-indigo-400 hover:text-white transition-colors font-medium"
@@ -106,33 +102,36 @@ const JudgmentList: React.FC<{
         </span>
       </div>
 
-      {filteredJudgments &&
-        filteredJudgments.map((judgment, i) => {
+      {judgments &&
+        judgments.map((judgment, i) => {
           if (!judgment) return null;
           const attributeValue =
-            attributeMap?.[judgment.data_id]?.[judgment.attribute || '']?.[
+            attributeMap?.[judgment.agent_run_id]?.[judgment.attribute || '']?.[
               judgment.attribute_idx || 0
-            ]?.attribute;
+            ]?.value;
+          if (!attributeValue) {
+            return null;
+          }
 
           return (
             <div
               key={i}
               className={`group bg-indigo-50 rounded-md p-1.5 text-xs text-indigo-900 leading-snug mt-1 hover:bg-indigo-100 transition-colors cursor-pointer border border-transparent hover:border-indigo-200`}
               onClick={() => {
-                onShowDatapoint(judgment.data_id);
+                onShowAgentRun(judgment.agent_run_id);
                 // If there's a block citation in the attribute value, scroll to the first one
                 if (attributeValue) {
                   const match = attributeValue.match(/B(\d+)/);
-                  if (match && onShowDatapoint) {
+                  if (match && onShowAgentRun) {
                     const blockIndex = parseInt(match[1], 10);
-                    onShowDatapoint(judgment.data_id, blockIndex);
+                    onShowAgentRun(judgment.agent_run_id, blockIndex);
                   }
                 }
               }}
             >
               {attributeValue !== undefined && (
                 <p className="mb-0.5">
-                  {renderAttributeValue(attributeValue, judgment.data_id)}
+                  {renderAttributeValue(attributeValue, judgment.agent_run_id)}
                 </p>
               )}
               <div className="flex items-center gap-1 text-[10px] text-indigo-600 mt-1">
@@ -143,7 +142,7 @@ const JudgmentList: React.FC<{
                   )}
                 </span>
                 <span className="ml-1 opacity-70">
-                  data_id: {judgment.data_id}
+                  agent_run_id: {judgment.agent_run_id}
                 </span>
               </div>
             </div>
@@ -156,7 +155,7 @@ const JudgmentList: React.FC<{
 export default function BinEditor({
   bin,
   marginalJudgments,
-  onShowDatapoint,
+  onShowAgentRun,
   loading,
 }: BinEditorProps) {
   const dispatch = useAppDispatch();
@@ -168,7 +167,7 @@ export default function BinEditor({
   const [isEditing, setIsEditing] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [text, setText] = useState(
-    'predicate' in bin ? (bin as FramePredicate).predicate : bin.id
+    'predicate' in bin ? (bin as PredicateFilter).predicate : bin.id
   );
 
   const hasJudgments = marginalJudgments && marginalJudgments.length > 0;
@@ -189,7 +188,7 @@ export default function BinEditor({
             } else if (e.key === 'Escape') {
               setIsEditing(false);
               setText(
-                'predicate' in bin ? (bin as FramePredicate).predicate : bin.id
+                'predicate' in bin ? (bin as PredicateFilter).predicate : bin.id
               );
             }
           }}
@@ -294,7 +293,7 @@ export default function BinEditor({
           <JudgmentList
             binId={bin.id}
             judgments={marginalJudgments}
-            onShowDatapoint={onShowDatapoint}
+            onShowAgentRun={onShowAgentRun}
           />
         </div>
       )}

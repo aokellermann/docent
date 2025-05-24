@@ -1,43 +1,41 @@
-import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
 import {
-  AttributeWithCitation,
-  MarginalizationResult,
-  RegexSnippet,
-  StreamedAttribute,
-  TaskStats,
-  TranscriptMetadataField,
-} from '../types/experimentViewerTypes';
+  createSlice,
+  type PayloadAction,
+  createAsyncThunk,
+} from '@reduxjs/toolkit';
+
+import { apiRestClient } from '../services/apiService';
+import socketService from '../services/socketService';
+import { TranscriptMetadataField as AgentRunMetadataField } from '../types/experimentViewerTypes';
 import {
-  ComplexFrameFilter,
+  ComplexFilter,
   FrameDimension,
-  FrameFilter,
   FrameGrid,
   Marginals,
 } from '../types/frameTypes';
-import socketService from '../services/socketService';
-import { apiBaseClient, apiRestClient } from '../services/apiService';
+import { BaseAgentRunMetadata } from '../types/transcriptTypes';
+
 import { setToastNotification } from './toastSlice';
-import { resetExperimentViewerSlice } from './experimentViewerSlice';
-import { resetTranscriptSlice } from './transcriptSlice';
-import { resetAttributeFinderSlice } from './attributeFinderSlice';
 
 export interface FrameState {
-  // Available eval IDs
-  evalIds?: string[];
+  // Jank state necessary to auto-scroll correctly:
+  //   If there is an initial attributeDimId, then we wait until the attributes have loaded
+  //   before we scroll to the specified transcript block
+  hasInitAttributeDimId?: boolean;
   // Available frame grids
   frameGrids?: FrameGrid[];
   isLoadingFrameGrids: boolean;
   // FrameGrid state
-  dimensions?: FrameDimension[];
-  baseFilter?: ComplexFrameFilter;
+  dimensionsMap?: Record<string, FrameDimension>;
+  baseFilter?: ComplexFilter;
   // Metadata
-  transcriptMetadataFields?: TranscriptMetadataField[];
-  transcriptMetadata?: Record<string, Record<string, any>>;
+  agentRunMetadataFields?: AgentRunMetadataField[];
+  agentRunMetadata?: Record<string, Record<string, BaseAgentRunMetadata>>;
   // Global variables
   frameGridId?: string;
   evalId?: string;
-  sampleDimId?: string;
-  experimentDimId?: string;
+  innerDimId?: string;
+  outerDimId?: string;
   marginals?: Marginals;
 }
 
@@ -68,35 +66,10 @@ export const fetchFrameGrids = createAsyncThunk(
   }
 );
 
-export const fetchEvalIds = createAsyncThunk(
-  'frame/fetchEvalIds',
-  async (_, { dispatch }) => {
-    try {
-      const response = await apiBaseClient.get('/eval_ids');
-      dispatch(setEvalIds(response.data));
-    } catch (error) {
-      dispatch(
-        setToastNotification({
-          title: 'Error fetching evaluation IDs',
-          description: 'Please try again in a moment',
-          variant: 'destructive',
-        })
-      );
-      throw error;
-    }
-  }
-);
-
 export const initSession = createAsyncThunk(
   'frame/initSession',
   async (evalId: string, { dispatch }) => {
     try {
-      // Reset all states
-      // dispatch(resetFrameSlice());
-      // dispatch(resetExperimentViewerSlice());
-      // dispatch(resetAttributeFinderSlice());
-      // dispatch(resetTranscriptSlice());
-
       const response = await apiRestClient.post('/join', {
         fg_id: evalId,
       });
@@ -105,10 +78,8 @@ export const initSession = createAsyncThunk(
       // Set various IDs
       dispatch(setFrameGridId(fg_id));
       dispatch(setEvalId(evalId));
-      dispatch(setSampleDimId(response.data.sample_dim_id));
-      dispatch(setExperimentDimId(response.data.experiment_dim_id));
 
-      dispatch(getTranscriptMetadataFields());
+      dispatch(getAgentRunMetadataFields());
       // Start a broker socket to listen for state updates
       await socketService.initSocket(fg_id);
       // Only request state after connection is established
@@ -118,8 +89,6 @@ export const initSession = createAsyncThunk(
       socketService.closeSocket();
       dispatch(setFrameGridId(undefined));
       dispatch(setEvalId(undefined));
-      dispatch(setSampleDimId(undefined));
-      dispatch(setExperimentDimId(undefined));
       dispatch(
         setToastNotification({
           title: 'Error connecting to server',
@@ -164,8 +133,8 @@ export const getState = createAsyncThunk(
   }
 );
 
-export const getTranscriptMetadataFields = createAsyncThunk(
-  'frame/getTranscriptMetadataFields',
+export const getAgentRunMetadataFields = createAsyncThunk(
+  'frame/getAgentRunMetadataFields',
   async (_, { dispatch, getState }) => {
     const state = getState() as { frame: FrameState };
     const frameGridId = state.frame.frameGridId;
@@ -183,14 +152,14 @@ export const getTranscriptMetadataFields = createAsyncThunk(
 
     try {
       const response = await apiRestClient.get(
-        `/transcript_metadata_fields?fg_id=${frameGridId}`
+        `/agent_run_metadata_fields?fg_id=${frameGridId}`
       );
-      dispatch(setTranscriptMetadataFields(response.data.fields));
+      dispatch(setAgentRunMetadataFields(response.data.fields));
     } catch (error) {
       dispatch(
         setToastNotification({
           title: 'Error fetching metadata fields',
-          description: 'Failed to retrieve transcript metadata fields',
+          description: 'Failed to retrieve metadata fields',
           variant: 'destructive',
         })
       );
@@ -199,9 +168,9 @@ export const getTranscriptMetadataFields = createAsyncThunk(
   }
 );
 
-export const getTranscriptMetadata = createAsyncThunk(
-  'frame/getTranscriptMetadata',
-  async (datapointIds: string[], { dispatch, getState }) => {
+export const getAgentRunMetadata = createAsyncThunk(
+  'frame/getAgentRunMetadata',
+  async (agentRunIds: string[], { dispatch, getState }) => {
     const state = getState() as { frame: FrameState };
     const frameGridId = state.frame.frameGridId;
 
@@ -217,16 +186,53 @@ export const getTranscriptMetadata = createAsyncThunk(
     }
 
     try {
-      const response = await apiRestClient.post('/datapoint_metadata', {
+      const response = await apiRestClient.post('/agent_run_metadata', {
         fg_id: frameGridId,
-        datapoint_ids: datapointIds,
+        agent_run_ids: agentRunIds,
       });
-      dispatch(updateTranscriptMetadata(response.data));
+      dispatch(updateAgentRunMetadata(response.data));
     } catch (error) {
       dispatch(
         setToastNotification({
-          title: 'Error fetching transcript metadata',
-          description: 'Failed to retrieve datapoint metadata',
+          title: 'Error fetching metadata',
+          description: 'Failed to retrieve metadata',
+          variant: 'destructive',
+        })
+      );
+      throw error;
+    }
+  }
+);
+
+export const getDimensions = createAsyncThunk(
+  'frame/getDimensions',
+  async (dimIds: string[] | undefined, { dispatch, getState }) => {
+    const state = getState() as { frame: FrameState };
+    const frameGridId = state.frame.frameGridId;
+
+    if (!frameGridId) {
+      dispatch(
+        setToastNotification({
+          title: 'Configuration error',
+          description: 'No frame grid ID available',
+          variant: 'destructive',
+        })
+      );
+      throw new Error('No frame grid ID available');
+    }
+
+    try {
+      const response = await apiRestClient.post('/get_dimensions', {
+        fg_id: frameGridId,
+        dim_ids: dimIds,
+      });
+      dispatch(setDimensions(response.data));
+      return response.data;
+    } catch (error) {
+      dispatch(
+        setToastNotification({
+          title: 'Error fetching dimensions',
+          description: 'Failed to retrieve dimensions',
           variant: 'destructive',
         })
       );
@@ -342,6 +348,61 @@ export const deleteFilter = createAsyncThunk(
   }
 );
 
+export const updateFrameGrid = createAsyncThunk(
+  'frame/updateFrameGrid',
+  async (
+    {
+      fg_id,
+      name,
+      description,
+    }: { fg_id: string; name?: string; description?: string },
+    { dispatch }
+  ) => {
+    try {
+      await apiRestClient.put('/framegrid', {
+        fg_id,
+        name,
+        description,
+      });
+      return { fg_id };
+    } catch (error) {
+      dispatch(
+        setToastNotification({
+          title: 'Error updating frame grid',
+          description: 'Failed to update frame grid',
+          variant: 'destructive',
+        })
+      );
+      throw error;
+    }
+  }
+);
+
+export const deleteFrameGrid = createAsyncThunk(
+  'frame/deleteFrameGrid',
+  async (fg_id: string, { dispatch }) => {
+    try {
+      await apiRestClient.delete(`/framegrid?fg_id=${fg_id}`);
+      dispatch(
+        setToastNotification({
+          title: 'Frame grid deleted',
+          description: 'The frame grid has been successfully deleted',
+        })
+      );
+      return { fg_id };
+    } catch (error) {
+      dispatch(
+        setToastNotification({
+          title: 'Error deleting frame grid',
+          description: 'Failed to delete frame grid',
+          variant: 'destructive',
+        })
+      );
+      throw error;
+    }
+  }
+);
+
 export const editFilter = createAsyncThunk(
   'frame/editFilter',
   async (
@@ -389,26 +450,34 @@ export const frameSlice = createSlice({
       state.marginals = action.payload;
     },
     setDimensions: (state, action: PayloadAction<FrameDimension[]>) => {
-      state.dimensions = action.payload;
+      state.dimensionsMap = action.payload.reduce(
+        (map, dimension) => {
+          map[dimension.id] = dimension;
+          return map;
+        },
+        {} as Record<string, FrameDimension>
+      );
     },
     setBaseFilter: (
       state,
-      action: PayloadAction<ComplexFrameFilter | undefined>
+      action: PayloadAction<ComplexFilter | undefined>
     ) => {
       state.baseFilter = action.payload;
     },
-    setTranscriptMetadataFields: (
+    setAgentRunMetadataFields: (
       state,
-      action: PayloadAction<TranscriptMetadataField[]>
+      action: PayloadAction<AgentRunMetadataField[]>
     ) => {
-      state.transcriptMetadataFields = action.payload;
+      state.agentRunMetadataFields = action.payload;
     },
-    updateTranscriptMetadata: (
+    updateAgentRunMetadata: (
       state,
-      action: PayloadAction<Record<string, Record<string, any>>>
+      action: PayloadAction<
+        Record<string, Record<string, BaseAgentRunMetadata>>
+      >
     ) => {
-      state.transcriptMetadata = {
-        ...state.transcriptMetadata,
+      state.agentRunMetadata = {
+        ...state.agentRunMetadata,
         ...action.payload,
       };
     },
@@ -418,20 +487,20 @@ export const frameSlice = createSlice({
     setEvalId: (state, action: PayloadAction<string | undefined>) => {
       state.evalId = action.payload;
     },
-    setSampleDimId: (state, action: PayloadAction<string | undefined>) => {
-      state.sampleDimId = action.payload;
+    setInnerDimId: (state, action: PayloadAction<string | undefined>) => {
+      state.innerDimId = action.payload;
     },
-    setExperimentDimId: (state, action: PayloadAction<string | undefined>) => {
-      state.experimentDimId = action.payload;
-    },
-    setEvalIds: (state, action: PayloadAction<string[]>) => {
-      state.evalIds = action.payload;
+    setOuterDimId: (state, action: PayloadAction<string | undefined>) => {
+      state.outerDimId = action.payload;
     },
     setFrameGrids: (state, action: PayloadAction<FrameGrid[]>) => {
       state.frameGrids = action.payload;
     },
     setIsLoadingFrameGrids: (state, action: PayloadAction<boolean>) => {
       state.isLoadingFrameGrids = action.payload;
+    },
+    setHasInitAttributeDimId: (state, action: PayloadAction<boolean>) => {
+      state.hasInitAttributeDimId = action.payload;
     },
     resetFrameSlice: () => initialState,
   },
@@ -441,15 +510,15 @@ export const {
   setMarginals,
   setDimensions,
   setBaseFilter,
-  setTranscriptMetadataFields,
-  updateTranscriptMetadata,
+  setAgentRunMetadataFields,
+  updateAgentRunMetadata,
   setFrameGridId,
   setEvalId,
-  setSampleDimId,
-  setExperimentDimId,
-  setEvalIds,
+  setInnerDimId,
+  setOuterDimId,
   setFrameGrids,
   setIsLoadingFrameGrids,
+  setHasInitAttributeDimId,
   resetFrameSlice,
 } = frameSlice.actions;
 

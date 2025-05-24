@@ -1,3 +1,5 @@
+import { Citation } from './experimentViewerTypes';
+
 export interface Marginals {
   [dimId: string]: {
     [filterId: string]: Judgment[];
@@ -6,11 +8,12 @@ export interface Marginals {
 
 export interface Judgment {
   id: string;
-  data_id: string;
-  attribute: string | null;
-  attribute_idx: number | null;
+  agent_run_id: string;
+  filter_id: string;
+  attribute?: string | null;
+  attribute_idx?: number | null;
   matches: boolean;
-  reason: string | null;
+  reason?: string | null;
 }
 
 export interface FrameGrid {
@@ -25,17 +28,21 @@ export interface FrameGrid {
 
 export interface Attribute {
   id: string;
-  data_id: string;
+  agent_run_id: string;
   attribute: string;
-  attribute_idx: number;
-  value: string;
+  attribute_idx?: number | null;
+  value?: string | null;
+}
+
+export interface AttributeWithCitations extends Attribute {
+  citations: Citation[] | null;
 }
 
 export type FilterLiteral =
   | 'primitive'
-  | 'predicate'
+  | 'attribute_predicate'
   | 'complex'
-  | 'datapoint_id';
+  | 'agent_run_id';
 
 export interface FrameFilter {
   id: string;
@@ -43,8 +50,8 @@ export interface FrameFilter {
   type: FilterLiteral;
 }
 
-export interface DatapointIdFilter extends FrameFilter {
-  type: 'datapoint_id';
+export interface AgentRunIdFilter extends FrameFilter {
+  type: 'agent_run_id';
   value: string;
 }
 
@@ -57,14 +64,14 @@ export interface PrimitiveFilter extends FrameFilter {
 
 export type MetadataType = 'str' | 'int' | 'float' | 'bool';
 
-export interface FramePredicate extends FrameFilter {
-  type: 'predicate';
+export interface PredicateFilter extends FrameFilter {
+  type: 'attribute_predicate';
   predicate: string;
   attribute: string;
   backend: string;
 }
 
-export interface ComplexFrameFilter extends FrameFilter {
+export interface ComplexFilter extends FrameFilter {
   type: 'complex';
   filters: FrameFilter[];
   op: 'and' | 'or';
@@ -81,7 +88,8 @@ export interface FrameDimension {
   loading_marginals: boolean | null;
 }
 
-export interface Judgment {
-  data_id: string;
-  matches: boolean;
+export interface RegexSnippet {
+  snippet: string;
+  match_start: number;
+  match_end: number;
 }

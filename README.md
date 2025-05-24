@@ -1,133 +1,33 @@
-[![License: LGPL v3](https://img.shields.io/badge/License-LGPL%20v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
+## Docent helps summarize, cluster, and search over agent transcripts
 
-The Docent code preview is licensed under LGPL.
+<p align="center">
+  <a href="https://www.gnu.org/licenses/lgpl-3.0"><img alt="License: LGPL v3" src="https://img.shields.io/badge/License-LGPL%20v3-blue.svg"/></a>
+  <a href='https://github.com/TransluceAI/docent/pulls'><img alt='PRs Welcome' src='https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=shields'/></a>
+  <img alt="GitHub commit activity" src="https://img.shields.io/github/commit-activity/m/TransluceAI/docent"/>
+  <img alt="GitHub closed issues" src="https://img.shields.io/github/issues-closed/TransluceAI/docent"/>
+</p>
 
-# Docent Onboarding Notes
+<p align="center">
+  <a href="https://transluce-docent.readthedocs-hosted.com/en/latest">Docs</a> - <a href="https://github.com/TransluceAI/docent/issues/new?assignees=&labels=bug">Bug reports</a> - <a href="#community">Community</a> - <a href="#roadmap">Roadmap</a> - <a href="#changelog">Changelog</a>
+</p>
 
-- [Running the Docent server + UI](#running-the-docent-server--ui)
-  - [Environment variables](#environment-variables)
-  - [Option 1: Docker (recommended)](#option-1-docker-recommended)
-  - [Option 2: Manual](#option-2-manual)
-- [Installing the Docent Python SDK](#installing-the-docent-python-sdk)
-  - [Ingesting your own logs](#ingesting-your-own-logs)
-- [Customizing LLM calls](#customizing-llm-calls)
+> [!NOTE]
+> Docent is currently still in private alpha, and interfaces/schemas are unstable. We hope to transition to an open beta within a week or two!
+>
+> *May 22, 2025*
 
-## Running the Docent server + UI
+### Quickstart
 
-### Environment variables
+To get started, check out the [quickstart guide](https://transluce-docent.readthedocs-hosted.com/en/latest/quickstart).
 
-We store important environment variables in a `.env` file at the root of the project. A `.env.template` example is provided; please copy it to `.env` and fill in the necessary values.
+### Community
 
-### Option 1: Docker (recommended)
+We'll release a Slack channel for community support soon! Stay tuned.
 
-First install [Docker Engine](https://docs.docker.com/engine/install/) and [Docker Compose](https://docs.docker.com/compose/install/) if they're not already on your system. Then run:
+### Roadmap
 
-```bash
-DOCENT_SERVER_PORT=8889 DOCENT_WEB_PORT=3001 docker compose up --build
-```
+Reach out to kevin@transluce.org to find out! We'll be publicizing it soon.
 
-If on Linux, you might have to use `sudo`:
-```bash
-sudo DOCENT_SERVER_PORT=8889 DOCENT_WEB_PORT=3001 docker compose up --build
-```
-Note that `sudo` strips environment variables, so you have to set them *inside* the command.
+### Changelog
 
-The API will run on port 8889, and the frontend will run on port 3001. Cold build + start should take a few minutes. Restarting after the initial build will be much faster, even with code changes.
-
-### Option 2: Local
-
-To run the server and website locally, you'll first need to install Postgres and Redis. If you don't have them already, you can install them using Docker (again using `sudo` if on Linux):
-```bash
-docker compose -f docker-compose-db.yml up --build
-```
-
-after which Postgres and Redis will be available at `DOCENT_PG_PORT` and `DOCENT_REDIS_PORT`, respectively, as set in `.env`.
-
-If you'd like to set up your own databases, please visit the official docs for [Postgres](https://www.postgresql.org/download/) and [Redis](https://redis.io/docs/latest/operate/oss_and_stack/install/archive/install-redis/).
-
-Once your databases are up, run:
-
-```bash
-uv sync           # if on uv
-pip install -e .  # if on pip
-```
-
-to install the relevant packages, then
-
-```bash
-docent server --port 8889 --workers 4
-```
-
-to start the server on port 8889 with 4 workers and
-
-```bash
-docent web --build --port 3001
-```
-
-to build and serve the frontend on port 3001. You should be able to access the Docent UI at `http://localhost:3001`.
-
-### Option 2: Manual
-
-You must have Postgres and Redis both installed and running.
-
-
-
-## Installing the Docent Python SDK
-
-In order to load transcripts into Docent, you'll need to install the Docent Python SDK.
-
-Run this command if you haven't already (yes, it's the same as above), and you should be all set:
-
-```bash
-uv sync           # if on uv
-pip install -e .  # if on pip
-```
-
-You can now create a new session by running:
-
-```python
-from docent import DocentClient
-client = DocentClient(server_url="http://localhost:8889", web_url="http://localhost:3001")
-
-# Create a new FrameGrid (an object you can stick transcripts into)
-fg_id = client.create_framegrid()
-```
-
-You should see a new FrameGrid in the Docent UI upon refresh.
-
-### Ingesting your own logs
-
-See [`examples/ingest.ipynb`](examples/ingest.ipynb) for an example of how to ingest your own logs. Tl;dr, the SDK supports `add_datapoints`, which expects a list of `Datapoint` objects.
-
-```python
-from docent._frames.transcript import Transcript
-from docent._frames.types import Datapoint
-
-transcripts = ...  # Load your transcripts here
-datapoints = [
-  Datapoint.from_transcript(transcript)
-  for transcript in transcripts
-]
-client.add_datapoints(fg_id, datapoints)
-```
-
-See [`transcript.py`](docent/_frames/transcript.py#L105) for the `Transcript` object definition. Note that `Transcript`s have [`metadata` with a particular schema](docent/_frames/transcript.py#L19). Most fields are pretty straightforward. Some clarifications:
-
-- We borrowed terminology from Inspect, in which each eval is called a **task**, each eval task is called a **sample**, and each stochastic run of an agent on a sample is an **epoch**. That's what `task_id`, `sample_id`, and `epoch_id` refer to, respectively.
-- An **experiment** is one invocation of the agent evaluation harness. That's what `experiment_id` refers to. For example, running Claude Sonnet 3.5 on an entire benchmark would be one experiment; running Sonnet 3.7 on the same benchmark would be another experiment; running one particular sample with a modified agent prompt would be a third experiment. Each eval might have multiple experiments.
-- Since tasks often have custom scorers that output scores in their own formats, we allow you to pass in scoring data as arbitrary dictionaries in `Transcript.metadata.scores`. You'll have to tell Docent the default score to render in the frontend (`Transcript.metadata.default_score_key`)
-- For regular logs you can leave the intervention fields (`Transcript.metadata.intervention_description`, `Transcript.metadata.intervention_timestamp`, `Transcript.metadata.intervention_index`) empty; they'll get populated by Docent when you run interventions on tasks.
-- `task_args` is specific to Inspect and not necessary for most logs.
-- You can stick any additional task metadata in the `TranscriptMetadata.additional_metadata` field.
-
-You can see existing loaders for inspiration:
-
-- [For general Inspect logs](docent/_loader/load_inspect.py)
-- [For OpenHands SWE-Bench logs](docent/_loader/load_oh_swe_bench.py)
-- [For Tau-Bench logs](docent/_loader/load_tau_bench.py)
-
-## Customizing LLM Calls
-
-Many users have requested a simpler way to manage LLM providers and API calls. This is now done in [`provider_preferences.py`](docent/_llm_util/provider_preferences.py). This file reads from an _LLM preferences config_, expected to be located at [`docent_llm_prefs.json`](docent/_llm_util/docent_llm_prefs.json); for convenience, we've provided an example config (containing the settings we use in the deployed Docent) that you can start with. The `docent_llm_prefs.json` config controls which LLM providers and models are used for each Docent feature. In the `model_options` field you should specify a list of models you would like to use (along with the provider and the `reasoning_effort` parameter if applicable), in order of priority; by default the first model in the list will be used for each query, and the other models in the list exist for fallback reasons (eg. in case an API is unavailable).
-
-We have implemented providers for the OpenAI and Anthropic APIs; you can find the implementations in [`openai.py`](docent/_llm_util/openai.py) and [`anthropic.py`](docent/_llm_util/anthropic.py). If you'd like to add a new LLM provider, you can do so by implementing the `SingleOutputGetter` and `SingleStreamingOutputGetter` protocols for the new provider (see our example implementations as a reference) and registering a new `ProviderConfig` in the `LLMManager`'s `self.providers` (located in [`prod_llms.py`](docent/_llm_util/prod_llms.py)).
+We'll start semantically versioning Docent soon, once we're out of private alpha.

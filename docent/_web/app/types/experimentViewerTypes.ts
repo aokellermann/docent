@@ -1,4 +1,8 @@
-import { FrameDimension, FrameFilter, Judgment } from './frameTypes';
+import {
+  AttributeWithCitations,
+  FrameDimension,
+  FrameFilter,
+} from './frameTypes';
 
 export type MetadataType = 'str' | 'int' | 'float' | 'bool';
 
@@ -15,17 +19,10 @@ export interface Citation {
   action_unit_idx: number | null;
 }
 
-export interface AttributeWithCitation {
-  attribute: string;
-  citations: Citation[];
-}
-
 export interface StreamedAttribute {
-  datapoint_id: string | null;
-  attribute: string | null;
-  attributes: AttributeWithCitation[] | null;
-  num_datapoints_done: number;
-  num_datapoints_total: number;
+  data_dict: Record<string, Record<string, AttributeWithCitations[]>>;
+  num_agent_runs_done: number;
+  num_agent_runs_total: number;
 }
 
 export interface TaskStats {

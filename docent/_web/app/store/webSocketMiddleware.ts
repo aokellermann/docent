@@ -1,36 +1,34 @@
-import { Middleware } from '@reduxjs/toolkit';
+import type { Middleware } from '@reduxjs/toolkit';
+
 import socketService from '../services/socketService';
-import {
-  setExperimentStatMarginals,
-  setInterventionDescriptionMarginals,
-  setIdMarginals,
-  setSampleStatMarginals,
-  setStatMarginals,
-  setStatMarginalsAndFilters,
-} from './experimentViewerSlice';
-import { AppDispatch } from './store';
-import {
-  setBaseFilter,
-  setMarginals,
-  setTranscriptMetadataFields,
-  updateTranscriptMetadata,
-} from './frameSlice';
-import { setDimensions } from './frameSlice';
-import { getTranscriptMetadataFields } from './frameSlice';
-import { getState } from './frameSlice';
-import { setExperimentDimId, setSampleDimId } from './frameSlice';
-import { setFrameGridId } from './frameSlice';
+
 import {
   handleAttributesUpdate,
   setAttributeSearches,
   setLoadingAttributesForId,
 } from './attributeFinderSlice';
 import {
-  handleDatapointsUpdated,
+  setOuterStatMarginals,
+  setIdMarginals,
+  setStatMarginalsAndFilters,
+} from './experimentViewerSlice';
+import {
+  setBaseFilter,
+  setMarginals,
+  setAgentRunMetadataFields,
+  updateAgentRunMetadata,
+  setInnerDimId,
+  setOuterDimId,
+  setDimensions,
+  setFrameGrids,
+} from './frameSlice';
+import { AppDispatch } from './store';
+import {
+  handleAgentRunsUpdated,
   onFinishLoadingActionsSummary,
   onFinishLoadingSolutionSummary,
   setActionsSummary,
-  setCurDatapoint,
+  setCurAgentRun,
   setLoadingTaResponse,
   setSolutionSummary,
   setTaMessages,
@@ -47,6 +45,13 @@ export const createWebSocketMiddleware = (): Middleware => {
       // Handle different types of messages from the server
       const dispatch = store.dispatch as AppDispatch;
       switch (data.action) {
+        case 'framegrids_updated':
+          dispatch(setFrameGrids(data.payload));
+          break;
+        case 'framegrid_deleted':
+          // If the current framegrid is deleted, we could potentially redirect to the home page
+          // This would be handled by a different part of the app
+          break;
         case 'dimensions':
           dispatch(setDimensions(data.payload));
           break;
@@ -54,10 +59,10 @@ export const createWebSocketMiddleware = (): Middleware => {
           dispatch(setBaseFilter(data.payload));
           break;
         case 'transcript_metadata_fields':
-          dispatch(setTranscriptMetadataFields(data.payload.fields));
+          dispatch(setAgentRunMetadataFields(data.payload.fields));
           break;
         case 'datapoint_metadata':
-          dispatch(updateTranscriptMetadata(data.payload.metadata));
+          dispatch(updateAgentRunMetadata(data.payload.metadata));
           break;
         case 'marginals':
           dispatch(setMarginals(data.payload));
@@ -70,28 +75,29 @@ export const createWebSocketMiddleware = (): Middleware => {
           dispatch(setLoadingAttributesForId(undefined));
           break;
         case 'specific_marginals':
-          if (data.payload.request_type === 'exp_stats') {
+          if (data.payload.request_type === 'comb_stats') {
             dispatch(setStatMarginalsAndFilters(data.payload.result));
-          } else if (data.payload.request_type === 'exp_ids') {
+          } else if (data.payload.request_type === 'comb_ids') {
             dispatch(setIdMarginals(data.payload.result));
-          } else if (data.payload.request_type === 'per_sample_stats') {
-            dispatch(setSampleStatMarginals(data.payload.result));
-          } else if (data.payload.request_type === 'per_experiment_stats') {
-            dispatch(setExperimentStatMarginals(data.payload.result));
           } else if (
-            data.payload.request_type === 'intervention_descriptions'
+            data.payload.request_type === 'outer_stats' &&
+            data.payload.result
           ) {
-            dispatch(setInterventionDescriptionMarginals(data.payload.result));
+            dispatch(setOuterStatMarginals(data.payload.result));
           }
           break;
         case 'datapoint':
-          dispatch(setCurDatapoint(data.payload.datapoint));
+          dispatch(setCurAgentRun(data.payload.datapoint));
           break;
         case 'datapoints_updated':
-          dispatch(handleDatapointsUpdated());
+          dispatch(handleAgentRunsUpdated());
           break;
         case 'attribute_searches':
           dispatch(setAttributeSearches(data.payload));
+          break;
+        case 'io_dims_updated':
+          dispatch(setInnerDimId(data.payload.inner_dim_id));
+          dispatch(setOuterDimId(data.payload.outer_dim_id));
           break;
         case 'summarize_transcript_update':
           if (data.payload.type === 'solution') {

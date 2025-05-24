@@ -9,104 +9,68 @@ not doing it now.
 import traceback
 from contextlib import nullcontext
 from functools import partial
-from typing import Any, Callable, Literal, Protocol, Sequence, TypedDict, cast
+from typing import Any, Literal, Sequence, cast
 
 import anyio
-from anthropic import AsyncAnthropic
-from openai import AsyncOpenAI
 
-from docent._llm_util import anthropic, openai
-from docent._llm_util.anthropic import (
-    get_anthropic_chat_completion_async,
-    get_anthropic_chat_completion_streaming_async,
+from docent._llm_util.data_models.exceptions import RateLimitException
+from docent._llm_util.data_models.llm_output import (
+    AsyncLLMOutputStreamingCallback,
+    AsyncSingleLLMOutputStreamingCallback,
+    LLMOutput,
+    LLMCompletion,
 )
 from docent._llm_util.llm_cache import LLMCache
-from docent._llm_util.openai import (
-    get_openai_chat_completion_async,
-    get_openai_chat_completion_streaming_async,
-)
-from docent._llm_util.types import (
-    AsyncSingleStreamingCallback,
-    AsyncStreamingCallback,
-    ChatMessage,
-    LLMCompletion,
-    LLMOutput,
-    ModelOption,
-    RateLimitException,
-    ToolInfo,
-    get_single_streaming_callback,
-    parse_chat_message,
+from docent._llm_util.providers.preferences import ModelOption
+from docent._llm_util.providers.registry import (
+    PROVIDERS,
+    SingleOutputGetter,
+    SingleStreamingOutputGetter,
 )
 from docent._log_util import get_logger
+from docent.data_models.chat import ChatMessage, ToolInfo, parse_chat_message
 
 logger = get_logger(__name__)
+
+
+def _get_single_streaming_callback(
+    batch_index: int,
+    streaming_callback: AsyncLLMOutputStreamingCallback,
+) -> AsyncSingleLLMOutputStreamingCallback:
+    async def single_streaming_callback(llm_output: LLMOutput):
+        await streaming_callback(batch_index, llm_output)
+
+    return single_streaming_callback
 
 
 class PleaseRotate(Exception):
     pass
 
 
-class SingleOutputGetter(Protocol):
-    async def __call__(
-        self,
-        client: Any,
-        messages: list[ChatMessage],
-        model_name: str,
-        *,
-        tools: list[ToolInfo] | None,
-        tool_choice: Literal["auto", "required"] | None,
-        max_new_tokens: int,
-        temperature: float,
-        reasoning_effort: Literal["low", "medium", "high"] | None,
-        logprobs: bool,
-        top_logprobs: int | None,
-        timeout: float,
-    ) -> LLMOutput: ...
+def _get_offset_streaming_callback(
+    streaming_callback: AsyncLLMOutputStreamingCallback,
+    original_indices: list[int],
+):
+    async def _offset_streaming_callback(batch_index: int, llm_output: LLMOutput):
+        await streaming_callback(original_indices[batch_index], llm_output)
+
+    return _offset_streaming_callback
 
 
-class SingleStreamingOutputGetter(Protocol):
-    async def __call__(
-        self,
-        client: Any,
-        streaming_callback: AsyncSingleStreamingCallback | None,
-        messages: list[ChatMessage],
-        model_name: str,
-        *,
-        tools: list[ToolInfo] | None,
-        tool_choice: Literal["auto", "required"] | None,
-        max_new_tokens: int,
-        temperature: float,
-        reasoning_effort: Literal["low", "medium", "high"] | None,
-        logprobs: bool,
-        top_logprobs: int | None,
-        timeout: float,
-    ) -> LLMOutput: ...
+def _get_offset_completion_callback(
+    completion_callback: AsyncLLMOutputStreamingCallback,
+    original_indices: list[int],
+):
+    async def _offset_completion_callback(batch_index: int, llm_output: LLMOutput):
+        await completion_callback(original_indices[batch_index], llm_output)
 
-
-class ProviderConfig(TypedDict):
-    async_client_getter: Callable[[], AsyncOpenAI | AsyncAnthropic]
-    single_output_getter: SingleOutputGetter
-    single_streaming_output_getter: SingleStreamingOutputGetter
-
-
-PROVIDERS: dict[str, ProviderConfig] = {
-    "anthropic": {
-        "async_client_getter": anthropic.get_anthropic_client_async,
-        "single_output_getter": get_anthropic_chat_completion_async,
-        "single_streaming_output_getter": get_anthropic_chat_completion_streaming_async,
-    },
-    "openai": {
-        "async_client_getter": openai.get_openai_client_async,
-        "single_output_getter": get_openai_chat_completion_async,
-        "single_streaming_output_getter": get_openai_chat_completion_streaming_async,
-    },
-}
+    return _offset_completion_callback
 
 
 async def _parallelize_calls(
     single_output_getter: SingleOutputGetter | SingleStreamingOutputGetter,
-    streaming_callback: AsyncStreamingCallback | None,
-    completion_callback: AsyncStreamingCallback | None,
+    streaming_callback: AsyncLLMOutputStreamingCallback | None,
+    completion_callback: AsyncLLMOutputStreamingCallback | None,
     # Arguments for the individual completion getter
     client: Any,
     messages_list: list[list[ChatMessage]],
@@ -169,7 +133,7 @@ async def _parallelize_calls(
                 else:
                     result = await base_func(
                         client=client,
-                        streaming_callback=get_single_streaming_callback(i, streaming_callback),
+                        streaming_callback=_get_single_streaming_callback(i, streaming_callback),
                         messages=messages,
                     )
 
@@ -190,10 +154,6 @@ async def _parallelize_calls(
                     completions=[],
                     errors=["rate_limit" if isinstance(e, RateLimitException) else "other"],
                 )
-
-                # # Call the completion callback for errors too if provided
-                # if completion_callback:
-                #     await completion_callback(i, error_output)
 
             # Set the result in either case
             responses[i] = result
@@ -238,8 +198,7 @@ async def _parallelize_calls(
         raise
 
     # Cache results if available
-    if cache is not None:
-        _cache_responses()
+    _cache_responses()
 
     # At this point, all indices should have a result
     assert all(
@@ -273,9 +232,9 @@ class LLMManager:
         top_logprobs: int | None = None,
         max_concurrency: int | None = None,
         timeout: float = 5.0,
-        streaming_callback: AsyncStreamingCallback | None = None,
-        completion_callback: AsyncStreamingCallback | None = None,
         fill_cache: str | None = None,
+        streaming_callback: AsyncLLMOutputStreamingCallback | None = None,
+        completion_callback: AsyncLLMOutputStreamingCallback | None = None,
     ) -> list[LLMOutput]:
         """
         If max_concurrency is None, use LLManager.semaphore to manage concurrency
@@ -299,7 +258,9 @@ class LLMManager:
 
                 # Collect inputs that don't have a result yet
                 null_inputs = [
-                    (i, messages_list[i]) for i, result in enumerate(results) if result is None
+                    (batch_index, messages_list[batch_index])
+                    for batch_index, result in enumerate(results)
+                    if result is None
                 ]
 
                 # Check cache if available
@@ -308,7 +269,7 @@ class LLMManager:
                     uncached_messages: list[list[ChatMessage]] = []
                     hits = 0
 
-                    for i, messages in null_inputs:
+                    for batch_index, messages in null_inputs:
                         cached_result = self.cache.get(
                             messages,
                             model_name,
@@ -320,36 +281,46 @@ class LLMManager:
                             top_logprobs=top_logprobs,
                         )
                         if cached_result is not None:
-                            results[i] = cached_result
+                            results[batch_index] = cached_result
                             hits += 1
 
                             # Call completion and streaming callbacks for cache hits
                             # TODO(mengk): we should make the callbacks batchable
                             if completion_callback:
-                                await completion_callback(i, cached_result)
+                                await completion_callback(batch_index, cached_result)
                             if streaming_callback:
-                                await streaming_callback(i, cached_result)
+                                await streaming_callback(batch_index, cached_result)
                         else:
-                            uncached_indices.append(i)
+                            uncached_indices.append(batch_index)
                             uncached_messages.append(messages)
 
                     misses = len(messages_list) - hits
                     logger.info(f"{model_name}: {hits} cache hits, {misses} misses")
                 # Otherwise, everything is uncached
                 else:
-                    uncached_indices = [i for i, _ in null_inputs]
+                    uncached_indices = [batch_index for batch_index, _ in null_inputs]
                     uncached_messages = [messages for _, messages in null_inputs]
 
-                # Get completions for uncached messages
                 if uncached_messages:
+                    # Get completions for uncached messages
                     outputs = await _parallelize_calls(
                         (
                             single_output_getter
                             if streaming_callback is None
                             else single_streaming_output_getter
                         ),
-                        streaming_callback,
-                        completion_callback,
+                        # We need to offset the callback indices, so when they're called from within
+                        # _parallelize_calls, the indices correspond to the original messages_list
+                        (
+                            _get_offset_streaming_callback(streaming_callback, uncached_indices)
+                            if streaming_callback is not None
+                            else None
+                        ),
+                        (
+                            _get_offset_completion_callback(completion_callback, uncached_indices)
+                            if completion_callback is not None
+                            else None
+                        ),
                         client,
                         uncached_messages,
                         model_name,
@@ -367,8 +338,10 @@ class LLMManager:
                         cache=self.cache,
                         fill_cache=fill_cache,
                     )
-                    for i, (messages, output) in enumerate(zip(uncached_messages, outputs)):
-                        results[uncached_indices[i]] = output if not output.did_error else None
+                    for batch_index, messages, output in zip(
+                        uncached_indices, uncached_messages, outputs
+                    ):
+                        results[batch_index] = output if not output.did_error else None
 
                 # If there are still some None results, rotate model options
                 num_error = sum(1 for result in results if result is None)
@@ -421,8 +394,8 @@ async def get_llm_completions_async(
     top_logprobs: int | None = None,
     max_concurrency: int = 100,
     timeout: float = 60.0,
-    streaming_callback: AsyncStreamingCallback | None = None,
-    completion_callback: AsyncStreamingCallback | None = None,
+    streaming_callback: AsyncLLMOutputStreamingCallback | None = None,
+    completion_callback: AsyncLLMOutputStreamingCallback | None = None,
     use_cache: bool = False,
     fill_cache: str | None = None,
 ) -> list[LLMOutput]:
@@ -443,11 +416,7 @@ async def get_llm_completions_async(
 
     # Parse messages
     parsed_messages_list = [
-        [
-            message if isinstance(message, ChatMessage) else parse_chat_message(message)
-            for message in messages
-        ]
-        for messages in messages_list
+        [parse_chat_message(message) for message in messages] for messages in messages_list
     ]
 
     return await llm_manager.get_completions(
