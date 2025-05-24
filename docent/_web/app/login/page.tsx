@@ -10,15 +10,14 @@ import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from '@/hooks/use-toast';
 
-import { apiRestClient } from '../services/apiService';
-import { UserResponse } from '../types/userTypes';
+import { login } from '../services/authService';
 import { useUser } from '../contexts/UserContext';
 
 function LoginPageContent() {
   const router = useRouter();
+  const { setUser } = useUser();
   const searchParams = useSearchParams();
   const emailParam = searchParams.get('email') || '';
-  const { setUser } = useUser();
 
   // Form state
   const [email, setEmail] = useState(emailParam);
@@ -42,18 +41,14 @@ function LoginPageContent() {
 
     setIsSubmitting(true);
     try {
-      const loginRequest = { email: email.trim() };
-      const loginResponse = await apiRestClient.post<UserResponse>(
-        '/login',
-        loginRequest
-      );
+      const userData = await login(email.trim()); // Pure API call
 
-      // Update the user context
-      setUser(loginResponse.data);
+      // Set user in context immediately to prevent race condition
+      setUser(userData);
 
       toast({
         title: 'Success',
-        description: `Welcome back!`,
+        description: 'Welcome back!',
       });
 
       // Redirect to dashboard after successful login
@@ -61,8 +56,11 @@ function LoginPageContent() {
     } catch (error: any) {
       console.error('Failed to log in:', error);
 
-      // Handle different error cases
-      if (error.response?.status === 404) {
+      // Handle API error responses
+      const message =
+        error.response?.data?.detail || error.message || 'Login failed';
+
+      if (message.includes('not found') || error.response?.status === 404) {
         toast({
           title: 'User not found',
           description:
@@ -72,7 +70,7 @@ function LoginPageContent() {
       } else {
         toast({
           title: 'Error',
-          description: 'Failed to log in. Please try again.',
+          description: message,
           variant: 'destructive',
         });
       }

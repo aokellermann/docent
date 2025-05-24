@@ -10,17 +10,31 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
+import { logout } from '../../services/authService';
 import { useUser } from '../../contexts/UserContext';
+import { toast } from '@/hooks/use-toast';
 
 export const UserProfile = () => {
-  const { user, logout } = useUser();
+  const { user, setUser } = useUser();
 
+  // Don't render if no user (e.g., on login page)
   if (!user) {
     return null;
   }
 
   const handleLogout = async () => {
-    await logout();
+    try {
+      await logout(); // Pure API call
+      setUser(null); // Clear client state
+      window.location.href = '/login'; // Handle redirect
+    } catch (error) {
+      console.error('Logout failed:', error);
+      toast({
+        title: 'Logout Error',
+        description: 'Failed to logout. Please try again.',
+        variant: 'destructive',
+      });
+    }
   };
 
   // Get user initials from email (first letter of email)

@@ -10,8 +10,7 @@ import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from '@/hooks/use-toast';
 
-import { apiRestClient } from '../services/apiService';
-import { UserCreateRequest, UserResponse } from '../types/userTypes';
+import { signup } from '../services/authService';
 import { useUser } from '../contexts/UserContext';
 
 const SignupPage = () => {
@@ -19,19 +18,6 @@ const SignupPage = () => {
   const { setUser } = useUser();
   const [email, setEmail] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const handleSignupSuccess = (user: UserResponse) => {
-    // Update the user context for immediate authentication
-    setUser(user);
-
-    toast({
-      title: 'Welcome to Docent!',
-      description: 'Your account has been created successfully.',
-    });
-
-    // Redirect to dashboard after successful signup
-    router.push('/');
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,32 +33,39 @@ const SignupPage = () => {
 
     setIsSubmitting(true);
     try {
-      const request: UserCreateRequest = { email: email.trim() };
-      const response = await apiRestClient.post<UserResponse>(
-        '/signup',
-        request
-      );
+      const userData = await signup(email.trim()); // Pure API call
 
-      console.log('User signup result:', response.data);
-      handleSignupSuccess(response.data);
+      // Set user in context immediately to prevent race condition
+      setUser(userData);
+
+      toast({
+        title: 'Welcome to Docent!',
+        description: 'Your account has been created successfully.',
+      });
+
+      // Redirect to dashboard after successful signup
+      router.push('/');
     } catch (error: any) {
       console.error('Failed to sign up:', error);
 
-      // Handle specific error cases
-      if (error.response?.status === 409) {
+      // Handle API error responses
+      const message =
+        error.response?.data?.detail || error.message || 'Signup failed';
+
+      if (
+        message.includes('already exists') ||
+        error.response?.status === 409
+      ) {
         toast({
           title: 'Account Already Exists',
           description:
             'A user with this email already exists. Please log in instead.',
           variant: 'destructive',
         });
-
-        // consider redirecting to login page after a delay
-        // and autofill the email field
       } else {
         toast({
           title: 'Error',
-          description: 'Failed to create account. Please try again.',
+          description: message,
           variant: 'destructive',
         });
       }
@@ -88,7 +81,7 @@ const SignupPage = () => {
           {/* Header */}
           <div className="text-center space-y-2">
             <h1 className="text-2xl font-bold tracking-tight">
-              Sign up for Docent
+              Create your Docent account
             </h1>
             <p className="text-sm text-gray-600">
               Enter your email address to get started
@@ -133,7 +126,7 @@ const SignupPage = () => {
               onClick={() => router.push('/login')}
               className="text-sm"
             >
-              Already have an account? Log in
+              Already have an account? Sign in
             </Button>
           </div>
         </div>

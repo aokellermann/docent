@@ -1,39 +1,41 @@
+import type { Metadata } from 'next';
 import { Open_Sans, JetBrains_Mono } from 'next/font/google';
-
-import './globals.css';
-import ReduxToastHandler from '@/components/ReduxToastHandler';
-import { Toaster } from '@/components/ui/toaster';
 import { cn } from '@/lib/utils';
 
+import { ReduxProvider, CSPostHogProvider } from './providers';
 import WebsocketProvider from './contexts/WebsocketContext';
+import { Toaster } from '@/components/ui/toaster';
+import ReduxToastHandler from '@/components/ReduxToastHandler';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { UserProvider } from './contexts/UserContext';
-import { AuthWrapper } from './components/auth/AuthWrapper';
-import { CSPostHogProvider, ReduxProvider } from './providers';
+import { getUser } from './lib/dal';
 
-import { Metadata } from 'next';
-import { TooltipProvider } from '@radix-ui/react-tooltip';
+import './globals.css';
 
 const openSans = Open_Sans({
   subsets: ['latin'],
   display: 'swap',
+  variable: '--font-open-sans',
 });
 
 const jetbrainsMono = JetBrains_Mono({
   subsets: ['latin'],
-  variable: '--font-jetbrains-mono',
   display: 'swap',
+  variable: '--font-jetbrains-mono',
 });
 
 export const metadata: Metadata = {
-  title: 'Transluce Docent',
-  description: 'Docent',
+  title: 'Docent',
+  description: 'AI-powered evaluation framework',
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const user = await getUser();
+
   return (
     <html lang="en" className="h-full">
       <body
@@ -42,9 +44,9 @@ export default function RootLayout({
         <CSPostHogProvider>
           <ReduxProvider>
             <WebsocketProvider>
-              <UserProvider>
+              <UserProvider user={user}>
                 <TooltipProvider>
-                  <AuthWrapper>{children}</AuthWrapper>
+                  {children}
                   <Toaster />
                   <ReduxToastHandler />
                 </TooltipProvider>

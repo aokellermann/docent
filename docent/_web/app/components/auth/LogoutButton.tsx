@@ -3,6 +3,7 @@
 import { Button } from '@/components/ui/button';
 import { toast } from '@/hooks/use-toast';
 
+import { logout } from '../../services/authService';
 import { useUser } from '../../contexts/UserContext';
 
 interface LogoutButtonProps {
@@ -22,16 +23,22 @@ export const LogoutButton = ({
   size = 'default',
   className,
 }: LogoutButtonProps) => {
-  const { logout } = useUser();
+  const { setUser } = useUser();
 
   const handleLogout = async () => {
     try {
-      await logout();
+      await logout(); // Pure API call
+      setUser(null); // Clear client state
+
       toast({
         title: 'Success',
         description: 'You have been logged out successfully.',
       });
+
+      // Redirect to login
+      window.location.href = '/login';
     } catch (error) {
+      console.error('Logout failed:', error);
       toast({
         title: 'Error',
         description: 'There was an error logging out. Please try again.',

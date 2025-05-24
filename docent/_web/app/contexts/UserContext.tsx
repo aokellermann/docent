@@ -1,57 +1,28 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, ReactNode } from 'react';
+import type { User } from '../lib/dal';
 
-import { apiRestClient } from '../services/apiService';
-import type { User } from '../types/userTypes';
-
-type UserContextType = {
+interface UserContextType {
   user: User | null;
-  loading: boolean;
   setUser: (user: User | null) => void;
-  logout: () => Promise<void>;
-};
+}
 
-const UserContext = createContext<UserContextType | null>(null);
+const UserContext = createContext<UserContextType | undefined>(undefined);
 
-export const UserProvider = ({ children }: { children: React.ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+interface UserProviderProps {
+  children: ReactNode;
+  user: User | null; // Can be null for non-authenticated pages
+}
 
-  useEffect(() => {
-    const fetchUser = async () => {
-      try {
-        const response = await apiRestClient.get('/me');
-        setUser(response.data);
-      } catch (error: any) {
-        // If we get a 401, that's expected for users without valid sessions
-        if (error.response?.status === 401) {
-          setUser(null);
-        } else {
-          console.error('Error fetching user:', error);
-          setUser(null);
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchUser();
-  }, []);
-
-  const logout = async () => {
-    try {
-      await apiRestClient.post('/logout');
-    } catch (error) {
-      console.error('Error during logout:', error);
-    } finally {
-      // Clear user state regardless of API call success
-      setUser(null);
-    }
-  };
+export const UserProvider = ({
+  children,
+  user: initialUser,
+}: UserProviderProps) => {
+  const [user, setUser] = useState<User | null>(initialUser);
 
   return (
-    <UserContext.Provider value={{ user, loading, setUser, logout }}>
+    <UserContext.Provider value={{ user, setUser }}>
       {children}
     </UserContext.Provider>
   );
@@ -59,8 +30,19 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
 
 export const useUser = () => {
   const context = useContext(UserContext);
-  if (!context) {
+  if (context === undefined) {
     throw new Error('useUser must be used within a UserProvider');
   }
   return context;
+};
+
+// Hook for components that require authentication
+export const useRequireAuth = () => {
+  const { user } = useUser();
+  if (!user) {
+    throw new Error(
+      'useRequireAuth used in component without authenticated user'
+    );
+  }
+  return user;
 };
