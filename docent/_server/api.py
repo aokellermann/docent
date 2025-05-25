@@ -1,15 +1,103 @@
 import time
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from docent._env_util import ENV
 from docent._log_util import get_logger
 from docent._server._broker.router import broker_router
 from docent._server._rest.router import rest_router
 
 logger = get_logger(__name__)
+
+
+def get_cors_configuration() -> dict[str, Any]:
+    """
+    Get CORS configuration for both development and production environments.
+
+    **Environment-based CORS behavior:**
+
+    **Development Mode** (DOCENT_CORS_ORIGINS empty/unset):
+    - Uses regex pattern to allow any localhost port
+    - Supports localhost, 127.0.0.1, and 0.0.0.0 with any port
+    - Works with both HTTP and HTTPS protocols
+    - Examples: http://localhost:3000, https://127.0.0.1:8080
+
+    **Production Mode** (DOCENT_CORS_ORIGINS set with values):
+    - Uses exact origin matching for maximum security
+    - Comma-separated list of allowed origins
+    - Validates and strips whitespace from each origin
+    - Examples: https://yourdomain.com or https://app.yourdomain.com,https://admin.yourdomain.com
+
+    Returns:
+        Dictionary with CORS middleware configuration parameters
+    """
+    # Read CORS origins from environment variable
+    cors_origins_env = ENV.get("DOCENT_CORS_ORIGINS")
+
+    # Check if environment variable is set and contains valid origins
+    if cors_origins_env and cors_origins_env.strip():
+        # Production mode: Parse and validate exact origins
+        origins = [origin.strip() for origin in cors_origins_env.split(",") if origin.strip()]
+
+        # Validate that we have at least one valid origin
+        if not origins:
+            logger.warning(
+                "DOCENT_CORS_ORIGINS is set but contains no valid origins. "
+                "Falling back to development mode with localhost regex."
+            )
+            return _get_development_cors_config()
+
+        # Log production configuration
+        logger.info(f"🔒 Production CORS mode: Using exact origins {origins}")
+        return {
+            "allow_origins": origins,
+            "allow_credentials": True,
+            "allow_methods": ["*"],
+            "allow_headers": ["*"],
+        }
+    else:
+        # Development mode: Use regex for flexible localhost support
+        logger.info("🔧 Development CORS mode: Using regex pattern for localhost origins")
+        return _get_development_cors_config()
+
+
+def _get_development_cors_config() -> dict[str, Any]:
+    """
+    Get CORS configuration for development environment using regex pattern.
+
+    **Regex pattern breakdown:**
+    ```
+    ^https?://(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0):\\d+$
+    ```
+
+    - `^https?://` - HTTP or HTTPS protocol at start
+    - `(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0)` - Localhost variations (dots escaped)
+    - `:\\d+` - Colon followed by port number (1+ digits)
+    - `$` - End of string (prevents subdomain attacks)
+
+    **Allowed origins examples:**
+    - ✅ http://localhost:3000
+    - ✅ https://localhost:8080
+    - ✅ http://127.0.0.1:3001
+    - ✅ https://0.0.0.0:4000
+    - ❌ http://localhost (no port)
+    - ❌ http://evil.localhost:3000 (subdomain)
+    - ❌ http://external.com:3000 (external domain)
+
+    Returns:
+        Dictionary with development CORS configuration
+    """
+    development_regex = r"^https?://(localhost|127\.0\.0\.1|0\.0\.0\.0):\d+$"
+
+    return {
+        "allow_origin_regex": development_regex,
+        "allow_credentials": True,
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+    }
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
@@ -31,15 +119,27 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
 
 asgi_app = FastAPI()
+
 # Add request logging middleware first (before other middlewares)
 asgi_app.add_middleware(RequestLoggingMiddleware)
-asgi_app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+# Configure CORS with environment-based settings
+# Automatically switches between development (regex) and production (exact origins) modes
+try:
+    cors_config = get_cors_configuration()
+    asgi_app.add_middleware(CORSMiddleware, **cors_config)
+    logger.info("✅ CORS middleware configured successfully")
+except Exception as e:
+    logger.error(f"❌ Failed to configure CORS middleware: {e}")
+    # Fallback to safe development configuration
+    asgi_app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|0\.0\.0\.0):\d+$",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    logger.warning("⚠️  Using fallback development CORS configuration")
 
 # Include REST router
 asgi_app.include_router(rest_router, prefix="/rest")

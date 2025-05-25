@@ -3,14 +3,11 @@
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import React, { useEffect, Suspense, useState, useRef } from 'react';
 
-import Breadcrumbs from '../components/Breadcrumbs';
-import ResponsiveCheck from '../components/ResponsiveCheck';
-import { requestAttributes } from '../store/attributeFinderSlice';
-import {
-  initSession,
-  setHasInitAttributeDimId,
-} from '../store/frameSlice';
-import { useAppDispatch, useAppSelector } from '../store/hooks';
+import Breadcrumbs from '../../components/Breadcrumbs';
+import ResponsiveCheck from '../../components/ResponsiveCheck';
+import { requestAttributes } from '../../store/attributeFinderSlice';
+import { initSession, setHasInitAttributeDimId } from '../../store/frameSlice';
+import { useAppDispatch, useAppSelector } from '../../store/hooks';
 
 export default function DocentLayout({
   children,

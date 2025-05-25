@@ -4,6 +4,7 @@ import hashlib
 from contextlib import asynccontextmanager
 from itertools import product
 from time import perf_counter
+from datetime import timedelta
 from typing import (
     Any,
     AsyncIterator,
@@ -18,6 +19,7 @@ from typing import (
     overload,
 )
 from uuid import uuid4
+from datetime import datetime, UTC
 
 import anyio
 from sqlalchemy import URL, ColumnElement, delete, distinct, exists, func, select, text, update
@@ -44,7 +46,9 @@ from docent._db_service.schemas.tables import (
     SQLAFrameGrid,
     SQLAJob,
     SQLAJudgment,
+    SQLASession,
     SQLATranscript,
+    SQLAUser,
 )
 from docent._env_util import ENV
 from docent._log_util import get_logger
@@ -59,6 +63,7 @@ from docent.data_models.filters import (
 )
 from docent.data_models.metadata import BaseAgentRunMetadata
 from docent.data_models.transcript import Transcript
+from docent.data_models.user import User
 
 logger = get_logger(__name__)
 
@@ -1671,6 +1676,121 @@ class DBService:
             result = await session.execute(select(SQLAJob).where(SQLAJob.id == job_id))
             job = result.scalar_one_or_none()
             return job.job_json if job else None
+
+    #########
+    # Users #
+    #########
+
+    async def create_user(self, email: str) -> User:
+        """
+        Create a new user. Raises an error if a user with the given email already exists.
+
+        Args:
+            email: The email address of the user
+
+        Returns:
+            The User object
+        """
+        # Check if user already exists
+        existing_user = await self.get_user_by_email(email)
+        if existing_user:
+            raise ValueError("User already exists for {email}")
+
+        user_id = str(uuid4())
+        sqa_user = SQLAUser(id=user_id, email=email)
+
+        async with self.session() as session:
+            session.add(sqa_user)
+            await session.flush()  # Not strictly needed for uuid, but good for autoincrement fields
+
+        logger.info(f"Created new user with ID: {sqa_user.id} and email: {sqa_user.email}")
+        return User(id=sqa_user.id, email=sqa_user.email, created_at=sqa_user.created_at)
+
+    async def get_user_by_email(self, email: str) -> User | None:
+        """
+        Retrieve a user by email address.
+
+        Args:
+            email: The email address to search for
+
+        Returns:
+            The User object if found, None otherwise
+        """
+        async with self.session() as session:
+            result = await session.execute(select(SQLAUser).where(SQLAUser.email == email))
+            sqla_user = result.scalar_one_or_none()
+            if sqla_user:
+                return User(id=sqla_user.id, email=sqla_user.email, created_at=sqla_user.created_at)
+            return None
+
+    async def create_session(self, user_id: str, expires_in_days: int = 30) -> str:
+        """
+        Create a new session for a user.
+
+        Args:
+            user_id: The user ID to create a session for
+            expires_in_days: Number of days until the session expires
+
+        Returns:
+            The session ID
+        """
+
+        session_id = str(uuid4())
+        expires_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(days=expires_in_days)
+
+        async with self.session() as session:
+            session.add(
+                SQLASession(
+                    id=session_id,
+                    user_id=user_id,
+                    expires_at=expires_at,
+                    is_active=True,
+                )
+            )
+        logger.info(f"Created session {session_id} for user {user_id}")
+        return session_id
+
+    async def get_user_by_session_id(self, session_id: str) -> User | None:
+        """
+        Retrieve a user by their session ID.
+
+        Args:
+            session_id: The session ID to look up
+
+        Returns:
+            The User object if the session is valid and active, None otherwise
+        """
+        async with self.session() as session:
+            # Join session and user tables, check if session is active and not expired
+            result = await session.execute(
+                select(SQLAUser)
+                .join(SQLASession, SQLAUser.id == SQLASession.user_id)
+                .where(
+                    SQLASession.id == session_id,
+                    SQLASession.is_active,
+                    SQLASession.expires_at > datetime.now(UTC).replace(tzinfo=None),
+                )
+            )
+            sqla_user = result.scalar_one_or_none()
+            if sqla_user:
+                return User(id=sqla_user.id, email=sqla_user.email, created_at=sqla_user.created_at)
+            return None
+
+    async def invalidate_session(self, session_id: str) -> bool:
+        """
+        Invalidate a session by marking it as inactive.
+
+        Args:
+            session_id: The session ID to invalidate
+
+        Returns:
+            True if the session was found and invalidated, False otherwise
+        """
+        async with self.session() as session:
+            result = await session.execute(
+                update(SQLASession).where(SQLASession.id == session_id).values(is_active=False)
+            )
+            return result.rowcount > 0
 
     @asynccontextmanager
     async def advisory_lock(self, fg_id: str, action_id: str) -> AsyncIterator[None]:

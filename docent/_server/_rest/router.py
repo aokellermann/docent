@@ -5,7 +5,7 @@ from typing import Any, Literal, TypedDict, cast
 from uuid import uuid4
 
 import anyio
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.inspection import inspect as sqla_inspect
@@ -27,6 +27,7 @@ from docent._server._assistant.summarizer import (
     summarize_agent_actions,
     summarize_intended_solution,
 )
+from docent._server._auth.session import create_user_session, invalidate_user_session
 from docent._server._broker.redis_client import publish_to_broker
 from docent._server._rest.send_state import (
     publish_attribute_searches,
@@ -58,6 +59,137 @@ async def get_db():
 @rest_router.get("/ping")
 async def ping():
     return {"status": "ok", "message": "pong"}
+
+
+class UserCreateRequest(BaseModel):
+    """Request model for creating a new user."""
+
+    email: str
+
+    class Config:
+        extra = "forbid"
+
+
+class UserResponse(BaseModel):
+    """Response model for user operations."""
+
+    user_id: str
+    email: str
+
+    class Config:
+        extra = "forbid"
+
+
+@rest_router.post("/signup")
+async def signup(request: UserCreateRequest, response: Response) -> UserResponse:
+    """
+    User signup endpoint. Creates a new user with the provided email.
+    Fails if a user with that email already exists.
+
+    Args:
+        request: UserCreateRequest containing email
+        response: FastAPI Response object to set cookies
+
+    Returns:
+        UserResponse with user_id and email
+
+    Raises:
+        HTTPException: 409 if a user with this email already exists
+    """
+    db = await get_db()
+
+    # Check if user already exists
+    existing_user = await db.get_user_by_email(request.email)
+    if existing_user:
+        raise HTTPException(
+            status_code=409,
+            detail="A user with this email address already exists. Please use the login page.",
+        )
+
+    user = await db.create_user(request.email)
+
+    # Create a session for the new user
+    await create_user_session(user.id, response)
+
+    return UserResponse(user_id=user.id, email=user.email)
+
+
+class LoginRequest(BaseModel):
+    email: str
+
+
+@rest_router.post("/login")
+async def login(request: LoginRequest, response: Response) -> UserResponse:
+    """
+    User login endpoint. Authenticates a user and creates a session.
+
+    Args:
+        request: LoginRequest containing email
+        response: FastAPI Response object to set cookies
+
+    Returns:
+        UserResponse with user_id and email
+    """
+    db = await get_db()
+    user = await db.get_user_by_email(request.email)
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Create a new session
+    await create_user_session(user.id, response)
+
+    return UserResponse(user_id=user.id, email=user.email)
+
+
+@rest_router.get("/me")
+async def get_current_user(request: Request) -> UserResponse:
+    """
+    Get current user endpoint. Retrieves user information from session cookie.
+
+    Args:
+        request: FastAPI Request object to access cookies
+
+    Returns:
+        UserResponse with user_id and email
+
+    Raises:
+        HTTPException: 401 if session is invalid or expired
+    """
+    db = await get_db()
+
+    # Get session ID from cookie
+    session_id = request.cookies.get("docent_session_id")
+    if not session_id:
+        raise HTTPException(status_code=401, detail="No session found")
+
+    # Get user by session ID
+    user = await db.get_user_by_session_id(session_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+    return UserResponse(user_id=user.id, email=user.email)
+
+
+@rest_router.post("/logout")
+async def logout(request: Request, response: Response):
+    """
+    User logout endpoint. Invalidates the current session.
+
+    Args:
+        request: FastAPI Request object to access cookies
+        response: FastAPI Response object to clear cookies
+
+    Returns:
+        Success message
+    """
+    # Get session ID from cookie
+    session_id = request.cookies.get("docent_session_id")
+    if session_id:
+        # Invalidate the session using the auth helper
+        await invalidate_user_session(session_id, response)
+
+    return {"message": "Logged out successfully"}
 
 
 @rest_router.get("/framegrids")

@@ -34,7 +34,12 @@ def server(
 
 @app.command(help="Run the website")
 def web(
-    backend_url: str = typer.Option("http://localhost:8888", help="Backend URL to query"),
+    backend_url: str = typer.Option(
+        "http://localhost:8888", help="Backend URL for client-side (browser) requests"
+    ),
+    internal_backend_url: str = typer.Option(
+        None, help="Backend URL for server-side requests (defaults to backend_url)"
+    ),
     port: int = typer.Option(3000, help="Port to bind to"),
     build: bool = typer.Option(False, help="Build the web app"),
     install: bool = typer.Option(True, help="Install dependencies"),
@@ -43,9 +48,10 @@ def web(
     file_path = Path(__file__).parent.parent.parent.absolute() / "docent" / "_web"
     os.chdir(file_path)
 
-    # Create environment with the backend URL
+    # Create environment with both backend URLs
     env = os.environ.copy()
     env["NEXT_PUBLIC_API_HOST"] = backend_url
+    env["INTERNAL_API_HOST"] = internal_backend_url or backend_url
 
     # Install dependencies if requested
     if install:
