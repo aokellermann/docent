@@ -6,8 +6,8 @@ import React, { Suspense } from 'react';
 import { BASE_DOCENT_PATH } from '@/app/constants';
 import { useAppSelector } from '@/app/store/hooks';
 
-import AttributeFinder from '../components/AttributeFinder';
-import ExperimentViewer from '../components/ExperimentViewer';
+import AttributeFinder from '../../components/AttributeFinder';
+import ExperimentViewer from '../../components/ExperimentViewer';
 
 function DocentDashboardContent() {
   const router = useRouter();

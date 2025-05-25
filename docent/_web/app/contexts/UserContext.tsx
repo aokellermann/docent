@@ -28,6 +28,10 @@ export const UserProvider = ({
   );
 };
 
+/**
+ * Hook for components that may or may not have a user
+ * Use this in shared components or pages that handle both states
+ */
 export const useUser = () => {
   const context = useContext(UserContext);
   if (context === undefined) {
@@ -36,13 +40,27 @@ export const useUser = () => {
   return context;
 };
 
-// Hook for components that require authentication
-export const useRequireAuth = () => {
-  const { user } = useUser();
+/**
+ * Hook for components that require authentication
+ * Throws an error if user is null - use only in authenticated areas
+ * This replaces the need for a separate AuthenticatedUserContext
+ */
+export const useRequireAuth = (): {
+  user: User;
+  setUser: (user: User) => void;
+} => {
+  const { user, setUser } = useUser();
+
   if (!user) {
     throw new Error(
-      'useRequireAuth used in component without authenticated user'
+      'useRequireAuth used in component without authenticated user. ' +
+        'This hook should only be used in authenticated pages/components.'
     );
   }
-  return user;
+
+  // Type-safe return - user is guaranteed to be non-null
+  return {
+    user,
+    setUser: (newUser: User) => setUser(newUser), // Only allow non-null users
+  };
 };

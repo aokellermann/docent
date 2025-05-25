@@ -44,7 +44,7 @@ const SignupPage = () => {
       });
 
       // Redirect to dashboard after successful signup
-      router.push('/');
+      router.push('/dashboard');
     } catch (error: any) {
       console.error('Failed to sign up:', error);
 

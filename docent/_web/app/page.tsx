@@ -1,16 +1,21 @@
-import { requireAuth } from './lib/dal';
-import DocentDashboard from './components/DocentDashboard';
+import { redirect } from 'next/navigation';
+import { getUser } from './lib/dal';
 
 /**
- * Server Component - Handles authentication
- * Following Next.js recommendations: auth check close to the data source
+ * Root Landing Page - Server Component
+ *
+ * Redirects users based on authentication status:
+ * - Authenticated users → /dashboard (handled by route group)
+ * - Unauthenticated users → /login
  */
-export default async function HomePage() {
-  // This automatically redirects to /login if not authenticated
-  // Uses React cache() to avoid duplicate API calls during rendering
-  await requireAuth();
+export default async function LandingPage() {
+  const user = await getUser();
 
-  // User data is now available via UserProvider context
-  // DocentDashboard will access it via useRequireAuth()
-  return <DocentDashboard />;
+  if (user) {
+    // User is authenticated, redirect to dashboard
+    redirect('/dashboard');
+  } else {
+    // User is not authenticated, redirect to login
+    redirect('/login');
+  }
 }

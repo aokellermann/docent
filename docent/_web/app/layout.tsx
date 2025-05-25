@@ -34,6 +34,7 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Get user without requiring auth - this allows login/signup pages to work
   const user = await getUser();
 
   return (

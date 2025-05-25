@@ -52,7 +52,7 @@ function LoginPageContent() {
       });
 
       // Redirect to dashboard after successful login
-      router.push('/');
+      router.push('/dashboard');
     } catch (error: any) {
       console.error('Failed to log in:', error);
 

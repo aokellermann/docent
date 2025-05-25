@@ -32,32 +32,12 @@ import { resetExperimentViewerSlice } from '../store/experimentViewerSlice';
 import { fetchFrameGrids, resetFrameSlice } from '../store/frameSlice';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { resetTranscriptSlice } from '../store/transcriptSlice';
-import { useUser } from '../contexts/UserContext';
+import { useRequireAuth } from '../contexts/UserContext';
 
 export default function DocentDashboard() {
-  const { user } = useUser();
+  // User is guaranteed to be present in authenticated pages
+  const { user } = useRequireAuth();
 
-  // Show loading state if user is not yet available (during hydration)
-  if (!user) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center space-y-2">
-          <Loader2 className="h-6 w-6 animate-spin mx-auto" />
-          <p className="text-sm text-gray-600">Loading your dashboard...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // User is available, render the dashboard
-  return <DocentDashboardContent user={user} />;
-}
-
-function DocentDashboardContent({
-  user,
-}: {
-  user: { user_id: string; email: string };
-}) {
   const evalId = useAppSelector((state) => state.frame.evalId);
   const frameGrids = useAppSelector((state) => state.frame.frameGrids);
   const isLoadingFrameGrids = useAppSelector(
@@ -89,7 +69,7 @@ function DocentDashboardContent({
   const handleCreateFrameGrid = async () => {
     setIsCreatingGrid(true);
     try {
-      const response = await apiRestClient.post('/create', {
+      await apiRestClient.post('/create', {
         name: newGridName,
         description: newGridDescription,
       });
@@ -198,7 +178,7 @@ function DocentDashboardContent({
                   Creating...
                 </>
               ) : (
-                'Create'
+                'Create Frame Grid'
               )}
             </Button>
           </DialogFooter>

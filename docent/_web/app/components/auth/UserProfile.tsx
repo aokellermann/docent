@@ -11,16 +11,15 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 import { logout } from '../../services/authService';
-import { useUser } from '../../contexts/UserContext';
+import { useRequireAuth, useUser } from '../../contexts/UserContext';
 import { toast } from '@/hooks/use-toast';
 
 export const UserProfile = () => {
-  const { user, setUser } = useUser();
+  // User is guaranteed to be present since this component is only used in authenticated areas
+  const { user } = useRequireAuth();
 
-  // Don't render if no user (e.g., on login page)
-  if (!user) {
-    return null;
-  }
+  // Use base useUser for logout to access setUser that accepts null
+  const { setUser } = useUser();
 
   const handleLogout = async () => {
     try {
