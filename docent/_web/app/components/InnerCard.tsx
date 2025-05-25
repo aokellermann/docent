@@ -8,6 +8,8 @@ import {
 import React, { useCallback, useEffect, useMemo } from 'react';
 import { useSelector } from 'react-redux';
 
+import { BASE_DOCENT_PATH } from '../constants';
+
 import {
   Tooltip,
   TooltipContent,
@@ -24,6 +26,35 @@ import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { RootState } from '../store/store';
 import { RegexSnippet, TaskStats } from '../types/experimentViewerTypes';
 import { AttributeWithCitations } from '../types/frameTypes';
+
+// Helper function to handle transcript navigation with special clicks
+const handleTranscriptNavigation = (
+  e: React.MouseEvent,
+  agentRunId: string,
+  blockId?: number,
+  attributeQueryDimId?: string,
+  onShowAgentRun?: (agentRunId: string, blockId?: number) => void
+) => {
+  e.stopPropagation();
+  
+  if (e.metaKey || e.ctrlKey || e.button === 1) {
+    const evalId = window.location.pathname.split('/')[1];
+    
+    let url = `${window.location.origin}${BASE_DOCENT_PATH}/${evalId}/transcript/${agentRunId}`;
+    
+    const blockIdParam = blockId ? `?block_id=${blockId}` : '';
+    url += blockIdParam;
+    
+    if (attributeQueryDimId) {
+      url += blockIdParam ? `&attributeDimId=${attributeQueryDimId}` : `?attributeDimId=${attributeQueryDimId}`;
+    }
+    
+    window.open(url, '_blank');
+  } 
+  else if (e.button === 0 && onShowAgentRun) {
+    onShowAgentRun(agentRunId, blockId);
+  }
+};
 
 interface InnerCard {
   innerId: string;
@@ -42,6 +73,7 @@ interface AttributeSectionProps {
   curAttributeQuery: string;
   attributes: AttributeWithCitations[];
   onShowAgentRun?: (agentRunId: string, blockId?: number) => void;
+  attributeQueryDimId?: string;
 }
 
 const AttributeSection: React.FC<AttributeSectionProps> = ({
@@ -49,6 +81,7 @@ const AttributeSection: React.FC<AttributeSectionProps> = ({
   curAttributeQuery,
   attributes: attributes,
   onShowAgentRun,
+  attributeQueryDimId,
 }) => {
   const dispatch = useAppDispatch();
   const voteState = useAppSelector((state) => state.attributeFinder.voteState);
@@ -108,11 +141,8 @@ const AttributeSection: React.FC<AttributeSectionProps> = ({
               <button
                 key={`citation-${i}`}
                 className="px-0.5 py-0.25 bg-indigo-200 text-indigo-800 rounded hover:bg-indigo-400 hover:text-white transition-colors font-medium"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (onShowAgentRun) {
-                    onShowAgentRun(dataId, citation.block_idx);
-                  }
+                onMouseDown={(e) => {
+                  handleTranscriptNavigation(e, dataId, citation.block_idx, attributeQueryDimId, onShowAgentRun);
                 }}
               >
                 {citedText}
@@ -136,13 +166,10 @@ const AttributeSection: React.FC<AttributeSectionProps> = ({
           <div
             key={idx}
             className="group bg-indigo-50 rounded-md p-1 text-xs text-indigo-900 leading-snug mt-1 hover:bg-indigo-100 transition-colors cursor-pointer border border-transparent hover:border-indigo-200"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (onShowAgentRun) {
-                const firstCitation =
-                  citations.length > 0 ? citations[0] : null;
-                onShowAgentRun(dataId, firstCitation?.block_idx);
-              }
+            onMouseDown={(e) => {
+              const firstCitation = citations.length > 0 ? citations[0] : null;
+              const blockId = firstCitation?.block_idx;
+              handleTranscriptNavigation(e, dataId, blockId, attributeQueryDimId, onShowAgentRun);
             }}
           >
             <div className="flex flex-col">
@@ -638,11 +665,8 @@ const InnerCard: React.FC<InnerCard> = ({
              )} */}
                         <span
                           className="text-blue-600 font-medium hover:text-blue-700"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onShowAgentRun
-                              ? onShowAgentRun(agentRunId)
-                              : () => {};
+                          onMouseDown={(e) => {
+                            handleTranscriptNavigation(e, agentRunId, undefined, attributeQueryDimId, onShowAgentRun);
                           }}
                         >
                           View
@@ -689,6 +713,7 @@ const InnerCard: React.FC<InnerCard> = ({
                       curAttributeQuery={curAttributeQuery}
                       attributes={attributes}
                       onShowAgentRun={onShowAgentRun}
+                      attributeQueryDimId={attributeQueryDimId}
                     />
                   )}
                 </div>
