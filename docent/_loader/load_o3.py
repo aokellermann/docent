@@ -1,7 +1,9 @@
 import json
 
-from docent._frames.transcript import Transcript, TranscriptMetadata
-from docent._llm_util.types import ChatMessage, parse_chat_message
+from docent.data_models.agent_run import AgentRun
+from docent.data_models.transcript import Transcript
+from docent._loader.load_inspect import InspectAgentRunMetadata
+from docent.data_models.chat import ChatMessage, parse_chat_message
 from docent._log_util import get_logger
 
 logger = get_logger(__name__)
@@ -27,9 +29,9 @@ MINI_4O_LOGS = {
 }
 
 
-def load_o3() -> list[Transcript]:
+def load_o3() -> list[AgentRun]:
     print("Loading o3")
-    transcripts: list[Transcript] = []
+    transcripts: list[AgentRun] = []
     for path, name in O3_LOGS.items():
         with open(path, "r") as f:
             sample = json.load(f)
@@ -40,7 +42,7 @@ def load_o3() -> list[Transcript]:
             chat_message = parse_chat_message(message_data)
             messages.append(chat_message)
 
-        metadata = TranscriptMetadata(
+        metadata = InspectAgentRunMetadata(
             epoch_id=0,
             experiment_id="human-generated_attacks",
             intervention_description=None,
@@ -57,8 +59,8 @@ def load_o3() -> list[Transcript]:
             scoring_metadata={},
             additional_metadata={},
         )
-        transcript = Transcript(
-            messages=messages,
+        transcript = AgentRun(
+            transcripts={"default": Transcript(messages=messages)},
             metadata=metadata,
         )
         transcripts.append(transcript)
@@ -76,7 +78,7 @@ def load_o3() -> list[Transcript]:
             chat_message = parse_chat_message(message_data)
             messages.append(chat_message)
 
-        metadata = TranscriptMetadata(
+        metadata = InspectAgentRunMetadata(
             epoch_id=0,
             experiment_id="human-generated_attacks_2",
             intervention_description=None,
@@ -93,8 +95,8 @@ def load_o3() -> list[Transcript]:
             scoring_metadata={},
             additional_metadata={},
         )
-        transcript = Transcript(
-            messages=messages,
+        transcript = AgentRun(
+            transcripts={"default": Transcript(messages=messages)},
             metadata=metadata,
         )
         transcripts.append(transcript)

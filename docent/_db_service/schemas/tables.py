@@ -14,6 +14,8 @@ from docent.data_models.filters import FrameDimension, FrameFilter, Judgment, pa
 from docent.data_models.transcript import Transcript
 from docent._ai_tools.diff import DiffAttribute
 
+from uuid import uuid4
+
 TABLE_FRAME_GRID = "frame_grids"
 TABLE_AGENT_RUN = "agent_runs"
 TABLE_ATTRIBUTE = "attributes"
