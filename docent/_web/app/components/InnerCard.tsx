@@ -771,7 +771,7 @@ const InnerCard: React.FC<InnerCard> = ({
                     {otherId && (
                         <div className="flex justify-between items-center">
                           <span className="text-gray-600">
-                            Transcript{' '}
+                            Agent Run{' '}
                             <span className="font-mono">{otherId}</span>
                       </span>
                       <div className="flex gap-2">

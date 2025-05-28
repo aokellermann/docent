@@ -35,6 +35,11 @@ export interface TranscriptViewerHandle {
   scrollToBlock: (blockIndex: number) => void;
 }
 
+// Add props interface
+interface TranscriptViewerProps {
+  alt: boolean;
+}
+
 // Add this helper function near the top of the file
 const formatMetadataValue = (value: any): string => {
   if (typeof value === 'object' && value !== null) {
@@ -49,8 +54,8 @@ interface EditingToolCall extends Omit<ToolCall, 'arguments'> {
   argumentsString: string;
 }
 
-const TranscriptViewer = forwardRef((_, ref) => {
-  const agentRun = useAppSelector((state) => state.transcript.curAgentRun);
+const TranscriptViewer = forwardRef<TranscriptViewerHandle, TranscriptViewerProps>(({ alt }, ref) => {
+  const agentRun = useAppSelector((state) => alt ? state.transcript.altAgentRun : state.transcript.curAgentRun);
   const transcript = useMemo(
     () =>
       agentRun && Object.keys(agentRun.transcripts).length > 0

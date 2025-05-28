@@ -4,21 +4,15 @@ import { useParams, useSearchParams } from 'next/navigation';
 import React, { Suspense, useEffect, useRef } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
-import { getCurAgentRun } from '@/app/store/transcriptSlice';
-import { Card } from '@/components/ui/card';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { getCurAgentRun, getAltAgentRun } from '@/app/store/transcriptSlice';
 
-import AgentSummary from '../components/AgentSummary';
-import TaPanel from '../components/TaPanel';
-import TaskSummary from '../components/TaskSummary';
 import TranscriptViewer, {
   TranscriptViewerHandle,
-} from '../components/TranscriptViewer';
+} from '../../transcript/components/TranscriptViewer';
 
 const SCROLL_DELAY = 250;
 
-export default function AgentRunPage() {
+export default function AgentRunPage2() {
   const dispatch = useAppDispatch();
 
   const frameGridId = useAppSelector((state) => state.frame.frameGridId);
@@ -26,7 +20,7 @@ export default function AgentRunPage() {
 
   const params = useParams();
   const searchParams = useSearchParams();
-  const agentRunIdRaw = params.agent_run_id;
+  const agentRunIdRaw = params.concat_run_id;
   const blockIdParam = searchParams.get('block_id');
   const blockId = blockIdParam ? parseInt(blockIdParam, 10) : undefined;
 
@@ -39,6 +33,7 @@ export default function AgentRunPage() {
    */
 
   const transcriptViewerRef = useRef<TranscriptViewerHandle>(null);
+  const altTranscriptViewerRef = useRef<TranscriptViewerHandle>(null);
 
   const alreadyScrolledRef = useRef(false);
   const hasInitAttributeDimId = useAppSelector(
@@ -78,6 +73,7 @@ export default function AgentRunPage() {
     if (fetchRef.current || frameGridId === undefined) return;
     if (curAgentRun?.id !== agentRunId) {
       dispatch(getCurAgentRun(agentRunId));
+      dispatch(getAltAgentRun("c9afedfd-394d-44a7-8457-f57a9c5e8c6d"));
       fetchRef.current = true;
     }
   }, [frameGridId, agentRunId, blockId, dispatch, curAgentRun?.id]);
@@ -98,40 +94,7 @@ export default function AgentRunPage() {
     <Suspense fallback={<div>Loading...</div>}>
       <div className="flex-1 flex space-x-3 min-h-0">
         <TranscriptViewer ref={transcriptViewerRef} alt={false} />
-
-        <Card className="h-full overflow-y-auto flex-1 p-3">
-          <Tabs defaultValue="agent" className="h-full flex flex-col">
-            <TabsList className="grid w-full grid-cols-3 h-8">
-              <TabsTrigger value="agent" className="text-xs">
-                Agent Summary
-              </TabsTrigger>
-              <TabsTrigger value="task" className="text-xs">
-                Task Summary
-              </TabsTrigger>
-              <TabsTrigger value="chat" className="text-xs">
-                Chat
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="task" className="flex-1 mt-0">
-              <ScrollArea className="h-full px-1 py-2">
-                <TaskSummary />
-              </ScrollArea>
-            </TabsContent>
-
-            <TabsContent value="agent" className="flex-1 mt-0">
-              <ScrollArea className="h-full px-1 py-2">
-                <AgentSummary onCitationClick={handleShowAgentRun} />
-              </ScrollArea>
-            </TabsContent>
-
-            <TabsContent value="chat" className="flex-1 mt-0">
-              <div className="h-full px-1 py-2">
-                <TaPanel onShowAgentRun={handleShowAgentRun} />
-              </div>
-            </TabsContent>
-          </Tabs>
-        </Card>
+        <TranscriptViewer ref={altTranscriptViewerRef} alt={true} />
       </div>
     </Suspense>
   );
