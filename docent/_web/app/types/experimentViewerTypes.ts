@@ -70,7 +70,6 @@ export interface StreamedDiffs {
   data_id_2: string | null;
   claim: string[] | null;
   evidence: EvidenceWithCitation[] | null;
-  reverse_evidence: EvidenceWithCitation[] | null;
   num_pairs_done: number;
   num_pairs_total: number;
 }

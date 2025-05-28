@@ -57,7 +57,6 @@ export interface AttributeFinderState {
     {
       claim: string[];
       evidence: EvidenceWithCitation[];
-      reverse_evidence: EvidenceWithCitation[];
     }
   >;
 }
@@ -736,7 +735,6 @@ export const attributeFinderSlice = createSlice({
         data_id_2,
         claim,
         evidence,
-        reverse_evidence,
         num_pairs_done,
         num_pairs_total,
       } = action.payload;
@@ -748,8 +746,7 @@ export const attributeFinderSlice = createSlice({
         data_id_1 === null ||
         data_id_2 === null ||
         claim === null ||
-        evidence === null ||
-        reverse_evidence === null
+        evidence === null
       ) {
         return;
       }
@@ -765,7 +762,6 @@ export const attributeFinderSlice = createSlice({
       state.diffMap[pairKey] = {
         claim,
         evidence,
-        reverse_evidence,
       };
     },
     clearDiffMap: (state) => {

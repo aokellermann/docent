@@ -384,7 +384,6 @@ class SQLADiffAttribute(SQLABase):
     # Null indicates no values for this (data_id_1, data_id_2, attribute) pair
     claim = mapped_column(Text)
     evidence = mapped_column(Text)
-    reverse_evidence = mapped_column(Text)
 
     __table_args__ = (
         UniqueConstraint(
@@ -406,7 +405,6 @@ class SQLADiffAttribute(SQLABase):
         attribute_idx: int | None,
         claim: str | None,
         evidence: str | None,
-        reverse_evidence: str | None,
         fg_id: str,
     ):
         return cls(
@@ -418,7 +416,6 @@ class SQLADiffAttribute(SQLABase):
             attribute_idx=attribute_idx,
             claim=claim,
             evidence=evidence,
-            reverse_evidence=reverse_evidence,
         )
 
     def to_diff_attribute(self):
@@ -430,5 +427,4 @@ class SQLADiffAttribute(SQLABase):
             attribute_idx=self.attribute_idx,
             claim=self.claim,
             evidence=self.evidence,
-            reverse_evidence=self.reverse_evidence,
         )

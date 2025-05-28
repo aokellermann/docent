@@ -315,7 +315,6 @@ interface DiffSectionProps {
   diffResults: {
     claim: string[];
     evidence: EvidenceWithCitation[];
-    reverse_evidence: EvidenceWithCitation[];
   };
   onShowDatapoint?: (datapointId: string, blockId?: number) => void;
 }
@@ -330,11 +329,10 @@ const DiffSection: React.FC<DiffSectionProps> = ({
     return null;
   }
 
-  // Create an array of (claim, evidence, reverse_evidence) triples
+  // Create an array of (claim, evidence) tuples
   const diffTriples = diffResults.claim.map((claim, idx) => ({
     claim,
     evidence: diffResults.evidence[idx] || null,
-    reverse_evidence: diffResults.reverse_evidence[idx] || null,
   }));
 
   // Helper function to render text with citations
@@ -418,15 +416,6 @@ const DiffSection: React.FC<DiffSectionProps> = ({
             </div>
           )}
 
-          {/* Reverse Evidence */}
-          {triple.reverse_evidence && (
-            <div>
-              <p className="font-medium text-indigo-800">Reverse Evidence:</p>
-              <p className="mt-0.5">
-                {renderTextWithCitations(triple.reverse_evidence.evidence, triple.reverse_evidence.citations || [])}
-              </p>
-            </div>
-          )}
         </div>
       ))}
     </div>

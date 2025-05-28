@@ -895,7 +895,6 @@ class StreamedDiffs(TypedDict):
     data_id_2: str | None
     claim: list[str] | None
     evidence: list[EvidenceWithCitation] | None
-    reverse_evidence: list[EvidenceWithCitation] | None
     num_pairs_done: int
     num_pairs_total: int
 
@@ -942,7 +941,6 @@ async def listen_compute_diffs(job_id: str):
         data_id_2: str,
         claim: list[str],
         evidence: list[str],
-        reverse_evidence: list[str],
     ) -> None:
         nonlocal num_done
 
@@ -955,10 +953,6 @@ async def listen_compute_diffs(job_id: str):
                 "evidence": [
                     EvidenceWithCitation(evidence=e, citations=parse_citations_multi_transcript(e))
                     for e in evidence
-                ],
-                "reverse_evidence": [
-                    EvidenceWithCitation(evidence=e, citations=parse_citations_multi_transcript(e))
-                    for e in reverse_evidence
                 ],
                 "num_pairs_done": num_done,
                 "num_pairs_total": num_total,
@@ -1010,7 +1004,6 @@ async def listen_compute_diffs(job_id: str):
                 data_id_2=None,
                 claim=None,
                 evidence=None,
-                reverse_evidence=None,
                 num_pairs_done=0,
                 num_pairs_total=num_total,
             )
