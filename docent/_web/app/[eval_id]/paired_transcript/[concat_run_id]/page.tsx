@@ -24,8 +24,8 @@ export default function AgentRunPage2() {
   const blockIdParam = searchParams.get('block_id');
   const blockId = blockIdParam ? parseInt(blockIdParam, 10) : undefined;
 
-  const agentRunId = React.useMemo(() => {
-    return Array.isArray(agentRunIdRaw) ? agentRunIdRaw[0] : agentRunIdRaw;
+  const agentRunIds = React.useMemo(() => {
+    return (Array.isArray(agentRunIdRaw) ? agentRunIdRaw[0] : agentRunIdRaw).split('___');
   }, [agentRunIdRaw]);
 
   /**
@@ -53,7 +53,7 @@ export default function AgentRunPage2() {
 
     if (
       transcriptViewerRef.current &&
-      curAgentRun?.id === agentRunId &&
+      curAgentRun?.id === agentRunIds[0] &&
       blockId
     ) {
       alreadyScrolledRef.current = true;
@@ -62,7 +62,7 @@ export default function AgentRunPage2() {
         transcriptViewerRef.current?.scrollToBlock(blockId);
       }, 100); // Small delay to allow for DOM rendering
     }
-  }, [curAgentRun, blockId, agentRunId, hasInitAttributeDimId, attributeMap]);
+  }, [curAgentRun, blockId, agentRunIds, hasInitAttributeDimId, attributeMap]);
 
   /**
    * Fetch agent run once
@@ -71,12 +71,12 @@ export default function AgentRunPage2() {
   const fetchRef = useRef(false);
   useEffect(() => {
     if (fetchRef.current || frameGridId === undefined) return;
-    if (curAgentRun?.id !== agentRunId) {
-      dispatch(getCurAgentRun(agentRunId));
-      dispatch(getAltAgentRun("c9afedfd-394d-44a7-8457-f57a9c5e8c6d"));
+    if (curAgentRun?.id !== agentRunIds[0]) {
+      dispatch(getCurAgentRun(agentRunIds[0]));
+      dispatch(getAltAgentRun(agentRunIds[1]));
       fetchRef.current = true;
     }
-  }, [frameGridId, agentRunId, blockId, dispatch, curAgentRun?.id]);
+  }, [frameGridId, agentRunIds, blockId, dispatch, curAgentRun?.id]);
 
   const handleShowAgentRun = (agentRunId: string, blockId?: number) => {
     if (agentRunId !== curAgentRun?.id) {
