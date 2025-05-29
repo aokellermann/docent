@@ -756,7 +756,7 @@ export const attributeFinderSlice = createSlice({
       }
 
       // Create a key for the pair of datapoints
-      const pairKey = `${data_id_1}|||${data_id_2}`;
+      const pairKey = `${data_id_1}___${data_id_2}`;
 
       // Update the diff map with the new data
       state.diffMap[pairKey] = {

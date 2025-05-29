@@ -34,7 +34,7 @@ import DimensionSelector from './DimensionSelector';
 import InnerCard from './InnerCard';
 
 interface ExperimentViewerProps {
-  onShowAgentRun?: (agentRunId: string, blockId?: number) => void;
+  onShowAgentRun?: (agentRunId: string, blockId?: number, paired?: boolean) => void;
 }
 
 export default function ExperimentViewer({
@@ -155,8 +155,8 @@ export default function ExperimentViewer({
           let hasDiffResults = true;
           if (diffMap) {
             hasDiffResults = Object.keys(diffMap).some((key) => {
-              const [id1, id2] = key.split('|||');
-              return id1 === datapointId; // || id2 === datapointId;
+              const [id1, id2] = key.split('___');
+              return id1 === datapointId || id2 === datapointId;
             });
           }
 

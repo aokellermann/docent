@@ -14,13 +14,23 @@ function DocentDashboardContent() {
   const evalId = useAppSelector((state) => state.frame.evalId);
 
   const handleShowAgentRun = React.useCallback(
-    (agentRunId: string, blockIdx?: number) => {
+    (agentRunId: string, blockIdx?: number, paired?: boolean) => {
       if (blockIdx !== undefined) {
-        router.push(
-          `${BASE_DOCENT_PATH}/${evalId}/transcript/${agentRunId}?block_id=${blockIdx}`
-        );
+        if (paired) {
+          router.push(
+            `${BASE_DOCENT_PATH}/${evalId}/paired_transcript/${agentRunId}?block_id=${blockIdx}`
+          );
+        } else {
+          router.push(
+            `${BASE_DOCENT_PATH}/${evalId}/transcript/${agentRunId}?block_id=${blockIdx}`
+          );
+      } 
       } else {
-        router.push(`${BASE_DOCENT_PATH}/${evalId}/transcript/${agentRunId}`);
+        if (paired) {
+          router.push(`${BASE_DOCENT_PATH}/${evalId}/paired_transcript/${agentRunId}`);
+        } else {
+          router.push(`${BASE_DOCENT_PATH}/${evalId}/transcript/${agentRunId}`);
+        }
       }
     },
     [router, evalId]

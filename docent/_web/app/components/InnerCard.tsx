@@ -39,7 +39,7 @@ interface InnerCard {
   innerLabel: string;
   stats: TaskStats | null;
   agentRunIds: string[];
-  onShowAgentRun?: (agentRunId: string, blockId?: number) => void;
+  onShowAgentRun?: (agentRunId: string, blockId?: number, paired?: boolean) => void;
   isExpanded: boolean;
   onToggle?: () => void;
   innerCount?: number;
@@ -49,7 +49,7 @@ interface AttributeSectionProps {
   dataId: string;
   curAttributeQuery: string;
   attributes: AttributeWithCitations[];
-  onShowAgentRun?: (agentRunId: string, blockId?: number) => void;
+  onShowAgentRun?: (agentRunId: string, blockId?: number, paired?: boolean) => void;
 }
 
 const AttributeSection: React.FC<AttributeSectionProps> = ({
@@ -316,7 +316,7 @@ interface DiffSectionProps {
     claim: string[];
     evidence: EvidenceWithCitation[];
   };
-  onShowDatapoint?: (datapointId: string, blockId?: number) => void;
+  onShowDatapoint?: (datapointId: string, blockId?: number, paired?: boolean) => void;
 }
 
 const DiffSection: React.FC<DiffSectionProps> = ({
@@ -394,7 +394,7 @@ const DiffSection: React.FC<DiffSectionProps> = ({
       <div className="flex items-center mb-1">
         <div className="h-2 w-2 rounded-full bg-indigo-500 mr-1.5"></div>
         <span className="text-xs font-medium text-indigo-700">
-          Diff results
+          Diff results with {otherId}
         </span>
       </div>
 
@@ -615,8 +615,8 @@ const InnerCard: React.FC<InnerCard> = ({
 
       // Find any diff results where this datapoint is involved
       const diffEntry = Object.entries(diffMap).find(([key]) => {
-        const [id1, _] = key.split('|||');
-        return id1 === dataId;
+        const [id1, id2] = key.split('___');
+        return id1 === dataId; // || id2 === dataId;
       });
 
       if (!diffEntry) return null;
@@ -732,7 +732,7 @@ const InnerCard: React.FC<InnerCard> = ({
               if (diffMap && !initialDiffResults) return null;
 
               const diffResults = initialDiffResults ? initialDiffResults[1] : null;
-              const otherId = initialDiffResults ? initialDiffResults[0].split('|||')[1] : null;
+              const otherId = initialDiffResults ? initialDiffResults[0].split('___').filter(id => id !== agentRunId)[0] : null;
 
               return (
                 <div
@@ -744,7 +744,7 @@ const InnerCard: React.FC<InnerCard> = ({
                       : 'bg-white/80 hover:bg-gray-50'
                   }`}
                   onClick={() =>
-                    onShowAgentRun ? onShowAgentRun(agentRunId) : undefined
+                    onShowAgentRun ? (otherId ? onShowAgentRun(agentRunId + "___" + otherId, undefined, true) : onShowAgentRun(agentRunId)) : undefined
                   }
                 >
                   <div>
@@ -759,7 +759,7 @@ const InnerCard: React.FC<InnerCard> = ({
                           onClick={(e) => {
                             e.stopPropagation();
                             onShowAgentRun
-                              ? onShowAgentRun(agentRunId)
+                              ? (otherId ? onShowAgentRun(agentRunId + "___" + otherId, undefined, true) : onShowAgentRun(agentRunId))
                               : () => {};
                           }}
                         >
@@ -767,7 +767,7 @@ const InnerCard: React.FC<InnerCard> = ({
                         </span>
                       </div>
                     </div>
-                    {otherId && <hr/>}
+                    {/* {otherId && <hr/>}
                     {otherId && (
                         <div className="flex justify-between items-center">
                           <span className="text-gray-600">
@@ -788,7 +788,7 @@ const InnerCard: React.FC<InnerCard> = ({
                         </span>
                         </div>
                       </div>
-                    )}
+                    )} */}
                     {/* Display metadata if available */}
                     {agentRunMetadata && agentRunMetadata[agentRunId] && (
                       <MetadataDisplay
@@ -837,7 +837,7 @@ const InnerCard: React.FC<InnerCard> = ({
                       dataId={agentRunId}
                       otherId={otherId ?? ''}
                       diffResults={diffResults}
-                      onShowDatapoint={onShowAgentRun}
+                      onShowDatapoint={() => onShowAgentRun ? (otherId ? onShowAgentRun(agentRunId + "___" + otherId, undefined, true) : onShowAgentRun(agentRunId)) : undefined}
                     />
                   )}
                 </div>
