@@ -24,10 +24,10 @@ import { UserProfile } from './auth/UserProfile';
 import { apiRestClient } from '../services/apiService';
 import socketService from '../services/socketService';
 import {
-  cancelCurrentAttributeRequest,
+  cancelCurrentSearch,
   cancelCurrentClusterRequest,
-  resetAttributeFinderSlice,
-} from '../store/attributeFinderSlice';
+  resetSearchSlice,
+} from '../store/searchSlice';
 import { resetExperimentViewerSlice } from '../store/experimentViewerSlice';
 import { fetchFrameGrids, resetFrameSlice } from '../store/frameSlice';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
@@ -59,9 +59,9 @@ export default function DocentDashboard() {
     socketService.closeSocket();
     dispatch(resetFrameSlice());
     dispatch(resetExperimentViewerSlice());
-    dispatch(resetAttributeFinderSlice());
+    dispatch(resetSearchSlice());
     dispatch(resetTranscriptSlice());
-    dispatch(cancelCurrentAttributeRequest());
+    dispatch(cancelCurrentSearch());
     dispatch(cancelCurrentClusterRequest());
     // TODO(mengk): call thunks to cancel the transcript requests too
   }, [dispatch, evalId]);

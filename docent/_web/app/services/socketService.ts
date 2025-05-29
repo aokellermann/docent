@@ -13,14 +13,13 @@ const notifyConnectionStatusChange = (status: boolean) => {
   connectionStatusListeners.forEach((listener) => listener(status));
 };
 
-// Keep track of the last frameGridId we successfully connected with so that
-// callers that only need to "make sure the socket is ready" can attempt to
-// transparently reconnect without having to know the id.
+// Keep track of the last connection parameters for reconnection
 let lastFrameGridId: string | null = null;
+let lastViewId: string | null = null;
 
 /**
  * Ensure the websocket is connected. If it's closed, we try to reconnect
- * using the last successfully-used frameGridId. If we cannot reconnect we
+ * using the last successfully-used frameGridId and viewId. If we cannot reconnect we
  * throw, allowing the caller (e.g. an axios interceptor) to surface the
  * error.
  */
@@ -36,12 +35,20 @@ export const ensureConnected = async (): Promise<void> => {
     return;
   }
 
-  console.log('Attempting to reconnect to', lastFrameGridId);
-  await initSocket(lastFrameGridId);
+  console.log(
+    'Attempting to reconnect to',
+    lastFrameGridId,
+    'with view',
+    lastViewId
+  );
+  await initSocket(lastFrameGridId, lastViewId || undefined);
 };
 
 // Initialize the WebSocket connection
-export const initSocket = (frameGridId: string): Promise<void> => {
+export const initSocket = (
+  frameGridId: string,
+  viewId?: string
+): Promise<void> => {
   return new Promise((resolve, reject) => {
     if (socket && socket.readyState === WebSocket.OPEN) {
       isConnected = true;
@@ -50,14 +57,21 @@ export const initSocket = (frameGridId: string): Promise<void> => {
     }
 
     const baseUrl = `${BASE_URL ? (BASE_URL.startsWith('https') ? 'wss' : 'ws') : 'ws'}://${(BASE_URL || '').replace(/^https?:\/\//, '')}`;
-    const ws = new WebSocket(`${baseUrl}/broker/${frameGridId}`);
+    const viewParam = viewId ? `?view_id=${viewId}` : '';
+    const ws = new WebSocket(`${baseUrl}/broker/${frameGridId}${viewParam}`);
 
     ws.onopen = () => {
-      console.log('Redux socket connected');
+      console.log(
+        'Redux socket connected to framegrid:',
+        frameGridId,
+        'view:',
+        viewId || 'none'
+      );
       socket = ws;
       isConnected = true;
       notifyConnectionStatusChange(isConnected);
       lastFrameGridId = frameGridId;
+      lastViewId = viewId || null;
       resolve();
     };
 
@@ -146,6 +160,7 @@ export const closeSocket = (): void => {
     socket.close();
     socket = null;
     lastFrameGridId = null;
+    lastViewId = null;
     isConnected = false;
     notifyConnectionStatusChange(false);
   }

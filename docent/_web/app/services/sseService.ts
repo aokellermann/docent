@@ -31,7 +31,9 @@ const createEventSource = (
   const taskId = generateTaskId();
 
   // Create the EventSource - caller must include leading slash in URL
-  const eventSource = new EventSource(`${BASE_URL}${url}`);
+  const eventSource = new EventSource(`${BASE_URL}${url}`, {
+    withCredentials: true,
+  });
 
   // Store the EventSource reference for cleanup
   eventSourcesMap[taskId] = eventSource;

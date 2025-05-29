@@ -7,8 +7,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from docent._env_util import ENV
 from docent._log_util import get_logger
+from docent._server._auth.session_middleware import SessionAuthMiddleware
 from docent._server._broker.router import broker_router
-from docent._server._rest.router import rest_router
+from docent._server._rest.router import public_router, authenticated_router
 
 logger = get_logger(__name__)
 
@@ -120,8 +121,12 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
 asgi_app = FastAPI()
 
-# Add request logging middleware first (before other middlewares)
+# Add middlewares in order (they are processed in reverse order when handling responses)
+# 1. Request logging middleware first
 asgi_app.add_middleware(RequestLoggingMiddleware)
+
+# 2. Session authentication middleware second (after logging, before CORS)
+asgi_app.add_middleware(SessionAuthMiddleware)
 
 # Configure CORS with environment-based settings
 # Automatically switches between development (regex) and production (exact origins) modes
@@ -141,8 +146,9 @@ except Exception as e:
     )
     logger.warning("⚠️  Using fallback development CORS configuration")
 
-# Include REST router
-asgi_app.include_router(rest_router, prefix="/rest")
+# Include routers with clear separation
+asgi_app.include_router(public_router, prefix="/rest")
+asgi_app.include_router(authenticated_router, prefix="/rest")
 asgi_app.include_router(broker_router, prefix="/broker")
 
 # If running in production, add Sentry middleware

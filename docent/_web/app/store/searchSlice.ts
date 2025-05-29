@@ -7,48 +7,44 @@ import { v4 as uuid4 } from 'uuid';
 
 import { apiRestClient } from '../services/apiService';
 import sseService from '../services/sseService';
+import { StreamedSearchResult } from '../types/experimentViewerTypes';
 import {
-  AttributeFeedback,
-  StreamedAttribute,
-} from '../types/experimentViewerTypes';
-import {
-  AttributeWithCitations,
+  SearchResultWithCitations,
   ComplexFilter,
   FrameFilter,
 } from '../types/frameTypes';
 
 import { clearRegexSnippets } from './experimentViewerSlice';
-import { addAttributeDimension, getDimensions } from './frameSlice';
 import { RootState } from './store';
 import { setToastNotification } from './toastSlice';
 
 // Map to store cancel functions for active SSE connections
 const cancelFunctionsMap: Record<string, () => void> = {};
 
-export interface AttributeFinderState {
-  attributeQueryTextboxValue?: string;
+export interface SearchState {
+  searchQueryTextboxValue?: string;
   searchHistory?: string[];
-  attributeMap?: Record<string, Record<string, AttributeWithCitations[]>>;
-  // Current attribute query
-  attributeQueryDimId?: string;
+  searchResultMap?: Record<string, Record<string, SearchResultWithCitations[]>>;
+  // Current search query
+  curSearchQuery?: string;
   // Clustering
   activeClusterTaskId?: string;
   // Parts of the lifecycle of a query
   loadingProgress?: [number, number]; // [num_done, num_total]
-  loadingAttributesForId?: string;
-  activeAttributeTaskId?: string;
-  // Feedback
-  voteState?: Record<string, Record<string, 'up' | 'down'>>; // agent_run_id -> attribute -> vote
-  // Attribute searches with completion status
-  attributeSearches?: Array<{
-    dim_id: string;
-    attribute: string;
+  loadingSearchQuery?: string;
+  activeSearchTaskId?: string;
+  // // Feedback
+  // voteState?: Record<string, Record<string, 'up' | 'down'>>; // agent_run_id -> attribute -> vote
+  // Searches with completion status
+  searchesWithStats?: Array<{
+    search_id: string;
+    search_query: string;
     num_judgments_computed: number;
     num_total: number;
   }>;
 }
 
-const initialState: AttributeFinderState = {};
+const initialState: SearchState = {};
 
 export const requestRegexSnippetsIfExist = createAsyncThunk(
   'experimentViewer/requestRegexSnippetsIfExist',
@@ -64,11 +60,13 @@ export const requestRegexSnippetsIfExist = createAsyncThunk(
         throw new Error('No frame grid ID available');
       }
 
-      const response = await apiRestClient.post('/get_regex_snippets', {
-        fg_id: frameGridId,
-        filter_id: filterId,
-        agent_run_ids: agentRunIds,
-      });
+      const response = await apiRestClient.post(
+        `/${frameGridId}/get_regex_snippets`,
+        {
+          filter_id: filterId,
+          agent_run_ids: agentRunIds,
+        }
+      );
 
       return response.data;
     } catch (error) {
@@ -84,57 +82,19 @@ export const requestRegexSnippetsIfExist = createAsyncThunk(
   }
 );
 
-export const requestAttributes = createAsyncThunk(
-  'experimentViewer/requestAttributes',
-  async (
-    {
-      attribute,
-      existingDimId,
-    }: { attribute?: string; existingDimId?: string },
-    { dispatch, getState }
-  ) => {
+export const computeSearch = createAsyncThunk(
+  'experimentViewer/computeSearch',
+  async ({ searchQuery }: { searchQuery: string }, { dispatch, getState }) => {
     try {
       const state = getState() as RootState;
 
-      // Cancel any existing attribute task
-      await dispatch(cancelCurrentAttributeRequest());
+      // Cancel any existing task
+      await dispatch(cancelCurrentSearch());
 
-      // Set the UI loading state that doesn't depend on `attribute`
+      // Set the UI loading state
       dispatch(setLoadingProgress([0, 0]));
-
-      let dimId: string;
-      if (existingDimId) {
-        dimId = existingDimId;
-        // We also need to explicitly get the corresponding dimension to extract the relevant attribute
-        await dispatch(getDimensions());
-        // Parse the attribute out
-        const dimensionsMap = state.frame.dimensionsMap;
-        if (!dimensionsMap) {
-          throw new Error('No dimensions map available');
-        }
-        const dim = dimensionsMap[dimId];
-        if (!dim) {
-          throw new Error('Could not find search with the provided ID');
-        }
-        if (!dim.attribute) {
-          throw new Error('No attribute found for existing dimension');
-        }
-        attribute = dim.attribute;
-      } else {
-        if (!attribute) {
-          throw new Error(
-            'No attribute, nor existing dimension ID provided. This should never happen!'
-          );
-        }
-
-        // If there isn't an existing dimension, add one corresponding to the attribute
-        // This method auto-triggers the push of a new filter
-        dimId = await dispatch(addAttributeDimension(attribute)).unwrap();
-      }
-
-      // Set the UI loading state that depends on `attribute`
-      dispatch(setLoadingAttributesForId(attribute));
-      dispatch(setAttributeQueryDimId(dimId));
+      dispatch(setLoadingSearchQuery(searchQuery));
+      dispatch(setSearchQuery(searchQuery));
 
       // Send the request via REST API
       const frameGridId = state.frame.frameGridId;
@@ -142,26 +102,29 @@ export const requestAttributes = createAsyncThunk(
         throw new Error('No frame grid ID available');
       }
 
-      // Start the compute attributes job
-      const response = await apiRestClient.post('/start_compute_attributes', {
-        fg_id: frameGridId,
-        attribute,
-      });
+      // Start the compute search job
+      console.log('Starting compute search', searchQuery);
+      const response = await apiRestClient.post(
+        `/${frameGridId}/start_compute_search`,
+        {
+          search_query: searchQuery,
+        }
+      );
 
       const jobId = response.data;
 
-      // Set the job ID as the active attribute task ID
-      dispatch(setActiveAttributeTaskId(jobId));
+      // Set the job ID as the active task ID
+      dispatch(setActiveSearchTaskId(jobId));
 
       // Set up event source to listen for streaming updates using sseService
       const { eventSource, onCancel } = sseService.createEventSource(
-        `/rest/listen_compute_attributes?job_id=${jobId}`,
-        (data: StreamedAttribute) => {
-          dispatch(handleAttributesUpdate(data));
+        `/rest/${frameGridId}/listen_compute_search?job_id=${jobId}`,
+        (data: StreamedSearchResult) => {
+          dispatch(handleSearchUpdate(data));
         },
         () => {
-          dispatch(setLoadingAttributesForId(undefined));
-          dispatch(setActiveAttributeTaskId(undefined));
+          dispatch(setLoadingSearchQuery(undefined));
+          dispatch(setActiveSearchTaskId(undefined));
         },
         (title, description, variant) => {
           dispatch(
@@ -177,8 +140,8 @@ export const requestAttributes = createAsyncThunk(
       cancelFunctionsMap[jobId] = onCancel;
     } catch (error) {
       // Cleanup on error
-      dispatch(setLoadingAttributesForId(undefined));
-      dispatch(setActiveAttributeTaskId(undefined));
+      dispatch(setLoadingSearchQuery(undefined));
+      dispatch(setActiveSearchTaskId(undefined));
       dispatch(
         setToastNotification({
           title: 'Error performing search',
@@ -213,18 +176,20 @@ export const requestClusters = createAsyncThunk(
       await dispatch(cancelCurrentClusterRequest());
 
       // Start the cluster dimension job
-      const response = await apiRestClient.post('/start_cluster_dimension', {
-        fg_id: frameGridId,
-        dim_id: payload.dimensionId,
-        feedback: payload.feedback,
-      });
+      const response = await apiRestClient.post(
+        `/${frameGridId}/start_cluster_dimension`,
+        {
+          dim_id: payload.dimensionId,
+          feedback: payload.feedback,
+        }
+      );
 
       const jobId = response.data;
       dispatch(setActiveClusterTaskId(jobId));
 
       // Set up event source to listen for streaming updates using sseService
       const { eventSource, onCancel } = sseService.createEventSource(
-        `/rest/listen_cluster_dimension?job_id=${jobId}`,
+        `/rest/${frameGridId}/listen_cluster_dimension?job_id=${jobId}`,
         (data) => {
           // Handle any cluster updates if needed
           // Currently the backend doesn't send progress updates for clustering
@@ -260,30 +225,30 @@ export const requestClusters = createAsyncThunk(
   }
 );
 
-export const clearAttributeQuery = createAsyncThunk(
-  'experimentViewer/clearAttributeQuery',
+export const clearSearch = createAsyncThunk(
+  'experimentViewer/clearSearch',
   async (_, { dispatch, getState }) => {
-    dispatch(setAttributeQueryDimId(undefined));
-    dispatch(cancelCurrentAttributeRequest());
-    dispatch(clearAttributeMap());
+    dispatch(setSearchQuery(undefined));
+    dispatch(cancelCurrentSearch());
+    dispatch(clearSearchResultMap());
   }
 );
 
-export const cancelCurrentAttributeRequest = createAsyncThunk(
-  'experimentViewer/cancelCurrentAttributeRequest',
+export const cancelCurrentSearch = createAsyncThunk(
+  'experimentViewer/cancelCurrentSearch',
   async (_, { getState, dispatch }) => {
-    const state = getState() as { attributeFinder: AttributeFinderState };
-    const { activeAttributeTaskId } = state.attributeFinder;
+    const state = getState() as RootState;
+    const { activeSearchTaskId } = state.search;
 
-    // Also cancel any active cluster task when cancelling attribute requests
+    // Also cancel any active cluster task when cancelling search requests
     await dispatch(cancelCurrentClusterRequest());
 
-    if (activeAttributeTaskId) {
+    if (activeSearchTaskId) {
       // If there's an active cancel function, call it
-      if (cancelFunctionsMap[activeAttributeTaskId]) {
+      if (cancelFunctionsMap[activeSearchTaskId]) {
         try {
-          cancelFunctionsMap[activeAttributeTaskId]();
-          delete cancelFunctionsMap[activeAttributeTaskId];
+          cancelFunctionsMap[activeSearchTaskId]();
+          delete cancelFunctionsMap[activeSearchTaskId];
         } catch (error) {
           dispatch(
             setToastNotification({
@@ -305,8 +270,8 @@ export const cancelCurrentAttributeRequest = createAsyncThunk(
       }
 
       // Reset the state
-      dispatch(setLoadingAttributesForId(undefined));
-      dispatch(setActiveAttributeTaskId(undefined));
+      dispatch(setLoadingSearchQuery(undefined));
+      dispatch(setActiveSearchTaskId(undefined));
       dispatch(setLoadingProgress(undefined));
     }
   }
@@ -330,13 +295,12 @@ export const updateBaseFilter = createAsyncThunk(
     }
 
     try {
-      await apiRestClient.post('/base_filter', {
-        fg_id: frameGridId,
+      await apiRestClient.post(`/${frameGridId}/base_filter`, {
         filter: filter ?? null,
       });
 
-      // Also clear attribute query and regex snippets
-      dispatch(clearAttributeQuery());
+      // Also clear search query and regex snippets
+      dispatch(clearSearch());
       dispatch(clearRegexSnippets());
     } catch (error) {
       dispatch(
@@ -405,15 +369,15 @@ export const clearBaseFilters = createAsyncThunk(
   'experimentViewer/clearBaseFilters',
   async (_, { dispatch }) => {
     dispatch(updateBaseFilter(undefined));
-    dispatch(clearAttributeQuery());
+    dispatch(clearSearch());
   }
 );
 
 export const cancelCurrentClusterRequest = createAsyncThunk(
   'experimentViewer/cancelCurrentClusterRequest',
   async (_, { getState, dispatch }) => {
-    const state = getState() as { attributeFinder: AttributeFinderState };
-    const { activeClusterTaskId } = state.attributeFinder;
+    const state = getState() as RootState;
+    const { activeClusterTaskId } = state.search;
 
     if (activeClusterTaskId) {
       // If there's an active cancel function, call it
@@ -447,42 +411,42 @@ export const cancelCurrentClusterRequest = createAsyncThunk(
   }
 );
 
-export const submitAttributeFeedback = createAsyncThunk(
-  'experimentViewer/submitAttributeFeedback',
-  async (
-    {
-      originalQuery,
-      feedback,
-      missingQueries,
-    }: {
-      originalQuery: string;
-      feedback: AttributeFeedback[];
-      missingQueries: string;
-    },
-    { dispatch }
-  ) => {
-    try {
-      const response = await apiRestClient.post('/submit_attribute_feedback', {
-        original_query: originalQuery,
-        attribute_feedback: feedback,
-        missing_queries: missingQueries,
-      });
-      return response.data.rewritten_query;
-    } catch (error) {
-      dispatch(
-        setToastNotification({
-          title: 'Error submitting attribute feedback',
-          description: 'Failed to submit attribute feedback',
-          variant: 'destructive',
-        })
-      );
-      throw error;
-    }
-  }
-);
+// export const submitAttributeFeedback = createAsyncThunk(
+//   'experimentViewer/submitAttributeFeedback',
+//   async (
+//     {
+//       originalQuery,
+//       feedback,
+//       missingQueries,
+//     }: {
+//       originalQuery: string;
+//       feedback: AttributeFeedback[];
+//       missingQueries: string;
+//     },
+//     { dispatch }
+//   ) => {
+//     try {
+//       const response = await apiRestClient.post('/submit_attribute_feedback', {
+//         original_query: originalQuery,
+//         attribute_feedback: feedback,
+//         missing_queries: missingQueries,
+//       });
+//       return response.data.rewritten_query;
+//     } catch (error) {
+//       dispatch(
+//         setToastNotification({
+//           title: 'Error submitting attribute feedback',
+//           description: 'Failed to submit attribute feedback',
+//           variant: 'destructive',
+//         })
+//       );
+//       throw error;
+//     }
+//   }
+// );
 
-export const attributeFinderSlice = createSlice({
-  name: 'attributeFinder',
+export const searchSlice = createSlice({
+  name: 'search',
   initialState,
   reducers: {
     setActiveClusterTaskId: (
@@ -491,9 +455,9 @@ export const attributeFinderSlice = createSlice({
     ) => {
       state.activeClusterTaskId = action.payload;
     },
-    handleAttributesUpdate: (
+    handleSearchUpdate: (
       state,
-      action: PayloadAction<StreamedAttribute>
+      action: PayloadAction<StreamedSearchResult>
     ) => {
       const { data_dict, num_agent_runs_done, num_agent_runs_total } =
         action.payload;
@@ -501,80 +465,76 @@ export const attributeFinderSlice = createSlice({
       // Update the progress counters
       state.loadingProgress = [num_agent_runs_done, num_agent_runs_total];
 
-      // Update the attribute map
-      if (!state.attributeMap) {
-        state.attributeMap = {};
+      // Update the search map
+      if (!state.searchResultMap) {
+        state.searchResultMap = {};
       }
       for (const agent_run_id in data_dict) {
-        for (const attribute in data_dict[agent_run_id]) {
-          if (!state.attributeMap[agent_run_id]) {
-            state.attributeMap[agent_run_id] = {};
+        for (const search_query in data_dict[agent_run_id]) {
+          if (!state.searchResultMap[agent_run_id]) {
+            state.searchResultMap[agent_run_id] = {};
           }
 
-          // Replace the old values at (agent_run_id, attribute)
-          state.attributeMap[agent_run_id][attribute] =
-            data_dict[agent_run_id][attribute];
+          // Replace the old values at (agent_run_id, search_query)
+          state.searchResultMap[agent_run_id][search_query] =
+            data_dict[agent_run_id][search_query];
         }
       }
     },
-    setLoadingAttributesForId: (
+    setLoadingSearchQuery: (
       state,
       action: PayloadAction<string | undefined>
     ) => {
-      state.loadingAttributesForId = action.payload;
+      state.loadingSearchQuery = action.payload;
     },
-    // New actions for attribute requests
-    setActiveAttributeTaskId: (
+    setActiveSearchTaskId: (
       state,
       action: PayloadAction<string | undefined>
     ) => {
-      state.activeAttributeTaskId = action.payload;
+      state.activeSearchTaskId = action.payload;
     },
-    clearAttributeMap: (state) => {
-      state.attributeMap = undefined;
+    clearSearchResultMap: (state) => {
+      state.searchResultMap = undefined;
     },
-    voteOnAttribute: (
-      state,
-      action: PayloadAction<{
-        agent_run_id: string;
-        attribute: string;
-        vote: 'up' | 'down';
-      }>
-    ) => {
-      const { agent_run_id, attribute, vote } = action.payload;
-      if (!state.voteState) {
-        state.voteState = {};
-      }
+    // voteOnAttribute: (
+    //   state,
+    //   action: PayloadAction<{
+    //     agent_run_id: string;
+    //     attribute: string;
+    //     vote: 'up' | 'down';
+    //   }>
+    // ) => {
+    //   const { agent_run_id, attribute, vote } = action.payload;
+    //   if (!state.voteState) {
+    //     state.voteState = {};
+    //   }
 
-      // Initialize nested objects if they don't exist
-      state.voteState[agent_run_id] = state.voteState[agent_run_id] || {};
+    //   // Initialize nested objects if they don't exist
+    //   state.voteState[agent_run_id] = state.voteState[agent_run_id] || {};
 
-      // Toggle behavior: remove vote if it's the same as current vote
-      if (state.voteState[agent_run_id][attribute] === vote) {
-        delete state.voteState[agent_run_id][attribute];
-        // Clean up empty objects
-        if (Object.keys(state.voteState[agent_run_id]).length === 0) {
-          delete state.voteState[agent_run_id];
-        }
-      } else {
-        // Set the new vote
-        state.voteState[agent_run_id][attribute] = vote;
-      }
-    },
-    clearVoteState: (state) => {
-      state.voteState = undefined;
-    },
-    setAttributeQueryTextboxValue: (
+    //   // Toggle behavior: remove vote if it's the same as current vote
+    //   if (state.voteState[agent_run_id][attribute] === vote) {
+    //     delete state.voteState[agent_run_id][attribute];
+    //     // Clean up empty objects
+    //     if (Object.keys(state.voteState[agent_run_id]).length === 0) {
+    //       delete state.voteState[agent_run_id];
+    //     }
+    //   } else {
+    //     // Set the new vote
+    //     state.voteState[agent_run_id][attribute] = vote;
+    //   }
+    // },
+    // clearVoteState: (state) => {
+    //   state.voteState = undefined;
+    // },
+    setSearchQueryTextboxValue: (
       state,
       action: PayloadAction<string | undefined>
     ) => {
-      state.attributeQueryTextboxValue = action.payload;
+      state.searchQueryTextboxValue = action.payload;
     },
-    setAttributeQueryDimId: (
-      state,
-      action: PayloadAction<string | undefined>
-    ) => {
-      state.attributeQueryDimId = action.payload;
+    setSearchQuery: (state, action: PayloadAction<string | undefined>) => {
+      state.curSearchQuery = action.payload;
     },
     setLoadingProgress: (
       state,
@@ -582,36 +542,36 @@ export const attributeFinderSlice = createSlice({
     ) => {
       state.loadingProgress = action.payload;
     },
-    setAttributeSearches: (
+    setSearchesWithStats: (
       state,
       action: PayloadAction<
         Array<{
-          dim_id: string;
-          attribute: string;
+          search_id: string;
+          search_query: string;
           num_judgments_computed: number;
           num_total: number;
         }>
       >
     ) => {
-      state.attributeSearches = action.payload;
+      state.searchesWithStats = action.payload;
     },
-    resetAttributeFinderSlice: () => initialState,
+    resetSearchSlice: () => initialState,
   },
 });
 
 export const {
   setActiveClusterTaskId,
-  handleAttributesUpdate,
-  setLoadingAttributesForId,
-  setActiveAttributeTaskId,
-  clearAttributeMap,
-  voteOnAttribute,
-  clearVoteState,
-  setAttributeQueryTextboxValue,
-  setAttributeQueryDimId,
+  handleSearchUpdate,
+  setLoadingSearchQuery,
+  setActiveSearchTaskId,
+  clearSearchResultMap,
+  // voteOnAttribute,
+  // clearVoteState,
+  setSearchQueryTextboxValue,
+  setSearchQuery,
   setLoadingProgress,
-  setAttributeSearches,
-  resetAttributeFinderSlice,
-} = attributeFinderSlice.actions;
+  setSearchesWithStats,
+  resetSearchSlice,
+} = searchSlice.actions;
 
-export default attributeFinderSlice.reducer;
+export default searchSlice.reducer;

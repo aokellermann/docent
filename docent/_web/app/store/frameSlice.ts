@@ -19,9 +19,9 @@ import { setToastNotification } from './toastSlice';
 
 export interface FrameState {
   // Jank state necessary to auto-scroll correctly:
-  //   If there is an initial attributeDimId, then we wait until the attributes have loaded
+  //   If there is an initial search query, then we wait until the search has loaded
   //   before we scroll to the specified transcript block
-  hasInitAttributeDimId?: boolean;
+  hasInitSearchQuery?: boolean;
   // Available frame grids
   frameGrids?: FrameGrid[];
   isLoadingFrameGrids: boolean;
@@ -68,22 +68,24 @@ export const fetchFrameGrids = createAsyncThunk(
 
 export const initSession = createAsyncThunk(
   'frame/initSession',
-  async (evalId: string, { dispatch }) => {
+  async (frameGridId: string, { dispatch }) => {
     try {
-      const response = await apiRestClient.post('/join', {
-        fg_id: evalId,
-      });
-      const { fg_id } = response.data;
+      const response = await apiRestClient.post(`/${frameGridId}/join`);
+      const { fg_id, view_id } = response.data;
+
+      if (fg_id !== frameGridId) {
+        throw new Error('Frame grid ID mismatch');
+      }
 
       // Set various IDs
-      dispatch(setFrameGridId(fg_id));
-      dispatch(setEvalId(evalId));
+      dispatch(setFrameGridId(frameGridId));
+      dispatch(setEvalId(frameGridId));
 
       dispatch(getAgentRunMetadataFields());
-      // Start a broker socket to listen for state updates
-      await socketService.initSocket(fg_id);
+      // Start a broker socket to listen for state updates with dual-channel support
+      await socketService.initSocket(fg_id, view_id);
       // Only request state after connection is established
-      dispatch(getState(evalId));
+      dispatch(getState());
     } catch (error) {
       // Cleanup on error
       socketService.closeSocket();
@@ -103,7 +105,7 @@ export const initSession = createAsyncThunk(
 
 export const getState = createAsyncThunk(
   'frame/getState',
-  async (evalId: string, { dispatch, getState }) => {
+  async (_, { dispatch, getState }) => {
     const state = getState() as { frame: FrameState };
     const frameGridId = state.frame.frameGridId;
 
@@ -119,7 +121,7 @@ export const getState = createAsyncThunk(
     }
 
     try {
-      await apiRestClient.get(`/state?fg_id=${frameGridId}`);
+      await apiRestClient.get(`/${frameGridId}/state`);
     } catch (error) {
       dispatch(
         setToastNotification({
@@ -152,7 +154,7 @@ export const getAgentRunMetadataFields = createAsyncThunk(
 
     try {
       const response = await apiRestClient.get(
-        `/agent_run_metadata_fields?fg_id=${frameGridId}`
+        `/${frameGridId}/agent_run_metadata_fields`
       );
       dispatch(setAgentRunMetadataFields(response.data.fields));
     } catch (error) {
@@ -186,10 +188,12 @@ export const getAgentRunMetadata = createAsyncThunk(
     }
 
     try {
-      const response = await apiRestClient.post('/agent_run_metadata', {
-        fg_id: frameGridId,
-        agent_run_ids: agentRunIds,
-      });
+      const response = await apiRestClient.post(
+        `/${frameGridId}/agent_run_metadata`,
+        {
+          agent_run_ids: agentRunIds,
+        }
+      );
       dispatch(updateAgentRunMetadata(response.data));
     } catch (error) {
       dispatch(
@@ -222,10 +226,12 @@ export const getDimensions = createAsyncThunk(
     }
 
     try {
-      const response = await apiRestClient.post('/get_dimensions', {
-        fg_id: frameGridId,
-        dim_ids: dimIds,
-      });
+      const response = await apiRestClient.post(
+        `/${frameGridId}/get_dimensions`,
+        {
+          dim_ids: dimIds,
+        }
+      );
       dispatch(setDimensions(response.data));
       return response.data;
     } catch (error) {
@@ -241,9 +247,9 @@ export const getDimensions = createAsyncThunk(
   }
 );
 
-export const addAttributeDimension = createAsyncThunk(
-  'frame/addAttributeDimension',
-  async (attribute: string, { dispatch, getState }) => {
+export const addSearchDimension = createAsyncThunk(
+  'frame/addSearchDimension',
+  async (searchQuery: string, { dispatch, getState }) => {
     const state = getState() as { frame: FrameState };
     const frameGridId = state.frame.frameGridId;
 
@@ -259,11 +265,10 @@ export const addAttributeDimension = createAsyncThunk(
     }
 
     try {
-      const response = await apiRestClient.post('/dimension', {
-        fg_id: frameGridId,
+      const response = await apiRestClient.post(`/${frameGridId}/dimension`, {
         dim: {
-          name: attribute,
-          attribute: attribute,
+          name: searchQuery,
+          search_query: searchQuery,
         },
       });
       return response.data; // ID of the posted dimension
@@ -299,7 +304,7 @@ export const deleteDimension = createAsyncThunk(
 
     try {
       await apiRestClient.delete(
-        `/dimension?fg_id=${frameGridId}&dim_id=${dimensionId}`
+        `/${frameGridId}/dimension?dim_id=${dimensionId}`
       );
     } catch (error) {
       dispatch(
@@ -333,13 +338,47 @@ export const deleteFilter = createAsyncThunk(
 
     try {
       await apiRestClient.delete(
-        `/filter?fg_id=${frameGridId}&filter_id=${filterId}`
+        `/${frameGridId}/filter?filter_id=${filterId}`
       );
     } catch (error) {
       dispatch(
         setToastNotification({
           title: 'Error deleting filter',
           description: 'Failed to delete filter',
+          variant: 'destructive',
+        })
+      );
+      throw error;
+    }
+  }
+);
+
+export const deleteSearch = createAsyncThunk(
+  'frame/deleteSearch',
+  async (searchQueryId: string, { dispatch, getState }) => {
+    const state = getState() as { frame: FrameState };
+    const frameGridId = state.frame.frameGridId;
+
+    if (!frameGridId) {
+      dispatch(
+        setToastNotification({
+          title: 'Configuration error',
+          description: 'No frame grid ID available',
+          variant: 'destructive',
+        })
+      );
+      throw new Error('No frame grid ID available');
+    }
+
+    try {
+      await apiRestClient.delete(
+        `/${frameGridId}/search?search_query_id=${searchQueryId}`
+      );
+    } catch (error) {
+      dispatch(
+        setToastNotification({
+          title: 'Error deleting search',
+          description: 'Failed to delete search query',
           variant: 'destructive',
         })
       );
@@ -359,8 +398,7 @@ export const updateFrameGrid = createAsyncThunk(
     { dispatch }
   ) => {
     try {
-      await apiRestClient.put('/framegrid', {
-        fg_id,
+      await apiRestClient.put(`/${fg_id}/framegrid`, {
         name,
         description,
       });
@@ -382,7 +420,7 @@ export const deleteFrameGrid = createAsyncThunk(
   'frame/deleteFrameGrid',
   async (fg_id: string, { dispatch }) => {
     try {
-      await apiRestClient.delete(`/framegrid?fg_id=${fg_id}`);
+      await apiRestClient.delete(`/${fg_id}/framegrid`);
       dispatch(
         setToastNotification({
           title: 'Frame grid deleted',
@@ -424,8 +462,7 @@ export const editFilter = createAsyncThunk(
     }
 
     try {
-      await apiRestClient.post('/filter', {
-        fg_id: frameGridId,
+      await apiRestClient.post(`/${frameGridId}/filter`, {
         filter_id: filterId,
         new_predicate: newPredicate,
       });
@@ -499,8 +536,8 @@ export const frameSlice = createSlice({
     setIsLoadingFrameGrids: (state, action: PayloadAction<boolean>) => {
       state.isLoadingFrameGrids = action.payload;
     },
-    setHasInitAttributeDimId: (state, action: PayloadAction<boolean>) => {
-      state.hasInitAttributeDimId = action.payload;
+    setHasInitSearchQuery: (state, action: PayloadAction<boolean>) => {
+      state.hasInitSearchQuery = action.payload;
     },
     resetFrameSlice: () => initialState,
   },
@@ -518,7 +555,7 @@ export const {
   setOuterDimId,
   setFrameGrids,
   setIsLoadingFrameGrids,
-  setHasInitAttributeDimId,
+  setHasInitSearchQuery,
   resetFrameSlice,
 } = frameSlice.actions;
 

@@ -11,13 +11,13 @@ from docent.data_models.agent_run import AgentRun
 from docent.data_models.citation import Citation, parse_citations_single_transcript
 from docent.data_models.transcript import SINGLE_BLOCK_CITE_INSTRUCTION
 
-ATTRIBUTE_EXTRACTION_PROMPT = f"""
+SEARCH_PROMPT = f"""
 Your task is to check for instances of a search query in some text:
 <text>
 {{item}}
 </text>
 <query>
-{{attribute}}
+{{search_query}}
 </query>
 
 First think carefully about whether the text contains any instances of the query.
@@ -37,63 +37,63 @@ description
 """.strip()
 
 
-class Attribute(BaseModel):
+class SearchResult(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     agent_run_id: str
-    attribute: str
-    attribute_idx: int | None = None
+    search_query: str
+    search_result_idx: int | None = None
     value: str | None = None
 
 
-class AttributeWithCitations(Attribute):
+class SearchResultWithCitations(SearchResult):
     citations: list[Citation] | None
 
     @classmethod
-    def from_attribute(cls, attribute: Attribute) -> "AttributeWithCitations":
+    def from_search_result(cls, result: SearchResult) -> "SearchResultWithCitations":
         return cls(
-            **attribute.model_dump(),
+            **result.model_dump(),
             citations=(
-                parse_citations_single_transcript(attribute.value)
-                if attribute.value is not None
+                parse_citations_single_transcript(result.value)
+                if result.value is not None
                 else None
             ),
         )
 
 
-class AttributeStreamingCallback(Protocol):
-    """Supports batched streaming for cases where many attributes are pre-computed.
+class SearchResultStreamingCallback(Protocol):
+    """Supports batched streaming for cases where many search results are pre-computed.
     This avoids invoking the callback separately for each datapoint.
     """
 
     async def __call__(
         self,
-        attributes: list[Attribute],
+        search_results: list[SearchResult],
     ) -> None: ...
 
 
 def _get_llm_streaming_callback(
-    attribute: str,
+    search_result: str,
     datapoint_ids: list[str],
-    attribute_streaming_callback: AttributeStreamingCallback,
+    search_result_callback: SearchResultStreamingCallback,
 ):
     async def _streaming_callback(batch_index: int, llm_output: LLMOutput):
-        attributes = _parse_llm_output(llm_output)
+        search_results = _parse_llm_output(llm_output)
 
         # Return nothing if the LLM call failed (hence None)
-        if attributes is None:
-            await attribute_streaming_callback(list[Attribute]())
+        if search_results is None:
+            await search_result_callback(list[SearchResult]())
         else:
-            await attribute_streaming_callback(
+            await search_result_callback(
                 [
-                    Attribute(
+                    SearchResult(
                         agent_run_id=datapoint_ids[batch_index],
-                        attribute=attribute,
-                        attribute_idx=i,
+                        search_query=search_result,
+                        search_result_idx=i,
                         value=value,
                     )
-                    # If there were no matches, return a single None attribute
-                    # Otherwise, return all attributes
-                    for i, value in enumerate(attributes if len(attributes) > 0 else [None])
+                    # If there were no matches, return a single None result
+                    # Otherwise, return all results
+                    for i, value in enumerate(search_results if len(search_results) > 0 else [None])
                 ]
             )
 
@@ -112,10 +112,10 @@ def _parse_llm_output(output: LLMOutput) -> list[str] | None:
         return [str(match.group(1).strip()) for match in matches]
 
 
-async def extract_attributes(
+async def execute_search(
     agent_runs: list[AgentRun],
-    attribute: str,
-    attribute_callback: AttributeStreamingCallback | None = None,
+    search_query: str,
+    search_result_callback: SearchResultStreamingCallback | None = None,
 ):
     """
     Processes items sequentially and calls streaming_callback with the
@@ -125,12 +125,12 @@ async def extract_attributes(
     texts = [ar.text for ar in agent_runs]
 
     llm_callback = (
-        _get_llm_streaming_callback(attribute, ids, attribute_callback)
-        if attribute_callback is not None
+        _get_llm_streaming_callback(search_query, ids, search_result_callback)
+        if search_result_callback is not None
         else None
     )
 
-    prompts = [ATTRIBUTE_EXTRACTION_PROMPT.format(attribute=attribute, item=item) for item in texts]
+    prompts = [SEARCH_PROMPT.format(search_query=search_query, item=item) for item in texts]
     outputs = await get_llm_completions_async(
         [
             [
@@ -141,7 +141,7 @@ async def extract_attributes(
             ]
             for prompt in prompts
         ],
-        PROVIDER_PREFERENCES.extract_attributes,
+        PROVIDER_PREFERENCES.execute_search,
         max_new_tokens=4096,
         timeout=180.0,
         use_cache=True,

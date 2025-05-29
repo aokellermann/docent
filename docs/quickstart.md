@@ -108,12 +108,12 @@ Docker Compose is the easiest way to get started, but you may want a manual inst
 
     === "Prod"
         ```bash
-        docent web --port 3001 --backend-url http://localhost:8889
+        docent web --build --port 3001 --backend-url http://localhost:8889
         ```
 
     === "Dev (with autoreload)"
         ```bash
-        docent web --build --port 3001 --backend-url http://localhost:8889
+        docent web --port 3001 --backend-url http://localhost:8889
         ```
 
     to run the frontend. You may need to [install Node.js](https://nodejs.org/en/download/) first.

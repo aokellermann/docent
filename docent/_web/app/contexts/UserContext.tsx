@@ -1,7 +1,14 @@
 'use client';
 
-import { createContext, useContext, useState, ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  ReactNode,
+} from 'react';
 import type { User } from '../lib/dal';
+import { getCurrentUser } from '../services/authService';
 
 interface UserContextType {
   user: User | null;
@@ -20,6 +27,26 @@ export const UserProvider = ({
   user: initialUser,
 }: UserProviderProps) => {
   const [user, setUser] = useState<User | null>(initialUser);
+
+  // Validate session on mount to catch stale server-side state
+  useEffect(() => {
+    // Only validate if we have an initial user from server-side
+    if (initialUser) {
+      getCurrentUser()
+        .then((currentUser) => {
+          // If server says no user but we have one, clear it
+          if (!currentUser && user) {
+            setUser(null);
+          }
+        })
+        .catch(() => {
+          // Clear user state on validation error
+          if (user) {
+            setUser(null);
+          }
+        });
+    }
+  }, [initialUser, user]);
 
   return (
     <UserContext.Provider value={{ user, setUser }}>

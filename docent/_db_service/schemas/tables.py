@@ -7,7 +7,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import mapped_column
 from sqlalchemy.schema import UniqueConstraint
 
-from docent._ai_tools.attribute_extraction import Attribute
+from docent._ai_tools.search import SearchResult
+from docent._db_service.contexts import ViewContext
 from docent._db_service.schemas.base import SQLABase
 from docent.data_models.agent_run import AgentRun
 from docent.data_models.filters import FrameDimension, FrameFilter, Judgment, parse_filter_dict
@@ -15,7 +16,8 @@ from docent.data_models.transcript import Transcript
 
 TABLE_FRAME_GRID = "frame_grids"
 TABLE_AGENT_RUN = "agent_runs"
-TABLE_ATTRIBUTE = "attributes"
+TABLE_SEARCH_RESULTS = "search_results"
+TABLE_SEARCH_QUERIES = "search_queries"
 TABLE_FRAME_DIMENSION = "frame_dimensions"
 TABLE_FILTER = "filters"
 TABLE_JUDGMENT = "judgments"
@@ -23,6 +25,7 @@ TABLE_JOB = "jobs"
 TABLE_TRANSCRIPT = "transcripts"
 TABLE_USER = "users"
 TABLE_SESSION = "sessions"
+TABLE_VIEW = "views"
 
 
 def _sanitize_pg_text(text: str) -> str:
@@ -139,9 +142,9 @@ class SQLAFrameGrid(SQLABase):
     name = mapped_column(Text)
     description = mapped_column(Text)
 
-    base_filter_id = mapped_column(String(36), ForeignKey(f"{TABLE_FILTER}.id"), index=True)
-    outer_dim_id = mapped_column(String(36), ForeignKey(f"{TABLE_FRAME_DIMENSION}.id"))
-    inner_dim_id = mapped_column(String(36), ForeignKey(f"{TABLE_FRAME_DIMENSION}.id"))
+    # base_filter_id = mapped_column(String(36), ForeignKey(f"{TABLE_FILTER}.id"), index=True)
+    # outer_dim_id = mapped_column(String(36), ForeignKey(f"{TABLE_FRAME_DIMENSION}.id"))
+    # inner_dim_id = mapped_column(String(36), ForeignKey(f"{TABLE_FRAME_DIMENSION}.id"))
 
     # User who created this frame grid
     created_by = mapped_column(
@@ -161,10 +164,10 @@ class SQLAFrameDimension(SQLABase):
     fg_id = mapped_column(
         String(36), ForeignKey(f"{TABLE_FRAME_GRID}.id"), nullable=False, index=True
     )
+    view_id = mapped_column(String(36), ForeignKey(f"{TABLE_VIEW}.id"), nullable=False, index=True)
 
-    # For predicate dimensions
-    attribute = mapped_column(Text, index=True)
-    backend = mapped_column(Text, nullable=False)
+    # For dimensions that cluster search query results
+    search_query = mapped_column(Text, index=True)
 
     # For metadata dimensions
     metadata_key = mapped_column(Text, index=True)
@@ -175,14 +178,14 @@ class SQLAFrameDimension(SQLABase):
     loading_marginals = mapped_column(Boolean, nullable=False)
 
     @classmethod
-    def from_frame_dimension(cls, dimension: FrameDimension, fg_id: str):
+    def from_frame_dimension(cls, dimension: FrameDimension, ctx: ViewContext):
         """Convert a FrameDimension object to a SQLAFrameDimension object for database storage."""
         sqla_dimension = cls(
             id=dimension.id,
             name=dimension.name,
-            fg_id=fg_id,
-            attribute=dimension.attribute,
-            backend=dimension.backend,
+            fg_id=ctx.fg_id,
+            view_id=ctx.view_id,
+            search_query=dimension.search_query,
             metadata_key=dimension.metadata_key,
             maintain_mece=dimension.maintain_mece,
             loading_clusters=dimension.loading_clusters,
@@ -193,7 +196,7 @@ class SQLAFrameDimension(SQLABase):
         filters: list[SQLAFilter] = []
         if dimension.bins:
             for filter_obj in dimension.bins:
-                filters.append(SQLAFilter.from_filter(filter_obj, fg_id, dimension.id))
+                filters.append(SQLAFilter.from_filter(filter_obj, ctx, dimension.id))
 
         return sqla_dimension, filters
 
@@ -202,13 +205,32 @@ class SQLAFrameDimension(SQLABase):
             id=self.id,
             name=self.name,
             bins=filters,
-            attribute=self.attribute,
-            backend=self.backend,
+            search_query=self.search_query,
             metadata_key=self.metadata_key,
             maintain_mece=self.maintain_mece,
             loading_clusters=self.loading_clusters,
             loading_marginals=self.loading_marginals,
         )
+
+
+class SQLAView(SQLABase):
+    __tablename__ = TABLE_VIEW
+
+    id = mapped_column(String(36), primary_key=True)
+    fg_id = mapped_column(
+        String(36), ForeignKey(f"{TABLE_FRAME_GRID}.id"), nullable=False, index=True
+    )
+
+    name = mapped_column(Text, nullable=True)
+    is_default = mapped_column(Boolean, nullable=False, default=False, index=True)
+
+    base_filter_id = mapped_column(String(36), ForeignKey(f"{TABLE_FILTER}.id"), nullable=True)
+    inner_dim_id = mapped_column(
+        String(36), ForeignKey(f"{TABLE_FRAME_DIMENSION}.id"), nullable=True
+    )
+    outer_dim_id = mapped_column(
+        String(36), ForeignKey(f"{TABLE_FRAME_DIMENSION}.id"), nullable=True
+    )
 
 
 class SQLAFilter(SQLABase):
@@ -218,6 +240,7 @@ class SQLAFilter(SQLABase):
     fg_id = mapped_column(
         String(36), ForeignKey(f"{TABLE_FRAME_GRID}.id"), nullable=False, index=True
     )
+    view_id = mapped_column(String(36), ForeignKey(f"{TABLE_VIEW}.id"), nullable=False, index=True)
 
     # Which dimension the filter "belongs" to (supports the relationships below)
     dimension_id = mapped_column(String(36), ForeignKey(f"{TABLE_FRAME_DIMENSION}.id"), index=True)
@@ -233,12 +256,13 @@ class SQLAFilter(SQLABase):
     def from_filter(
         cls,
         filter: FrameFilter,
-        fg_id: str,
-        dim_id: str | None,
+        ctx: ViewContext,
+        dim_id: str | None = None,
     ):
         return cls(
             id=filter.id,
-            fg_id=fg_id,
+            fg_id=ctx.fg_id,
+            view_id=ctx.view_id,
             dimension_id=dim_id,
             filter_json=filter.model_dump(),
             filter_type=filter.type,
@@ -270,8 +294,8 @@ class SQLAJudgment(SQLABase):
         nullable=False,
         index=True,
     )
-    attribute = mapped_column(Text, index=True)
-    attribute_idx = mapped_column(Integer, index=True)
+    search_query = mapped_column(Text, index=True)
+    search_result_idx = mapped_column(Integer, index=True)
 
     # The judgment result
     matches = mapped_column(Boolean, nullable=False, index=True)
@@ -279,7 +303,7 @@ class SQLAJudgment(SQLABase):
 
     @classmethod
     def from_judgment(cls, judgment: Judgment, fg_id: str) -> "SQLAJudgment":
-        uniqueness_key = f"{fg_id}|{judgment.filter_id}|{judgment.agent_run_id}|{judgment.attribute}|{judgment.attribute_idx}"
+        uniqueness_key = f"{fg_id}|{judgment.filter_id}|{judgment.agent_run_id}|{judgment.search_query}|{judgment.search_result_idx}"
 
         return cls(
             id=judgment.id,
@@ -287,8 +311,8 @@ class SQLAJudgment(SQLABase):
             uniqueness_key=uniqueness_key,
             agent_run_id=judgment.agent_run_id,
             filter_id=judgment.filter_id,
-            attribute=judgment.attribute,
-            attribute_idx=judgment.attribute_idx,
+            search_query=judgment.search_query,
+            search_result_idx=judgment.search_result_idx,
             matches=judgment.matches,
             reason=judgment.reason,
         )
@@ -298,29 +322,29 @@ class SQLAJudgment(SQLABase):
             id=self.id,
             agent_run_id=self.agent_run_id,
             filter_id=self.filter_id,
-            attribute=self.attribute,
-            attribute_idx=self.attribute_idx,
+            search_query=self.search_query,
+            search_result_idx=self.search_result_idx,
             matches=self.matches,
             reason=self.reason,
         )
 
 
-class SQLAAttribute(SQLABase):
-    __tablename__ = TABLE_ATTRIBUTE
+class SQLASearchResult(SQLABase):
+    __tablename__ = TABLE_SEARCH_RESULTS
 
     id = mapped_column(String(36), primary_key=True)
     fg_id = mapped_column(
         String(36), ForeignKey(f"{TABLE_FRAME_GRID}.id"), nullable=False, index=True
     )
 
-    # Location of the attribute
+    # Location of the search result
     agent_run_id = mapped_column(
         String(36), ForeignKey(f"{TABLE_AGENT_RUN}.id"), nullable=False, index=True
     )
-    attribute = mapped_column(Text, nullable=False, index=True)
-    attribute_idx = mapped_column(Integer, index=True)
+    search_query = mapped_column(Text, nullable=False, index=True)
+    search_result_idx = mapped_column(Integer, index=True)
 
-    # Null indicates no values for this (datapoint, attribute) pair
+    # Null indicates no values for this (datapoint, search_query) pair
     # If there are any non-null values, value should never be null
     value = mapped_column(Text)
 
@@ -328,35 +352,46 @@ class SQLAAttribute(SQLABase):
         UniqueConstraint(
             "fg_id",
             "agent_run_id",
-            "attribute",
-            "attribute_idx",
-            name="uq_attribute_key_combination",
+            "search_query",
+            "search_result_idx",
+            name="uq_search_result_key_combination",
         ),
     )
 
     @classmethod
-    def from_attribute(
+    def from_search_result(
         cls,
-        attribute: Attribute,
+        search_result: SearchResult,
         fg_id: str,
     ):
         return cls(
-            id=attribute.id,
+            id=search_result.id,
             fg_id=fg_id,
-            agent_run_id=attribute.agent_run_id,
-            attribute=attribute.attribute,
-            attribute_idx=attribute.attribute_idx,
-            value=attribute.value,
+            agent_run_id=search_result.agent_run_id,
+            search_query=search_result.search_query,
+            search_result_idx=search_result.search_result_idx,
+            value=search_result.value,
         )
 
-    def to_attribute(self) -> Attribute:
-        return Attribute(
+    def to_search_result(self) -> SearchResult:
+        return SearchResult(
             id=self.id,
             agent_run_id=self.agent_run_id,
-            attribute=self.attribute,
-            attribute_idx=self.attribute_idx,
+            search_query=self.search_query,
+            search_result_idx=self.search_result_idx,
             value=self.value,
         )
+
+
+class SQLASearchQuery(SQLABase):
+    __tablename__ = TABLE_SEARCH_QUERIES
+
+    id = mapped_column(String(36), primary_key=True)
+    fg_id = mapped_column(
+        String(36), ForeignKey(f"{TABLE_FRAME_GRID}.id"), nullable=False, index=True
+    )
+
+    search_query = mapped_column(Text, nullable=False, index=True)
 
 
 class SQLAJob(SQLABase):

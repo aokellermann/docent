@@ -2,28 +2,22 @@ import {
   ChevronDown,
   ChevronRight,
   Loader2,
-  ThumbsUp,
-  ThumbsDown,
 } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo } from 'react';
-import { useSelector } from 'react-redux';
 
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
+
+
 
 import {
   requestRegexSnippetsIfExist,
-  voteOnAttribute,
-} from '../store/attributeFinderSlice';
+  // voteOnAttribute,
+} from '../store/searchSlice';
 import { updateRegexSnippets } from '../store/experimentViewerSlice';
 import { getAgentRunMetadata } from '../store/frameSlice';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { RootState } from '../store/store';
 import { RegexSnippet, TaskStats } from '../types/experimentViewerTypes';
-import { AttributeWithCitations } from '../types/frameTypes';
+import { SearchResultWithCitations } from '../types/frameTypes';
 
 interface InnerCard {
   innerId: string;
@@ -40,7 +34,7 @@ interface InnerCard {
 interface AttributeSectionProps {
   dataId: string;
   curAttributeQuery: string;
-  attributes: AttributeWithCitations[];
+  attributes: SearchResultWithCitations[];
   onShowAgentRun?: (agentRunId: string, blockId?: number) => void;
 }
 
@@ -50,8 +44,8 @@ const AttributeSection: React.FC<AttributeSectionProps> = ({
   attributes: attributes,
   onShowAgentRun,
 }) => {
-  const dispatch = useAppDispatch();
-  const voteState = useAppSelector((state) => state.attributeFinder.voteState);
+  // const dispatch = useAppDispatch();
+  // const voteState = useAppSelector((state) => state.search.voteState);
 
   if (attributes.length === 0) {
     return null;
@@ -73,7 +67,7 @@ const AttributeSection: React.FC<AttributeSectionProps> = ({
           return null;
         }
         const citations = attribute.citations || [];
-        const currentVote = voteState?.[dataId]?.[attributeText];
+        // const currentVote = voteState?.[dataId]?.[attributeText];
 
         // Create a component that renders text with citations highlighted
         const renderTextWithCitations = () => {
@@ -149,7 +143,7 @@ const AttributeSection: React.FC<AttributeSectionProps> = ({
               <div className="flex items-start justify-between gap-2">
                 <p className="mb-0.5 flex-1">{renderTextWithCitations()}</p>
                 <div className="flex shrink-0">
-                  <Tooltip>
+                  {/* <Tooltip>
                     <TooltipContent>This result is relevant</TooltipContent>
                     <TooltipTrigger asChild>
                       <button
@@ -196,7 +190,7 @@ const AttributeSection: React.FC<AttributeSectionProps> = ({
                         <ThumbsDown className="w-3 h-3" />
                       </button>
                     </TooltipTrigger>
-                  </Tooltip>
+                  </Tooltip> */}
                 </div>
               </div>
               <div className="flex items-center gap-1 text-[10px] text-indigo-600 mt-1">
@@ -353,45 +347,26 @@ const InnerCard: React.FC<InnerCard> = ({
 }) => {
   const dispatch = useAppDispatch();
 
-  const attributeQueryDimId = useAppSelector(
-    (state) => state.attributeFinder.attributeQueryDimId
-  );
-  const dimensionsMap = useAppSelector((state) => state.frame.dimensionsMap);
-  const curAttributeQuery = useMemo(
-    () =>
-      attributeQueryDimId
-        ? dimensionsMap?.[attributeQueryDimId]?.attribute
-        : undefined,
-    [attributeQueryDimId, dimensionsMap]
+  const {
+    curSearchQuery,
+    searchResultMap: attributeMap,
+    loadingSearchQuery: loadingAttributesForId,
+  } = useAppSelector((state: RootState) => state.search);
+
+  const { baseFilter, agentRunMetadata } = useAppSelector(
+    (state: RootState) => ({
+      baseFilter: state.frame.baseFilter,
+      agentRunMetadata: state.frame.agentRunMetadata,
+    })
   );
 
-  const attributeMap = useSelector(
-    (state: RootState) => state.attributeFinder.attributeMap
-  );
-  const loadingAttributesForId = useSelector(
-    (state: RootState) => state.attributeFinder.loadingAttributesForId
-  );
-  const agentRunMetadata = useSelector(
-    (state: RootState) => state.frame.agentRunMetadata
-  );
-
-  const selectedDiffTranscript = useSelector(
-    (state: RootState) => state.experimentViewer.selectedDiffTranscript
-  );
-  const selectedDiffSampleId = useSelector(
-    (state: RootState) => state.experimentViewer.selectedDiffSampleId
+  const { selectedDiffTranscript, regexSnippets } = useAppSelector(
+    (state: RootState) => state.experimentViewer
   );
 
   /**
    * Regex snippets for the associated transcripts
    */
-
-  const regexSnippets = useAppSelector(
-    (state: RootState) => state.experimentViewer.regexSnippets
-  );
-  const baseFilter = useAppSelector(
-    (state: RootState) => state.frame.baseFilter
-  );
 
   useEffect(() => {
     if (
@@ -476,14 +451,14 @@ const InnerCard: React.FC<InnerCard> = ({
 
   const getAttributes = useCallback(
     (dataId: string) => {
-      if (!curAttributeQuery) return null;
-      const attributes = attributeMap?.[dataId]?.[curAttributeQuery].filter(
+      if (!curSearchQuery) return null;
+      const attributes = attributeMap?.[dataId]?.[curSearchQuery].filter(
         (attr) => attr.value !== null
       );
       if (attributes === undefined || attributes.length === 0) return null;
       return attributes;
     },
-    [curAttributeQuery, attributeMap]
+    [curSearchQuery, attributeMap]
   );
 
   return (
@@ -536,7 +511,7 @@ const InnerCard: React.FC<InnerCard> = ({
           {stats && (
             <div className="flex flex-row gap-2 items-center font-mono">
               {allScoreKeys.map((scoreKey, index) => {
-                if (curAttributeQuery) return null;
+                if (curSearchQuery) return null;
 
                 const scoreStats = stats[scoreKey];
                 if (!scoreStats) return null;
@@ -587,7 +562,7 @@ const InnerCard: React.FC<InnerCard> = ({
             {agentRunIds.map((agentRunId) => {
               // Skip if there is an active query but there are no matching attribute values
               const attributes = getAttributes(agentRunId);
-              if (curAttributeQuery && attributes === null) return null;
+              if (curSearchQuery && attributes === null) return null;
 
               return (
                 <div
@@ -683,10 +658,10 @@ const InnerCard: React.FC<InnerCard> = ({
                   />
 
                   {/* Replace the inline attribute section with the new component */}
-                  {attributes && curAttributeQuery && (
+                  {attributes && curSearchQuery && (
                     <AttributeSection
                       dataId={agentRunId}
-                      curAttributeQuery={curAttributeQuery}
+                      curAttributeQuery={curSearchQuery}
                       attributes={attributes}
                       onShowAgentRun={onShowAgentRun}
                     />

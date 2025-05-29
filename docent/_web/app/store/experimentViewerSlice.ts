@@ -79,8 +79,7 @@ export const setIODims = createAsyncThunk(
     }
 
     try {
-      await apiRestClient.post('/io_dims', {
-        fg_id: frameGridId,
+      await apiRestClient.post(`/${frameGridId}/io_dims`, {
         inner_dim_id: innerDimId,
         outer_dim_id: outerDimId,
       });
@@ -126,8 +125,7 @@ export const setIODimByMetadataKey = createAsyncThunk(
     }
 
     try {
-      await apiRestClient.post('/io_dims_with_metadata_key', {
-        fg_id: frameGridId,
+      await apiRestClient.post(`/${frameGridId}/io_dims_with_metadata_key`, {
         metadata_key: metadataKey,
         type: type,
       });

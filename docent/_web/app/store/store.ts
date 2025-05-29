@@ -2,7 +2,7 @@
 
 import { configureStore } from '@reduxjs/toolkit';
 
-import attributeFinderReducer from './attributeFinderSlice';
+import searchReducer from './searchSlice';
 import experimentViewerReducer from './experimentViewerSlice';
 import frameReducer from './frameSlice';
 import toastReducer from './toastSlice';
@@ -23,7 +23,7 @@ const errorLogger = (store: any) => (next: any) => (action: any) => {
 const store = configureStore({
   reducer: {
     experimentViewer: experimentViewerReducer,
-    attributeFinder: attributeFinderReducer,
+    search: searchReducer,
     frame: frameReducer,
     transcript: transcriptReducer,
     toast: toastReducer,

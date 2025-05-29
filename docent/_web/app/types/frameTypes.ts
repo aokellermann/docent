@@ -10,8 +10,8 @@ export interface Judgment {
   id: string;
   agent_run_id: string;
   filter_id: string;
-  attribute?: string | null;
-  attribute_idx?: number | null;
+  search_query?: string | null;
+  search_result_idx?: number | null;
   matches: boolean;
   reason?: string | null;
 }
@@ -26,21 +26,22 @@ export interface FrameGrid {
   created_at: string;
 }
 
-export interface Attribute {
+export interface SearchResult {
   id: string;
   agent_run_id: string;
-  attribute: string;
-  attribute_idx?: number | null;
+  search_query: string;
+  search_result_idx?: number | null;
   value?: string | null;
 }
 
-export interface AttributeWithCitations extends Attribute {
+export interface SearchResultWithCitations extends SearchResult {
   citations: Citation[] | null;
 }
 
 export type FilterLiteral =
   | 'primitive'
-  | 'attribute_predicate'
+  | 'search_result_exists'
+  | 'search_result_predicate'
   | 'complex'
   | 'agent_run_id';
 
@@ -64,10 +65,15 @@ export interface PrimitiveFilter extends FrameFilter {
 
 export type MetadataType = 'str' | 'int' | 'float' | 'bool';
 
-export interface PredicateFilter extends FrameFilter {
-  type: 'attribute_predicate';
+export interface SearchResultExistsFilter extends FrameFilter {
+  type: 'search_result_exists';
+  search_query: string;
+}
+
+export interface SearchResultPredicateFilter extends FrameFilter {
+  type: 'search_result_predicate';
   predicate: string;
-  attribute: string;
+  search_query: string;
   backend: string;
 }
 
@@ -81,15 +87,9 @@ export interface FrameDimension {
   id: string;
   name: string | null;
   bins: FrameFilter[] | null;
-  attribute: string | null;
+  search_query: string | null;
   metadata_key: string | null;
-  backend: string;
-  loading_clusters: boolean | null;
-  loading_marginals: boolean | null;
-}
-
-export interface RegexSnippet {
-  snippet: string;
-  match_start: number;
-  match_end: number;
+  maintain_mece: boolean | null;
+  loading_clusters: boolean;
+  loading_marginals: boolean;
 }

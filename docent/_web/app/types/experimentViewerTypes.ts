@@ -1,10 +1,9 @@
 import {
-  AttributeWithCitations,
+  SearchResultWithCitations,
   FrameDimension,
   FrameFilter,
+  MetadataType,
 } from './frameTypes';
-
-export type MetadataType = 'str' | 'int' | 'float' | 'bool';
 
 export interface TranscriptMetadataField {
   name: string;
@@ -19,8 +18,8 @@ export interface Citation {
   action_unit_idx: number | null;
 }
 
-export interface StreamedAttribute {
-  data_dict: Record<string, Record<string, AttributeWithCitations[]>>;
+export interface StreamedSearchResult {
+  data_dict: Record<string, Record<string, SearchResultWithCitations[]>>;
   num_agent_runs_done: number;
   num_agent_runs_total: number;
 }

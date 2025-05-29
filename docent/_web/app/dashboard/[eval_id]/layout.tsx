@@ -5,9 +5,9 @@ import React, { useEffect, Suspense, useState, useRef } from 'react';
 
 import Breadcrumbs from '../../components/Breadcrumbs';
 import ResponsiveCheck from '../../components/ResponsiveCheck';
-import { requestAttributes } from '../../store/attributeFinderSlice';
-import { initSession, setHasInitAttributeDimId } from '../../store/frameSlice';
+import { initSession, setHasInitSearchQuery } from '../../store/frameSlice';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
+import { computeSearch } from '@/app/store/searchSlice';
 
 export default function DocentLayout({
   children,
@@ -38,55 +38,54 @@ export default function DocentLayout({
   const frameGridId = useAppSelector((state) => state.frame.frameGridId);
   const dimensionsMap = useAppSelector((state) => state.frame.dimensionsMap);
 
-  const [initAttributeDimId, setInitAttributeDimId] = useState<
-    string | undefined
-  >(undefined);
+  const [initSearchQuery, setInitSearchQuery] = useState<string | undefined>(
+    undefined
+  );
 
-  // Check if the URL contains an attributeDimId parameter
+  // Check if the URL contains a searchQuery parameter
   const searchParamsCheckedRef = useRef(false);
   useEffect(() => {
     if (searchParamsCheckedRef.current) return;
 
-    const attributeDimId = searchParams.get('attributeDimId');
-    if (attributeDimId) {
-      setInitAttributeDimId(attributeDimId);
-      dispatch(setHasInitAttributeDimId(true));
-      console.log('Found attributeDimId in URL:', attributeDimId);
+    const searchQuery = searchParams.get('searchQuery');
+    if (searchQuery) {
+      setInitSearchQuery(searchQuery);
+      dispatch(setHasInitSearchQuery(true));
+      console.log('Found searchQuery in URL:', searchQuery);
 
-      // Create a new URLSearchParams object without the attributeQuery
+      // Create a new URLSearchParams object without the searchQuery
       const newSearchParams = new URLSearchParams(searchParams.toString());
-      newSearchParams.delete('attributeDimId');
+      newSearchParams.delete('searchQuery');
 
       // Update the URL without adding to history
       router.replace(
         `${window.location.pathname}?${newSearchParams.toString()}`
       );
     } else {
-      dispatch(setHasInitAttributeDimId(false));
-      console.log('No attributeDimId found in URL');
+      dispatch(setHasInitSearchQuery(false));
+      console.log('No searchQuery found in URL');
     }
 
     searchParamsCheckedRef.current = true;
   }, [searchParams, router, dispatch]);
 
-  // If the URL comes with an attributeDimId, we need to request the attributes
-  const alreadyRequestedInitAttribute = useRef(false);
+  // If the URL comes with an searchQuery, we need to request the search
+  const alreadyRequestedInitSearch = useRef(false);
   useEffect(() => {
     if (
-      !alreadyRequestedInitAttribute.current &&
+      !alreadyRequestedInitSearch.current &&
       frameGridId &&
-      initAttributeDimId &&
+      initSearchQuery &&
       dimensionsMap
     ) {
       dispatch(
-        requestAttributes({
-          attribute: undefined,
-          existingDimId: initAttributeDimId,
+        computeSearch({
+          searchQuery: initSearchQuery,
         })
       );
-      alreadyRequestedInitAttribute.current = true;
+      alreadyRequestedInitSearch.current = true;
     }
-  }, [initAttributeDimId, dispatch, frameGridId, dimensionsMap]);
+  }, [initSearchQuery, dispatch, frameGridId, dimensionsMap]);
 
   return (
     <div className="flex flex-col h-screen w-screen p-3 pt-2 space-y-2 min-h-0 min-w-0">
