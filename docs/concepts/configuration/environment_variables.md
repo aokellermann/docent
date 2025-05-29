@@ -31,8 +31,6 @@ We have provided reasonable defaults in `.env.template`, but you're welcome to c
 
 ## CORS
 
-`DOCENT_CORS_ORIGINS`: Comma-separated list of allowed frontend origins for CORS. Leave empty/unset for development (auto-allows localhost origins).
-* Development: Leave unset (defaults to localhost:3000,3001)
-* Production: DOCENT_CORS_ORIGINS=https://yourdomain.com
-* Multiple domains: DOCENT_CORS_ORIGINS=https://app.yourdomain.com,https://admin.yourdomain.com
-* Mixed: DOCENT_CORS_ORIGINS=http://localhost:3001,https://yourdomain.com
+* `DOCENT_CORS_ORIGINS`: Comma-separated list of allowed frontend origins for CORS
+    * Leave empty/unset for development (defaults to `localhost:*`)
+    * Example for multiple domains: `DOCENT_CORS_ORIGINS=https://app.yourdomain.com,https://admin.yourdomain.com`
