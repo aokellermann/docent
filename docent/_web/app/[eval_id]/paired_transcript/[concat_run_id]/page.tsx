@@ -1,7 +1,7 @@
 'use client';
 
 import { useParams, useSearchParams } from 'next/navigation';
-import React, { Suspense, useEffect, useRef } from 'react';
+import React, { Suspense, useEffect, useRef, useCallback } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
 import { getCurAgentRun, getAltAgentRun } from '@/app/store/transcriptSlice';
@@ -9,6 +9,7 @@ import { getCurAgentRun, getAltAgentRun } from '@/app/store/transcriptSlice';
 import TranscriptViewer, {
   TranscriptViewerHandle,
 } from '../../transcript/components/TranscriptViewer';
+import DiffPanel from './components/DiffPanel';
 
 const SCROLL_DELAY = 250;
 
@@ -17,6 +18,7 @@ export default function AgentRunPage2() {
 
   const frameGridId = useAppSelector((state) => state.frame.frameGridId);
   const curAgentRun = useAppSelector((state) => state.transcript.curAgentRun);
+  const altAgentRun = useAppSelector((state) => state.transcript.altAgentRun);
 
   const params = useParams();
   const searchParams = useSearchParams();
@@ -71,12 +73,12 @@ export default function AgentRunPage2() {
   const fetchRef = useRef(false);
   useEffect(() => {
     if (fetchRef.current || frameGridId === undefined) return;
-    if (curAgentRun?.id !== agentRunIds[0]) {
+    if (curAgentRun?.id !== agentRunIds[0] || altAgentRun?.id !== agentRunIds[1]) {
       dispatch(getCurAgentRun(agentRunIds[0]));
       dispatch(getAltAgentRun(agentRunIds[1]));
       fetchRef.current = true;
     }
-  }, [frameGridId, agentRunIds, blockId, dispatch, curAgentRun?.id]);
+  }, [frameGridId, agentRunIds, blockId, dispatch, curAgentRun?.id, altAgentRun?.id]);
 
   const handleShowAgentRun = (agentRunId: string, blockId?: number) => {
     if (agentRunId !== curAgentRun?.id) {
@@ -90,6 +92,18 @@ export default function AgentRunPage2() {
     }
   };
 
+  // Create a unified scroll function for the DiffPanel that can handle both transcripts
+  const handleDiffScrollToBlock = useCallback((blockIndex: number, transcriptIdx?: number) => {
+    if (transcriptIdx === 0 && transcriptViewerRef.current) {
+      transcriptViewerRef.current.scrollToBlock(blockIndex);
+    } else if (transcriptIdx === 1 && altTranscriptViewerRef.current) {
+      altTranscriptViewerRef.current.scrollToBlock(blockIndex);
+    } else {
+      // If no transcriptIdx provided, try to scroll the first transcript
+      transcriptViewerRef.current?.scrollToBlock(blockIndex);
+    }
+  }, []);
+
   return (
     <Suspense fallback={<div>Loading...</div>}>
       <div className="flex-1 flex space-x-3 min-h-0">
@@ -102,6 +116,10 @@ export default function AgentRunPage2() {
           ref={altTranscriptViewerRef} 
           alt={true} 
           otherTranscriptRef={transcriptViewerRef}
+        />
+        <DiffPanel 
+          agentRunIds={[agentRunIds[0], agentRunIds[1]]}
+          scrollToBlock={handleDiffScrollToBlock}
         />
       </div>
     </Suspense>

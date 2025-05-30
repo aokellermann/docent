@@ -335,60 +335,6 @@ const DiffSection: React.FC<DiffSectionProps> = ({
     evidence: diffResults.evidence[idx] || null,
   }));
 
-  // Helper function to render text with citations
-  const renderTextWithCitations = (text: string, citations: Citation[]) => {
-    if (!citations.length) {
-      return text;
-    }
-
-    // Sort citations by start index to process them in order
-    const sortedCitations = [...citations].sort(
-      (a, b) => a.start_idx - b.start_idx
-    );
-
-    const parts: JSX.Element[] = [];
-    let lastIndex = 0;
-
-    sortedCitations.forEach((citation, i) => {
-      // Add text before the citation
-      if (citation.start_idx > lastIndex) {
-        parts.push(
-          <span key={`text-${i}`}>
-            {text.slice(lastIndex, citation.start_idx)}
-          </span>
-        );
-      }
-
-      // Add the cited text as a clickable element
-      const citedText = text.slice(citation.start_idx, citation.end_idx);
-      parts.push(
-        <button
-          key={`citation-${i}`}
-          className="px-0.5 py-0.25 bg-indigo-200 text-indigo-800 rounded hover:bg-indigo-400 hover:text-white transition-colors font-medium"
-          onClick={(e) => {
-            e.stopPropagation();
-            if (onShowDatapoint) {
-              onShowDatapoint(citedText[1] == '0' ? dataId : otherId, citation.block_idx);
-            }
-          }}
-        >
-          {citedText}
-        </button>
-      );
-
-      lastIndex = citation.end_idx;
-    });
-
-    // Add any remaining text
-    if (lastIndex < text.length) {
-      parts.push(
-        <span key={`text-end`}>{text.slice(lastIndex)}</span>
-      );
-    }
-
-    return <>{parts}</>;
-  };
-
   return (
     <div className="pt-1 mt-1 border-t border-indigo-100 text-xs space-y-1">
       <div className="flex items-center mb-1">
@@ -399,23 +345,11 @@ const DiffSection: React.FC<DiffSectionProps> = ({
       </div>
 
       {diffTriples.map((triple, idx) => (
-        <div key={idx} className="bg-indigo-50 rounded-md p-1.5 text-xs text-indigo-900 leading-snug mt-1">
+        <div key={idx} className="bg-indigo-50 rounded-md p-1.5 text-xs text-indigo-900 leading-snug mt-1" onClick={() => onShowDatapoint?.(otherId)}>
           {/* Claim */}
           <div className="mb-1.5">
-            <p className="font-medium text-indigo-800">Claim:</p>
             <p className="mt-0.5">{triple.claim}</p>
           </div>
-
-          {/* Evidence */}
-          {triple.evidence && (
-            <div className="mb-1.5">
-              <p className="font-medium text-indigo-800">Evidence:</p>
-              <p className="mt-0.5">
-                {renderTextWithCitations(triple.evidence.evidence, triple.evidence.citations || [])}
-              </p>
-            </div>
-          )}
-
         </div>
       ))}
     </div>
