@@ -37,7 +37,7 @@ const Breadcrumbs: React.FC<BreadcrumbsProps> = () => {
   // Get the current page information
   const agentRunId = params?.agent_run_id as string | undefined;
   const sampleId = params?.sample_id as string | undefined;
-  const isDiffPage = pathname?.includes('/diff');
+  const isDiffPage = pathname?.includes('/paired_transcript');
   const isForestPage = pathname?.includes('/forest');
 
   // For diff page

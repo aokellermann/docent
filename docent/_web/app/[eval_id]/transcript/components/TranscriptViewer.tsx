@@ -33,12 +33,13 @@ import MetadataDialog from './MetadataDialog';
 
 // Export interface for use in other components
 export interface TranscriptViewerHandle {
-  scrollToBlock: (blockIndex: number) => void;
+  scrollToBlock: (blockIndex: number, transcriptIdx?: number) => void;
 }
 
 // Add props interface
 interface TranscriptViewerProps {
   alt: boolean;
+  otherTranscriptRef?: React.RefObject<TranscriptViewerHandle>;
 }
 
 // Add this helper function near the top of the file
@@ -55,7 +56,7 @@ interface EditingToolCall extends Omit<ToolCall, 'arguments'> {
   argumentsString: string;
 }
 
-const TranscriptViewer = forwardRef<TranscriptViewerHandle, TranscriptViewerProps>(({ alt }, ref) => {
+const TranscriptViewer = forwardRef<TranscriptViewerHandle, TranscriptViewerProps>(({ alt, otherTranscriptRef }, ref) => {
   const agentRun = useAppSelector((state) => alt ? state.transcript.altAgentRun : state.transcript.curAgentRun);
   const transcript = useMemo(
     () =>
@@ -97,7 +98,7 @@ const TranscriptViewer = forwardRef<TranscriptViewerHandle, TranscriptViewerProp
 
     // Get all block elements
     const blockElements = Array.from(
-      document.querySelectorAll('[id^="block-"]')
+      document.querySelectorAll('[id*="block-"]')
     );
     if (blockElements.length === 0) return;
 
@@ -120,7 +121,7 @@ const TranscriptViewer = forwardRef<TranscriptViewerHandle, TranscriptViewerProp
 
       // Extract block index from the id
       const blockId = element.id;
-      const blockIndex = parseInt(blockId.replace('block-', ''), 10);
+      const blockIndex = parseInt(blockId.replace('block-', '').split('___')[1], 10);
 
       return { blockIndex, visibilityScore };
     });
@@ -143,13 +144,22 @@ const TranscriptViewer = forwardRef<TranscriptViewerHandle, TranscriptViewerProp
   }, [debouncedScrollPosition, transcript, scrollNode]);
 
   /**
-   * Scroll to block function
+   * Scroll to block function - now with cross-scrolling support
    */
-
   const scrollToBlock = useCallback(
-    (blockIndex: number) => {
+    (blockIndex: number, transcriptIdx: number = alt ? 1 : 0) => {
+      // Determine which transcript should handle this scroll
+      const currentTranscriptIdx = alt ? 1 : 0;
+      
+      if (transcriptIdx !== currentTranscriptIdx && otherTranscriptRef?.current) {
+        // Cross-scroll to the other transcript
+        otherTranscriptRef.current.scrollToBlock(blockIndex);
+        return;
+      }
+
+      // Handle scrolling within this transcript
       const tryScrolling = (attempts = 0, maxAttempts = 3) => {
-        const blockElement = document.getElementById(`block-${blockIndex}`);
+        const blockElement = document.getElementById(`t-${transcriptIdx}___block-${blockIndex}`);
         if (blockElement && scrollNode) {
           const containerRect = scrollNode.getBoundingClientRect();
           const elementRect = blockElement.getBoundingClientRect();
@@ -181,7 +191,7 @@ const TranscriptViewer = forwardRef<TranscriptViewerHandle, TranscriptViewerProp
 
       tryScrolling();
     },
-    [scrollNode]
+    [scrollNode, alt, otherTranscriptRef]
   );
 
   React.useImperativeHandle(
@@ -204,7 +214,7 @@ const TranscriptViewer = forwardRef<TranscriptViewerHandle, TranscriptViewerProp
         ? Math.min(currentBlockIndex + 1, transcript.messages.length - 1)
         : 0;
 
-    scrollToBlock(nextIndex);
+    scrollToBlock(nextIndex, alt ? 1 : 0);
   }, [currentBlockIndex, transcript, scrollToBlock]);
   const goToPrevBlock = useCallback(() => {
     if (!transcript) return;
@@ -212,7 +222,7 @@ const TranscriptViewer = forwardRef<TranscriptViewerHandle, TranscriptViewerProp
     const prevIndex =
       currentBlockIndex !== null ? Math.max(currentBlockIndex - 1, 0) : 0;
 
-    scrollToBlock(prevIndex);
+    scrollToBlock(prevIndex, alt ? 1 : 0);
   }, [currentBlockIndex, transcript, scrollToBlock]);
 
   return (
@@ -255,7 +265,7 @@ const TranscriptViewer = forwardRef<TranscriptViewerHandle, TranscriptViewerProp
               key={index}
               message={message}
               index={index}
-              id={`block-${index}`}
+              id={`t-${alt ? 1 : 0}___block-${index}`}
               agentRun={agentRun}
               scrollToBlock={scrollToBlock}
             />
@@ -312,7 +322,7 @@ export default TranscriptViewer;
 const AttributeDisplay: React.FC<{
   agentRunId: string;
   blockIndex: number;
-  scrollToBlock?: (blockIndex: number) => void;
+  scrollToBlock?: (blockIndex: number, transcriptIdx?: number) => void;
 }> = ({ agentRunId, blockIndex, scrollToBlock }) => {
   const attributeQueryDimId = useAppSelector(
     (state) => state.attributeFinder.attributeQueryDimId
@@ -444,7 +454,7 @@ const AttributeDisplay: React.FC<{
                   className={`px-0.5 py-0.25 bg-indigo-200 text-indigo-800 hover:bg-indigo-400 rounded hover:text-white transition-colors font-medium`}
                   onClick={(e) => {
                     e.stopPropagation();
-                    scrollToBlock?.(citation.block_idx);
+                    scrollToBlock?.(citation.block_idx, citation.transcript_idx || undefined);
                   }}
                 >
                   {citedText}
@@ -485,7 +495,7 @@ const AttributeDisplay: React.FC<{
 const DiffDisplay: React.FC<{
   agentRunId: string;
   blockIndex: number;
-  scrollToBlock?: (blockIndex: number) => void;
+  scrollToBlock?: (blockIndex: number, transcriptIdx?: number) => void;
 }> = ({ agentRunId, blockIndex, scrollToBlock }) => {
   const diffMap = useAppSelector((state) => state.attributeFinder.diffMap);
 
@@ -534,7 +544,7 @@ const DiffDisplay: React.FC<{
   }
 
   // Helper function to render text with citations highlighted
-  const renderTextWithCitations = (text: string, citations: Citation[], otherAgentRunId: string) => {
+  const renderTextWithCitations = (text: string, citations: Citation[]) => {
     if (!citations.length) {
       return text;
     }
@@ -565,7 +575,7 @@ const DiffDisplay: React.FC<{
           className="px-0.5 py-0.25 bg-purple-200 text-purple-800 hover:bg-purple-400 rounded hover:text-white transition-colors font-medium"
           onClick={(e) => {
             e.stopPropagation();
-            scrollToBlock?.(citation.block_idx);
+            scrollToBlock?.(citation.block_idx, citation.transcript_idx == null ? undefined : citation.transcript_idx);
           }}
         >
           {citedText}
@@ -632,7 +642,6 @@ const DiffDisplay: React.FC<{
                           {renderTextWithCitations(
                             pair.evidence.evidence, 
                             pair.evidence.citations || [], 
-                            diff.otherAgentRunId
                           )}
                         </span>
                       </div>
@@ -653,7 +662,7 @@ const MessageBox: React.FC<{
   index: number;
   id?: string;
   agentRun: AgentRun;
-  scrollToBlock: (blockIndex: number) => void;
+  scrollToBlock: (blockIndex: number, transcriptIdx?: number) => void;
 }> = ({ message, index, id, agentRun, scrollToBlock }) => {
   const agentRunId = agentRun.id;
 
