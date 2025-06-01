@@ -3,10 +3,8 @@ import type { Middleware } from '@reduxjs/toolkit';
 import socketService from '../services/socketService';
 
 import {
-  handleAttributesUpdate,
-  setAttributeSearches,
-  setLoadingAttributesForId,
-} from './attributeFinderSlice';
+  setSearchesWithStats,
+} from './searchSlice';
 import {
   setOuterStatMarginals,
   setIdMarginals,
@@ -68,12 +66,6 @@ export const createWebSocketMiddleware = (): Middleware => {
           dispatch(setMarginals(data.payload));
           break;
 
-        case 'compute_attributes_update':
-          dispatch(handleAttributesUpdate(data.payload));
-          break;
-        case 'compute_attributes_complete':
-          dispatch(setLoadingAttributesForId(undefined));
-          break;
         case 'specific_marginals':
           if (data.payload.request_type === 'comb_stats') {
             dispatch(setStatMarginalsAndFilters(data.payload.result));
@@ -92,8 +84,8 @@ export const createWebSocketMiddleware = (): Middleware => {
         case 'datapoints_updated':
           dispatch(handleAgentRunsUpdated());
           break;
-        case 'attribute_searches':
-          dispatch(setAttributeSearches(data.payload));
+        case 'searches':
+          dispatch(setSearchesWithStats(data.payload));
           break;
         case 'io_dims_updated':
           dispatch(setInnerDimId(data.payload.inner_dim_id));

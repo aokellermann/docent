@@ -3,9 +3,14 @@ from typing import Any, Awaitable, Callable, cast
 import anyio
 from sqlalchemy.inspection import inspect as sqla_inspect
 
+from docent._db_service.contexts import ViewContext
 from docent._db_service.service import DBService, MarginalizationResult
 from docent._log_util import get_logger
-from docent._server._broker.redis_client import publish_to_broker
+from docent._server._broker.redis_client import (
+    publish_framegrid_update,
+    publish_to_broker,
+    publish_view_update,
+)
 from docent.data_models.metadata import BaseAgentRunMetadata
 
 logger = get_logger(__name__)
@@ -67,30 +72,34 @@ def _format_bin_combination(bin_combination: tuple[tuple[str, str], ...]) -> str
     return "|".join(",".join(pair) for pair in bin_combination)
 
 
-async def publish_dims(db: DBService, fg_id: str):
-    await publish_to_broker(
-        fg_id,
+async def publish_dims(db: DBService, ctx: ViewContext):
+    await publish_framegrid_update(
+        ctx.fg_id,
         {
             "action": "dimensions",
-            "payload": await db.get_dims(fg_id),
+            "payload": await db.get_view_dims(ctx),
         },
     )
 
 
 async def publish_marginals(
-    db: DBService, fg_id: str, dim_ids: list[str] | None = None, ensure_fresh: bool = True
+    db: DBService,
+    ctx: ViewContext,
+    dim_ids: list[str] | None = None,
+    ensure_fresh: bool = True,
 ):
     async def _publish_dim_callback(_: Any):
-        await publish_dims(db, fg_id)
+        await publish_dims(db, ctx)
 
     marginals = await db.get_marginals(
-        fg_id,
+        ctx,
         keep_dim_ids=dim_ids,
         ensure_fresh=ensure_fresh,
         publish_dim_callback=_publish_dim_callback,
     )
-    await publish_to_broker(
-        fg_id,
+
+    await publish_framegrid_update(
+        ctx.fg_id,
         {
             "action": "marginals",
             "payload": marginals,
@@ -98,36 +107,27 @@ async def publish_marginals(
     )
 
 
-async def publish_base_filter(db: DBService, fg_id: str):
-    base_filter = await db.get_base_filter(fg_id)
-    await publish_to_broker(
-        fg_id,
+async def publish_base_filter(db: DBService, ctx: ViewContext):
+    await publish_view_update(
+        ctx.fg_id,
+        ctx.view_id,
         {
             "action": "base_filter",
-            "payload": base_filter,
+            "payload": ctx.base_filter,
         },
     )
 
 
-async def publish_datapoints_updated(fg_id: str, datapoint_ids: list[str] | None):
-    await publish_to_broker(
-        fg_id,
-        {
-            "action": "datapoints_updated",
-            "payload": datapoint_ids,
-        },
-    )
-
-
-async def publish_io_dims(db: DBService, fg_id: str):
-    io_dims = await db.get_io_dims(fg_id)
+async def publish_io_dims(db: DBService, ctx: ViewContext):
+    io_dims = await db.get_io_dims(ctx)
     assert (
         io_dims is not None
-    ), f"FrameGrid {fg_id} has no outer or inner dimension specified; this should never happen"
+    ), f"No inner or outer dimension specified for fg_id={ctx.fg_id}, view_id={ctx.view_id}"
     inner_dim_id, outer_dim_id = io_dims
 
-    await publish_to_broker(
-        fg_id,
+    await publish_view_update(
+        ctx.fg_id,
+        ctx.view_id,
         {
             "action": "io_dims_updated",
             "payload": {
@@ -138,37 +138,40 @@ async def publish_io_dims(db: DBService, fg_id: str):
     )
 
 
-async def publish_attribute_searches(db: DBService, fg_id: str):
-    await publish_to_broker(
-        fg_id,
+async def publish_searches(db: DBService, ctx: ViewContext):
+    await publish_framegrid_update(
+        ctx.fg_id,
         {
-            "action": "attribute_searches",
-            "payload": await db.get_attribute_searches_with_judgment_counts(fg_id),
+            "action": "searches",
+            "payload": await db.get_searches_with_result_counts(ctx),
         },
     )
 
 
-async def publish_homepage_marginals(
-    db: DBService, fg_id: str, inner_dim_id: str | None, outer_dim_id: str | None
+async def _publish_homepage_marginals(
+    db: DBService,
+    ctx: ViewContext,
+    inner_dim_id: str | None,
+    outer_dim_id: str | None,
 ):
     # Gather base data, as this is needed for map functions
-    metadata_with_ids = await db.get_metadata_with_ids(fg_id, base_data_only=True)
+    metadata_with_ids = await db.get_metadata_with_ids(ctx)
     metadata_dict = {id: md for id, md in metadata_with_ids}
 
     # Get all required marginals once
     keep_dim_ids = [dim_id for dim_id in [inner_dim_id, outer_dim_id] if dim_id is not None]
-    marginals = await db.get_marginals(fg_id, keep_dim_ids=keep_dim_ids)
+    marginals = await db.get_marginals(ctx, keep_dim_ids=keep_dim_ids)
     # Marginalize using cached marginals; prevents multile duplicate requests
     comb_marginals = await db.marginalize(
-        fg_id,
-        keep_dim_ids=keep_dim_ids,
+        ctx,
+        keep_dim_ids,
         return_dims_and_filters=True,
         _marginals=marginals,
     )
     outer_marginals = (
         await db.marginalize(
-            fg_id,
-            keep_dim_ids=[outer_dim_id],
+            ctx,
+            [outer_dim_id],
             _marginals=marginals,
         )
         if outer_dim_id
@@ -199,8 +202,9 @@ async def publish_homepage_marginals(
     # Send all processed marginals at once
     async with anyio.create_task_group() as tg:
         tg.start_soon(
-            publish_to_broker,
-            fg_id,
+            publish_view_update,
+            ctx.fg_id,
+            ctx.view_id,
             {
                 "action": "specific_marginals",
                 "payload": {
@@ -210,8 +214,9 @@ async def publish_homepage_marginals(
             },
         )
         tg.start_soon(
-            publish_to_broker,
-            fg_id,
+            publish_view_update,
+            ctx.fg_id,
+            ctx.view_id,
             {
                 "action": "specific_marginals",
                 "payload": {
@@ -221,8 +226,9 @@ async def publish_homepage_marginals(
             },
         )
         tg.start_soon(
-            publish_to_broker,
-            fg_id,
+            publish_view_update,
+            ctx.fg_id,
+            ctx.view_id,
             {
                 "action": "specific_marginals",
                 "payload": {
@@ -251,13 +257,14 @@ async def publish_framegrids(db: DBService):
     )
 
 
-async def publish_homepage_state(db: DBService, fg_id: str):
-    io_dims = await db.get_io_dims(fg_id)
-    assert io_dims is not None, f"FrameGrid {fg_id} has no inner or outer dimension specified"
+async def publish_homepage_state(db: DBService, ctx: ViewContext):
+    """Publish homepage state for a specific view. Always requires ViewProvider since base filters are view-scoped."""
+    io_dims = await db.get_io_dims(ctx)
+    assert io_dims is not None, f"View {ctx.view_id} has no inner or outer dimension specified"
     inner_dim_id, outer_dim_id = io_dims
 
-    await publish_base_filter(db, fg_id)
-    await publish_dims(db, fg_id)
-    await publish_io_dims(db, fg_id)
-    await publish_homepage_marginals(db, fg_id, inner_dim_id, outer_dim_id)
-    await publish_attribute_searches(db, fg_id)
+    await publish_base_filter(db, ctx)
+    await publish_dims(db, ctx)
+    await publish_io_dims(db, ctx)
+    await _publish_homepage_marginals(db, ctx, inner_dim_id, outer_dim_id)
+    await publish_searches(db, ctx)

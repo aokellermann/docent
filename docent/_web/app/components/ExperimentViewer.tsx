@@ -7,19 +7,14 @@ import React, {
   useCallback,
 } from 'react';
 
-import { AttributeFeedback } from '@/app/types/experimentViewerTypes';
-import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useDebounce } from '@/hooks/use-debounce';
-import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
-import {
-  clearAttributeQuery,
-  clearVoteState,
-  setAttributeQueryTextboxValue,
-  submitAttributeFeedback,
-} from '../store/attributeFinderSlice';
+
+
+
+
 import {
   addExpandedInner,
   addExpandedOuter,
@@ -52,12 +47,12 @@ export default function ExperimentViewer({
 
   // Attributes
   const {
-    loadingAttributesForId,
-    attributeQueryDimId,
-    attributeMap,
-    voteState,
     diffMap,
-  } = useAppSelector((state) => state.attributeFinder);
+    loadingSearchQuery,
+    curSearchQuery,
+    searchResultMap: attributeMap,
+    // voteState,
+  } = useAppSelector((state) => state.search);
 
   const {
     expandedOuter,
@@ -66,14 +61,6 @@ export default function ExperimentViewer({
     dimIdsToFilterIds,
     filtersMap,
   } = useAppSelector((state) => state.experimentViewer);
-
-  const curAttributeQuery = useMemo(
-    () =>
-      attributeQueryDimId
-        ? dimensionsMap?.[attributeQueryDimId]?.attribute
-        : undefined,
-    [attributeQueryDimId, dimensionsMap]
-  );
 
   // Assemble maps of the inner and outer filters
   const outerFilters = useMemo(() => {
@@ -137,17 +124,17 @@ export default function ExperimentViewer({
   // Filter to IDs to ones that have the attribute query
   const idMarginals = useMemo(() => {
     if (!rawIdMarginals) return rawIdMarginals;
-    if (!curAttributeQuery && !diffMap) return rawIdMarginals;
+    if (!curSearchQuery && !diffMap) return rawIdMarginals;
 
     // Filter the keys and their datapoints based on attribute query or diff results
     const filtered = Object.entries(rawIdMarginals).reduce(
       (result, [key, datapointsList]) => {
         // Filter datapoints to ones that have the attributes and/or diff results
-        const filteredDatapoints = datapointsList.filter((datapointId) => {
+        const filteredAgentRuns = datapointsList.filter((datapointId) => {
           // Check for attributes if there's an active attribute query
 
-          if (curAttributeQuery) {
-            const attrs = attributeMap?.[datapointId]?.[curAttributeQuery];
+          if (curSearchQuery) {
+            const attrs = attributeMap?.[datapointId]?.[curSearchQuery];
             return attrs && attrs.length > 0;
           }
 
@@ -164,8 +151,8 @@ export default function ExperimentViewer({
         });
 
         // Only include keys that have at least one datapoint after filtering
-        if (filteredDatapoints.length > 0) {
-          result[key] = filteredDatapoints;
+        if (filteredAgentRuns.length > 0) {
+          result[key] = filteredAgentRuns;
         }
 
         return result;
@@ -174,18 +161,18 @@ export default function ExperimentViewer({
     );
 
     return filtered;
-  }, [rawIdMarginals, curAttributeQuery, attributeMap, diffMap]);
+  }, [rawIdMarginals, curSearchQuery, attributeMap, diffMap]);
 
   // Only keep stat marginals that have datapoints, after filtering by attribute query
   const statMarginals = useMemo(() => {
     if (!rawStatMarginals) return rawStatMarginals;
-    if (!curAttributeQuery && !diffMap) return rawStatMarginals;
+    if (!curSearchQuery && !diffMap) return rawStatMarginals;
     return Object.fromEntries(
       Object.entries(rawStatMarginals).filter(([key, _]) => {
         return idMarginals && key in idMarginals;
       })
     );
-  }, [rawStatMarginals, curAttributeQuery, idMarginals, diffMap]);
+  }, [rawStatMarginals, curSearchQuery, idMarginals, diffMap]);
 
   // For each outer filter, get the inner filters that have non-null stats
   const [outerIdsToInnerIds, filteredInnerIds] = useMemo(() => {
@@ -247,57 +234,58 @@ export default function ExperimentViewer({
    * Handle feedback
    */
 
-  const attributeFeedback = useMemo(() => {
-    if (!voteState) return [];
-    return Object.entries(voteState).flatMap(([agent_run_id, attributes]) =>
-      Object.entries(attributes).map(
-        ([attribute, vote]) =>
-          ({
-            attribute,
-            vote,
-          }) as AttributeFeedback
-      )
-    );
-  }, [voteState]);
-  const [missingQueries, setMissingQueries] = useState<string>('');
-  const [waitingOnNewQuery, setWaitingOnNewQuery] = useState(false);
-  const handleFeedbackSubmit = useCallback(async () => {
-    if (!curAttributeQuery) return;
-    if (attributeFeedback.length === 0 && !missingQueries) {
-      toast({
-        title: 'No feedback provided',
-        description: 'Please provide feedback',
-        variant: 'destructive',
-      });
-      return;
-    }
+  // const attributeFeedback = useMemo(() => {
+  //   if (!voteState) return [];
+  //   return Object.entries(voteState).flatMap(([agent_run_id, attributes]) =>
+  //     Object.entries(attributes).map(
+  //       ([attribute, vote]) =>
+  //         ({
+  //           attribute,
+  //           vote,
+  //         }) as AttributeFeedback
+  //     )
+  //   );
+  // }, [voteState]);
+  // const [missingQueries, setMissingQueries] = useState<string>('');
+  // const [waitingOnNewQuery, setWaitingOnNewQuery] = useState(false);
+  // const handleFeedbackSubmit = useCallback(async () => {
+  //   if (!curSearchQuery) return;
+  //   // if (attributeFeedback.length === 0 && !missingQueries) {
+  //   if (!missingQueries) {
+  //     toast({
+  //       title: 'No feedback provided',
+  //       description: 'Please provide feedback',
+  //       variant: 'destructive',
+  //     });
+  //     return;
+  //   }
 
-    toast({
-      title: 'Feedback submitted',
-      description: "We're recomputing the search results with your feedback...",
-    });
-    setWaitingOnNewQuery(true);
+  //   toast({
+  //     title: 'Feedback submitted',
+  //     description: "We're recomputing the search results with your feedback...",
+  //   });
+  //   setWaitingOnNewQuery(true);
 
-    try {
-      const result = await dispatch(
-        submitAttributeFeedback({
-          originalQuery: curAttributeQuery,
-          feedback: attributeFeedback,
-          missingQueries,
-        })
-      ).unwrap();
+  //   try {
+  //     const result = await dispatch(
+  //       submitAttributeFeedback({
+  //         originalQuery: curSearchQuery,
+  //         feedback: attributeFeedback,
+  //         missingQueries,
+  //       })
+  //     ).unwrap();
 
-      // Update the curAttributeQuery
-      dispatch(clearAttributeQuery());
-      dispatch(setAttributeQueryTextboxValue(result));
+  //     // Update the curAttributeQuery
+  //     dispatch(clearSearch());
+  //     dispatch(setSearchQueryTextboxValue(result));
 
-      // Reset feedback state
-      dispatch(clearVoteState());
-      setMissingQueries('');
-    } finally {
-      setWaitingOnNewQuery(false);
-    }
-  }, [curAttributeQuery, attributeFeedback, missingQueries, dispatch]);
+  //     // Reset feedback state
+  //     dispatch(clearVoteState());
+  //     setMissingQueries('');
+  //   } finally {
+  //     setWaitingOnNewQuery(false);
+  //   }
+  // }, [curSearchQuery, attributeFeedback, missingQueries, dispatch]);
 
   /**
    * Handle toggling of outer and inner panels
@@ -430,7 +418,7 @@ export default function ExperimentViewer({
       </div>
 
       {/* Hint for refining search queries */}
-      {curAttributeQuery && (
+      {/* {curSearchQuery && (
         <div className="text-xs text-indigo-800 italic flex items-center justify-between gap-1.5 p-1.5 rounded-md border border-indigo-100">
           {waitingOnNewQuery ? (
             <div className="flex items-center justify-between w-full">
@@ -456,7 +444,7 @@ export default function ExperimentViewer({
             </div>
           )}
         </div>
-      )}
+      )} */}
 
       {/* Content area */}
       <div
@@ -505,7 +493,7 @@ export default function ExperimentViewer({
                 </div>
                 {outerStatMarginals &&
                   outerStatMarginals[getOuterKey(outerId)] &&
-                  !curAttributeQuery && (
+                  !curSearchQuery && (
                     <div className="flex flex-row flex-wrap gap-2 font-mono">
                       {Object.entries(
                         outerStatMarginals[getOuterKey(outerId)] || {}
@@ -593,7 +581,7 @@ export default function ExperimentViewer({
 
         {!hasOuterDimension && !hasInnerDimension && (
           <div className="text-xs text-gray-500 min-h-[24px]">
-            {loadingAttributesForId ? (
+            {loadingSearchQuery ? (
               <div className="flex items-center space-x-2">
                 <span>Loading results...</span>
                 <Loader2 className="h-3 w-3 animate-spin text-gray-500" />

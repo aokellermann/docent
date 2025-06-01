@@ -1,10 +1,4 @@
-import {
-  ChevronDown,
-  ChevronUp,
-  Loader,
-  Loader2,
-  Share2,
-} from 'lucide-react';
+import { ChevronDown, ChevronUp, Loader, Loader2, Share2 } from 'lucide-react';
 import React, {
   forwardRef,
   useCallback,
@@ -23,7 +17,6 @@ import {
 import { EvidenceWithCitation, Citation } from '@/app/types/experimentViewerTypes';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-
 
 import UuidPill from '@/components/UuidPill';
 import { useDebounce } from '@/hooks/use-debounce';
@@ -324,27 +317,16 @@ const AttributeDisplay: React.FC<{
   blockIndex: number;
   scrollToBlock?: (blockIndex: number, transcriptIdx?: number) => void;
 }> = ({ agentRunId, blockIndex, scrollToBlock }) => {
-  const attributeQueryDimId = useAppSelector(
-    (state) => state.attributeFinder.attributeQueryDimId
-  );
-  const dimensionsMap = useAppSelector((state) => state.frame.dimensionsMap);
-  const curAttributeQuery = useMemo(
-    () =>
-      attributeQueryDimId
-        ? dimensionsMap?.[attributeQueryDimId]?.attribute
-        : undefined,
-    [attributeQueryDimId, dimensionsMap]
-  );
-  const attributeMap = useAppSelector(
-    (state) => state.attributeFinder.attributeMap
+  const { curSearchQuery, searchResultMap } = useAppSelector(
+    (state) => state.search
   );
 
   // Get all attributes that reference this specific block
   const relevantAttributes = useMemo(() => {
-    if (!curAttributeQuery || !attributeMap || !attributeMap[agentRunId]) {
+    if (!curSearchQuery || !searchResultMap || !searchResultMap[agentRunId]) {
       return [];
     }
-    const attributes = attributeMap[agentRunId]?.[curAttributeQuery].filter(
+    const attributes = searchResultMap[agentRunId]?.[curSearchQuery].filter(
       (attr) => attr.value !== null
     );
     if (!attributes) {
@@ -353,13 +335,13 @@ const AttributeDisplay: React.FC<{
     return attributes.filter((attr) =>
       attr.citations?.some((citation) => citation.block_idx === blockIndex)
     );
-  }, [attributeMap, agentRunId, curAttributeQuery, blockIndex]);
+  }, [searchResultMap, agentRunId, curSearchQuery, blockIndex]);
   if (relevantAttributes.length === 0) {
     return null;
   }
 
   const handleShareAttribute = () => {
-    if (!attributeQueryDimId) {
+    if (!curSearchQuery) {
       toast({
         title: 'Error',
         description: 'Attribute Dimension ID not found.',
@@ -369,7 +351,7 @@ const AttributeDisplay: React.FC<{
     }
 
     const currentUrl = new URL(window.location.href);
-    currentUrl.searchParams.set('attributeDimId', attributeQueryDimId);
+    currentUrl.searchParams.set('searchQuery', curSearchQuery);
 
     navigator.clipboard
       .writeText(currentUrl.toString())
@@ -476,12 +458,12 @@ const AttributeDisplay: React.FC<{
 
           return (
             <div
-              key={`${curAttributeQuery}-${idx}`}
+              key={`${curSearchQuery}-${idx}`}
               className="group bg-indigo-50 rounded-md p-1 text-xs text-indigo-900 leading-snug mt-1 hover:bg-indigo-100 transition-colors border border-transparent hover:border-indigo-200"
             >
               <p className="mb-0.5">{renderTextWithCitations()}</p>
               <div className="flex items-center gap-1 text-[10px] text-indigo-600 mt-1">
-                <span className="opacity-70">{curAttributeQuery}</span>
+                <span className="opacity-70">{curSearchQuery}</span>
               </div>
             </div>
           );

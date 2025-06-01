@@ -1,5 +1,3 @@
-// import { FrameFilter, FramePredicate, Judgment } from '@/app/types/docent';
-
 import { ChevronDown, ChevronRight, Pencil, Trash2, X } from 'lucide-react';
 import React, { useState } from 'react';
 import { useSelector } from 'react-redux';
@@ -16,7 +14,11 @@ import {
 import { deleteFilter, editFilter } from '../store/frameSlice';
 import { useAppDispatch } from '../store/hooks';
 import { RootState } from '../store/store';
-import { PredicateFilter, Judgment, FrameFilter } from '../types/frameTypes';
+import {
+  SearchResultPredicateFilter,
+  Judgment,
+  FrameFilter,
+} from '../types/frameTypes';
 
 interface BinEditorProps {
   bin: FrameFilter;
@@ -41,7 +43,7 @@ const JudgmentList: React.FC<{
   onShowAgentRun: (agentRunId: string, blockId?: number) => void;
 }> = ({ binId, judgments, onShowAgentRun }) => {
   const attributeMap = useSelector(
-    (state: RootState) => state.attributeFinder.attributeMap
+    (state: RootState) => state.search.searchResultMap
   );
 
   const renderAttributeValue = (value: string, dataId: string) => {
@@ -106,9 +108,9 @@ const JudgmentList: React.FC<{
         judgments.map((judgment, i) => {
           if (!judgment) return null;
           const attributeValue =
-            attributeMap?.[judgment.agent_run_id]?.[judgment.attribute || '']?.[
-              judgment.attribute_idx || 0
-            ]?.value;
+            attributeMap?.[judgment.agent_run_id]?.[
+              judgment.search_query || ''
+            ]?.[judgment.search_result_idx || 0]?.value;
           if (!attributeValue) {
             return null;
           }
@@ -136,9 +138,9 @@ const JudgmentList: React.FC<{
               )}
               <div className="flex items-center gap-1 text-[10px] text-indigo-600 mt-1">
                 <span className="opacity-70">
-                  {judgment.attribute}
-                  {judgment.attribute_idx !== null && (
-                    <>, idx: {judgment.attribute_idx}</>
+                  {judgment.search_query}
+                  {judgment.search_result_idx !== null && (
+                    <>, idx: {judgment.search_result_idx}</>
                   )}
                 </span>
                 <span className="ml-1 opacity-70">
@@ -167,7 +169,7 @@ export default function BinEditor({
   const [isEditing, setIsEditing] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [text, setText] = useState(
-    'predicate' in bin ? (bin as PredicateFilter).predicate : bin.id
+    'predicate' in bin ? (bin as SearchResultPredicateFilter).predicate : bin.id
   );
 
   const hasJudgments = marginalJudgments && marginalJudgments.length > 0;
@@ -188,7 +190,9 @@ export default function BinEditor({
             } else if (e.key === 'Escape') {
               setIsEditing(false);
               setText(
-                'predicate' in bin ? (bin as PredicateFilter).predicate : bin.id
+                'predicate' in bin
+                  ? (bin as SearchResultPredicateFilter).predicate
+                  : bin.id
               );
             }
           }}

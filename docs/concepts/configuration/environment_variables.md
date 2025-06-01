@@ -2,7 +2,7 @@
 title: Environment variables
 ---
 
-### LLM calls
+## LLM calls
 
 * `OPENAI_API_KEY`: OpenAI API key
 * `ANTHROPIC_API_KEY`: Anthropic API key
@@ -28,3 +28,9 @@ We have provided reasonable defaults in `.env.template`, but you're welcome to c
 
 * `DOCENT_REDIS_HOST`: Redis host
 * `DOCENT_REDIS_PORT`: Redis port
+
+## CORS
+
+* `DOCENT_CORS_ORIGINS`: Comma-separated list of allowed frontend origins for CORS
+    * Leave empty/unset for development (defaults to `localhost:*`)
+    * Example for multiple domains: `DOCENT_CORS_ORIGINS=https://app.yourdomain.com,https://admin.yourdomain.com`

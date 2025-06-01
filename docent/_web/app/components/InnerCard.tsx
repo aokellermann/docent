@@ -1,10 +1,4 @@
-import {
-  ChevronDown,
-  ChevronRight,
-  Loader2,
-  ThumbsUp,
-  ThumbsDown,
-} from 'lucide-react';
+
 import { useRouter } from 'next/navigation';
 import {
   OrganizationMethod,
@@ -12,26 +6,48 @@ import {
   Citation,
 } from '../types/experimentViewerTypes';
 
-import { BASE_DOCENT_PATH } from '../constants';
+import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo } from 'react';
-import { useSelector } from 'react-redux';
-
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
-
+import { BASE_DOCENT_PATH } from '../constants';
 import {
   requestRegexSnippetsIfExist,
-  voteOnAttribute,
-} from '../store/attributeFinderSlice';
+  // voteOnAttribute,
+} from '../store/searchSlice';
 import { updateRegexSnippets } from '../store/experimentViewerSlice';
 import { getAgentRunMetadata } from '../store/frameSlice';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { RootState } from '../store/store';
 import { RegexSnippet, TaskStats } from '../types/experimentViewerTypes';
-import { AttributeWithCitations } from '../types/frameTypes';
+import { SearchResultWithCitations } from '../types/frameTypes';
+
+// Helper function to handle transcript navigation with special clicks
+const handleTranscriptNavigation = (
+  e: React.MouseEvent,
+  agentRunId: string,
+  frameGridId?: string,
+  blockId?: number,
+  searchQuery?: string,
+  onShowAgentRun?: (agentRunId: string, blockId?: number, blockId2?: number, paired?: boolean) => void
+) => {
+  e.stopPropagation();
+
+  if (frameGridId !== undefined && (e.metaKey || e.ctrlKey || e.button === 1)) {
+    let url = `${window.location.origin}${BASE_DOCENT_PATH}/${frameGridId}/transcript/${agentRunId}`;
+
+    const blockIdParam = blockId ? `?block_id=${blockId}` : '';
+    url += blockIdParam;
+
+    if (searchQuery) {
+      url += blockIdParam
+        ? `&searchQuery=${searchQuery}`
+        : `?searchQuery=${searchQuery}`;
+    }
+
+    window.open(url, '_blank');
+  } else if (e.button === 0 && onShowAgentRun) {
+    onShowAgentRun(agentRunId, blockId);
+  }
+};
 
 interface InnerCard {
   innerId: string;
@@ -48,7 +64,7 @@ interface InnerCard {
 interface AttributeSectionProps {
   dataId: string;
   curAttributeQuery: string;
-  attributes: AttributeWithCitations[];
+  attributes: SearchResultWithCitations[];
   onShowAgentRun?: (agentRunId: string, blockId?: number, blockId2?: number, paired?: boolean) => void;
 }
 
@@ -58,8 +74,11 @@ const AttributeSection: React.FC<AttributeSectionProps> = ({
   attributes: attributes,
   onShowAgentRun,
 }) => {
-  const dispatch = useAppDispatch();
-  const voteState = useAppSelector((state) => state.attributeFinder.voteState);
+  // const dispatch = useAppDispatch();
+  // const voteState = useAppSelector((state) => state.search.voteState);
+  const frameGridId = useAppSelector(
+    (state: RootState) => state.frame.frameGridId
+  );
 
   if (attributes.length === 0) {
     return null;
@@ -81,7 +100,7 @@ const AttributeSection: React.FC<AttributeSectionProps> = ({
           return null;
         }
         const citations = attribute.citations || [];
-        const currentVote = voteState?.[dataId]?.[attributeText];
+        // const currentVote = voteState?.[dataId]?.[attributeText];
 
         // Create a component that renders text with citations highlighted
         const renderTextWithCitations = () => {
@@ -116,11 +135,15 @@ const AttributeSection: React.FC<AttributeSectionProps> = ({
               <button
                 key={`citation-${i}`}
                 className="px-0.5 py-0.25 bg-indigo-200 text-indigo-800 rounded hover:bg-indigo-400 hover:text-white transition-colors font-medium"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (onShowAgentRun) {
-                    onShowAgentRun(dataId, citation.block_idx);
-                  }
+                onMouseDown={(e) => {
+                  handleTranscriptNavigation(
+                    e,
+                    dataId,
+                    frameGridId,
+                    citation.block_idx,
+                    curAttributeQuery,
+                    onShowAgentRun
+                  );
                 }}
               >
                 {citedText}
@@ -144,20 +167,24 @@ const AttributeSection: React.FC<AttributeSectionProps> = ({
           <div
             key={idx}
             className="group bg-indigo-50 rounded-md p-1 text-xs text-indigo-900 leading-snug mt-1 hover:bg-indigo-100 transition-colors cursor-pointer border border-transparent hover:border-indigo-200"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (onShowAgentRun) {
-                const firstCitation =
-                  citations.length > 0 ? citations[0] : null;
-                onShowAgentRun(dataId, firstCitation?.block_idx);
-              }
+            onMouseDown={(e) => {
+              const firstCitation = citations.length > 0 ? citations[0] : null;
+              const blockId = firstCitation?.block_idx;
+              handleTranscriptNavigation(
+                e,
+                dataId,
+                frameGridId,
+                blockId,
+                curAttributeQuery,
+                onShowAgentRun
+              );
             }}
           >
             <div className="flex flex-col">
               <div className="flex items-start justify-between gap-2">
                 <p className="mb-0.5 flex-1">{renderTextWithCitations()}</p>
                 <div className="flex shrink-0">
-                  <Tooltip>
+                  {/* <Tooltip>
                     <TooltipContent>This result is relevant</TooltipContent>
                     <TooltipTrigger asChild>
                       <button
@@ -204,7 +231,7 @@ const AttributeSection: React.FC<AttributeSectionProps> = ({
                         <ThumbsDown className="w-3 h-3" />
                       </button>
                     </TooltipTrigger>
-                  </Tooltip>
+                  </Tooltip> */}
                 </div>
               </div>
               <div className="flex items-center gap-1 text-[10px] text-indigo-600 mt-1">
@@ -414,48 +441,26 @@ const InnerCard: React.FC<InnerCard> = ({
 }) => {
   const dispatch = useAppDispatch();
 
-  const attributeQueryDimId = useAppSelector(
-    (state) => state.attributeFinder.attributeQueryDimId
-  );
-  const dimensionsMap = useAppSelector((state) => state.frame.dimensionsMap);
-  const curAttributeQuery = useMemo(
-    () =>
-      attributeQueryDimId
-        ? dimensionsMap?.[attributeQueryDimId]?.attribute
-        : undefined,
-    [attributeQueryDimId, dimensionsMap]
+  const {
+    curSearchQuery,
+    searchResultMap: attributeMap,
+    loadingSearchQuery: loadingAttributesForId,
+    diffMap: diffMap,
+  } = useAppSelector((state: RootState) => state.search);
+
+
+
+  const { baseFilter, agentRunMetadata, frameGridId } = useAppSelector(
+    (state: RootState) => state.frame
   );
 
-  const attributeMap = useSelector(
-    (state: RootState) => state.attributeFinder.attributeMap
-  );
-  const diffMap = useSelector(
-    (state: RootState) => state.attributeFinder.diffMap
-  );
-  const loadingAttributesForId = useSelector(
-    (state: RootState) => state.attributeFinder.loadingAttributesForId
-  );
-  const agentRunMetadata = useSelector(
-    (state: RootState) => state.frame.agentRunMetadata
-  );
-
-  const selectedDiffTranscript = useSelector(
-    (state: RootState) => state.experimentViewer.selectedDiffTranscript
-  );
-  const selectedDiffSampleId = useSelector(
-    (state: RootState) => state.experimentViewer.selectedDiffSampleId
+  const { selectedDiffTranscript, regexSnippets } = useAppSelector(
+    (state: RootState) => state.experimentViewer
   );
 
   /**
    * Regex snippets for the associated transcripts
    */
-
-  const regexSnippets = useAppSelector(
-    (state: RootState) => state.experimentViewer.regexSnippets
-  );
-  const baseFilter = useAppSelector(
-    (state: RootState) => state.frame.baseFilter
-  );
 
   useEffect(() => {
     if (
@@ -540,14 +545,14 @@ const InnerCard: React.FC<InnerCard> = ({
 
   const getAttributes = useCallback(
     (dataId: string) => {
-      if (!curAttributeQuery) return null;
-      const attributes = attributeMap?.[dataId]?.[curAttributeQuery].filter(
+      if (!curSearchQuery) return null;
+      const attributes = attributeMap?.[dataId]?.[curSearchQuery].filter(
         (attr) => attr.value !== null
       );
       if (attributes === undefined || attributes.length === 0) return null;
       return attributes;
     },
-    [curAttributeQuery, attributeMap]
+    [curSearchQuery, attributeMap]
   );
 
   const getDiffResults = useCallback(
@@ -616,7 +621,7 @@ const InnerCard: React.FC<InnerCard> = ({
           {stats && (
             <div className="flex flex-row gap-2 items-center font-mono">
               {allScoreKeys.map((scoreKey, index) => {
-                if (curAttributeQuery) return null;
+                if (curSearchQuery) return null;
 
                 const scoreStats = stats[scoreKey];
                 if (!scoreStats) return null;
@@ -669,7 +674,7 @@ const InnerCard: React.FC<InnerCard> = ({
               const attributes = getAttributes(agentRunId);
               const initialDiffResults = getDiffResults(agentRunId);
 
-              if (curAttributeQuery && attributes === null) return null;
+              if (curSearchQuery && attributes === null) return null;
               if (diffMap && !initialDiffResults) return null;
 
               const diffResults = initialDiffResults ? initialDiffResults[1] : null;
@@ -697,11 +702,16 @@ const InnerCard: React.FC<InnerCard> = ({
                       <div className="flex gap-2">
                         <span
                           className="text-blue-600 font-medium hover:text-blue-700"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onShowAgentRun
-                              ? (otherId ? onShowAgentRun(agentRunId + "___" + otherId, undefined, undefined, true) : onShowAgentRun(agentRunId))
-                              : () => {};
+                          onMouseDown={(e) => {
+                            // (otherId ? onShowAgentRun(agentRunId + "___" + otherId, undefined, undefined, true) : onShowAgentRun(agentRunId))
+                            handleTranscriptNavigation(
+                              e,
+                              agentRunId,
+                              frameGridId,
+                              undefined,
+                              curSearchQuery,
+                              onShowAgentRun
+                            );
                           }}
                         >
                           View
@@ -764,10 +774,10 @@ const InnerCard: React.FC<InnerCard> = ({
                   />
 
                   {/* Replace the inline attribute section with the new component */}
-                  {attributes && curAttributeQuery && (
+                  {attributes && curSearchQuery && (
                     <AttributeSection
                       dataId={agentRunId}
-                      curAttributeQuery={curAttributeQuery}
+                      curAttributeQuery={curSearchQuery}
                       attributes={attributes}
                       onShowAgentRun={onShowAgentRun}
                     />

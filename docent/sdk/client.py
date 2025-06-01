@@ -18,18 +18,18 @@ class DocentClient:
     Args:
         server_url: URL of the Docent API server.
         web_url: URL of the Docent web UI.
-        api_key: Optional API key for authentication.
+        email: Email address for authentication.
     """
 
-    def __init__(self, server_url: str, web_url: str, api_key: str | None = None):
-        self._server_url = server_url.rstrip("/")
+    def __init__(self, server_url: str, web_url: str, email: str | None = None):
+        self._server_url = server_url.rstrip("/") + "/rest"
         self._web_url = web_url.rstrip("/")
-        self._api_key = api_key
+        self._email = email
 
         # Use requests.Session for connection pooling and persistent headers
         self._session = requests.Session()
-        if api_key:
-            self._session.headers.update({"Authorization": f"Bearer {self._api_key}"})
+        if email:
+            self._session.headers.update({"Authorization": f"Bearer {self._email}"})
 
     def create_framegrid(
         self,
@@ -54,7 +54,7 @@ class DocentClient:
             ValueError: If the response is missing the FrameGrid ID.
             requests.exceptions.HTTPError: If the API request fails.
         """
-        url = f"{self._server_url}/rest/create"
+        url = f"{self._server_url}/create"
         payload = {
             "fg_id": fg_id,
             "name": name,
@@ -96,8 +96,8 @@ class DocentClient:
         Raises:
             requests.exceptions.HTTPError: If the API request fails.
         """
-        url = f"{self._server_url}/rest/io_dims"
-        payload = {"fg_id": fg_id, "inner_dim_id": inner_dim_id, "outer_dim_id": outer_dim_id}
+        url = f"{self._server_url}/{fg_id}/io_dims"
+        payload = {"inner_dim_id": inner_dim_id, "outer_dim_id": outer_dim_id}
         response = self._session.post(url, json=payload)
         response.raise_for_status()
         return response.json()
@@ -121,9 +121,8 @@ class DocentClient:
         Raises:
             requests.exceptions.HTTPError: If the API request fails.
         """
-        url = f"{self._server_url}/rest/dimension"
+        url = f"{self._server_url}/{fg_id}/dimension"
         payload = {
-            "fg_id": fg_id,
             "dim": dim.model_dump(),
         }
 
@@ -148,8 +147,8 @@ class DocentClient:
         Raises:
             requests.exceptions.HTTPError: If the API request fails.
         """
-        url = f"{self._server_url}/rest/agent_runs"
-        payload = {"fg_id": fg_id, "agent_runs": [ar.model_dump() for ar in agent_runs]}
+        url = f"{self._server_url}/{fg_id}/agent_runs"
+        payload = {"agent_runs": [ar.model_dump() for ar in agent_runs]}
 
         response = self._session.post(url, json=payload)
         response.raise_for_status()
@@ -171,7 +170,7 @@ class DocentClient:
         Raises:
             requests.exceptions.HTTPError: If the API request fails.
         """
-        url = f"{self._server_url}/rest/base_filter/{fg_id}"
+        url = f"{self._server_url}/{fg_id}/base_filter"
         response = self._session.get(url)
         response.raise_for_status()
         # The endpoint returns the filter model directly or null
@@ -193,9 +192,8 @@ class DocentClient:
         Raises:
             requests.exceptions.HTTPError: If the API request fails.
         """
-        url = f"{self._server_url}/rest/base_filter"
+        url = f"{self._server_url}/{fg_id}/base_filter"
         payload = {
-            "fg_id": fg_id,
             "filter": filter.model_dump() if filter else None,
         }
 
@@ -214,7 +212,7 @@ class DocentClient:
         Raises:
             requests.exceptions.HTTPError: If the API request fails.
         """
-        url = f"{self._server_url}/rest/framegrids"
+        url = f"{self._server_url}/framegrids"
         response = self._session.get(url)
         response.raise_for_status()
         return response.json()
@@ -232,9 +230,8 @@ class DocentClient:
         Raises:
             requests.exceptions.HTTPError: If the API request fails.
         """
-        url = f"{self._server_url}/rest/get_dimensions"
+        url = f"{self._server_url}/{fg_id}/get_dimensions"
         payload = {
-            "fg_id": fg_id,
             "dim_ids": dim_ids,
         }
         response = self._session.post(url, json=payload)
@@ -258,9 +255,8 @@ class DocentClient:
         Raises:
             requests.exceptions.HTTPError: If the API request fails.
         """
-        url = f"{self._server_url}/rest/attribute_searches"
+        url = f"{self._server_url}/{fg_id}/attribute_searches"
         params = {
-            "fg_id": fg_id,
             "base_data_only": base_data_only,
         }
         response = self._session.get(url, params=params)
@@ -285,9 +281,8 @@ class DocentClient:
         Raises:
             requests.exceptions.HTTPError: If the API request fails.
         """
-        url = f"{self._server_url}/rest/dimension_attributes"
+        url = f"{self._server_url}/{fg_id}/dimension_attributes"
         params = {
-            "fg_id": fg_id,
             "dim_id": dim_id,
             "base_data_only": base_data_only,
         }

@@ -67,7 +67,7 @@ const Breadcrumbs: React.FC<BreadcrumbsProps> = () => {
               size="sm"
               variant="outline"
               className="h-7 text-xs whitespace-nowrap px-2 py-0 flex items-center gap-x-1"
-              onClick={() => router.push('/')}
+              onClick={() => router.push('/dashboard')}
             >
               <Layers size={16} />
             </Button>

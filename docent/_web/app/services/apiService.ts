@@ -25,6 +25,7 @@ export const apiBaseClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  withCredentials: true,
 });
 apiBaseClient.interceptors.request.use(async (config) => {
   await ensureWebsocketConnected();
@@ -36,6 +37,7 @@ export const apiRestClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  withCredentials: true,
 });
 apiRestClient.interceptors.request.use(async (config) => {
   await ensureWebsocketConnected();

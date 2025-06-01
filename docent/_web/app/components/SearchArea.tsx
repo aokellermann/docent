@@ -30,22 +30,24 @@ import { toast } from '@/hooks/use-toast';
 
 import {
   addBaseFilter,
-  clearAttributeQuery,
+  clearSearch,
   clearBaseFilters,
   removeBaseFilter,
-  requestAttributes,
+  computeSearch,
+  setSearchQueryTextboxValue,
   requestClusters,
-  setAttributeQueryTextboxValue,
   requestDiffs,
-  setAttributeQueryDimId,
-} from '../store/attributeFinderSlice';
-import { deleteDimension } from '../store/frameSlice';
+} from '../store/searchSlice';
+import {
+  addSearchDimension,
+  deleteSearch,
+} from '../store/frameSlice';
 import { useAppDispatch } from '../store/hooks';
 import { RootState } from '../store/store';
 
 import BinEditor from './BinEditor';
 
-interface AttributeFinderProps {
+interface SearchAreaProps {
   onShowAgentRun?: (agentRunId: string, blockId?: number) => void;
 }
 
@@ -75,46 +77,37 @@ const PRESET_QUERIES = [
 const DEFAULT_PLACEHOLDER_TEXT =
   "Describe what you're looking for in detail, or try a sample preset above";
 
-const AttributeFinder: React.FC<AttributeFinderProps> = ({
-  onShowAgentRun,
-}) => {
+const SearchArea: React.FC<SearchAreaProps> = ({ onShowAgentRun }) => {
   const dispatch = useAppDispatch();
 
-  const frameGridId = useSelector(
-    (state: RootState) => state.frame.frameGridId
-  );
-  const baseFilter = useSelector((state: RootState) => state.frame.baseFilter);
-  const transcriptMetadataFields = useSelector(
-    (state: RootState) => state.frame.agentRunMetadataFields
-  );
-  const marginals = useSelector((state: RootState) => state.frame.marginals);
-  const dimensionsMap = useSelector(
-    (state: RootState) => state.frame.dimensionsMap
-  );
   const {
-    attributeQueryDimId,
+    frameGridId,
+    baseFilter,
+    agentRunMetadataFields,
+    marginals,
+    dimensionsMap,
+  } = useSelector((state: RootState) => state.frame);
+  const {
+    curSearchQuery,
     activeClusterTaskId,
-    loadingAttributesForId,
+    loadingSearchQuery,
     loadingProgress,
-    attributeSearches,
-    attributeQueryTextboxValue,
-  } = useSelector((state: RootState) => state.attributeFinder);
+    searchesWithStats,
+    searchQueryTextboxValue,
+  } = useSelector((state: RootState) => state.search);
 
-  // Pull out the dimension that is currently being used for the attribute query
+  // Pull out the dimension associated with the current search query
   const activeDim = useMemo(() => {
-    return attributeQueryDimId
-      ? dimensionsMap?.[attributeQueryDimId]
-      : undefined;
-  }, [dimensionsMap, attributeQueryDimId]);
-  // Along with its attribute value
-  const curAttributeQuery = useMemo(
-    () => activeDim && activeDim.attribute,
-    [activeDim]
-  );
+    if (!curSearchQuery || !dimensionsMap) return undefined;
+    return Object.values(dimensionsMap).find(
+      (dim) => dim.search_query === curSearchQuery
+    );
+  }, [dimensionsMap, curSearchQuery]);
 
   /**
    * Local state for UI components
    */
+
   // Metadata filters
   const [metadataKey, setMetadataKey] = useState('');
   const [metadataValue, setMetadataValue] = useState('');
@@ -122,7 +115,7 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
     undefined
   );
   const [metadataOp, setMetadataOp] = useState<string>('==');
-  // Attribute search box
+  // Search box hints
   const [placeholderText, setPlaceholderText] = useState(
     DEFAULT_PLACEHOLDER_TEXT
   );
@@ -171,7 +164,7 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
         }
       }
 
-      dispatch(clearAttributeQuery());
+      dispatch(clearSearch());
       dispatch(
         addBaseFilter({
           type: 'primitive',
@@ -201,7 +194,18 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
     }
   }, [metadataValue, metadataType, metadataKey, onUpdateMetadataFilter]);
 
-  const handleSearch = async (query?: string, existingDimId?: string) => {
+  const handleClearSearch = useCallback(() => {
+    if (curSearchQuery) {
+      dispatch(setSearchQueryTextboxValue(curSearchQuery || ''));
+      dispatch(clearSearch());
+    }
+  }, [curSearchQuery, dispatch]);
+
+  /**
+   * Requesting searches and clusters
+   */
+
+  const handleSearch = async (query?: string) => {
     if (!query?.trim()) {
       toast({
         title: 'Missing search query',
@@ -212,34 +216,43 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
     }
 
     // Reset form
-    dispatch(setAttributeQueryTextboxValue(''));
+    dispatch(setSearchQueryTextboxValue(''));
 
-    // Request attributes
+    // Search
     const trimmedQuery = query.trim();
-    dispatch(requestAttributes({ attribute: trimmedQuery, existingDimId }));
+    dispatch(computeSearch({ searchQuery: trimmedQuery }));
   };
 
-  const handleEditAttribute = () => {
-    if (activeDim) {
-      dispatch(setAttributeQueryTextboxValue(activeDim.attribute || ''));
-      dispatch(clearAttributeQuery());
+  const handleRequestClusters = async () => {
+    let dimId: string;
+    if (!activeDim) {
+      if (!curSearchQuery) {
+        toast({
+          title: 'Could not cluster data',
+          description: 'Could not find curSearchQuery',
+          variant: 'destructive',
+        });
+        return;
+      }
+      dimId = await dispatch(addSearchDimension(curSearchQuery)).unwrap();
+    } else {
+      dimId = activeDim.id;
     }
-  };
-
-  const handleRequestClusters = () => {
-    if (!activeDim) return;
 
     // If bins exist and feedback is not being shown yet, show the feedback input
-    if (activeDim.bins && activeDim.bins.length > 0 && !showFeedbackInput) {
+    if (
+      activeDim &&
+      activeDim.bins &&
+      activeDim.bins.length > 0 &&
+      !showFeedbackInput
+    ) {
       setShowFeedbackInput(true);
       return;
     }
-
     // Use the context's requestClusters function
     dispatch(
-      requestClusters({ dimensionId: activeDim.id, feedback: clusterFeedback })
+      requestClusters({ dimensionId: dimId, feedback: clusterFeedback })
     );
-
     // Clear feedback after sending and hide the input
     setClusterFeedback('');
     setShowFeedbackInput(false);
@@ -250,10 +263,14 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
     setClusterFeedback('');
   };
 
+  /**
+   * Presets in the search interface
+   */
+
   const [isPresetHovered, setIsPresetHovered] = useState(false);
 
   const handleSelectPreset = (query: string) => {
-    dispatch(setAttributeQueryTextboxValue(query));
+    dispatch(setSearchQueryTextboxValue(query));
     setIsPresetHovered(false);
   };
 
@@ -306,9 +323,9 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
   /**
    * Handle share button
    */
-  const handleShare = (dimId: string) => {
+  const handleShare = (searchQuery: string) => {
     navigator.clipboard
-      .writeText(`${window.location.href}?attributeDimId=${dimId}`)
+      .writeText(`${window.location.href}?searchQuery=${searchQuery}`)
       .then(() => {
         toast({
           title: 'Search URL copied',
@@ -387,7 +404,7 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
                   value={metadataKey}
                   onValueChange={(value: string) => {
                     setMetadataKey(value);
-                    const selectedField = transcriptMetadataFields?.find(
+                    const selectedField = agentRunMetadataFields?.find(
                       (f) => f.name === value
                     );
                     if (selectedField) {
@@ -404,7 +421,7 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
                     <SelectValue placeholder="Select field" />
                   </SelectTrigger>
                   <SelectContent>
-                    {transcriptMetadataFields?.map((field) => (
+                    {agentRunMetadataFields?.map((field) => (
                       <SelectItem
                         key={field.name}
                         value={field.name}
@@ -625,15 +642,15 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
 
           <div className="border rounded-md bg-gray-50 p-2 space-y-1">
             <div className="text-xs text-gray-600">Search query</div>
-            {activeDim ? (
+            {curSearchQuery ? (
               <div className="space-y-2">
                 <div className="flex items-center">
                   <div className="flex-1 px-2 py-1 bg-indigo-50 border border-indigo-100 rounded text-xs font-mono whitespace-pre-wrap text-indigo-800">
-                    {activeDim.attribute}
+                    {curSearchQuery}
                   </div>
                   <div className="flex flex-col xl:flex-row ml-2 space-y-1 xl:space-y-0 xl:space-x-1">
                     <button
-                      onClick={() => handleShare(activeDim.id)}
+                      onClick={() => handleShare(curSearchQuery)}
                       className="inline-flex items-center gap-x-1 text-xs bg-blue-50 text-blue-500 border border-blue-100 px-1.5 py-0.5 rounded-md hover:bg-blue-100 transition-colors"
                       title="Share this search"
                     >
@@ -641,7 +658,7 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
                       Share
                     </button>
                     <button
-                      onClick={() => handleEditAttribute()}
+                      onClick={() => handleClearSearch()}
                       className="inline-flex items-center gap-x-1 text-xs bg-red-50 text-red-500 border border-red-100 px-1.5 py-0.5 rounded-md hover:bg-red-100 transition-colors"
                     >
                       <RefreshCw className="h-3 w-3 mr" />
@@ -650,9 +667,9 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
                   </div>
                 </div>
 
-                {/* Progress bar for attribute updates */}
-                {loadingAttributesForId &&
-                  loadingAttributesForId === curAttributeQuery &&
+                {/* Progress bar for updates */}
+                {loadingSearchQuery &&
+                  loadingSearchQuery === curSearchQuery &&
                   loadingProgress && (
                     <div className="mt-2 mb-2 space-y-1">
                       <div className="flex justify-between text-xs text-gray-600">
@@ -690,20 +707,24 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
                   onClick={handleRequestClusters}
                   disabled={
                     !frameGridId ||
-                    activeDim.loading_clusters ||
-                    activeDim.loading_marginals ||
+                    // Already loading clusters or marginals
+                    (activeDim &&
+                      (activeDim.loading_clusters ||
+                        activeDim.loading_marginals)) ||
+                    // Already clustering
                     activeClusterTaskId !== undefined ||
-                    (loadingAttributesForId === curAttributeQuery &&
-                      loadingAttributesForId !== null) ||
-                    showFeedbackInput // Disable button when feedback input is visible
+                    // Loading a search currently
+                    loadingSearchQuery !== undefined ||
+                    // Disable button when feedback input is visible
+                    showFeedbackInput
                   }
                 >
-                  {activeDim.loading_clusters ? (
+                  {activeDim && activeDim.loading_clusters ? (
                     <Loader2 className="h-3 w-3 mr-2 animate-spin" />
                   ) : (
                     <Sparkles className="h-3 w-3 mr-2" />
                   )}
-                  {activeDim.bins && activeDim.bins.length > 0
+                  {activeDim && activeDim.bins && activeDim.bins.length > 0
                     ? 'Re-cluster with feedback'
                     : 'Cluster matching results'}
                 </Button>
@@ -747,7 +768,7 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
                 )}
 
                 {/* Display bins if they exist */}
-                {activeDim.bins && activeDim.bins.length > 0 && (
+                {activeDim && activeDim.bins && activeDim.bins.length > 0 && (
                   <div className="space-y-2 mt-3">
                     <div className="text-xs text-gray-600 font-medium">
                       Clusters
@@ -790,16 +811,16 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
                     <Textarea
                       className="h-[10rem] resize-none border-0 p-2 shadow-none focus-visible:ring-0 text-xs font-mono"
                       placeholder={placeholderText}
-                      value={isPresetHovered ? '' : attributeQueryTextboxValue}
+                      value={isPresetHovered ? '' : searchQueryTextboxValue}
                       onChange={(e) =>
-                        dispatch(setAttributeQueryTextboxValue(e.target.value))
+                        dispatch(setSearchQueryTextboxValue(e.target.value))
                       }
                       onKeyDown={(
                         e: React.KeyboardEvent<HTMLTextAreaElement>
                       ) => {
                         if (e.key === 'Enter' && !e.shiftKey) {
                           e.preventDefault();
-                          handleSearch(attributeQueryTextboxValue);
+                          handleSearch(searchQueryTextboxValue);
                         }
                       }}
                     />
@@ -808,8 +829,8 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
                         type="button"
                         size="sm"
                         className="gap-1 h-8 text-xs"
-                        onClick={() => handleSearch(attributeQueryTextboxValue)}
-                        disabled={!attributeQueryTextboxValue?.trim()}
+                        onClick={() => handleSearch(searchQueryTextboxValue)}
+                        disabled={!searchQueryTextboxValue?.trim()}
                       >
                         Search
                         <CornerDownLeft className="size-3" />
@@ -819,14 +840,14 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
                 </div>
 
                 {/* Search History Section - Updated with consistent colors */}
-                {attributeSearches && attributeSearches.length > 0 && (
+                {searchesWithStats && searchesWithStats.length > 0 && (
                   <div className="max-h-[20rem] overflow-y-auto pr-1">
                     <div className="flex justify-between items-center mb-1">
                       <div className="text-xs font-medium text-gray-500">
                         Saved Searches
                       </div>
                     </div>
-                    {attributeSearches.map((search, index) => {
+                    {searchesWithStats.map((search, index) => {
                       const completionPercentage =
                         search.num_total > 0
                           ? Math.min(
@@ -838,7 +859,7 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
                           : 0;
                       const isComplete = completionPercentage === 100;
                       // Extract first 8 characters of UUID for display
-                      const shortDimId = search.dim_id.split('-')[0];
+                      const shortDimId = search.search_id.split('-')[0];
 
                       return (
                         <div
@@ -848,18 +869,18 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
                           <div className="flex items-center py-1.5 px-2 text-xs bg-white">
                             <code
                               className="px-1 bg-gray-50 border border-gray-100 rounded text-[10px] text-gray-500 mr-2 flex-shrink-0"
-                              title={search.dim_id}
+                              title={search.search_id}
                             >
                               {shortDimId}
                             </code>
                             <div
                               className="font-mono text-gray-800 truncate flex-1 cursor-pointer"
-                              title={search.attribute}
+                              title={search.search_query}
                               onClick={() => {
-                                handleSearch(search.attribute, search.dim_id);
+                                handleSearch(search.search_query);
                               }}
                             >
-                              {search.attribute}
+                              {search.search_query}
                             </div>
                             <div className="flex items-center ml-2 space-x-1.5 flex-shrink-0">
                               <div className="flex items-center gap-1.5">
@@ -882,7 +903,7 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
                                 className="hover:bg-indigo-50 rounded p-0.5 text-indigo-400 hover:text-indigo-600 transition-colors"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleShare(search.dim_id);
+                                  handleShare(search.search_query);
                                 }}
                                 title="Share this search"
                               >
@@ -893,11 +914,11 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   dispatch(
-                                    setAttributeQueryTextboxValue(
-                                      search.attribute
+                                    setSearchQueryTextboxValue(
+                                      search.search_query
                                     )
                                   );
-                                  dispatch(clearAttributeQuery());
+                                  dispatch(clearSearch());
                                 }}
                                 title="Edit this search query"
                               >
@@ -907,7 +928,7 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
                                 className="hover:bg-red-50 rounded p-0.5 text-red-400 hover:text-red-600 transition-colors"
                                 onClick={async (e) => {
                                   e.stopPropagation();
-                                  await dispatch(deleteDimension(search.dim_id))
+                                  await dispatch(deleteSearch(search.search_id))
                                     .unwrap()
                                     .then(() => {
                                       toast({
@@ -938,4 +959,4 @@ const AttributeFinder: React.FC<AttributeFinderProps> = ({
   );
 };
 
-export default AttributeFinder;
+export default SearchArea;

@@ -78,7 +78,7 @@ export const getActionsSummary = createAsyncThunk(
 
       // Create SSE connection using the service
       const { eventSource, onCancel } = sseService.createEventSource(
-        `/rest/actions_summary?fg_id=${frameGridId}&agent_run_id=${agentRunId}`,
+        `/rest/${frameGridId}/actions_summary?agent_run_id=${agentRunId}`,
         (data) => {
           // Update actions summary with streamed data
           dispatch(
@@ -156,7 +156,7 @@ export const getSolutionSummary = createAsyncThunk(
 
       // Create SSE connection using the service
       const { eventSource, onCancel } = sseService.createEventSource(
-        `/rest/solution_summary?fg_id=${frameGridId}&agent_run_id=${agentRunId}`,
+        `/rest/${frameGridId}/solution_summary?agent_run_id=${agentRunId}`,
         (data) => {
           // Update solution summary with streamed data
           dispatch(
@@ -252,7 +252,7 @@ export const getCurAgentRun = createAsyncThunk(
 
     try {
       const response = await apiRestClient.get(
-        `/agent_run?fg_id=${frameGridId}&agent_run_id=${agentRunId}`
+        `/${frameGridId}/agent_run?agent_run_id=${agentRunId}`
       );
       console.log('response', response);
       dispatch(setCurAgentRun(response.data));
@@ -372,8 +372,7 @@ export const createTaSession = createAsyncThunk(
       dispatch(resetTaSession());
 
       // Create a new TA session via REST API
-      const response = await apiRestClient.post('/ta_session', {
-        fg_id: frameGridId,
+      const response = await apiRestClient.post(`/${frameGridId}/ta_session`, {
         base_filter: {
           type: 'agent_run_id',
           value: agentRunId,

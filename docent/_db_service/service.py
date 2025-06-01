@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import asyncio
 import functools
 import hashlib
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from itertools import product
 from time import perf_counter
 from typing import (
@@ -32,38 +35,40 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from docent._ai_tools.diff import extract_states_and_diffs_2
+from sqlalchemy.sql import ColumnElement
 
-from docent._ai_tools.attribute_extraction import (
-    Attribute,
-    AttributeStreamingCallback,
-    extract_attributes,
-)
 from docent._ai_tools.clustering.cluster_generator import propose_clusters
+from docent._ai_tools.search import SearchResult, SearchResultStreamingCallback, execute_search
+from docent._db_service.contexts import ViewContext
 from docent._db_service.schemas.base import SQLABase
 from docent._db_service.schemas.tables import (
     SQLAAgentRun,
-    SQLAAttribute,
     SQLADiffAttribute,
     SQLAFilter,
     SQLAFrameDimension,
     SQLAFrameGrid,
     SQLAJob,
     SQLAJudgment,
+    SQLASearchQuery,
+    SQLASearchResult,
+    SQLASession,
     SQLATranscript,
+    SQLAUser,
+    SQLAView,
 )
 from docent._env_util import ENV
 from docent._log_util import get_logger
-from docent.data_models.agent_run import AgentRun
+from docent.data_models.agent_run import AgentRun, BaseAgentRunMetadata
 from docent.data_models.filters import (
-    AttributePredicateFilter,
     ComplexFilter,
     FrameDimension,
     FrameFilter,
     Judgment,
     PrimitiveFilter,
+    SearchResultPredicateFilter,
 )
-from docent.data_models.metadata import BaseAgentRunMetadata
 from docent.data_models.transcript import Transcript
+from docent.data_models.user import User
 
 logger = get_logger(__name__)
 
@@ -308,12 +313,18 @@ class DBService:
     # FrameGrid #
     #############
 
-    async def create(
-        self, fg_id: str | None = None, name: str | None = None, description: str | None = None
+    async def create_fg(
+        self,
+        user: User,
+        fg_id: str | None = None,
+        name: str | None = None,
+        description: str | None = None,
     ):
         fg_id = fg_id or str(uuid4())
         async with self.session() as session:
-            session.add(SQLAFrameGrid(id=fg_id, name=name, description=description))
+            session.add(
+                SQLAFrameGrid(id=fg_id, name=name, description=description, created_by=user.id)
+            )
         logger.info(f"Created FrameGrid with ID: {fg_id}")
         return fg_id
 
@@ -349,26 +360,32 @@ class DBService:
             result = await session.execute(select(exists().where(SQLAFrameGrid.id == fg_id)))
             return result.scalar_one()
 
-    async def delete_framegrid(self, fg_id: str) -> None:
-        # Remove all references from framegrid to other dimensions or filters
+    async def delete_fg(self, fg_id: str) -> None:
+        # Remove all references from views to other dimensions and filters
         async with self.session() as session:
             await session.execute(
-                update(SQLAFrameGrid)
-                .where(SQLAFrameGrid.id == fg_id)
+                update(SQLAView)
+                .where(SQLAView.fg_id == fg_id)
                 .values(outer_dim_id=None, inner_dim_id=None, base_filter_id=None)
             )
 
         # First delete all filters associated with this framegrid
-        filter_ids = await self._get_filter_ids(fg_id)
-        await self._delete_filters(fg_id, filter_ids)
+        async with self.session() as session:
+            query = select(SQLAFilter.id).where(SQLAFilter.fg_id == fg_id)
+            result = await session.execute(query)
+            filter_ids = cast(list[str], result.scalars().all())
+        await self._delete_filters(filter_ids)
 
         # Then delete all dimensions
-        dim_ids = await self._get_dim_ids(fg_id)
-        await self._delete_dimensions(fg_id, dim_ids)
+        async with self.session() as session:
+            query = select(SQLAFrameDimension.id).where(SQLAFrameDimension.fg_id == fg_id)
+            result = await session.execute(query)
+            dim_ids = cast(list[str], result.scalars().all())
+        await self._delete_dimensions(dim_ids)
 
         # Delete all attributes
         async with self.session() as session:
-            await session.execute(delete(SQLAAttribute).where(SQLAAttribute.fg_id == fg_id))
+            await session.execute(delete(SQLASearchResult).where(SQLASearchResult.fg_id == fg_id))
 
         # Delete all transcripts
         async with self.session() as session:
@@ -377,6 +394,10 @@ class DBService:
         # Delete all agent runs
         async with self.session() as session:
             await session.execute(delete(SQLAAgentRun).where(SQLAAgentRun.fg_id == fg_id))
+
+        # Delete views
+        async with self.session() as session:
+            await session.execute(delete(SQLAView).where(SQLAView.fg_id == fg_id))
 
         # Finally delete the framegrid
         async with self.session() as session:
@@ -393,71 +414,194 @@ class DBService:
             )
             return result.scalars().all()
 
-    async def get_base_filter(self, fg_id: str) -> FrameFilter | None:
-        """
-        Get the base filter for a given FrameGrid ID.
-        """
-        # Get base filter, using the associated frame grid
+    ##############
+    # Agent Runs #
+    ##############
+
+    async def add_agent_runs(self, ctx: ViewContext, agent_runs: list[AgentRun]):
+        async with self.session() as session:
+            # Add agent runs
+            session.add_all([SQLAAgentRun.from_agent_run(ar, ctx.fg_id) for ar in agent_runs])
+            # Add associated transcripts
+            sqla_transcripts = [
+                SQLATranscript.from_transcript(t, dk, ctx.fg_id, ar.id)
+                for ar in agent_runs
+                for dk, t in ar.transcripts.items()
+            ]
+            session.add_all(sqla_transcripts)
+        logger.info(f"Pushed {len(agent_runs)} agent runs and {len(sqla_transcripts)} transcripts")
+
+        # Get all MECE metadata dimensions associated with this FG, regardless of view
         async with self.session() as session:
             result = await session.execute(
-                select(SQLAFilter)
-                .where(SQLAFrameGrid.id == fg_id)
-                .join(SQLAFrameGrid, SQLAFrameGrid.base_filter_id == SQLAFilter.id)
+                select(SQLAFrameDimension.id).where(
+                    SQLAFrameDimension.fg_id == ctx.fg_id,
+                    SQLAFrameDimension.metadata_key.isnot(None),
+                    SQLAFrameDimension.maintain_mece,
+                )
             )
-            raw = result.scalar_one_or_none()
+            mece_dim_ids = result.scalars().all()
 
-        filter = raw.to_filter() if raw else None
-        if filter is None:
-            return None
-        if not filter.supports_sql:
-            raise ValueError(f"Base filter must support SQL, got {filter.type} from the database")
+        # Re-cluster all MECE metadata dimensions
+        async with anyio.create_task_group() as tg:
+            for dim_id in mece_dim_ids:
+                tg.start_soon(self.cluster_metadata_dim, ctx, dim_id)
 
-        return filter
+    async def get_agent_runs(
+        self,
+        ctx: ViewContext,
+        agent_run_ids: list[str] | None = None,
+        _where_clause: ColumnElement[bool] | None = None,
+        _limit: int | None = None,
+    ) -> list[AgentRun]:
+        """
+        Get all agent runs for a given FrameGrid ID.
+        """
+        async with self.session() as session:
+            # Get runs
+            query = select(SQLAAgentRun).where(ctx.get_base_where_clause(SQLAAgentRun))
+            if agent_run_ids is not None:
+                query = query.where(SQLAAgentRun.id.in_(agent_run_ids))
+            if _where_clause is not None:
+                query = query.where(_where_clause)
+            if _limit is not None:
+                query = query.limit(_limit)
+            result = await session.execute(query)
+            agent_runs_raw = result.scalars().all()
 
-    async def set_base_filter(self, fg_id: str, base_filter: ComplexFilter | None):
-        if base_filter is not None:
-            if base_filter.op != "and":
-                raise ValueError(
-                    f"Base filter must be a conjunction (AND) of filters, got {base_filter.op}"
-                )
+            # Get transcripts for those runs
+            agent_run_ids = [ar.id for ar in agent_runs_raw]
+            result = await session.execute(
+                select(SQLATranscript).where(SQLATranscript.agent_run_id.in_(agent_run_ids))
+            )
+            transcripts_raw = result.scalars().all()
 
-        # Delete old filter
-        cur_base_filter = await self.get_base_filter(fg_id)
-        if cur_base_filter:
+        # Collate run_id -> transcripts
+        agent_run_transcripts: dict[str, list[tuple[str, Transcript]]] = {}
+        for t_raw in transcripts_raw:
+            agent_run_transcripts.setdefault(t_raw.agent_run_id, []).append(
+                t_raw.to_dict_key_and_transcript()
+            )
+
+        return [
+            ar_raw.to_agent_run(
+                transcripts={dk: t for dk, t in agent_run_transcripts.get(ar_raw.id, [])}
+            )
+            for ar_raw in agent_runs_raw
+        ]
+
+    async def get_agent_run(self, ctx: ViewContext, agent_run_id: str) -> AgentRun | None:
+        """
+        Get an AgentRun from the database by its ID.
+        """
+        agent_runs = await self.get_agent_runs(
+            ctx, _where_clause=SQLAAgentRun.id.in_([agent_run_id])
+        )
+        assert len(agent_runs) <= 1, f"Found {len(agent_runs)} AgentRuns with ID {agent_run_id}"
+        return agent_runs[0] if agent_runs else None
+
+    async def get_any_agent_run(self, ctx: ViewContext) -> AgentRun | None:
+        """
+        Get an arbitrary AgentRun from the database for a given FrameGrid ID.
+        """
+        agent_runs = await self.get_agent_runs(ctx, _limit=1)
+        return agent_runs[0] if agent_runs else None
+
+    async def count_base_agent_runs(self, ctx: ViewContext) -> int:
+        async with self.session() as session:
+            query = (
+                select(func.count())
+                .select_from(SQLAAgentRun)
+                .where(ctx.get_base_where_clause(SQLAAgentRun))
+            )
+            result = await session.execute(query)
+            return result.scalar_one()
+
+    async def get_metadata_with_ids(self, ctx: ViewContext):
+        async with self.session() as session:
+            query = select(SQLAAgentRun.id, SQLAAgentRun.metadata_json).where(
+                ctx.get_base_where_clause(SQLAAgentRun)
+            )
+
+            result = await session.execute(query)
+            raw = result.all()
+            return [(m[0], BaseAgentRunMetadata.model_validate(m[1])) for m in raw]
+
+    #########
+    # Views #
+    #########
+
+    async def get_default_view_ctx(self, fg_id: str) -> ViewContext:
+        # Check if a default view exists for this fg
+        async with self.session() as session:
+            result = await session.execute(
+                select(SQLAView).where(SQLAView.fg_id == fg_id, SQLAView.is_default)
+            )
+            view = result.scalar_one_or_none()
+
+        # If not, create a new view
+        if view is None:
             async with self.session() as session:
-                await session.execute(
-                    update(SQLAFrameGrid)
-                    .where(SQLAFrameGrid.id == fg_id)
-                    .values(base_filter_id=None)
+                view = SQLAView(
+                    id=str(uuid4()),
+                    fg_id=fg_id,
+                    is_default=True,
                 )
-            await self._delete_filters(fg_id, [cur_base_filter.id])
+                session.add(view)
 
-        # Push filter
+        # Get the base filter for this view
+        base_filter = (
+            await self.get_filter(view.base_filter_id) if view.base_filter_id is not None else None
+        )
+        # Check that the base filter is a ComplexFilter
         if base_filter is not None:
-            async with self.session() as session:
-                session.add(SQLAFilter.from_filter(base_filter, fg_id, None))
+            assert isinstance(base_filter, ComplexFilter), "Base filter must be a ComplexFilter"
 
-        # Attach filter to fg
+        return ViewContext(fg_id=fg_id, view_id=view.id, base_filter=base_filter)
+
+    async def set_view_base_filter(self, ctx: ViewContext, filter: ComplexFilter):
+        # Clear the old base filter
+        await self.clear_view_base_filter(ctx)
+
+        # Add the new filter
+        async with self.session() as session:
+            sqla_filter = SQLAFilter.from_filter(filter, ctx)
+            session.add(sqla_filter)
+            logger.info(f"Added filter {filter.id} to view {ctx.view_id}")
+
+        # Set the base filter
         async with self.session() as session:
             await session.execute(
-                update(SQLAFrameGrid)
-                .where(SQLAFrameGrid.id == fg_id)
-                .values(base_filter_id=base_filter.id if base_filter else None)
+                update(SQLAView)
+                .where(SQLAView.id == ctx.view_id)
+                .values(base_filter_id=sqla_filter.id)
             )
 
-        if base_filter is not None:
-            logger.info(f"Pushed and set base filter {base_filter.id}")
-        else:
-            logger.info("Removed base filter")
+        # Return the new ViewContext
+        return ViewContext(fg_id=ctx.fg_id, view_id=ctx.view_id, base_filter=filter)
+
+    async def clear_view_base_filter(self, ctx: ViewContext):
+        if ctx.base_filter is not None:
+            # Unset the base filter
+            async with self.session() as session:
+                await session.execute(
+                    update(SQLAView).where(SQLAView.id == ctx.view_id).values(base_filter_id=None)
+                )
+
+            # Delete the filter
+            await self.delete_filter(ctx.base_filter.id)
+
+        # Return the new ViewContext
+        return ViewContext(fg_id=ctx.fg_id, view_id=ctx.view_id, base_filter=None)
 
     async def set_io_dim_with_metadata_key(
-        self, fg_id: str, metadata_key: str, type: Literal["inner", "outer"]
+        self, ctx: ViewContext, metadata_key: str, type: Literal["inner", "outer"]
     ):
         # Check if there's a MECE dimension already with this metadata key
         async with self.session() as session:
             result = await session.execute(
                 select(SQLAFrameDimension).where(
-                    SQLAFrameDimension.fg_id == fg_id,
+                    SQLAFrameDimension.fg_id == ctx.fg_id,
                     SQLAFrameDimension.metadata_key == metadata_key,
                     SQLAFrameDimension.maintain_mece,
                 )
@@ -472,44 +616,53 @@ class DBService:
                 metadata_key=metadata_key,
                 maintain_mece=True,
             )
-            await self.upsert_dim(fg_id, new_dim, upsert_filters=False)
+            await self.upsert_dim(ctx, new_dim, upsert_filters=False)
             io_dim_id = new_dim.id
 
-        # Update the framegrid
+        # Update the view
         async with self.session() as session:
             await session.execute(
-                update(SQLAFrameGrid)
-                .where(SQLAFrameGrid.id == fg_id)
+                update(SQLAView)
+                .where(SQLAView.id == ctx.view_id)
                 .values(**{f"{type}_dim_id": io_dim_id})
             )
 
         # After setting, make sure they're re-clustered
-        await self.cluster_metadata_dim(fg_id, io_dim_id)
+        await self.cluster_metadata_dim(ctx, io_dim_id)
 
         # Delete unused metadata dimensions
-        await self._delete_unused_metadata_dims(fg_id)
+        await self._delete_unused_metadata_dims(ctx.fg_id)
 
     async def _delete_unused_metadata_dims(self, fg_id: str):
-        # Get inner/outer_dim_ids
-        io_dims = await self.get_io_dims(fg_id)
-        if io_dims is None:
-            inner_dim_id, outer_dim_id = None, None
-        else:
-            inner_dim_id, outer_dim_id = io_dims
-        dims_ids_to_keep = [d for d in [inner_dim_id, outer_dim_id] if d is not None]
+        # Get inner/outer_dim_ids from ALL views in this framegrid, not just one view
+        async with self.session() as session:
+            result = await session.execute(
+                select(SQLAView.inner_dim_id, SQLAView.outer_dim_id).where(SQLAView.fg_id == fg_id)
+            )
+            all_view_dims = result.all()
 
-        # Delete any metadata dimension that isn't one of those two
-        dims = await self.get_dims(fg_id)
+        # Collect all dimension IDs used by ANY view in this framegrid
+        dims_ids_to_keep: set[str] = set()
+        for inner_dim_id, outer_dim_id in all_view_dims:
+            if inner_dim_id:
+                dims_ids_to_keep.add(inner_dim_id)
+            if outer_dim_id:
+                dims_ids_to_keep.add(outer_dim_id)
+
+        # Delete any metadata dimension that isn't used by any view
+        dims = await self._get_fg_dims(fg_id)
         for dim in dims:
             if dim.metadata_key is not None and dim.id not in dims_ids_to_keep:
                 logger.info(f"Deleting unused metadata dimension {dim.id}")
-                await self.delete_dimension(fg_id, dim.id)
+                await self.delete_dimension(dim.id)
 
-    async def set_io_dims(self, fg_id: str, inner_dim_id: str | None, outer_dim_id: str | None):
+    async def set_io_dims(
+        self, ctx: ViewContext, inner_dim_id: str | None, outer_dim_id: str | None
+    ):
         async with self.session() as session:
             await session.execute(
-                update(SQLAFrameGrid)
-                .where(SQLAFrameGrid.id == fg_id)
+                update(SQLAView)
+                .where(SQLAView.id == ctx.view_id)
                 .values(inner_dim_id=inner_dim_id, outer_dim_id=outer_dim_id)
             )
 
@@ -517,97 +670,43 @@ class DBService:
         async with anyio.create_task_group() as tg:
             for dim_id in [outer_dim_id, inner_dim_id]:
                 if dim_id is not None:
-                    tg.start_soon(self.cluster_metadata_dim, fg_id, dim_id)
+                    tg.start_soon(self.cluster_metadata_dim, ctx, dim_id)
 
         # Delete unused metadata dimensions
-        await self._delete_unused_metadata_dims(fg_id)
+        await self._delete_unused_metadata_dims(ctx.fg_id)
 
-    async def get_io_dims(self, fg_id: str) -> tuple[str | None, str | None] | None:
+    async def get_io_dims(self, ctx: ViewContext) -> tuple[str | None, str | None] | None:
         async with self.session() as session:
             result = await session.execute(
-                select(SQLAFrameGrid.inner_dim_id, SQLAFrameGrid.outer_dim_id).where(
-                    SQLAFrameGrid.id == fg_id
+                select(SQLAView.inner_dim_id, SQLAView.outer_dim_id).where(
+                    SQLAView.id == ctx.view_id
                 )
             )
             row = result.one_or_none()
             return tuple(row) if row is not None else None
 
-    ######################
-    # Search persistence #
-    ######################
-
-    async def get_attribute_searches_with_judgment_counts(
-        self, fg_id: str, base_data_only: bool = True
-    ):
-        base_filter = await self.get_base_filter(fg_id) if base_data_only else None
-
-        async with self.session() as session:
-            query = select(SQLAFrameDimension.id, SQLAFrameDimension.attribute).where(
-                SQLAFrameDimension.fg_id == fg_id, SQLAFrameDimension.attribute.is_not(None)
-            )
-            result = await session.execute(query)
-            dim_ids_and_attributes = result.all()
-
-        # Consolidate set of attributes
-        for _, attribute in dim_ids_and_attributes:
-            assert attribute is not None, "We filtered out null attributes, this should not happen"
-        attributes = list(set(cast(str, attribute) for _, attribute in dim_ids_and_attributes))
-
-        # Get counts for each attribute
-        async with self.session() as session:
-            query = (
-                select(SQLAAttribute.attribute, func.count(distinct(SQLAAttribute.agent_run_id)))
-                .where(SQLAAttribute.fg_id == fg_id, SQLAAttribute.attribute.in_(attributes))
-                .group_by(SQLAAttribute.attribute)
-            )
-            # Filter to attributes for agent runs that match the base filter
-            where_clause = base_filter.to_sqla_where_clause(SQLAAgentRun) if base_filter else None
-            if where_clause is not None:
-                query = query.join(
-                    SQLAAgentRun, SQLAAgentRun.id == SQLAAttribute.agent_run_id
-                ).where(where_clause)
-
-            print(query.compile(compile_kwargs={"literal_binds": True}))
-            result = await session.execute(query)
-        counts = {attr: count for attr, count in result.all()}
-
-        # Return dims with counts
-        num_total = await self.count_base_agent_runs(fg_id)
-        return [
-            {
-                "dim_id": dim_id,
-                "attribute": attribute,
-                "num_judgments_computed": counts.get(attribute, 0),
-                "num_total": num_total,
-            }
-            for dim_id, attribute in dim_ids_and_attributes
-        ]
-
     ##########################
     # Dimensions and filters #
     ##########################
 
-    async def _delete_filters(self, fg_id: str, filter_ids: list[str]):
+    async def _delete_filters(self, filter_ids: list[str]):
         async with self.session() as session:
             # Delete judgments for filters
             judgment_result = await session.execute(
-                delete(SQLAJudgment).where(
-                    SQLAJudgment.filter_id.in_(filter_ids), SQLAJudgment.fg_id == fg_id
-                )
+                delete(SQLAJudgment).where(SQLAJudgment.filter_id.in_(filter_ids))
             )
             if (count := judgment_result.rowcount) > 0:
                 logger.info(f"Deleted {count} judgments across {len(filter_ids)} filters")
 
             # Delete the filters themselves
             filter_result = await session.execute(
-                delete(SQLAFilter).where(SQLAFilter.id.in_(filter_ids), SQLAFilter.fg_id == fg_id)
+                delete(SQLAFilter).where(SQLAFilter.id.in_(filter_ids))
             )
             if (count := filter_result.rowcount) > 0:
                 logger.info(f"Deleted {count} filters")
 
     async def set_dim_loading_state(
         self,
-        fg_id: str,
         dim_id: str,
         loading_clusters: bool | None = None,
         loading_marginals: bool | None = None,
@@ -623,7 +722,7 @@ class DBService:
                 update(SQLAFrameDimension).where(SQLAFrameDimension.id == dim_id).values(**values)
             )
 
-    async def upsert_dim(self, fg_id: str, dim: FrameDimension, upsert_filters: bool = True):
+    async def upsert_dim(self, ctx: ViewContext, dim: FrameDimension, upsert_filters: bool = True):
         """
         Generalized dimension upsert method that handles creating or updating dimensions and their filters.
 
@@ -632,23 +731,18 @@ class DBService:
             dim: The dimension to upsert
             upsert_filters: Whether to update filters as well. If True, will delete and recreate filters that have changed.
         """
-        existing_dim = await self.get_dim(fg_id, dim.id, include_bins=upsert_filters)
+        existing_dim = await self.get_dim(dim.id, include_bins=upsert_filters)
 
         # Create SQLAlchemy objects for the dimension and its filters
-        sqla_dim, sqla_filters = SQLAFrameDimension.from_frame_dimension(dim, fg_id)
+        sqla_dim, sqla_filters = SQLAFrameDimension.from_frame_dimension(dim, ctx)
 
         # Update or create the dimension
         async with self.session() as session:
             if existing_dim:
-                sqla_dim, _ = SQLAFrameDimension.from_frame_dimension(dim, fg_id)
+                sqla_dim, _ = SQLAFrameDimension.from_frame_dimension(dim, ctx)
                 values = {k: v for k, v in sqla_dim.__dict__.items() if not k.startswith("_sa_")}
                 await session.execute(
-                    update(SQLAFrameDimension)
-                    .where(
-                        SQLAFrameDimension.id == dim.id,
-                        SQLAFrameDimension.fg_id == fg_id,
-                    )
-                    .values(values)
+                    update(SQLAFrameDimension).where(SQLAFrameDimension.id == dim.id).values(values)
                 )  # TODO(mengk): check result
                 logger.info(f"Updated dimension {dim.id} properties")
             else:
@@ -682,7 +776,7 @@ class DBService:
             # Remove all deleted and changed filters
             filter_ids_to_remove = filters_to_delete | changed_filter_ids
             if filter_ids_to_remove:
-                await self._delete_filters(fg_id, list(filter_ids_to_remove))
+                await self._delete_filters(list(filter_ids_to_remove))
 
             # Add filters: never seen before + changed
             filter_ids_to_add = (new_filter_ids - existing_filter_ids) | changed_filter_ids
@@ -696,44 +790,21 @@ class DBService:
 
         # If this is a metadata dimension with maintain_mece, cluster it
         if dim.metadata_key is not None and dim.maintain_mece:
-            await self.cluster_metadata_dim(fg_id, dim.id)
+            await self.cluster_metadata_dim(ctx, dim.id)
 
         return dim.id
 
-    async def get_dim(self, fg_id: str, dim_id: str, include_bins: bool = True):
-        result = await self._get_dims(fg_id, [dim_id], include_bins)
+    async def get_dim(self, dim_id: str, include_bins: bool = True):
+        result = await self._get_specific_dims([dim_id], include_bins)
+        assert len(result) <= 1, f"Expected at most 1 dimension, got {len(result)}"
         return result[0] if result else None
 
-    async def get_dims(
-        self, fg_id: str, dim_ids: list[str] | None = None, include_bins: bool = True
+    async def get_dims(self, dim_ids: list[str], include_bins: bool = True) -> list[FrameDimension]:
+        return await self._get_specific_dims(dim_ids, include_bins)
+
+    async def _populate_dims_with_filters(
+        self, sqla_dims: Sequence[SQLAFrameDimension], include_bins: bool = True
     ) -> list[FrameDimension]:
-        return await self._get_dims(fg_id, dim_ids, include_bins)
-
-    async def _get_dim_ids(self, fg_id: str) -> list[str]:
-        """
-        Get all dimension IDs for a given FrameGrid ID.
-        """
-        # Get dimensions matching the requested IDs
-        async with self.session() as session:
-            query = select(SQLAFrameDimension.id).where(SQLAFrameDimension.fg_id == fg_id)
-            result = await session.execute(query)
-            return cast(list[str], result.scalars().all())
-
-    async def _get_dims(
-        self, fg_id: str, dim_ids: list[str] | None = None, include_bins: bool = True
-    ) -> list[FrameDimension]:
-        """
-        Get all dimensions for a given FrameGrid ID.
-        """
-        # Get dimensions matching the requested IDs
-        async with self.session() as session:
-            query = select(SQLAFrameDimension).where(SQLAFrameDimension.fg_id == fg_id)
-            # Restrict to requested IDs if provided; otherwise, get all dimensions
-            if dim_ids:
-                query = query.where(SQLAFrameDimension.id.in_(dim_ids))
-            result = await session.execute(query)
-            sqla_dims = result.scalars().all()
-
         async def _get_dim_bins(dim_id: str):
             async with self.session() as session:
                 result = await session.execute(
@@ -755,316 +826,264 @@ class DBService:
 
         return [dim.to_frame_dimension(dim_bins.get(dim.id)) for dim in sqla_dims]
 
-    async def _get_filter_ids(self, fg_id: str) -> list[str]:
+    async def _get_fg_dims(self, fg_id: str, include_bins: bool = False) -> list[FrameDimension]:
         async with self.session() as session:
-            query = select(SQLAFilter.id).where(SQLAFilter.fg_id == fg_id)
+            query = select(SQLAFrameDimension).where(SQLAFrameDimension.fg_id == fg_id)
+            result = await session.execute(query)
+            sqla_dims = result.scalars().all()
+
+        return await self._populate_dims_with_filters(sqla_dims, include_bins)
+
+    async def get_view_dims(
+        self, ctx: ViewContext, include_bins: bool = True
+    ) -> list[FrameDimension]:
+        # Get dimensions matching the requested IDs
+        async with self.session() as session:
+            query = select(SQLAFrameDimension).where(SQLAFrameDimension.view_id == ctx.view_id)
+            result = await session.execute(query)
+            sqla_dims = result.scalars().all()
+
+        return await self._populate_dims_with_filters(sqla_dims, include_bins)
+
+    async def _get_specific_dims(
+        self, dim_ids: list[str], include_bins: bool = True
+    ) -> list[FrameDimension]:
+        # Get dimensions matching the requested IDs
+        async with self.session() as session:
+            query = select(SQLAFrameDimension).where(SQLAFrameDimension.id.in_(dim_ids))
+            result = await session.execute(query)
+            sqla_dims = result.scalars().all()
+
+        return await self._populate_dims_with_filters(sqla_dims, include_bins)
+
+    async def _get_filter_ids(self, ctx: ViewContext) -> list[str]:
+        async with self.session() as session:
+            query = select(SQLAFilter.id).where(SQLAFilter.view_id == ctx.view_id)
             result = await session.execute(query)
             return cast(list[str], result.scalars().all())
 
-    async def _get_filters(
-        self, fg_id: str, filter_ids: list[str] | None = None
-    ) -> list[FrameFilter]:
+    async def _get_view_filters(self, ctx: ViewContext) -> list[FrameFilter]:
         async with self.session() as session:
-            query = select(SQLAFilter).where(SQLAFilter.fg_id == fg_id)
-            if filter_ids:
-                query = query.where(SQLAFilter.id.in_(filter_ids))
+            query = select(SQLAFilter).where(SQLAFilter.view_id == ctx.view_id)
             result = await session.execute(query)
             sqla_filters = result.scalars().all()
             return [sqla_filter.to_filter() for sqla_filter in sqla_filters]
 
-    async def get_filter(self, fg_id: str, filter_id: str) -> FrameFilter | None:
-        filters = await self._get_filters(fg_id, [filter_id])
-        assert len(filters) <= 1, f"Expected 1 filter, got {len(filters)}"
+    async def _get_specific_filters(self, filter_ids: list[str]) -> list[FrameFilter]:
+        async with self.session() as session:
+            query = select(SQLAFilter).where(SQLAFilter.id.in_(filter_ids))
+            result = await session.execute(query)
+            sqla_filters = result.scalars().all()
+            return [sqla_filter.to_filter() for sqla_filter in sqla_filters]
+
+    async def get_filter(self, filter_id: str) -> FrameFilter | None:
+        filters = await self._get_specific_filters([filter_id])
+        assert len(filters) <= 1, f"Expected at most 1 filter, got {len(filters)}"
         return filters[0] if filters else None
 
-    async def add_filter(self, fg_id: str, filter: FrameFilter):
-        async with self.session() as session:
-            session.add(SQLAFilter.from_filter(filter, fg_id, None))
-            logger.info(f"Added filter {filter.id}")
-
-        return filter.id
-
-    async def set_filter(self, fg_id: str, filter_id: str, filter: FrameFilter):
+    async def set_filter(self, filter_id: str, filter: FrameFilter):
         if filter_id != filter.id:
             raise ValueError(f"Filter ID mismatch: {filter_id} != {filter.id}")
 
         async with self.session() as session:
             await session.execute(
                 update(SQLAFilter)
-                .where(SQLAFilter.id == filter_id, SQLAFilter.fg_id == fg_id)
+                .where(SQLAFilter.id == filter_id)
                 .values(filter_json=filter.model_dump())
             )
             logger.info(f"Updated filter {filter_id}")
 
             # Also need to invalidate all the judgments involving this filter
             judgment_result = await session.execute(
-                delete(SQLAJudgment).where(
-                    SQLAJudgment.filter_id == filter_id, SQLAJudgment.fg_id == fg_id
-                )
+                delete(SQLAJudgment).where(SQLAJudgment.filter_id == filter_id)
             )
             logger.info(
                 f"Deleted {judgment_result.rowcount} judgments associated with updated filter {filter_id}"
             )
 
-    async def delete_filter(self, fg_id: str, filter_id: str):
-        await self._delete_filters(fg_id, [filter_id])
+    async def delete_filter(self, filter_id: str):
+        await self._delete_filters([filter_id])
 
-    async def delete_dimension(self, fg_id: str, dim_id: str):
-        await self._delete_dimensions(fg_id, [dim_id])
+    async def delete_dimension(self, dim_id: str):
+        await self._delete_dimensions([dim_id])
 
-    async def _delete_dimensions(self, fg_id: str, dim_ids: list[str]):
+    async def _delete_dimensions(self, dim_ids: list[str]):
         # Get all filters on these dimensions and delete them
         async with self.session() as session:
             result = await session.execute(
                 select(SQLAFilter.id)
                 .join(SQLAFrameDimension, SQLAFrameDimension.id == SQLAFilter.dimension_id)
-                .where(
-                    SQLAFrameDimension.fg_id == fg_id,
-                    SQLAFrameDimension.id.in_(dim_ids),
-                )
+                .where(SQLAFrameDimension.id.in_(dim_ids))
             )
             filter_ids = cast(list[str], result.scalars().all())
-        await self._delete_filters(fg_id, filter_ids)
-
-        # Get the attributes for the dimensions to be deleted
-        async with self.session() as session:
-            result = await session.execute(
-                select(SQLAFrameDimension.attribute)
-                .where(
-                    SQLAFrameDimension.id.in_(dim_ids),
-                    SQLAFrameDimension.fg_id == fg_id,
-                    SQLAFrameDimension.attribute.isnot(None),
-                )
-                .distinct()
-            )
-            attributes_to_check = result.scalars().all()
+        await self._delete_filters(filter_ids)
 
         # Then delete the dimensions
         async with self.session() as session:
             result = await session.execute(
-                delete(SQLAFrameDimension).where(
-                    SQLAFrameDimension.id.in_(dim_ids), SQLAFrameDimension.fg_id == fg_id
-                )
+                delete(SQLAFrameDimension).where(SQLAFrameDimension.id.in_(dim_ids))
             )
             logger.info(f"Deleted {result.rowcount} dimensions")
 
-        # If no more dimensions use this attribute, then clear them from the database
-        for attribute in attributes_to_check:
-            # Check if any other dimensions use this attribute
-            async with self.session() as session:
-                result = await session.execute(
-                    select(func.count())
-                    .select_from(SQLAFrameDimension)
-                    .where(
-                        SQLAFrameDimension.fg_id == fg_id,
-                        SQLAFrameDimension.attribute == attribute,
-                    )
-                )
-                remaining_count = result.scalar_one()
+    ############
+    # Searches #
+    ############
 
-            # If no dimensions use this attribute anymore, delete all attributes with this name
-            if remaining_count == 0:
-                async with self.session() as session:
-                    delete_result = await session.execute(
-                        delete(SQLAAttribute).where(
-                            SQLAAttribute.fg_id == fg_id,
-                            SQLAAttribute.attribute == attribute,
-                        )
-                    )
-                    logger.info(
-                        f"Cleared {delete_result.rowcount} attributes for '{attribute}' as no dimensions use it anymore"
-                    )
-
-    ##############
-    # Agent Runs #
-    ##############
-
-    async def add_agent_runs(self, fg_id: str, agent_runs: list[AgentRun]):
+    async def add_search_query(self, ctx: ViewContext, search_query: str) -> str:
+        """
+        Add a search query to the SQLASearchQuery table if it does not already exist.
+        Returns the id of the search query.
+        """
         async with self.session() as session:
-            # Add agent runs
-            session.add_all([SQLAAgentRun.from_agent_run(ar, fg_id) for ar in agent_runs])
-            # Add associated transcripts
-            sqla_transcripts = [
-                SQLATranscript.from_transcript(t, dk, fg_id, ar.id)
-                for ar in agent_runs
-                for dk, t in ar.transcripts.items()
-            ]
-            session.add_all(sqla_transcripts)
-        logger.info(f"Pushed {len(agent_runs)} agent runs and {len(sqla_transcripts)} transcripts")
+            # Check if the search query already exists for this frame grid
+            result = await session.execute(
+                select(SQLASearchQuery).where(
+                    SQLASearchQuery.fg_id == ctx.fg_id,
+                    SQLASearchQuery.search_query == search_query,
+                )
+            )
+            existing = result.scalar_one_or_none()
+            if existing is not None:
+                return existing.id
 
-        # Get all MECE metadata dimensions associated with this FG
+        # Otherwise, create a new search query
+        async with self.session() as session:
+            new_id = str(uuid4())
+            sq = SQLASearchQuery(
+                id=new_id,
+                fg_id=ctx.fg_id,
+                search_query=search_query,
+            )
+            session.add(sq)
+
+        logger.info(f"Added new search query {search_query} with id {new_id} to fg_id {ctx.fg_id}")
+        return new_id
+
+    async def delete_search_query(self, ctx: ViewContext, search_query_id: str):
+        """
+        Delete a search query from the database.
+
+        Args:
+            search_query_id: The ID of the search query to delete
+
+        Returns:
+            True if the search query was found and deleted, False otherwise
+        """
+        # Delete search results
+        async with self.session() as session:
+            await session.execute(
+                delete(SQLASearchQuery).where(SQLASearchQuery.id == search_query_id)
+            )
+
+        # Get all search queries
+        async with self.session() as session:
+            result = await session.execute(
+                select(SQLASearchQuery.search_query).where(SQLASearchQuery.fg_id == ctx.fg_id)
+            )
+            search_queries = list(set(result.scalars().all()))
+
+        # Get dimensions with queries that no searches require
         async with self.session() as session:
             result = await session.execute(
                 select(SQLAFrameDimension.id).where(
-                    SQLAFrameDimension.fg_id == fg_id,
-                    SQLAFrameDimension.metadata_key.isnot(None),
-                    SQLAFrameDimension.maintain_mece,
+                    SQLAFrameDimension.fg_id == ctx.fg_id,
+                    SQLAFrameDimension.search_query.isnot(None),
+                    ~SQLAFrameDimension.search_query.in_(search_queries),
                 )
             )
-            mece_dim_ids = result.scalars().all()
+            dim_ids = cast(list[str], result.scalars().all())
 
-        # Re-cluster all MECE metadata dimensions
-        async with anyio.create_task_group() as tg:
-            for dim_id in mece_dim_ids:
-                tg.start_soon(self.cluster_metadata_dim, fg_id, dim_id)
+        # Delete them
+        await self._delete_dimensions(dim_ids)
 
-    async def get_agent_runs(
-        self,
-        fg_id: str,
-        agent_run_ids: list[str] | None = None,
-        where_clause: ColumnElement[bool] | None = None,
-        limit: int | None = None,
-    ) -> list[AgentRun]:
-        """
-        Get all agent runs for a given FrameGrid ID.
-        """
+    async def get_searches_with_result_counts(self, ctx: ViewContext) -> list[dict[str, Any]]:
+        # Get search result queries
         async with self.session() as session:
-            # Get ARs
-            query = select(SQLAAgentRun).where(SQLAAgentRun.fg_id == fg_id)
-            if agent_run_ids is not None:
-                query = query.where(SQLAAgentRun.id.in_(agent_run_ids))
-            if where_clause is not None:
-                query = query.where(where_clause)
-            if limit is not None:
-                query = query.limit(limit)
+            query = select(SQLASearchQuery.id, SQLASearchQuery.search_query).where(
+                SQLASearchQuery.fg_id == ctx.fg_id
+            )
             result = await session.execute(query)
-            agent_runs_raw = result.scalars().all()
+            search_ids_and_queries = result.all()
 
-            # Get transcripts for those ARs
-            agent_run_ids = [ar.id for ar in agent_runs_raw]
-            result = await session.execute(
-                select(SQLATranscript).where(SQLATranscript.agent_run_id.in_(agent_run_ids))
+        # Consolidate set of search queries
+        for _, query in search_ids_and_queries:
+            assert query is not None, "We filtered out null search queries, this should not happen"
+        search_queries = list(set(cast(str, query) for _, query in search_ids_and_queries))
+
+        # Get counts of agent runs that these search queries have been run against
+        async with self.session() as session:
+            query = (
+                select(
+                    SQLASearchResult.search_query,
+                    func.count(distinct(SQLASearchResult.agent_run_id)),
+                )
+                .where(SQLASearchResult.search_query.in_(search_queries))
+                .join(SQLAAgentRun, SQLASearchResult.agent_run_id == SQLAAgentRun.id)
+                .where(
+                    ctx.get_base_where_clause(SQLAAgentRun),
+                )
+                .group_by(SQLASearchResult.search_query)
             )
-            transcripts_raw = result.scalars().all()
+            result = await session.execute(query)
 
-        # Collate run_id -> transcripts
-        agent_run_transcripts: dict[str, list[tuple[str, Transcript]]] = {}
-        for t_raw in transcripts_raw:
-            agent_run_transcripts.setdefault(t_raw.agent_run_id, []).append(
-                t_raw.to_dict_key_and_transcript()
-            )
-
+        # Return search queries with judgment counts
+        counts = {query: count for query, count in result.all()}
+        num_total = await self.count_base_agent_runs(ctx)
         return [
-            ar_raw.to_agent_run(
-                transcripts={dk: t for dk, t in agent_run_transcripts.get(ar_raw.id, [])}
-            )
-            for ar_raw in agent_runs_raw
+            {
+                "search_id": search_id,
+                "search_query": search_query,
+                "num_judgments_computed": counts.get(search_query, 0),
+                "num_total": num_total,
+            }
+            for search_id, search_query in search_ids_and_queries
         ]
 
-    async def get_agent_run(self, fg_id: str, agent_run_id: str) -> AgentRun | None:
-        """
-        Get an AgentRun from the database by its ID.
-        """
-        agent_runs = await self.get_agent_runs(fg_id, [agent_run_id])
-        assert len(agent_runs) <= 1, f"Found {len(agent_runs)} AgentRuns with ID {agent_run_id}"
-        return agent_runs[0] if agent_runs else None
+    async def _get_agent_runs_without_search_results(
+        self, ctx: ViewContext, search_query: str
+    ) -> list[AgentRun]:
+        where_clause = ~exists().where(
+            SQLASearchResult.agent_run_id == SQLAAgentRun.id,
+            SQLASearchResult.search_query == search_query,
+        )
+        return await self.get_agent_runs(ctx, _where_clause=where_clause)
 
-    async def get_any_agent_run(self, fg_id: str) -> AgentRun | None:
-        """
-        Get an arbitrary AgentRun from the database for a given FrameGrid ID.
-        """
-        agent_runs = await self.get_agent_runs(fg_id, limit=1)
-        return agent_runs[0] if agent_runs else None
+    async def get_search_results(
+        self,
+        ctx: ViewContext,
+        search_query: str,
+    ) -> list[SearchResult]:
+        return await self._get_search_results(ctx, search_query)
 
-    async def get_base_agent_runs(self, fg_id: str) -> list[AgentRun]:
-        base_filter = await self.get_base_filter(fg_id)
-        where_clause = base_filter.to_sqla_where_clause(SQLAAgentRun) if base_filter else None
-        return await self.get_agent_runs(fg_id, where_clause=where_clause)
-
-    async def count_base_agent_runs(self, fg_id: str) -> int:
-        base_filter = await self.get_base_filter(fg_id)
-        where_clause = base_filter.to_sqla_where_clause(SQLAAgentRun) if base_filter else None
+    async def _get_search_results(
+        self,
+        ctx: ViewContext,
+        search_query: str,
+        search_result_callback: SearchResultStreamingCallback | None = None,
+        ensure_fresh: bool = True,
+    ) -> list[SearchResult]:
+        # Ensure we have fresh search results
+        if ensure_fresh:
+            await self._compute_search(
+                ctx,
+                search_query,
+                search_result_callback=search_result_callback,
+            )
 
         async with self.session() as session:
             query = (
-                select(func.count()).select_from(SQLAAgentRun).where(SQLAAgentRun.fg_id == fg_id)
+                select(SQLASearchResult)
+                .where(SQLASearchResult.search_query == search_query)
+                .join(SQLAAgentRun, SQLASearchResult.agent_run_id == SQLAAgentRun.id)
+                .where(ctx.get_base_where_clause(SQLAAgentRun))
             )
-            if where_clause is not None:
-                query = query.where(where_clause)
 
             result = await session.execute(query)
-            return result.scalar_one()
-
-    async def get_metadata_with_ids(self, fg_id: str, base_data_only: bool = True):
-        base_filter = await self.get_base_filter(fg_id) if base_data_only else None
-        where_clause = base_filter.to_sqla_where_clause(SQLAAgentRun) if base_filter else None
-
-        async with self.session() as session:
-            query = select(SQLAAgentRun.id, SQLAAgentRun.metadata_json).where(
-                SQLAAgentRun.fg_id == fg_id
-            )
-            if where_clause is not None:
-                query = query.where(where_clause)
-
-            result = await session.execute(query)
-            raw = result.all()
-            return [(m[0], BaseAgentRunMetadata.model_validate(m[1])) for m in raw]
-
-    ##############
-    # Attributes #
-    ##############
-
-    async def get_agent_runs_without_attribute(
-        self, fg_id: str, attribute: str, base_filter: FrameFilter | None = None
-    ) -> list[AgentRun]:
-        where_clause = ~exists().where(
-            SQLAAttribute.agent_run_id == SQLAAgentRun.id,
-            SQLAAttribute.attribute == attribute,
-        )
-        # If base_data_only is True, we need to join with the base filter judgments
-        base_where_clause = base_filter.to_sqla_where_clause(SQLAAgentRun) if base_filter else None
-        if base_where_clause is not None:
-            where_clause = where_clause & base_where_clause
-
-        return await self.get_agent_runs(fg_id, where_clause=where_clause)
-
-    async def get_attributes(
-        self,
-        fg_id: str,
-        attribute: str,
-        base_data_only: bool = True,
-    ) -> list[Attribute]:
-        base_filter = await self.get_base_filter(fg_id) if base_data_only else None
-        return await self._get_attributes(
-            fg_id,
-            attribute,
-            base_filter=base_filter,
-        )
-
-    async def _get_attributes(
-        self,
-        fg_id: str,
-        attribute: str,
-        attribute_callback: AttributeStreamingCallback | None = None,
-        base_filter: FrameFilter | None = None,
-        ensure_fresh: bool = True,
-    ) -> list[Attribute]:
-        # Ensure we have fresh attributes
-        if ensure_fresh:
-            await self._compute_attributes(
-                fg_id,
-                attribute,
-                attribute_callback=attribute_callback,
-                base_filter=base_filter,
-            )
-
-        async with self.session() as session:
-            query = select(SQLAAttribute).where(
-                SQLAAttribute.fg_id == fg_id,
-                SQLAAttribute.attribute == attribute,
-            )
-            where_clause = base_filter.to_sqla_where_clause(SQLAAgentRun) if base_filter else None
-            if where_clause is not None:
-                query = query.join(
-                    SQLAAgentRun, SQLAAgentRun.id == SQLAAttribute.agent_run_id
-                ).where(where_clause)
-
-            result = await session.execute(query)
-            return [a.to_attribute() for a in result.scalars().all()]
+            return [a.to_search_result() for a in result.scalars().all()]
 
     async def compute_diffs(
         self,
-        fg_id: str,
+        ctx: ViewContext,
         experiment_id_1: str,
         experiment_id_2: str,
         diff_callback: (
@@ -1077,7 +1096,7 @@ class DBService:
 
         # TODO(vincent): flexible binning and comparisons
 
-        datapoints = await self.get_agent_runs(fg_id)
+        datapoints = await self.get_agent_runs(ctx)
 
         print(f"have {len(datapoints)} datapoints")
 
@@ -1097,7 +1116,7 @@ class DBService:
         async with self.session() as session:
             result = await session.execute(
                 select(SQLADiffAttribute).where(
-                    SQLADiffAttribute.frame_grid_id == fg_id,
+                    SQLADiffAttribute.frame_grid_id == ctx.fg_id,
                 )
             )
             existing_diffs = result.scalars().all()
@@ -1169,7 +1188,7 @@ class DBService:
                         attribute_idx=None,
                         claim="",
                         evidence="",
-                        fg_id=fg_id,
+                        fg_id=ctx.fg_id,
                     )
                 )
                 if diff_callback is not None:
@@ -1186,7 +1205,7 @@ class DBService:
                         attribute_idx=i,
                         claim=claim,
                         evidence=evidence,
-                        fg_id=fg_id,
+                        fg_id=ctx.fg_id,
                     )
                 )
                 diffs.append(claim)
@@ -1200,69 +1219,63 @@ class DBService:
                 logger.info(f"Pushed {len(to_upload)} diff attributes")
         return to_upload
 
-    async def compute_attributes(
+    async def compute_search(
         self,
-        fg_id: str,
-        attribute: str,
-        attribute_callback: AttributeStreamingCallback | None = None,
-        base_data_only: bool = True,
+        ctx: ViewContext,
+        search_query: str,
+        search_result_callback: SearchResultStreamingCallback | None = None,
     ):
-        base_filter = await self.get_base_filter(fg_id) if base_data_only else None
-        await self._compute_attributes(
-            fg_id,
-            attribute,
-            attribute_callback=attribute_callback,
-            base_filter=base_filter,
+        await self._compute_search(
+            ctx,
+            search_query,
+            search_result_callback=search_result_callback,
         )
 
-    async def _compute_attributes(
+    async def _compute_search(
         self,
-        fg_id: str,
-        attribute: str,
-        attribute_callback: AttributeStreamingCallback | None = None,
-        base_filter: FrameFilter | None = None,
+        ctx: ViewContext,
+        search_query: str,
+        search_result_callback: SearchResultStreamingCallback | None = None,
     ):
-        # If the attribute callback is set, the caller is expecting all results to be streamed back
+        # If the callback is set, the caller is expecting all results to be streamed back
         # So, retrieve them and send them
-        if attribute_callback is not None:
-            attrs = await self._get_attributes(
-                fg_id, attribute, base_filter=base_filter, ensure_fresh=False
+        if search_result_callback is not None:
+            existing_search_results = await self._get_search_results(
+                ctx, search_query, ensure_fresh=False
             )
-            await attribute_callback(attrs)
+            await search_result_callback(existing_search_results)
 
-        # Figure out which datapoints don't have the attribute
-        datapoints = await self.get_agent_runs_without_attribute(
-            fg_id, attribute, base_filter=base_filter
-        )
-        if not datapoints:
-            logger.info(f"All datapoints already have attribute {attribute}")
+        # Figure out which datapoints don't have search results computed
+        agent_runs = await self._get_agent_runs_without_search_results(ctx, search_query)
+        if not agent_runs:
+            logger.info(f"All datapoints already have results for {search_query}")
             return
         else:
-            logger.info(f"Computing attributes for {len(datapoints)} datapoints")
+            logger.info(f"Computing results for {len(agent_runs)} datapoints")
 
-        extracted_attrs: list[Attribute] = []
+        new_search_results: list[SearchResult] = []
 
-        async def _save_and_callback(attributes: list[Attribute]):
-            """When each attribute comes back, both call the callback and also save to
-            a running list of attributes that will be uploaded to the database.
+        async def _save_and_callback(search_results: list[SearchResult]):
+            """When each search result comes back, both call the callback and also save to
+            a running list of search results that will be uploaded to the database.
             """
-            nonlocal extracted_attrs
+            nonlocal new_search_results
 
-            extracted_attrs.extend(attributes)
-            if attribute_callback:
-                await attribute_callback(attributes)
+            new_search_results.extend(search_results)
+            if search_result_callback:
+                await search_result_callback(search_results)
 
         async def _upload():
-            """Upload the attributes we have to the database."""
-            nonlocal extracted_attrs
+            """Upload the search results we have to the database."""
+            nonlocal new_search_results
 
             with anyio.CancelScope(shield=True):
-                to_upload: list[SQLAAttribute] = [
-                    SQLAAttribute.from_attribute(
-                        attribute=attr,
-                        fg_id=fg_id,
+                to_upload: list[SQLASearchResult] = [
+                    SQLASearchResult.from_search_result(
+                        search_result=attr,
+                        fg_id=ctx.fg_id,
                     )
-                    for attr in extracted_attrs
+                    for attr in new_search_results
                 ]
                 async with self.session() as session:
                     session.add_all(to_upload)
@@ -1270,7 +1283,9 @@ class DBService:
                 logger.info(f"Pushed {len(to_upload)} attributes")
 
         try:
-            await extract_attributes(datapoints, attribute, attribute_callback=_save_and_callback)
+            await execute_search(
+                agent_runs, search_query, search_result_callback=_save_and_callback
+            )
         except anyio.get_cancelled_exc_class():
             logger.info("Attribute computation cancelled")
         finally:
@@ -1278,41 +1293,33 @@ class DBService:
             await _upload()
 
     async def _get_agent_runs_without_judgments(
-        self, fg_id: str, filter_id: str, base_filter: FrameFilter | None = None
+        self, ctx: ViewContext, filter_id: str
     ) -> list[AgentRun]:
         # Does this datapoint have a judgment for the given filter?
         subquery = (
             select(SQLAJudgment.id)
             .where(SQLAJudgment.agent_run_id == SQLAAgentRun.id)
             .where(SQLAJudgment.filter_id == filter_id)
-            .where(SQLAJudgment.fg_id == fg_id)
             .correlate(SQLAAgentRun)  # Explicitly correlate with the outer SQLAAgentRun table
             .exists()
         )
         where_clause = ~subquery
 
-        # If base_filter is provided, filter to those
-        base_where_clause = base_filter.to_sqla_where_clause(SQLAAgentRun) if base_filter else None
-        if base_where_clause is not None:
-            where_clause = where_clause & base_where_clause
+        return await self.get_agent_runs(ctx, _where_clause=where_clause)
 
-        return await self.get_agent_runs(fg_id, where_clause=where_clause)
-
-    ######################
-    # Filter computation #
-    ######################
+    #########################################
+    # Computing filters and clustering dims #
+    #########################################
 
     async def compute_filter(
         self,
-        fg_id: str,
+        ctx: ViewContext,
         filter_id: str,
-        base_data_only: bool = True,
     ):
-        base_filter = await self.get_base_filter(fg_id) if base_data_only else None
-        await self._compute_filter(fg_id, filter_id, base_filter=base_filter)
+        await self._compute_filter(ctx, filter_id)
 
     async def _get_dim_filters_with_missing_judgments(
-        self, fg_id: str, dim_id: str, base_filter: FrameFilter | None = None
+        self, ctx: ViewContext, dim_id: str
     ) -> list[str]:
         """TODO(mengk): this function looks pretty slow on profiling; check runtime complexity
         and see if there are obvious issues.
@@ -1330,20 +1337,15 @@ class DBService:
         TODO(mengk): we should think of a way to efficiently check...
         """
         async with self.session() as session:
-            # Build subquery that determines which datapoints match the base filter
-            agent_runs_subquery = select(SQLAAgentRun.id).where(SQLAAgentRun.fg_id == fg_id)
-            # If base_filter is provided, only consider datapoints that match it
-            where_clause = base_filter.to_sqla_where_clause(SQLAAgentRun) if base_filter else None
-            if where_clause is not None:
-                agent_runs_subquery = agent_runs_subquery.where(where_clause)
+            # Subquery that determines which datapoints match the base filter
+            agent_runs_subquery = select(SQLAAgentRun.id).where(
+                ctx.get_base_where_clause(SQLAAgentRun)
+            )
 
             # Main query to find filters with missing judgments
             query = (
                 select(SQLAFilter.id)
-                .where(
-                    SQLAFilter.fg_id == fg_id,
-                    SQLAFilter.dimension_id == dim_id,
-                )
+                .where(SQLAFilter.dimension_id == dim_id)
                 .where(
                     exists(
                         select(SQLAAgentRun)
@@ -1368,16 +1370,15 @@ class DBService:
 
     async def _compute_filter(
         self,
-        fg_id: str,
+        ctx: ViewContext,
         filter_id: str,
-        base_filter: FrameFilter | None = None,
     ):
         """
         FIXME(mengk): known concurrency issue: if the same filter is computed multiple times at once,
             you'll likely get a unique key violation error.
         """
 
-        filter = await self.get_filter(fg_id, filter_id)
+        filter = await self.get_filter(filter_id)
         if filter is None:
             raise ValueError(f"Filter ID {filter_id} not found")
 
@@ -1394,26 +1395,15 @@ class DBService:
             # Delete existing judgments for this filter
             async with self.session() as session:
                 await session.execute(
-                    delete(SQLAJudgment).where(
-                        SQLAJudgment.filter_id == filter_id,
-                        SQLAJudgment.fg_id == fg_id,
-                    )
+                    delete(SQLAJudgment).where(SQLAJudgment.filter_id == filter_id)
                 )
 
             # Get datapoints that match the WHERE clause and the base filter
             async with self.session() as session:
                 query = select(SQLAAgentRun.id).where(
-                    SQLAAgentRun.fg_id == fg_id,
+                    ctx.get_base_where_clause(SQLAAgentRun),
                     where_clause,
                 )
-                # If base_filter is provided, we need to join with the base filter judgments
-                base_where_clause = (
-                    base_filter.to_sqla_where_clause(SQLAAgentRun) if base_filter else None
-                )
-                if base_where_clause is not None:
-                    query = query.where(base_where_clause)
-
-                # Execute
                 result = await session.execute(query)
                 datapoint_ids = result.scalars().all()
 
@@ -1423,44 +1413,44 @@ class DBService:
             ]
         else:
             # Which datapoints do not have judgments for this filter? Early exit if all fresh
-            datapoints = await self._get_agent_runs_without_judgments(fg_id, filter_id, base_filter)
-            if not datapoints:
+            agent_runs = await self._get_agent_runs_without_judgments(ctx, filter_id)
+            if not agent_runs:
                 return
 
             logger.info(
-                f"Found {len(datapoints)} datapoints without judgments for filter {filter.name}"
+                f"Found {len(agent_runs)} datapoints without judgments for filter {filter.name}"
             )
 
-            attributes = None  # Default to None, will be set if filter is a FramePredicate
+            search_results = None  # Default to None, will be set if filter is a FramePredicate
 
-            # If filter is a AttributePredicateFilter, it operates on attributes
+            # If filter is a SearchResultPredicateFilter, it operates on search results
             # Pull them down and insert them into the datapoints
-            if filter.type == "attribute_predicate":
-                datapoints_dict = {d.id: d for d in datapoints}
-                attributes = await self._get_attributes(
-                    fg_id, filter.attribute, base_filter=base_filter
-                )
-                datapoints = list(datapoints_dict.values())
+            if filter.type == "search_result_predicate":
+                datapoints_dict = {d.id: d for d in agent_runs}
+                search_results = await self._get_search_results(ctx, filter.search_query)
+                agent_runs = list(datapoints_dict.values())
+
+            print(search_results)
 
             # Apply filter
-            judgments = await filter.apply(datapoints, attributes, return_all=True)
+            judgments = await filter.apply(agent_runs, search_results, return_all=True)
 
         # Push matching judgments to the database
         async with self.session() as session:
-            session.add_all([SQLAJudgment.from_judgment(j, fg_id) for j in judgments])
+            session.add_all([SQLAJudgment.from_judgment(j, ctx.fg_id) for j in judgments])
             logger.info(f"Pushed {len(judgments)} judgments")
 
-    async def _refresh_metadata_dims(self, fg_id: str):
-        dims = await self.get_dims(fg_id)
+    async def _refresh_metadata_dims(self, ctx: ViewContext):
+        dims = await self.get_view_dims(ctx)
         for dim in dims:
             if dim.metadata_key is not None:
-                await self.cluster_metadata_dim(fg_id, dim.id)
+                await self.cluster_metadata_dim(ctx, dim.id)
 
     @time_this
-    async def cluster_metadata_dim(self, fg_id: str, dim_id: str):
+    async def cluster_metadata_dim(self, ctx: ViewContext, dim_id: str):
         # Get rid of existing filters on this dim
-        filters = await self.get_dim_filters(fg_id, dim_id)
-        await self._delete_filters(fg_id, [f.id for f in filters])
+        filters = await self._get_dim_filters(dim_id)
+        await self._delete_filters([f.id for f in filters])
 
         # Get metadata filter key
         async with self.session() as session:
@@ -1473,10 +1463,7 @@ class DBService:
                     f"Dimension {dim_id} either not found or does not have a metadata key"
                 )
 
-        # Download *all* metadata to maintain the invariant that metadata filters are always fresh.
-        # If there is a currently-active base filter, and we only get the base metadata,
-        #   then the remaining datapoints will be missing judgments.
-        all_metadata_with_ids = await self.get_metadata_with_ids(fg_id, base_data_only=False)
+        all_metadata_with_ids = await self.get_metadata_with_ids(ctx)
 
         # Collect all datapoints with each unique metadata value
         value_to_datapoint_ids: dict[Any, set[str]] = {}
@@ -1492,7 +1479,7 @@ class DBService:
                     key_path=("metadata", metadata_key),
                     value=value,
                 ),
-                fg_id=fg_id,
+                ctx=ctx,
                 dim_id=dim_id,
             )
             for value in value_to_datapoint_ids.keys()
@@ -1507,7 +1494,7 @@ class DBService:
             matching_judgments = [
                 SQLAJudgment.from_judgment(
                     Judgment(agent_run_id=id, matches=True, filter_id=filters[value].id),
-                    fg_id=fg_id,
+                    fg_id=ctx.fg_id,
                 )
                 for id in datapoint_ids
             ]
@@ -1516,59 +1503,50 @@ class DBService:
             session.add_all(sqla_judgments)
             logger.info(f"Pushed {len(sqla_judgments)} judgments")
 
-    async def cluster_attributes(
+    async def cluster_search_results(
         self,
-        fg_id: str,
+        ctx: ViewContext,
         dim_id: str,
-        n_clusters: int = 1,
-        attribute_callback: AttributeStreamingCallback | None = None,
-        base_data_only: bool = True,
+        n_proposals: int = 1,
+        search_result_callback: SearchResultStreamingCallback | None = None,
     ):
-        dim = await self.get_dim(fg_id, dim_id)
+        dim = await self.get_dim(dim_id)
         if dim is None:
             raise ValueError(f"Dimension {dim_id} not found")
-        if dim.attribute is None:
+        if dim.search_query is None:
             raise ValueError(f"Dimension {dim_id} does not have an attribute")
 
         # Get attributes to cluster
-        base_filter = await self.get_base_filter(fg_id) if base_data_only else None
-        attributes = await self._get_attributes(
-            fg_id,
-            dim.attribute,
-            attribute_callback=attribute_callback,
-            base_filter=base_filter,
+        search_results = await self._get_search_results(
+            ctx,
+            dim.search_query,
+            search_result_callback=search_result_callback,
         )
-        to_cluster = [a.value for a in attributes if a.value is not None]
+        to_cluster = [a.value for a in search_results if a.value is not None]
 
         # Propose clusters with guidance on what attribute to focus on
-        guidance = (
-            f"Specifically focus on the following attribute: {dim.attribute}"
-            if dim.attribute
-            else None
-        )
+        guidance = f"Specifically focus on the following attribute: {dim.search_query}"
         proposals = await propose_clusters(
             to_cluster,
             n_clusters_list=[None],
             extra_instructions_list=[guidance],
             feedback_list=[],
-            k=n_clusters,
+            k=n_proposals,
         )
         predicates = proposals[0]
 
         # Delete existing filters
-        await self._delete_filters(fg_id, [f.id for f in await self.get_dim_filters(fg_id, dim_id)])
+        await self._delete_filters([f.id for f in await self._get_dim_filters(dim_id)])
 
         # Push filters
         sqla_filters = [
             SQLAFilter.from_filter(
-                AttributePredicateFilter(
+                SearchResultPredicateFilter(
                     name=predicate,
                     predicate=predicate,
-                    attribute=dim.attribute,
-                    backend=dim.backend,
-                    # llm_api_keys=llm_api_keys,
+                    search_query=dim.search_query,
                 ),
-                fg_id,
+                ctx,
                 dim_id,
             )
             for predicate in predicates
@@ -1581,21 +1559,18 @@ class DBService:
     # Marginalization #
     ###################
 
-    async def get_dim_filters(self, fg_id: str, dim_id: str):
+    async def _get_dim_filters(self, dim_id: str):
         async with self.session() as session:
             result = await session.execute(
-                select(SQLAFilter).where(
-                    SQLAFilter.dimension_id == dim_id, SQLAFilter.fg_id == fg_id
-                )
+                select(SQLAFilter).where(SQLAFilter.dimension_id == dim_id)
             )
             return [r.to_filter() for r in result.scalars().all()]
 
-    async def get_matching_judgments(self, fg_id: str, filter_id: str):
+    async def get_matching_judgments(self, filter_id: str):
         async with self.session() as session:
             result = await session.execute(
                 select(SQLAJudgment).where(
                     SQLAJudgment.filter_id == filter_id,
-                    SQLAJudgment.fg_id == fg_id,
                     SQLAJudgment.matches,
                 )
             )
@@ -1603,9 +1578,8 @@ class DBService:
 
     async def _get_dim_marginals(
         self,
-        fg_id: str,
+        ctx: ViewContext,
         dim: FrameDimension,
-        base_filter: FrameFilter | None = None,
         ensure_fresh: bool = True,
         publish_dim_callback: Callable[[str], Awaitable[None]] | None = None,  # Arg: filter_id
     ):
@@ -1615,7 +1589,7 @@ class DBService:
         if ensure_fresh and not always_fresh:
             # Which filters in this dim have missing judgments? Compute those.
             missing_judgment_filter_ids = await self._get_dim_filters_with_missing_judgments(
-                fg_id, dim.id, base_filter
+                ctx, dim.id
             )
             if missing_judgment_filter_ids:
                 logger.info(
@@ -1627,17 +1601,17 @@ class DBService:
                     if publish_dim_callback:
 
                         async def _mark_loading():
-                            await self.set_dim_loading_state(fg_id, dim.id, loading_marginals=True)
+                            await self.set_dim_loading_state(dim.id, loading_marginals=True)
                             await publish_dim_callback(dim.id)
 
                         tg.start_soon(_mark_loading)
 
                     for filter_id in missing_judgment_filter_ids:
-                        tg.start_soon(self._compute_filter, fg_id, filter_id, base_filter)
+                        tg.start_soon(self._compute_filter, ctx, filter_id)
 
                 # Mark done loading after previous task group completes
                 if publish_dim_callback:
-                    await self.set_dim_loading_state(fg_id, dim.id, loading_marginals=False)
+                    await self.set_dim_loading_state(dim.id, loading_marginals=False)
                     await publish_dim_callback(dim.id)
 
         # Get all (filter, datapoint) pairs for the current dim_id
@@ -1649,11 +1623,9 @@ class DBService:
             )
 
             # Ensure we only get judgments for datapoints that match the base filter
-            where_clause = base_filter.to_sqla_where_clause(SQLAAgentRun) if base_filter else None
-            if where_clause is not None:
-                query = query.join(
-                    SQLAAgentRun, SQLAAgentRun.id == SQLAJudgment.agent_run_id
-                ).where(where_clause)
+            query = query.join(SQLAAgentRun, SQLAAgentRun.id == SQLAJudgment.agent_run_id).where(
+                ctx.get_base_where_clause(SQLAAgentRun)
+            )
 
             result = await session.execute(query)
             raw = result.scalars().all()
@@ -1668,14 +1640,12 @@ class DBService:
 
     async def get_marginals(
         self,
-        fg_id: str,
+        ctx: ViewContext,
         keep_dim_ids: list[str] | None = None,
-        base_data_only: bool = True,
         ensure_fresh: bool = True,
         publish_dim_callback: Callable[[str], Awaitable[None]] | None = None,
     ) -> dict[str, dict[str, list[Judgment]]]:
-        base_filter = await self.get_base_filter(fg_id) if base_data_only else None
-        dims_dict = {d.id: d for d in await self.get_dims(fg_id)}
+        dims_dict = {d.id: d for d in await self.get_view_dims(ctx)}
         dim_ids = keep_dim_ids or list(dims_dict.keys())
         return dict(
             zip(
@@ -1683,9 +1653,8 @@ class DBService:
                 await asyncio.gather(
                     *[
                         self._get_dim_marginals(
-                            fg_id,
+                            ctx,
                             dims_dict[dim_id],
-                            base_filter=base_filter,
                             ensure_fresh=ensure_fresh,
                             publish_dim_callback=publish_dim_callback,
                         )
@@ -1697,14 +1666,13 @@ class DBService:
 
     async def marginalize(
         self,
-        fg_id: str,
+        ctx: ViewContext,
         keep_dim_ids: list[str],
-        base_data_only: bool = True,
         return_dims_and_filters: bool = False,
         _marginals: dict[str, dict[str, list[Judgment]]] | None = None,
     ) -> MarginalizationResult:
         # Retrieve marginals for each dimension, or use the cached marginals if provided
-        marginals = _marginals or await self.get_marginals(fg_id, keep_dim_ids, base_data_only)
+        marginals = _marginals or await self.get_marginals(ctx, keep_dim_ids)
         if not all(dim_id in marginals for dim_id in keep_dim_ids):
             raise ValueError(
                 f"Requested marginals for dims {keep_dim_ids} but only found {marginals.keys()} in marginals"
@@ -1726,7 +1694,7 @@ class DBService:
         # Get the (dim_id, filter_id) pairs for each dimension
         filters_per_dim: list[list[tuple[str, str]]] = []
         for dim_id in keep_dim_ids:
-            dim_filters = await self.get_dim_filters(fg_id, dim_id)
+            dim_filters = await self._get_dim_filters(dim_id)
             filters_per_dim.append([(dim_id, filter.id) for filter in dim_filters])
             dim_ids_to_filter_ids[dim_id] = [filter.id for filter in dim_filters]
 
@@ -1762,12 +1730,11 @@ class DBService:
 
         # Collect the actual dim and filter objects
         if return_dims_and_filters:
-            dims_dict = {dim.id: dim for dim in await self._get_dims(fg_id, keep_dim_ids)}
+            dims_dict = {dim.id: dim for dim in await self._get_specific_dims(keep_dim_ids)}
             filters_dict = {
                 f.id: f
                 # Get all filters for all dimensions
-                for f in await self._get_filters(
-                    fg_id,
+                for f in await self._get_specific_filters(
                     [
                         filter_id
                         for filter_ids in dim_ids_to_filter_ids.values()
@@ -1821,6 +1788,125 @@ class DBService:
             result = await session.execute(select(SQLAJob).where(SQLAJob.id == job_id))
             job = result.scalar_one_or_none()
             return job.job_json if job else None
+
+    #########
+    # Users #
+    #########
+
+    async def create_user(self, email: str) -> User:
+        """
+        Create a new user. Raises an error if a user with the given email already exists.
+
+        Args:
+            email: The email address of the user
+
+        Returns:
+            The User object
+        """
+        # Check if user already exists
+        existing_user = await self.get_user_by_email(email)
+        if existing_user:
+            raise ValueError("User already exists for {email}")
+
+        user_id = str(uuid4())
+        sqa_user = SQLAUser(id=user_id, email=email)
+
+        async with self.session() as session:
+            session.add(sqa_user)
+            await session.flush()  # Not strictly needed for uuid, but good for autoincrement fields
+
+        logger.info(f"Created new user with ID: {sqa_user.id} and email: {sqa_user.email}")
+        return User(id=sqa_user.id, email=sqa_user.email, created_at=sqa_user.created_at)
+
+    async def get_user_by_email(self, email: str) -> User | None:
+        """
+        Retrieve a user by email address.
+
+        Args:
+            email: The email address to search for
+
+        Returns:
+            The User object if found, None otherwise
+        """
+        async with self.session() as session:
+            result = await session.execute(select(SQLAUser).where(SQLAUser.email == email))
+            sqla_user = result.scalar_one_or_none()
+            if sqla_user:
+                return User(id=sqla_user.id, email=sqla_user.email, created_at=sqla_user.created_at)
+            return None
+
+    async def create_session(self, user_id: str, expires_in_days: int = 30) -> str:
+        """
+        Create a new session for a user.
+
+        Args:
+            user_id: The user ID to create a session for
+            expires_in_days: Number of days until the session expires
+
+        Returns:
+            The session ID
+        """
+
+        session_id = str(uuid4())
+        expires_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(days=expires_in_days)
+
+        async with self.session() as session:
+            session.add(
+                SQLASession(
+                    id=session_id,
+                    user_id=user_id,
+                    expires_at=expires_at,
+                    is_active=True,
+                )
+            )
+        logger.info(f"Created session {session_id} for user {user_id}")
+        return session_id
+
+    async def get_user_by_session_id(self, session_id: str) -> User | None:
+        """
+        Retrieve a user by their session ID.
+
+        Args:
+            session_id: The session ID to look up
+
+        Returns:
+            The User object if the session is valid and active, None otherwise
+        """
+        async with self.session() as session:
+            # Join session and user tables, check if session is active and not expired
+            result = await session.execute(
+                select(SQLAUser)
+                .join(SQLASession, SQLAUser.id == SQLASession.user_id)
+                .where(
+                    SQLASession.id == session_id,
+                    SQLASession.is_active,
+                    SQLASession.expires_at > datetime.now(UTC).replace(tzinfo=None),
+                )
+            )
+            sqla_user = result.scalar_one_or_none()
+            if sqla_user:
+                return User(id=sqla_user.id, email=sqla_user.email, created_at=sqla_user.created_at)
+            return None
+
+    async def invalidate_session(self, session_id: str) -> bool:
+        """
+        Invalidate a session by marking it as inactive.
+
+        Args:
+            session_id: The session ID to invalidate
+
+        Returns:
+            True if the session was found and invalidated, False otherwise
+        """
+        async with self.session() as session:
+            result = await session.execute(
+                update(SQLASession).where(SQLASession.id == session_id).values(is_active=False)
+            )
+            return result.rowcount > 0
+
+    ###########
+    # Locking #
+    ###########
 
     @asynccontextmanager
     async def advisory_lock(self, fg_id: str, action_id: str) -> AsyncIterator[None]:

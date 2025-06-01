@@ -6,8 +6,8 @@ import React, { Suspense } from 'react';
 import { BASE_DOCENT_PATH } from '@/app/constants';
 import { useAppSelector } from '@/app/store/hooks';
 
-import AttributeFinder from '../components/AttributeFinder';
-import ExperimentViewer from '../components/ExperimentViewer';
+import SearchArea from '../../components/SearchArea';
+import ExperimentViewer from '../../components/ExperimentViewer';
 
 function DocentDashboardContent() {
   const router = useRouter();
@@ -31,7 +31,7 @@ function DocentDashboardContent() {
   return (
     <div className="flex-1 flex space-x-3 min-h-0">
       <ExperimentViewer onShowAgentRun={handleShowAgentRun} />
-      <AttributeFinder onShowAgentRun={handleShowAgentRun} />
+      <SearchArea onShowAgentRun={handleShowAgentRun} />
     </div>
   );
 }

@@ -41,19 +41,19 @@ export default function AgentRunPage() {
   const transcriptViewerRef = useRef<TranscriptViewerHandle>(null);
 
   const alreadyScrolledRef = useRef(false);
-  const hasInitAttributeDimId = useAppSelector(
-    (state) => state.frame.hasInitAttributeDimId
+  const hasInitSearchQuery = useAppSelector(
+    (state) => state.frame.hasInitSearchQuery
   );
-  const attributeMap = useAppSelector(
-    (state) => state.attributeFinder.attributeMap
+  const searchResultMap = useAppSelector(
+    (state) => state.search.searchResultMap
   );
   useEffect(() => {
     if (alreadyScrolledRef.current) return;
 
-    // We wait until hasInitAttributeDimId is known before continuing
-    if (hasInitAttributeDimId === undefined) return;
-    // If there is an initial attributeDimId, then we wait until the attributes have populated
-    if (hasInitAttributeDimId === true && !attributeMap) return;
+    // We wait until hasInitSearchQuery is known before continuing
+    if (hasInitSearchQuery === undefined) return;
+    // If there is an initial search query, then we wait until the search has populated
+    if (hasInitSearchQuery === true && !searchResultMap) return;
     // Else, if it's false, then we don't need to wait
 
     if (
@@ -67,7 +67,7 @@ export default function AgentRunPage() {
         transcriptViewerRef.current?.scrollToBlock(blockId);
       }, 100); // Small delay to allow for DOM rendering
     }
-  }, [curAgentRun, blockId, agentRunId, hasInitAttributeDimId, attributeMap]);
+  }, [curAgentRun, blockId, agentRunId, hasInitSearchQuery, searchResultMap]);
 
   /**
    * Fetch agent run once

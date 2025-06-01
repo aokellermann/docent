@@ -162,8 +162,8 @@ class ProviderPreferences(BaseModel):
         ]
 
     @cached_property
-    def extract_attributes(self) -> list[ModelOption]:
-        """Get model options for the extract_attributes function.
+    def execute_search(self) -> list[ModelOption]:
+        """Get model options for the execute_search function.
 
         Returns:
             List of configured model options for this function.

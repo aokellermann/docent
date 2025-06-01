@@ -4,15 +4,25 @@
 
 First, instantiate a [`DocentClient`][docent.sdk.client.DocentClient] object. Make sure to set the `server_url` and `web_url` to the appropriate values from [setup](../quickstart.md).
 
+!!! warning
+    The `dev` branch is currently being updated to use a new user authentication system. You'll need to open your web browser, create an account, and fill in the `email` parameter.
+
 ```python
 from docent import DocentClient
-client = DocentClient(server_url="http://localhost:8889", web_url="http://localhost:3001")
+client = DocentClient(
+    server_url="http://localhost:8889",
+    web_url="http://localhost:3001",
+    email="test@transluce.org",
+)
 ```
 
 You can think of each frame grid as a collection of agent runs. Let's create a fresh one:
 
 ```python
-fg_id = client.create_framegrid(name="sample framegrid", description="example that comes with the Docent repo")
+fg_id = client.create_framegrid(
+    name="sample framegrid",
+    description="example that comes with the Docent repo",
+)
 ```
 
 Now we're ready to ingest some logs!

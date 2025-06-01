@@ -1,20 +1,19 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Protocol, Sequence, Type, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Protocol, Sequence, Type
 from uuid import uuid4
 
 from pydantic import BaseModel, Discriminator, Field, field_validator, model_validator
 from sqlalchemy import ColumnElement, and_, exists, or_
 
-from docent._ai_tools.attribute_extraction import Attribute
 from docent._ai_tools.clustering.cluster_assigner import (
     DEFAULT_ASSIGNER,
     AssignerType,
     assign_with_backend,
 )
+from docent._ai_tools.search import SearchResult
 from docent._log_util import get_logger
 from docent.data_models.agent_run import AgentRun
-from docent.data_models.metadata import BaseMetadata
 
 if TYPE_CHECKING:
     from docent._db_service.schemas.tables import SQLAAgentRun
@@ -24,8 +23,8 @@ logger = get_logger(__name__)
 
 FilterLiteral = Literal[
     "primitive",
-    "attribute_predicate",
-    "attribute_exists",
+    "search_result_predicate",
+    "search_result_exists",
     "complex",
     "agent_run_id",
 ]
@@ -41,8 +40,8 @@ class Judgment(BaseModel):
         id: Unique identifier for the judgment.
         agent_run_id: ID of the agent run this judgment applies to.
         filter_id: ID of the filter that produced this judgment.
-        attribute: Optional attribute name that was evaluated.
-        attribute_idx: Optional index of the attribute that was evaluated.
+        search_query: Optional search query that was evaluated.
+        search_result_idx: Optional index of the search result.
         matches: Whether the filter matched the agent run.
         reason: Optional explanation for the judgment.
     """
@@ -50,8 +49,8 @@ class Judgment(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     agent_run_id: str
     filter_id: str
-    attribute: str | None = None
-    attribute_idx: int | None = None
+    search_query: str | None = None
+    search_result_idx: int | None = None
 
     matches: bool
     reason: str | None = None
@@ -101,28 +100,28 @@ class BaseFrameFilter(BaseModel):
     async def apply(
         self,
         agent_runs: list[AgentRun],
-        attributes: list[Attribute] | None = None,
+        search_results: list[SearchResult] | None = None,
         judgment_callback: JudgmentStreamingCallback | None = None,
         return_all: bool = False,
     ) -> list[Judgment]:
         """
-        Applies this filter to the data.
+        Applies this filter to the agent runs.
 
         Args:
             agent_runs: The list of agent runs to filter.
-            attributes: Optional list of attributes for the agent runs.
+            search_results: Optional list of search results for the agent runs.
             judgment_callback: Optional callback for streaming judgment updates.
             return_all: If True, return judgments for all agent runs, not just matches.
 
         Returns:
-            A list of Judgment objects for each data point, indicating
+            A list of Judgment objects for each agent run, indicating
             whether it matches (with an optional reason).
         """
         raise NotImplementedError
 
 
 class AgentRunIdFilter(BaseFrameFilter):
-    """A filter that checks if a datapoint's ID matches a specified ID.
+    """A filter that checks if an agent run's ID matches a specified ID.
 
     This simple filter matches agent runs by their unique ID.
 
@@ -137,7 +136,7 @@ class AgentRunIdFilter(BaseFrameFilter):
     async def apply(
         self,
         agent_runs: list[AgentRun],
-        attributes: list[Attribute] | None = None,
+        search_results: list[SearchResult] | None = None,
         judgment_callback: JudgmentStreamingCallback | None = None,
         return_all: bool = False,
     ) -> list[Judgment]:
@@ -145,7 +144,7 @@ class AgentRunIdFilter(BaseFrameFilter):
 
         Args:
             agent_runs: The list of agent runs to filter.
-            attributes: Optional list of attributes (not used by this filter).
+            search_results: Optional list of search results (not used by this filter).
             judgment_callback: Optional callback for streaming judgment updates.
             return_all: If True, return judgments for all agent runs, not just matches.
 
@@ -165,10 +164,14 @@ class AgentRunIdFilter(BaseFrameFilter):
 
 
 class PrimitiveFilter(BaseFrameFilter):
-    """A filter that checks if a datapoint's metadata matches a specified key-value pair.
+    """A filter that checks if an agent run's metadata matches a specified key-value pair.
 
     This filter evaluates agent runs based on the value of a specific field, using
     various comparison operators.
+
+    Note: This filter currently only supports SQL-based filtering through
+    to_sqla_where_clause(). The apply() method is not implemented and will
+    raise NotImplementedError.
 
     Attributes:
         type: Always "primitive" for this filter.
@@ -202,37 +205,6 @@ class PrimitiveFilter(BaseFrameFilter):
             if not isinstance(self.value, str):
                 raise ValueError("value must be a string for ~* operation")
         return self
-
-    @staticmethod
-    def _get_value(key_path: tuple[str, ...], agent_run: AgentRun):
-        """Extracts a value from an agent run using the specified key path.
-
-        Args:
-            key_path: Tuple of strings representing the path to the value.
-            agent_run: The agent run to extract the value from.
-
-        Returns:
-            The extracted value.
-
-        Raises:
-            ValueError: If the extracted value is not a string, bool, int, or float.
-        """
-        ans = agent_run
-        for k in key_path:
-            if isinstance(ans, AgentRun):
-                ans = getattr(ans, k)
-            elif isinstance(ans, BaseMetadata):
-                ans = ans.get(k)
-            elif isinstance(ans, dict):
-                ans = cast(dict[str, Any], ans)[k]
-            else:
-                raise ValueError(
-                    f"Invalid key path {'.'.join(key_path)}: Cannot access key '{k}' on value of type {type(ans)}. Value must be an AgentRun or dict. Got: {ans}"
-                )
-        if not isinstance(ans, (str, bool, int, float)):
-            raise ValueError(f"Value must be a string, bool, int, or float. Got {type(ans)}: {ans}")
-
-        return ans
 
     def to_sqla_where_clause(self, SQLAAgentRun: Type[SQLAAgentRun]) -> ColumnElement[bool]:
         """Converts the filter to a SQLAlchemy where clause for database filtering.
@@ -289,74 +261,109 @@ class PrimitiveFilter(BaseFrameFilter):
         else:
             raise ValueError(f"Unsupported operation: {self.op}")
 
-    async def apply(
-        self,
-        agent_runs: list[AgentRun],
-        attributes: list[Attribute] | None = None,
-        judgment_callback: JudgmentStreamingCallback | None = None,
-        return_all: bool = False,
-    ):
-        """Applies metadata filtering to the data.
+    # @staticmethod
+    # def _get_value(key_path: tuple[str, ...], agent_run: AgentRun):
+    #     """Extracts a value from an agent run using the specified key path.
 
-        Args:
-            agent_runs: The list of agent runs to filter.
-            attributes: Optional list of attributes (not used by this filter).
-            judgment_callback: Optional callback for streaming judgment updates.
-            return_all: If True, return judgments for all agent runs, not just matches.
+    #     Args:
+    #         key_path: Tuple of strings representing the path to the value.
+    #         agent_run: The agent run to extract the value from.
 
-        Returns:
-            A list of Judgment objects for each matching agent run.
-        """
+    #     Returns:
+    #         The extracted value.
 
-        def _matches(ar: AgentRun):
-            v = PrimitiveFilter._get_value(self.key_path, ar)
-            return (
-                (v == self.value)
-                if self.op == "=="
-                else (
-                    (v != self.value)
-                    if self.op == "!="
-                    else (
-                        (float(v) < float(self.value))
-                        if self.op == "<"
-                        else (
-                            (float(v) <= float(self.value))
-                            if self.op == "<="
-                            else (
-                                (float(v) > float(self.value))
-                                if self.op == ">"
-                                else (float(v) >= float(self.value))
-                            )
-                        )
-                    )
-                )
-            )
+    #     Raises:
+    #         ValueError: If the extracted value is not a string, bool, int, or float.
+    #     """
+    #     ans = agent_run
+    #     for k in key_path:
+    #         if isinstance(ans, AgentRun):
+    #             ans = getattr(ans, k)
+    #         elif isinstance(ans, BaseMetadata):
+    #             ans = ans.get(k)
+    #         elif isinstance(ans, dict):
+    #             ans = cast(dict[str, Any], ans)[k]
+    #         else:
+    #             raise ValueError(
+    #                 f"Invalid key path {'.'.join(key_path)}: Cannot access key '{k}' on value of type {type(ans)}. Value must be an AgentRun or dict. Got: {ans}"
+    #             )
+    #     if not isinstance(ans, (str, bool, int, float)):
+    #         raise ValueError(f"Value must be a string, bool, int, or float. Got {type(ans)}: {ans}")
 
-        return [
-            Judgment(
-                agent_run_id=ar.id,
-                filter_id=self.id,
-                matches=b,
-                reason=f"metadata {'.'.join(self.key_path)} {self.op} {self.value}",
-            )
-            for ar in agent_runs
-            if (b := _matches(ar)) or return_all
-        ]
+    #     return ans
+
+    # async def apply(
+    #     self,
+    #     agent_runs: list[AgentRun],
+    #     search_results: list[SearchResult] | None = None,
+    #     judgment_callback: JudgmentStreamingCallback | None = None,
+    #     return_all: bool = False,
+    # ):
+    #     """Applies metadata filtering to the data.
+
+    #     Args:
+    #         agent_runs: The list of agent runs to filter.
+    #         attributes: Optional list of attributes (not used by this filter).
+    #         judgment_callback: Optional callback for streaming judgment updates.
+    #         return_all: If True, return judgments for all agent runs, not just matches.
+
+    #     Returns:
+    #         A list of Judgment objects for each matching agent run.
+    #     """
+
+    #     def _matches(ar: AgentRun):
+    #         v = PrimitiveFilter._get_value(self.key_path, ar)
+    #         return (
+    #             (v == self.value)
+    #             if self.op == "=="
+    #             else (
+    #                 (v != self.value)
+    #                 if self.op == "!="
+    #                 else (
+    #                     (float(v) < float(self.value))
+    #                     if self.op == "<"
+    #                     else (
+    #                         (float(v) <= float(self.value))
+    #                         if self.op == "<="
+    #                         else (
+    #                             (float(v) > float(self.value))
+    #                             if self.op == ">"
+    #                             else (float(v) >= float(self.value))
+    #                         )
+    #                     )
+    #                 )
+    #             )
+    #         )
+
+    #     return [
+    #         Judgment(
+    #             agent_run_id=ar.id,
+    #             filter_id=self.id,
+    #             matches=b,
+    #             reason=f"metadata {'.'.join(self.key_path)} {self.op} {self.value}",
+    #         )
+    #         for ar in agent_runs
+    #         if (b := _matches(ar)) or return_all
+    #     ]
 
 
-class AttributeExistsFilter(BaseFrameFilter):
-    """A filter that checks if a given attribute exists for each agent run.
+class SearchResultExistsFilter(BaseFrameFilter):
+    """A filter that checks if a given search result exists for each agent run.
 
-    This filter returns a list of judgments indicating whether the specified attribute
+    This filter returns a list of judgments indicating whether a non-null search result
     exists for each agent run.
 
+    Note: This filter currently only supports SQL-based filtering through
+    to_sqla_where_clause(). The apply() method is not implemented and will
+    raise NotImplementedError.
+
     Attributes:
-        type: Always "attribute_exists" for this filter.
-        attribute: The name of the attribute to check for existence.
+        type: Always "search_result_exists" for this filter.
+        search_query: The search query to check for existence.
     """
 
-    type: Literal["attribute_exists"] = "attribute_exists"  # type: ignore
-    attribute: str
+    type: Literal["search_result_exists"] = "search_result_exists"  # type: ignore
+    search_query: str
 
     supports_sql: bool = True
 
@@ -368,88 +375,78 @@ class AttributeExistsFilter(BaseFrameFilter):
 
         Returns:
             A SQLAlchemy column element that checks if an agent run has
-            at least one attribute with the specified name.
+            at least one search result with the specified search query.
         """
         # Import SQLAlchemy functions and SQLAAttribute locally
         # FIXME: this is a hack
-        from docent._db_service.schemas.tables import SQLAAttribute
+        from docent._db_service.schemas.tables import SQLASearchResult
 
         return (
             exists()
             .where(
-                SQLAAttribute.agent_run_id == SQLAAgentRun.id,
-                SQLAAttribute.attribute == self.attribute,
-                SQLAAttribute.value.isnot(None),
+                SQLASearchResult.agent_run_id == SQLAAgentRun.id,
+                SQLASearchResult.search_query == self.search_query,
+                SQLASearchResult.value.isnot(None),
             )
             .correlate(SQLAAgentRun)
         )
 
-    async def apply(
-        self,
-        agent_runs: list[AgentRun],
-        attributes: list[Attribute] | None = None,
-        judgment_callback: JudgmentStreamingCallback | None = None,
-        return_all: bool = False,
-    ) -> list[Judgment]:
-        raise NotImplementedError("AttributeExistsFilter only supports SQL")
 
+class SearchResultPredicateFilter(BaseFrameFilter):
+    """A filter that uses an LLM to evaluate an AgentRun's search results against a predicate.
 
-class AttributePredicateFilter(BaseFrameFilter):
-    """A filter that uses an LLM to evaluate an AgentRun's attributes against a predicate.
-
-    This filter uses an LLM to determine which agent runs have attributes that satisfy a given predicate.
+    This filter uses an LLM to determine which agent runs have search results that satisfy a given predicate.
 
     Attributes:
-        type: Always "attribute_predicate" for this filter.
-        predicate: The predicate to evaluate against each attribute value.
-        attribute: The name of the attribute to evaluate.
+        type: Always "search_result_predicate" for this filter.
+        predicate: The predicate to evaluate against each search result value.
+        search_query: The search query to evaluate.
         backend: The LLM backend to use for evaluation.
-        llm_api_keys: Optional API keys for the LLM.
     """
 
-    type: Literal["attribute_predicate"] = "attribute_predicate"  # type: ignore
+    type: Literal["search_result_predicate"] = "search_result_predicate"  # type: ignore
 
     predicate: str
-    attribute: str
+    search_query: str
     backend: AssignerType = DEFAULT_ASSIGNER
 
     async def apply(
         self,
         agent_runs: list[AgentRun],
-        attributes: list[Attribute] | None = None,
+        search_results: list[SearchResult] | None = None,
         judgment_callback: JudgmentStreamingCallback | None = None,
         return_all: bool = False,
     ):
-        """Uses an LLM to determine which data points satisfy the predicate.
+        """Uses an LLM to determine which agent runs satisfy the predicate.
 
         Args:
             agent_runs: The list of agent runs to filter.
-            attributes: The list of attributes to evaluate against the predicate.
+            search_results: The list of search results to evaluate against the predicate.
             judgment_callback: Optional callback for streaming judgment updates.
             return_all: If True, return judgments for all agent runs, not just matches.
 
         Returns:
-            A list of Judgment objects for each evaluated attribute.
+            A list of Judgment objects for each evaluated search result.
 
         Raises:
-            ValueError: If attributes are missing or not computed.
+            ValueError: If search_results are missing or not computed.
         """
-        # Validate attributes
-        assert attributes is not None, "Attributes must be provided for FramePredicate"
-        agent_runs_with_computed_attributes = set(attr.agent_run_id for attr in attributes)
+        # Validate search results
+        assert search_results is not None, "Search results must be provided for FramePredicate"
+        agent_runs_with_computed_attributes = set(sr.agent_run_id for sr in search_results)
         for ar in agent_runs:
             if ar.id not in agent_runs_with_computed_attributes:
                 raise ValueError(
-                    f"At least one datapoint is missing attribute {self.attribute}. These must be computed ahead of time."
+                    f"At least one agent run is missing attribute {self.search_query}. These must be computed ahead of time."
                 )
 
         # Collect attributes that need assignment
         strings_to_assign: list[str] = []
         index_map: list[tuple[str, int]] = []
-        for attr in attributes:
-            if attr.value is not None and attr.attribute_idx is not None:
-                strings_to_assign.append(attr.value)
-                index_map.append((attr.agent_run_id, attr.attribute_idx))
+        for result in search_results:
+            if result.value is not None and result.search_result_idx is not None:
+                strings_to_assign.append(result.value)
+                index_map.append((result.agent_run_id, result.search_result_idx))
 
         # One judgment for each attribute to assign
         judgments: list[Judgment] = []
@@ -466,8 +463,8 @@ class AttributePredicateFilter(BaseFrameFilter):
                     reason=m[1],
                     agent_run_id=agent_run_id,
                     filter_id=self.id,
-                    attribute=self.attribute,
-                    attribute_idx=attr_index,
+                    search_query=self.search_query,
+                    search_result_idx=attr_index,
                 )
                 if m is not None
                 else Judgment(
@@ -475,8 +472,8 @@ class AttributePredicateFilter(BaseFrameFilter):
                     reason="API error; default false",
                     agent_run_id=agent_run_id,
                     filter_id=self.id,
-                    attribute=self.attribute,
-                    attribute_idx=attr_index,
+                    search_query=self.search_query,
+                    search_result_idx=attr_index,
                 )
             )
             judgments.append(judgment)
@@ -587,7 +584,7 @@ class ComplexFilter(BaseFrameFilter):
     async def apply(
         self,
         agent_runs: list[AgentRun],
-        attributes: list[Attribute] | None = None,
+        search_results: list[SearchResult] | None = None,
         judgment_callback: JudgmentStreamingCallback | None = None,
         return_all: bool = False,
     ):
@@ -595,7 +592,7 @@ class ComplexFilter(BaseFrameFilter):
 
         Args:
             agent_runs: The list of agent runs to filter.
-            attributes: Optional list of attributes for the agent runs.
+            search_results: Optional list of search results for the agent runs.
             judgment_callback: Optional callback for streaming judgment updates.
             return_all: If True, return judgments for all agent runs, not just matches.
 
@@ -608,7 +605,7 @@ class ComplexFilter(BaseFrameFilter):
         # Gather judgments from each subfilter
         matching_agent_run_ids: list[set[str]] = []
         for f in self.filters:
-            judgments = await f.apply(agent_runs, attributes, judgment_callback, return_all)
+            judgments = await f.apply(agent_runs, search_results, judgment_callback, return_all)
             cur_matching_run_ids = set(j.agent_run_id for j in judgments if j.matches)
             matching_agent_run_ids.append(cur_matching_run_ids)
 
@@ -631,8 +628,7 @@ class FrameDimension(BaseModel):
         id: Unique identifier for the dimension.
         name: Optional human-readable name for the dimension.
         bins: Optional list of filters that define the bins of this dimension.
-        attribute: Optional attribute name for predicate dimensions.
-        backend: The LLM backend to use for predicate dimensions.
+        search_query: Optional search query for search query dimensions.
         metadata_key: Optional metadata key for metadata dimensions.
         maintain_mece: Optional flag to maintain mutually exclusive and collectively
             exhaustive bins.
@@ -644,9 +640,8 @@ class FrameDimension(BaseModel):
     name: str | None = None
     bins: list[FrameFilter] | None = None
 
-    # For predicate dimensions
-    attribute: str | None = None
-    backend: AssignerType = DEFAULT_ASSIGNER
+    # For search query dimensions
+    search_query: str | None = None
 
     # For metadata dimensions
     metadata_key: str | None = None
@@ -677,8 +672,8 @@ class FrameDimension(BaseModel):
 # Type union that allows the type system to infer the correct type based on the 'type' field
 FrameFilter = Annotated[
     PrimitiveFilter
-    | AttributePredicateFilter
-    | AttributeExistsFilter
+    | SearchResultPredicateFilter
+    | SearchResultExistsFilter
     | ComplexFilter
     | AgentRunIdFilter,
     Discriminator("type"),
@@ -727,7 +722,7 @@ def _combine_filter_judgments_partial(
             )
             for i in matching_ids
         ]
-    # When return_all is True, return judgments for all datapoints
+    # When return_all is True, return judgments for all agent runs
     else:
         if all_agent_run_ids is None:
             raise ValueError("all_agent_run_ids must be provided if return_all is True")
@@ -744,7 +739,7 @@ def _combine_filter_judgments_partial(
 
 
 def parse_filter_dict(filter_dict: dict[str, Any]) -> FrameFilter:
-    """Parses a dictionary representation of a filter into a FrameFilterTypes object.
+    """Parses a dictionary representation of a filter into a FrameFilter object.
 
     This function allows creating filter objects from serialized dictionary representations,
     handling the appropriate filter type based on the 'type' field.
@@ -765,10 +760,10 @@ def parse_filter_dict(filter_dict: dict[str, Any]) -> FrameFilter:
 
     if filter_type == "primitive":
         return PrimitiveFilter(**filter_dict)
-    elif filter_type == "attribute_predicate":
-        return AttributePredicateFilter(**filter_dict)
-    elif filter_type == "attribute_exists":
-        return AttributeExistsFilter(**filter_dict)
+    elif filter_type == "search_result_predicate":
+        return SearchResultPredicateFilter(**filter_dict)
+    elif filter_type == "search_result_exists":
+        return SearchResultExistsFilter(**filter_dict)
     elif filter_type == "complex":
         # Recursively parse nested filters
         nested_filters = [parse_filter_dict(f) for f in filter_dict["filters"]]
