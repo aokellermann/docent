@@ -211,6 +211,21 @@ class ProviderPreferences(BaseModel):
             ),
         ]
 
+    @cached_property
+    def compare_transcripts(self) -> list[ModelOption]:
+        """Get model options for the compare_transcripts function.
+
+        Returns:
+            List of configured model options for this function.
+        """
+        return [
+            ModelOption(
+                provider="anthropic",
+                model_name="claude-3-7-sonnet-20250219",
+                reasoning_effort="medium",
+            ),
+        ]
+
 
 # Initialize the singleton preferences object
 PROVIDER_PREFERENCES = ProviderPreferences()

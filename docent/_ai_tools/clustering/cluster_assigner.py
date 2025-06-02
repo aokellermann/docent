@@ -1,6 +1,6 @@
 import re
 from abc import abstractmethod
-from typing import Literal, Protocol
+from typing import Callable, Literal, Protocol
 
 import anyio
 
@@ -70,6 +70,10 @@ class ClusterAssigner:
         self.name = name
 
     @abstractmethod
+    async def skip_queries(self, items: list[str], cluster: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
     async def assign(
         self,
         items: list[str],
@@ -96,29 +100,63 @@ class LlmApiClusterAssigner(ClusterAssigner):
         model_options: list[ModelOption],
         max_new_tokens: int,
         temperature: float,
+        assign_prompt_fn: Callable[[str, str], str] | None = None,
     ) -> None:
         super().__init__(f"llm-api-{'/'.join([o.model_name for o in model_options])}")
         self.system_prompt = system_prompt
+        self.assign_prompt_fn = assign_prompt_fn
         self.model_options = model_options
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
 
     @classmethod
-    def from_o3_mini(cls):
+    def from_o3_mini(cls, assign_prompt_fn: Callable[[str, str], str] | None = None):
         return cls(
             system_prompt=None,
             max_new_tokens=8192,
             temperature=1,
             model_options=PROVIDER_PREFERENCES.cluster_assign_o3_mini,
+            assign_prompt_fn=assign_prompt_fn,
         )
 
     @classmethod
-    def from_sonnet_37_thinking(cls):
+    def from_sonnet_37_thinking(cls, assign_prompt_fn: Callable[[str, str], str] | None = None):
         return cls(
             system_prompt=None,
             max_new_tokens=4096,
             temperature=1.0,
             model_options=PROVIDER_PREFERENCES.cluster_assign_sonnet_37_thinking,
+            assign_prompt_fn=assign_prompt_fn,
+        )
+
+    async def skip_queries(self, items: list[str], cluster: str) -> None:
+        queries: list[list[dict[str, str]]] = [
+            [
+                *(
+                    [{"role": "system", "content": self.system_prompt}]
+                    if self.system_prompt
+                    else []
+                ),
+                {
+                    "role": "user",
+                    "content": (
+                        self.assign_prompt_fn(item, cluster)
+                        if self.assign_prompt_fn
+                        else ASSIGNMENT_PROMPT.format(item=item, cluster=cluster)
+                    ),
+                },
+            ]
+            for item in items
+        ]
+
+        await get_llm_completions_async(
+            queries,
+            model_options=self.model_options,
+            max_new_tokens=self.max_new_tokens,
+            temperature=self.temperature,
+            timeout=30,
+            use_cache=True,
+            fill_cache="ANSWER: NO\nEXPLANATION: skipping query",
         )
 
     async def assign(
@@ -140,7 +178,11 @@ class LlmApiClusterAssigner(ClusterAssigner):
                 ),
                 {
                     "role": "user",
-                    "content": ASSIGNMENT_PROMPT.format(item=item, cluster=cluster),
+                    "content": (
+                        self.assign_prompt_fn(item, cluster)
+                        if self.assign_prompt_fn
+                        else ASSIGNMENT_PROMPT.format(item=item, cluster=cluster)
+                    ),
                 },
             ]
             for item, cluster in zip(items, clusters, strict=True)
@@ -355,6 +397,8 @@ async def _get_base_assigner(backend: BaseAssignerType) -> ClusterAssigner:
 #             backup_model=await _get_base_assigner(backup_model_name),
 #             device_id=device_id,
 #         )
+#     async def skip_queries(self, items: list[str], cluster: str):
+#         await self.primary.skip_queries(items, cluster)
 
 #     async def assign(
 #         self,

@@ -13,6 +13,9 @@ from docent._db_service.schemas.base import SQLABase
 from docent.data_models.agent_run import AgentRun
 from docent.data_models.filters import FrameDimension, FrameFilter, Judgment, parse_filter_dict
 from docent.data_models.transcript import Transcript
+from docent._ai_tools.diff import DiffAttribute
+
+from uuid import uuid4
 
 TABLE_FRAME_GRID = "frame_grids"
 TABLE_AGENT_RUN = "agent_runs"
@@ -22,6 +25,7 @@ TABLE_FRAME_DIMENSION = "frame_dimensions"
 TABLE_FILTER = "filters"
 TABLE_JUDGMENT = "judgments"
 TABLE_JOB = "jobs"
+TABLE_DIFF_ATTRIBUTE = "diff_attributes"
 TABLE_TRANSCRIPT = "transcripts"
 TABLE_USER = "users"
 TABLE_SESSION = "sessions"
@@ -399,6 +403,73 @@ class SQLAJob(SQLABase):
 
     id = mapped_column(String(36), primary_key=True)
     job_json = mapped_column(JSONB, nullable=False)
+
+
+class SQLADiffAttribute(SQLABase):
+    __tablename__ = TABLE_DIFF_ATTRIBUTE
+
+    id = mapped_column(String(36), primary_key=True)
+    frame_grid_id = mapped_column(
+        String(36), ForeignKey(f"{TABLE_FRAME_GRID}.id"), nullable=False, index=True
+    )
+
+    # Location of the diff attribute
+    data_id_1 = mapped_column(
+        String(36), ForeignKey(f"{TABLE_AGENT_RUN}.id"), nullable=False, index=True
+    )
+    data_id_2 = mapped_column(
+        String(36), ForeignKey(f"{TABLE_AGENT_RUN}.id"), nullable=False, index=True
+    )
+    attribute = mapped_column(Text, nullable=False, index=True)
+    attribute_idx = mapped_column(Integer, index=True)
+
+    # Null indicates no values for this (data_id_1, data_id_2, attribute) pair
+    claim = mapped_column(Text)
+    evidence = mapped_column(Text)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "frame_grid_id",
+            "data_id_1",
+            "data_id_2",
+            "attribute",
+            "attribute_idx",
+            name="uq_diff_attribute_key_combination",
+        ),
+    )
+
+    @classmethod
+    def from_diff_attribute(
+        cls,
+        data_id_1: str,
+        data_id_2: str,
+        attribute: str,
+        attribute_idx: int | None,
+        claim: str | None,
+        evidence: str | None,
+        fg_id: str,
+    ):
+        return cls(
+            id=str(uuid4()),
+            frame_grid_id=fg_id,
+            data_id_1=data_id_1,
+            data_id_2=data_id_2,
+            attribute=attribute,
+            attribute_idx=attribute_idx,
+            claim=claim,
+            evidence=evidence,
+        )
+
+    def to_diff_attribute(self):
+        return DiffAttribute(
+            id=self.id,
+            data_id_1=self.data_id_1,
+            data_id_2=self.data_id_2,
+            attribute=self.attribute,
+            attribute_idx=self.attribute_idx,
+            claim=self.claim,
+            evidence=self.evidence,
+        )
 
 
 class SQLAUser(SQLABase):

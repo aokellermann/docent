@@ -29,7 +29,7 @@ import DimensionSelector from './DimensionSelector';
 import InnerCard from './InnerCard';
 
 interface ExperimentViewerProps {
-  onShowAgentRun?: (agentRunId: string, blockId?: number) => void;
+  onShowAgentRun?: (agentRunId: string, blockId?: number, blockId2?: number, paired?: boolean) => void;
 }
 
 export default function ExperimentViewer({
@@ -45,7 +45,9 @@ export default function ExperimentViewer({
     (state) => state.frame
   );
 
+  // Attributes
   const {
+    diffMap,
     loadingSearchQuery,
     curSearchQuery,
     searchResultMap: attributeMap,
@@ -116,22 +118,36 @@ export default function ExperimentViewer({
   );
 
   /**
-   * Deal with filtering by the attribute query
+   * Deal with filtering by the attribute query and diff results
    */
 
   // Filter to IDs to ones that have the attribute query
   const idMarginals = useMemo(() => {
-    if (!rawIdMarginals || !curSearchQuery) return rawIdMarginals;
+    if (!rawIdMarginals) return rawIdMarginals;
+    if (!curSearchQuery && !diffMap) return rawIdMarginals;
 
-    // Filter the keys and their datapoints based on attribute query
+    // Filter the keys and their datapoints based on attribute query or diff results
     const filtered = Object.entries(rawIdMarginals).reduce(
       (result, [key, datapointsList]) => {
-        // Filter datapoints to ones that have the attributes
-        const filteredAgentRuns = datapointsList.filter((agentRunId) => {
-          const attrs = attributeMap?.[agentRunId]?.[curSearchQuery].filter(
-            (attr) => attr.value !== null
-          );
-          return attrs && attrs.length > 0;
+        // Filter datapoints to ones that have the attributes and/or diff results
+        const filteredAgentRuns = datapointsList.filter((datapointId) => {
+          // Check for attributes if there's an active attribute query
+
+          if (curSearchQuery) {
+            const attrs = attributeMap?.[datapointId]?.[curSearchQuery];
+            return attrs && attrs.length && attrs[0].value !== null;
+          }
+
+          // Check for diff results if there's an active diff query
+          let hasDiffResults = true;
+          if (diffMap) {
+            hasDiffResults = Object.keys(diffMap).some((key) => {
+              const [id1, id2] = key.split('___');
+              return id1 === datapointId || id2 === datapointId;
+            });
+          }
+
+          return hasDiffResults;
         });
 
         // Only include keys that have at least one datapoint after filtering
@@ -145,17 +161,18 @@ export default function ExperimentViewer({
     );
 
     return filtered;
-  }, [rawIdMarginals, curSearchQuery, attributeMap]);
+  }, [rawIdMarginals, curSearchQuery, attributeMap, diffMap]);
 
   // Only keep stat marginals that have datapoints, after filtering by attribute query
   const statMarginals = useMemo(() => {
-    if (!rawStatMarginals || !curSearchQuery) return rawStatMarginals;
+    if (!rawStatMarginals) return rawStatMarginals;
+    if (!curSearchQuery && !diffMap) return rawStatMarginals;
     return Object.fromEntries(
       Object.entries(rawStatMarginals).filter(([key, _]) => {
         return idMarginals && key in idMarginals;
       })
     );
-  }, [rawStatMarginals, curSearchQuery, idMarginals]);
+  }, [rawStatMarginals, curSearchQuery, idMarginals, diffMap]);
 
   // For each outer filter, get the inner filters that have non-null stats
   const [outerIdsToInnerIds, filteredInnerIds] = useMemo(() => {

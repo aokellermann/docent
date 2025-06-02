@@ -23,6 +23,7 @@ const cancelFunctionsMap: Record<string, () => void> = {};
 
 export interface TranscriptState {
   curAgentRun?: AgentRun;
+  altAgentRun?: AgentRun;
   // Actions summary
   actionsSummary?: ActionsSummary;
   loadingActionsSummaryForTranscriptId?: string;
@@ -219,6 +220,13 @@ export const clearCurAgentRun = createAsyncThunk(
   }
 );
 
+export const clearAltAgentRun = createAsyncThunk(
+  'transcript/clearAltAgentRun',
+  async (_, { dispatch }) => {
+    dispatch(setAltAgentRun(undefined));
+  }
+);
+
 export const getCurAgentRun = createAsyncThunk(
   'transcript/getAgentRun',
   async (agentRunId: string, { dispatch, getState }) => {
@@ -261,6 +269,48 @@ export const getCurAgentRun = createAsyncThunk(
   }
 );
 
+export const getAltAgentRun = createAsyncThunk(
+  'transcript/getAltAgentRun',
+  async (agentRunId: string, { dispatch, getState }) => {
+    const state = getState() as RootState;
+    const frameGridId = state.frame.frameGridId;
+
+    // Clear current datapoint
+    const altAgentRun = state.transcript.altAgentRun;
+    if (altAgentRun !== undefined) {
+      dispatch(clearAltAgentRun());
+    }
+
+    if (!frameGridId) {
+      dispatch(
+        setToastNotification({
+          title: 'Configuration error',
+          description: 'No frame grid ID available',
+          variant: 'destructive',
+        })
+      );
+      throw new Error('No frame grid ID available');
+    }
+
+    try {
+      const response = await await apiRestClient.get(
+        `/${frameGridId}/agent_run?agent_run_id=${agentRunId}`
+      );
+      console.log('response', response);
+      dispatch(setAltAgentRun(response.data));
+    } catch (error) {
+      dispatch(
+        setToastNotification({
+          title: 'Error getting agent run',
+          description: 'Failed with unknown error',
+          variant: 'destructive',
+        })
+      );
+      throw error;
+    }
+  }
+);
+
 export const handleAgentRunsUpdated = createAsyncThunk(
   'transcript/handleAgentRunsUpdated',
   async (_, { dispatch, getState }) => {
@@ -270,6 +320,12 @@ export const handleAgentRunsUpdated = createAsyncThunk(
     const curAgentRun = state.transcript.curAgentRun;
     if (curAgentRun !== undefined) {
       dispatch(getCurAgentRun(curAgentRun.id));
+    }
+
+    // Refresh alternative datapoint
+    const altAgentRun = state.transcript.altAgentRun;
+    if (altAgentRun !== undefined) {
+      dispatch(getAltAgentRun(altAgentRun.id));
     }
 
     // Refresh transcript metadata
@@ -442,6 +498,9 @@ export const transcriptSlice = createSlice({
     setCurAgentRun: (state, action: PayloadAction<AgentRun | undefined>) => {
       state.curAgentRun = action.payload;
     },
+    setAltAgentRun: (state, action: PayloadAction<AgentRun | undefined>) => {
+      state.altAgentRun = action.payload;
+    },
     setActionsSummary: (
       state,
       action: PayloadAction<ActionsSummary | undefined>
@@ -510,6 +569,7 @@ export const transcriptSlice = createSlice({
 
 export const {
   setCurAgentRun,
+  setAltAgentRun,
   setActionsSummary,
   setLoadingActionsSummaryForTranscriptId,
   setActionsSummaryTaskId,
