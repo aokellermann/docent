@@ -11,7 +11,7 @@ import {
   Sparkles,
   XOctagon,
 } from 'lucide-react';
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSelector } from 'react-redux';
 
 import type { MetadataType, PrimitiveFilter } from '@/app/types/frameTypes';
@@ -28,24 +28,23 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
 
+import { addSearchDimension, deleteSearch } from '../store/frameSlice';
+import { useAppDispatch } from '../store/hooks';
 import {
   addBaseFilter,
-  clearSearch,
   clearBaseFilters,
-  removeBaseFilter,
+  clearSearch,
   computeSearch,
-  setSearchQueryTextboxValue,
+  removeBaseFilter,
   requestClusters,
   requestDiffs,
+  setSearchQueryTextboxValue,
 } from '../store/searchSlice';
-import {
-  addSearchDimension,
-  deleteSearch,
-} from '../store/frameSlice';
-import { useAppDispatch } from '../store/hooks';
 import { RootState } from '../store/store';
 
 import BinEditor from './BinEditor';
+import { ProgressBar } from './ProgressBar';
+import DebugReduxState from '../debug/DebugReduxState';
 
 interface SearchAreaProps {
   onShowAgentRun?: (agentRunId: string, blockId?: number) => void;
@@ -310,15 +309,11 @@ const SearchArea: React.FC<SearchAreaProps> = ({ onShowAgentRun }) => {
   const handleCancelDiffs = () => {
     setLoadingDiffs(false);
     setDiffsAttribute(null);
-    setExperimentId1('');
-    setExperimentId2('');
   };
 
   const handleClusterDiffs = () => {
     if (!diffsAttribute) return;
-    dispatch(
-      requestClusters({ dimensionId: diffsAttribute, feedback: '' })
-    );
+    dispatch(requestClusters({ dimensionId: diffsAttribute, feedback: '' }));
   };
   /**
    * Handle share button
@@ -544,93 +539,106 @@ const SearchArea: React.FC<SearchAreaProps> = ({ onShowAgentRun }) => {
           </div>
         </div>
         <div className="border-t" />
-      <div className="space-y-2">
-        <div>
-          <div className="text-sm font-semibold">Compare Experiments</div>
-          <div className="text-xs">
-            Compare results between two different experiment runs.
+        <div className="space-y-2">
+          <div>
+            <div className="text-sm font-semibold">Compare Experiments</div>
+            <div className="text-xs">
+              Compare results between two different experiment runs.
+            </div>
+          </div>
+
+          <div className="border rounded-md bg-gray-50 p-2 space-y-2">
+            {!loadingDiffs && !diffsAttribute ? (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <div className="text-xs text-gray-600">Experiment 1</div>
+                    <Input
+                      value={experimentId1}
+                      onChange={(e) => setExperimentId1(e.target.value)}
+                      placeholder="e.g. experiment-1"
+                      className="h-8 text-xs bg-white font-mono text-gray-600"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-xs text-gray-600">Experiment 2</div>
+                    <Input
+                      value={experimentId2}
+                      onChange={(e) => setExperimentId2(e.target.value)}
+                      placeholder="e.g. experiment-2"
+                      className="h-8 text-xs bg-white font-mono text-gray-600"
+                    />
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  className="text-xs w-full"
+                  onClick={handleRequestDiffs}
+                  disabled={!experimentId1 || !experimentId2}
+                >
+                  Compare Experiments
+                </Button>
+              </>
+            ) : loadingDiffs ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs text-gray-600">Loading diffs...</div>
+                  <button
+                    onClick={handleCancelDiffs}
+                    className="inline-flex items-center gap-x-1 text-xs bg-red-50 text-red-500 border border-red-100 px-1.5 py-0.5 rounded-md hover:bg-red-100 transition-colors"
+                  >
+                    <RefreshCw className="h-3 w-3 mr" />
+                    Clear
+                  </button>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-1.5">
+                  <div className="bg-blue-600 h-1.5 rounded-full animate-pulse"></div>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs text-gray-600">
+                    Comparison between experiments
+                    <span className="font-mono whitespace-pre-wrap text-indigo-800">
+                      &nbsp;{experimentId1}&nbsp;
+                    </span>
+                    and
+                    <span className="font-mono whitespace-pre-wrap text-indigo-800">
+                      &nbsp;{experimentId2}&nbsp;
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleCancelDiffs}
+                      className="text-xs"
+                    >
+                      Clear
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="text-xs"
+                      onClick={handleClusterDiffs}
+                    >
+                      <Sparkles className="h-3 w-3 mr-2" />
+                      Cluster Results
+                    </Button>
+                  </div>
+                </div>
+                {loadingProgress &&
+                  loadingProgress[0] !== loadingProgress[1] && (
+                    <ProgressBar
+                      current={loadingProgress[0]}
+                      total={loadingProgress[1]}
+                    />
+                  )}
+              </div>
+            )}
           </div>
         </div>
-
-        <div className="border rounded-md bg-gray-50 p-2 space-y-2">
-          {!loadingDiffs && !diffsAttribute ? (
-            <>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <div className="text-xs text-gray-600">Experiment 1</div>
-                  <Input
-                    value={experimentId1}
-                    onChange={(e) => setExperimentId1(e.target.value)}
-                    placeholder="e.g. experiment-1"
-                    className="h-8 text-xs bg-white font-mono text-gray-600"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <div className="text-xs text-gray-600">Experiment 2</div>
-                  <Input
-                    value={experimentId2}
-                    onChange={(e) => setExperimentId2(e.target.value)}
-                    placeholder="e.g. experiment-2"
-                    className="h-8 text-xs bg-white font-mono text-gray-600"
-                  />
-                </div>
-              </div>
-              <Button
-                size="sm"
-                className="text-xs w-full"
-                onClick={handleRequestDiffs}
-                disabled={!experimentId1 || !experimentId2}
-              >
-                Compare Experiments
-              </Button>
-            </>
-          ) : loadingDiffs ? (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="text-xs text-gray-600">Loading diffs...</div>
-                <button
-                onClick={handleCancelDiffs}
-                className="inline-flex items-center gap-x-1 text-xs bg-red-50 text-red-500 border border-red-100 px-1.5 py-0.5 rounded-md hover:bg-red-100 transition-colors"
-              >
-                <RefreshCw className="h-3 w-3 mr" />
-                Clear
-              </button>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-1.5">
-                <div className="bg-blue-600 h-1.5 rounded-full animate-pulse"></div>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="text-xs text-gray-600">Comparison between experiments
-                  <span className="font-mono whitespace-pre-wrap text-indigo-800">&nbsp;{experimentId1}&nbsp;</span>and
-                  <span className="font-mono whitespace-pre-wrap text-indigo-800">&nbsp;{experimentId2}&nbsp;</span>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleCancelDiffs}
-                    className="text-xs"
-                  >
-                    Clear
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="text-xs"
-                    onClick={handleClusterDiffs}
-                  >
-                    <Sparkles className="h-3 w-3 mr-2" />
-                    Cluster Results
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-      <div className="border-t" />
+        <div className="border-t" />
         <div className="space-y-2">
           <div>
             <div className="text-sm font-semibold">Global Search</div>
@@ -671,35 +679,11 @@ const SearchArea: React.FC<SearchAreaProps> = ({ onShowAgentRun }) => {
                 {loadingSearchQuery &&
                   loadingSearchQuery === curSearchQuery &&
                   loadingProgress && (
-                    <div className="mt-2 mb-2 space-y-1">
-                      <div className="flex justify-between text-xs text-gray-600">
-                        <span className="flex items-center">
-                          Processing datapoints
-                          <Loader2 className="h-3 w-3 ml-1.5 animate-spin text-gray-500" />
-                        </span>
-                        <span>
-                          {loadingProgress[0]} / {loadingProgress[1]}
-                        </span>
-                      </div>
-                      <div className="w-full bg-gray-200 rounded-full h-1.5">
-                        <div
-                          className="bg-blue-600 h-1.5 rounded-full transition-all duration-300 ease-in-out"
-                          style={{
-                            width: `${
-                              loadingProgress[1] > 0
-                                ? Math.min(
-                                    (loadingProgress[0] / loadingProgress[1]) *
-                                      100,
-                                    100
-                                  )
-                                : 0
-                            }%`,
-                          }}
-                        ></div>
-                      </div>
-                    </div>
+                    <ProgressBar
+                      current={loadingProgress[0]}
+                      total={loadingProgress[1]}
+                    />
                   )}
-
                 <Button
                   size="sm"
                   variant="outline"
