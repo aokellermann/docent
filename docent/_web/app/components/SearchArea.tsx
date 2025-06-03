@@ -37,13 +37,13 @@ import {
   computeSearch,
   removeBaseFilter,
   requestClusters,
-  requestDiffs,
   setSearchQueryTextboxValue,
 } from '../store/searchSlice';
 import { RootState } from '../store/store';
 
 import BinEditor from './BinEditor';
 import { ProgressBar } from './ProgressBar';
+import { requestDiffs } from '../store/diffSlice';
 import DebugReduxState from '../debug/DebugReduxState';
 
 interface SearchAreaProps {
@@ -94,6 +94,7 @@ const SearchArea: React.FC<SearchAreaProps> = ({ onShowAgentRun }) => {
     searchesWithStats,
     searchQueryTextboxValue,
   } = useSelector((state: RootState) => state.search);
+  const { diffLoadingProgress } = useSelector((state: RootState) => state.diff);
 
   // Pull out the dimension associated with the current search query
   const activeDim = useMemo(() => {
@@ -627,11 +628,11 @@ const SearchArea: React.FC<SearchAreaProps> = ({ onShowAgentRun }) => {
                     </Button>
                   </div>
                 </div>
-                {loadingProgress &&
-                  loadingProgress[0] !== loadingProgress[1] && (
+                {diffLoadingProgress &&
+                  diffLoadingProgress[0] !== diffLoadingProgress[1] && (
                     <ProgressBar
-                      current={loadingProgress[0]}
-                      total={loadingProgress[1]}
+                      current={diffLoadingProgress[0]}
+                      total={diffLoadingProgress[1]}
                     />
                   )}
               </div>

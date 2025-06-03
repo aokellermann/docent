@@ -1,10 +1,8 @@
 import {
   AttributeFeedback,
-  RegexSnippet,
   EvidenceWithCitation,
-  StreamedDiffs,
+  StreamedSearchResult,
 } from '../types/experimentViewerTypes';
-import socketService from '../services/socketService';
 import {
   createSlice,
   type PayloadAction,
@@ -14,7 +12,6 @@ import { v4 as uuid4 } from 'uuid';
 
 import { apiRestClient } from '../services/apiService';
 import sseService from '../services/sseService';
-import { StreamedSearchResult } from '../types/experimentViewerTypes';
 import {
   SearchResultWithCitations,
   ComplexFilter,
@@ -26,7 +23,7 @@ import { RootState } from './store';
 import { setToastNotification } from './toastSlice';
 
 // Map to store cancel functions for active SSE connections
-const cancelFunctionsMap: Record<string, () => void> = {};
+export const cancelFunctionsMap: Record<string, () => void> = {};
 
 export interface SearchState {
   searchQueryTextboxValue?: string;
@@ -133,7 +130,7 @@ export const computeSearch = createAsyncThunk(
       dispatch(setActiveSearchTaskId(jobId));
 
       // Set up event source to listen for streaming updates using sseService
-      const { eventSource, onCancel } = sseService.createEventSource(
+      const { onCancel } = sseService.createEventSource(
         `/rest/${frameGridId}/listen_compute_search?job_id=${jobId}`,
         (data: StreamedSearchResult) => {
           dispatch(handleSearchUpdate(data));
@@ -204,9 +201,9 @@ export const requestClusters = createAsyncThunk(
       dispatch(setActiveClusterTaskId(jobId));
 
       // Set up event source to listen for streaming updates using sseService
-      const { eventSource, onCancel } = sseService.createEventSource(
+      const { onCancel } = sseService.createEventSource(
         `/rest/${frameGridId}/listen_cluster_dimension?job_id=${jobId}`,
-        (data) => {
+        () => {
           // Handle any cluster updates if needed
           // Currently the backend doesn't send progress updates for clustering
         },
@@ -243,7 +240,7 @@ export const requestClusters = createAsyncThunk(
 
 export const clearSearch = createAsyncThunk(
   'experimentViewer/clearSearch',
-  async (_, { dispatch, getState }) => {
+  async (_, { dispatch }) => {
     dispatch(setSearchQuery(undefined));
     dispatch(cancelCurrentSearch());
     dispatch(clearSearchResultMap());
@@ -461,89 +458,6 @@ export const submitAttributeFeedback = createAsyncThunk(
   }
 );
 
-export const requestDiffs = createAsyncThunk(
-  'experimentViewer/requestDiffs',
-  async (
-    {
-      experimentId1,
-      experimentId2,
-    }: { experimentId1: string; experimentId2: string },
-    { dispatch, getState }
-  ) => {
-    try {
-      // Cancel any existing diff task
-      dispatch(cancelCurrentDiffRequest());
-
-      // Set the UI loading state
-      dispatch(setLoadingProgress([0, 0]));
-
-      // Get the frame grid ID from the state
-      const state = getState() as { frame: { frameGridId?: string } };
-      const frameGridId = state.frame.frameGridId;
-
-      if (!frameGridId) {
-        dispatch(
-          setToastNotification({
-            title: 'Configuration error',
-            description: 'No frame grid ID available',
-            variant: 'destructive',
-          })
-        );
-        throw new Error('No frame grid ID available');
-      }
-
-      // Start the compute diffs job
-      const response = await apiRestClient.post(
-        `/${frameGridId}/start_compute_diffs`,
-        {
-          fg_id: frameGridId,
-          experiment_id_1: experimentId1,
-          experiment_id_2: experimentId2,
-        }
-      );
-
-      const jobId = response.data;
-
-      // Set the job ID as the active diff task ID
-      dispatch(setActiveDiffTaskId(jobId));
-
-      // Set up event source to listen for streaming updates using sseService
-      const { eventSource, onCancel } = sseService.createEventSource(
-        `/rest/${frameGridId}/listen_compute_diffs?job_id=${jobId}`,
-        (data: StreamedDiffs) => {
-          dispatch(handleDiffsUpdate(data));
-        },
-        () => {
-          dispatch(setActiveDiffTaskId(undefined));
-        },
-        (title, description, variant) => {
-          dispatch(
-            setToastNotification({
-              title,
-              description,
-              variant,
-            })
-          );
-        }
-      );
-
-      // Store the cancel function for potential cleanup
-      cancelFunctionsMap[jobId] = onCancel;
-    } catch (error) {
-      // Cleanup on error
-      dispatch(setActiveDiffTaskId(undefined));
-      dispatch(
-        setToastNotification({
-          title: 'Error requesting diffs',
-          description: 'Failed to compute diffs between experiments',
-          variant: 'destructive',
-        })
-      );
-      throw error;
-    }
-  }
-);
-
 export const cancelCurrentDiffRequest = createAsyncThunk(
   'experimentViewer/cancelCurrentDiffRequest',
   async (_, { getState, dispatch }) => {
@@ -729,44 +643,6 @@ export const searchSlice = createSlice({
     setActiveDiffTaskId: (state, action: PayloadAction<string | undefined>) => {
       state.activeDiffTaskId = action.payload;
     },
-    handleDiffsUpdate: (state, action: PayloadAction<StreamedDiffs>) => {
-      const {
-        data_id_1,
-        data_id_2,
-        claim,
-        evidence,
-        num_pairs_done,
-        num_pairs_total,
-      } = action.payload;
-
-      // Update the progress counters
-      state.loadingProgress = [num_pairs_done, num_pairs_total];
-
-      if (
-        data_id_1 === null ||
-        data_id_2 === null ||
-        claim === null ||
-        evidence === null
-      ) {
-        return;
-      }
-
-      if (!state.diffMap) {
-        state.diffMap = {};
-      }
-
-      // Create a key for the pair of datapoints
-      const pairKey = `${data_id_1}___${data_id_2}`;
-
-      // Update the diff map with the new data
-      state.diffMap[pairKey] = {
-        claim,
-        evidence,
-      };
-    },
-    clearDiffMap: (state) => {
-      state.diffMap = undefined;
-    },
     resetSearchSlice: () => initialState,
   },
 });
@@ -783,8 +659,6 @@ export const {
   setSearchQuery,
   setLoadingProgress,
   setActiveDiffTaskId,
-  handleDiffsUpdate,
-  clearDiffMap,
   setSearchesWithStats,
   resetSearchSlice,
 } = searchSlice.actions;

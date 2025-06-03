@@ -7,10 +7,11 @@ import experimentViewerReducer from './experimentViewerSlice';
 import frameReducer from './frameSlice';
 import toastReducer from './toastSlice';
 import transcriptReducer from './transcriptSlice';
+import { diffReducer } from './diffSlice';
 import createWebSocketMiddleware from './webSocketMiddleware';
 
 // Create a custom error logger middleware
-const errorLogger = (store: any) => (next: any) => (action: any) => {
+const errorLogger = () => (next: any) => (action: any) => {
   // Log rejected thunk actions
   if (action.type?.endsWith('/rejected')) {
     console.error('Redux Thunk Error:', action.type);
@@ -24,6 +25,7 @@ const store = configureStore({
   reducer: {
     experimentViewer: experimentViewerReducer,
     search: searchReducer,
+    diff: diffReducer,
     frame: frameReducer,
     transcript: transcriptReducer,
     toast: toastReducer,
