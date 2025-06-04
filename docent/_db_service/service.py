@@ -1879,6 +1879,31 @@ class DBService:
             logger.info(f"Added job with ID: {job_id}")
         return job_id
 
+    async def add_search_job(self, query_id: str) -> (bool, str):
+        """
+        Adds or finds a search job for the given query. The first return value is whether this
+        call added a new job.
+        """
+        async with self.session() as session:
+            # Check if an equivalent job already exists
+            result = await session.execute(
+                select(SQLAJob)
+                .filter(SQLAJob.job_json["type"].astext == "compute_search")
+                .filter(SQLAJob.job_json["query_id"].astext == query_id)
+            )
+            existing = result.scalar_one_or_none()
+            if existing is not None:
+                return False, existing.id
+
+            # Otherwise, create a new job
+            job_id = str(uuid4())
+            session.add(
+                SQLAJob(id=job_id, job_json={"type": "compute_search", "query_id": query_id})
+            )
+            logger.info(f"Added job with ID: {job_id}")
+
+            return True, job_id
+
     async def get_job(self, job_id: str) -> dict[str, Any] | None:
         """
         Retrieve a job specification from the database.

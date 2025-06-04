@@ -656,16 +656,9 @@ async def start_compute_search(
     _: None = Depends(require_fg_permission(Permission.WRITE)),
 ):
     query_id = await db.add_search_query(ctx, request.search_query)
-
-    job_id = await db.add_job(
-        {
-            "type": "compute_search",
-            "query_id": query_id,
-        }
-    )
-
-    await enqueue_search_job(ctx, job_id)
-
+    new, job_id = await db.add_search_job(query_id)
+    if new:
+        await enqueue_search_job(ctx, job_id)
     return job_id
 
 
