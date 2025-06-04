@@ -9,7 +9,7 @@ not doing it now.
 import traceback
 from contextlib import nullcontext
 from functools import partial
-from typing import Any, Literal, Sequence, cast
+from typing import Any, AsyncContextManager, Literal, Sequence, cast
 
 import anyio
 
@@ -79,8 +79,7 @@ async def _parallelize_calls(
     logprobs: bool,
     top_logprobs: int | None,
     timeout: float,
-    max_concurrency: int | None,
-    semaphore: anyio.Semaphore | None,
+    semaphore: AsyncContextManager | None,
     use_tqdm: bool,
     cache: LLMCache | None = None,
     fill_cache: str | None = None,
@@ -98,10 +97,6 @@ async def _parallelize_calls(
         top_logprobs=top_logprobs,
         timeout=timeout,
     )
-    if max_concurrency is not None:
-        ctx = anyio.Semaphore(max_concurrency)
-    else:
-        ctx = nullcontext() if semaphore is None else semaphore
 
     responses: list[LLMOutput | None] = [None for _ in messages_list]
 
@@ -120,7 +115,7 @@ async def _parallelize_calls(
             )
             return
 
-        async with ctx:
+        async with semaphore:
             try:
                 if streaming_callback is None:
                     result = await base_func(client=client, messages=messages)
@@ -206,12 +201,9 @@ class LLMManager:
     def __init__(
         self,
         model_options: list[ModelOption],
-        max_concurrency: int = 100,
         use_cache: bool = False,
     ):
         self.cache = LLMCache() if use_cache else None
-        self.semaphore = anyio.Semaphore(max_concurrency)
-
         self.model_options = model_options
         self.current_model_option_index = 0
 
@@ -230,9 +222,6 @@ class LLMManager:
         streaming_callback: AsyncLLMOutputStreamingCallback | None = None,
         completion_callback: AsyncLLMOutputStreamingCallback | None = None,
     ) -> list[LLMOutput]:
-        """
-        If max_concurrency is None, use LLManager.semaphore to manage concurrency
-        """
         results: list[LLMOutput | None] = [None] * len(messages_list)
 
         while True:
@@ -323,8 +312,11 @@ class LLMManager:
                     logprobs=logprobs,
                     top_logprobs=top_logprobs,
                     timeout=timeout,
-                    max_concurrency=max_concurrency,
-                    semaphore=self.semaphore,
+                    semaphore=(
+                        anyio.Semaphore(max_concurrency)
+                        if max_concurrency is not None
+                        else nullcontext()
+                    ),
                     use_tqdm=len(uncached_messages) >= 5,
                     cache=self.cache,
                     fill_cache=fill_cache,
@@ -398,7 +390,6 @@ async def get_llm_completions_async(
     # Create the LLM manager
     llm_manager = LLMManager(
         model_options=model_options,
-        max_concurrency=max_concurrency,
         use_cache=use_cache,
     )
 
