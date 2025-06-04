@@ -32,14 +32,15 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.sql import ColumnElement
 
 from docent._ai_tools.clustering.cluster_generator import propose_clusters
 from docent._ai_tools.diff import extract_states_and_diffs
 from docent._ai_tools.search import SearchResult, SearchResultStreamingCallback, execute_search
 from docent._db_service.contexts import ViewContext
+from docent._db_service.schemas.auth_models import Permission, ResourceType, SubjectType, User
 from docent._db_service.schemas.base import SQLABase
 from docent._db_service.schemas.tables import (
+    SQLAAccessControlEntry,
     SQLAAgentRun,
     SQLADiffAttribute,
     SQLAFilter,
@@ -52,6 +53,7 @@ from docent._db_service.schemas.tables import (
     SQLASession,
     SQLATranscript,
     SQLAUser,
+    SQLAUserOrganization,
     SQLAView,
 )
 from docent._env_util import ENV
@@ -66,7 +68,6 @@ from docent.data_models.filters import (
     SearchResultPredicateFilter,
 )
 from docent.data_models.transcript import Transcript
-from docent.data_models.user import User
 
 logger = get_logger(__name__)
 
@@ -311,11 +312,22 @@ class DBService:
         name: str | None = None,
         description: str | None = None,
     ):
+        # Create FG
         fg_id = fg_id or str(uuid4())
         async with self.session() as session:
             session.add(
                 SQLAFrameGrid(id=fg_id, name=name, description=description, created_by=user.id)
             )
+
+        # Create ACL entry for the user
+        await self.set_acl_permission(
+            SubjectType.USER,
+            subject_id=user.id,
+            resource_type=ResourceType.FRAME_GRID,
+            resource_id=fg_id,
+            permission=Permission.ADMIN,
+        )
+
         logger.info(f"Created FrameGrid with ID: {fg_id}")
         return fg_id
 
@@ -409,13 +421,13 @@ class DBService:
     # Agent Runs #
     ##############
 
-    async def add_agent_runs(self, ctx: ViewContext, agent_runs: list[AgentRun]):
+    async def add_agent_runs(self, fg_id: str, agent_runs: list[AgentRun]):
         async with self.session() as session:
             # Add agent runs
-            session.add_all([SQLAAgentRun.from_agent_run(ar, ctx.fg_id) for ar in agent_runs])
+            session.add_all([SQLAAgentRun.from_agent_run(ar, fg_id) for ar in agent_runs])
             # Add associated transcripts
             sqla_transcripts = [
-                SQLATranscript.from_transcript(t, dk, ctx.fg_id, ar.id)
+                SQLATranscript.from_transcript(t, dk, fg_id, ar.id)
                 for ar in agent_runs
                 for dk, t in ar.transcripts.items()
             ]
@@ -425,18 +437,19 @@ class DBService:
         # Get all MECE metadata dimensions associated with this FG, regardless of view
         async with self.session() as session:
             result = await session.execute(
-                select(SQLAFrameDimension.id).where(
-                    SQLAFrameDimension.fg_id == ctx.fg_id,
+                select(SQLAFrameDimension.id, SQLAFrameDimension.view_id).where(
+                    SQLAFrameDimension.fg_id == fg_id,
                     SQLAFrameDimension.metadata_key.isnot(None),
                     SQLAFrameDimension.maintain_mece,
                 )
             )
-            mece_dim_ids = result.scalars().all()
+            mece_dim_ids_and_view_ids = result.all()
 
         # Re-cluster all MECE metadata dimensions
         async with anyio.create_task_group() as tg:
-            for dim_id in mece_dim_ids:
-                tg.start_soon(self.cluster_metadata_dim, ctx, dim_id)
+            for dim_id, view_id in mece_dim_ids_and_view_ids:
+                cur_ctx = await self.get_view_ctx(view_id)
+                tg.start_soon(self.cluster_metadata_dim, cur_ctx, dim_id)
 
     async def get_agent_runs(
         self,
@@ -522,6 +535,32 @@ class DBService:
     # Views #
     #########
 
+    async def get_all_view_ctxs(self, fg_id: str) -> list[ViewContext]:
+        async with self.session() as session:
+            result = await session.execute(select(SQLAView.id).where(SQLAView.fg_id == fg_id))
+            view_ids = result.scalars().all()
+            return [await self.get_view_ctx(view_id) for view_id in view_ids]
+
+    async def get_view_ctx(self, view_id: str) -> ViewContext:
+        async with self.session() as session:
+            # Get the view
+            result = await session.execute(select(SQLAView).where(SQLAView.id == view_id))
+            view = result.scalar_one_or_none()
+            if view is None:
+                raise ValueError(f"View with ID {view_id} not found")
+
+            # Get the base filter for this view
+            base_filter = (
+                await self.get_filter(view.base_filter_id)
+                if view.base_filter_id is not None
+                else None
+            )
+            # Check that the base filter is a ComplexFilter
+            if base_filter is not None:
+                assert isinstance(base_filter, ComplexFilter), "Base filter must be a ComplexFilter"
+
+            return ViewContext(fg_id=view.fg_id, view_id=view.id, base_filter=base_filter)
+
     async def get_default_view_ctx(self, fg_id: str) -> ViewContext:
         # Check if a default view exists for this fg
         async with self.session() as session:
@@ -530,7 +569,7 @@ class DBService:
             )
             view = result.scalar_one_or_none()
 
-        # If not, create a new view
+        # If not, create a new view whose admin is the user who created the FG
         if view is None:
             async with self.session() as session:
                 view = SQLAView(
@@ -539,6 +578,22 @@ class DBService:
                     is_default=True,
                 )
                 session.add(view)
+
+            # Who created the FG?
+            async with self.session() as session:
+                result = await session.execute(
+                    select(SQLAFrameGrid.created_by).where(SQLAFrameGrid.id == fg_id)
+                )
+                user_id = result.scalar_one()
+
+            # Create ACL entry for the user
+            await self.set_acl_permission(
+                SubjectType.USER,
+                subject_id=user_id,
+                resource_type=ResourceType.VIEW,
+                resource_id=view.id,
+                permission=Permission.ADMIN,
+            )
 
         # Get the base filter for this view
         base_filter = (
@@ -950,7 +1005,7 @@ class DBService:
         logger.info(f"Added new search query {search_query} with id {new_id} to fg_id {ctx.fg_id}")
         return new_id
 
-    async def delete_search_query(self, ctx: ViewContext, search_query_id: str):
+    async def delete_search_query(self, fg_id: str, search_query_id: str):
         """
         Delete a search query from the database.
 
@@ -969,7 +1024,7 @@ class DBService:
         # Get all search queries
         async with self.session() as session:
             result = await session.execute(
-                select(SQLASearchQuery.search_query).where(SQLASearchQuery.fg_id == ctx.fg_id)
+                select(SQLASearchQuery.search_query).where(SQLASearchQuery.fg_id == fg_id)
             )
             search_queries = list(set(result.scalars().all()))
 
@@ -977,7 +1032,7 @@ class DBService:
         async with self.session() as session:
             result = await session.execute(
                 select(SQLAFrameDimension.id).where(
-                    SQLAFrameDimension.fg_id == ctx.fg_id,
+                    SQLAFrameDimension.fg_id == fg_id,
                     SQLAFrameDimension.search_query.isnot(None),
                     ~SQLAFrameDimension.search_query.in_(search_queries),
                 )
@@ -1055,7 +1110,7 @@ class DBService:
     ) -> list[SearchResult]:
         # Ensure we have fresh search results
         if ensure_fresh:
-            await self._compute_search(
+            await self.compute_search(
                 ctx,
                 search_query,
                 search_result_callback=search_result_callback,
@@ -1408,7 +1463,6 @@ class DBService:
             if dim.metadata_key is not None:
                 await self.cluster_metadata_dim(ctx, dim.id)
 
-    @time_this
     async def cluster_metadata_dim(self, ctx: ViewContext, dim_id: str):
         # Get rid of existing filters on this dim
         filters = await self._get_dim_filters(dim_id)
@@ -1755,6 +1809,26 @@ class DBService:
     # Users #
     #########
 
+    async def get_users(self) -> list[User]:
+        async with self.session() as session:
+            # Get all users
+            users_result = await session.execute(select(SQLAUser))
+            sqla_users = users_result.scalars().all()
+
+            # Get all user-organization relationships
+            user_orgs_result = await session.execute(select(SQLAUserOrganization))
+            user_orgs = user_orgs_result.scalars().all()
+
+            # Group organizations by user_id
+            user_org_map: dict[str, list[str]] = {}
+            for user_org in user_orgs:
+                user_org_map.setdefault(user_org.user_id, []).append(user_org.organization_id)
+
+            # Convert to User objects with organization_ids
+            return [
+                user.to_user(organization_ids=user_org_map.get(user.id, [])) for user in sqla_users
+            ]
+
     async def create_user(self, email: str) -> User:
         """
         Create a new user. Raises an error if a user with the given email already exists.
@@ -1771,14 +1845,14 @@ class DBService:
             raise ValueError("User already exists for {email}")
 
         user_id = str(uuid4())
-        sqa_user = SQLAUser(id=user_id, email=email)
+        sqla_user = SQLAUser(id=user_id, email=email)
 
         async with self.session() as session:
-            session.add(sqa_user)
+            session.add(sqla_user)
             await session.flush()  # Not strictly needed for uuid, but good for autoincrement fields
 
-        logger.info(f"Created new user with ID: {sqa_user.id} and email: {sqa_user.email}")
-        return User(id=sqa_user.id, email=sqa_user.email, created_at=sqa_user.created_at)
+        logger.info(f"Created new user with ID: {sqla_user.id} and email: {sqla_user.email}")
+        return sqla_user.to_user(organization_ids=[])
 
     async def get_user_by_email(self, email: str) -> User | None:
         """
@@ -1791,11 +1865,21 @@ class DBService:
             The User object if found, None otherwise
         """
         async with self.session() as session:
+            # Get the user
             result = await session.execute(select(SQLAUser).where(SQLAUser.email == email))
             sqla_user = result.scalar_one_or_none()
-            if sqla_user:
-                return User(id=sqla_user.id, email=sqla_user.email, created_at=sqla_user.created_at)
-            return None
+            if not sqla_user:
+                return None
+
+            # Get the user's organization IDs
+            org_result = await session.execute(
+                select(SQLAUserOrganization.organization_id).where(
+                    SQLAUserOrganization.user_id == sqla_user.id
+                )
+            )
+            organization_ids = org_result.scalars().all()
+
+            return sqla_user.to_user(organization_ids=list(organization_ids))
 
     async def create_session(self, user_id: str, expires_in_days: int = 30) -> str:
         """
@@ -1846,9 +1930,18 @@ class DBService:
                 )
             )
             sqla_user = result.scalar_one_or_none()
-            if sqla_user:
-                return User(id=sqla_user.id, email=sqla_user.email, created_at=sqla_user.created_at)
-            return None
+            if not sqla_user:
+                return None
+
+            # Get the user's organization IDs
+            org_result = await session.execute(
+                select(SQLAUserOrganization.organization_id).where(
+                    SQLAUserOrganization.user_id == sqla_user.id
+                )
+            )
+            organization_ids = org_result.scalars().all()
+
+            return sqla_user.to_user(organization_ids=list(organization_ids))
 
     async def invalidate_session(self, session_id: str) -> bool:
         """
@@ -1865,6 +1958,192 @@ class DBService:
                 update(SQLASession).where(SQLASession.id == session_id).values(is_active=False)
             )
             return result.rowcount > 0
+
+    ###############
+    # Permissions #
+    ###############
+
+    async def has_permission(
+        self,
+        user: User,
+        resource_type: ResourceType,
+        resource_id: str,
+        permission: Permission,
+    ) -> bool:
+        async with self.session() as session:
+            # Build the resource filter based on ResourceType
+            if resource_type == ResourceType.FRAME_GRID:
+                resource_filter = SQLAAccessControlEntry.fg_id == resource_id
+            elif resource_type == ResourceType.VIEW:
+                resource_filter = SQLAAccessControlEntry.view_id == resource_id
+            else:
+                raise ValueError(f"Unsupported resource type: {resource_type}")
+
+            # Check public permissions
+            public_permission_result = await session.execute(
+                select(SQLAAccessControlEntry.permission).where(
+                    SQLAAccessControlEntry.is_public == True,
+                    resource_filter,
+                )
+            )
+            public_permissions = public_permission_result.scalars().all()
+            for perm_str in public_permissions:
+                if Permission(perm_str).includes(permission):
+                    return True
+
+            # Check direct user permissions
+            direct_permission_result = await session.execute(
+                select(SQLAAccessControlEntry.permission).where(
+                    SQLAAccessControlEntry.user_id == user.id,
+                    resource_filter,
+                )
+            )
+            user_permissions = direct_permission_result.scalars().all()
+            for perm_str in user_permissions:
+                if Permission(perm_str).includes(permission):
+                    return True
+
+            # Check organization permissions for all user's organizations
+            if user.organization_ids:
+                org_permission_result = await session.execute(
+                    select(SQLAAccessControlEntry.permission).where(
+                        SQLAAccessControlEntry.organization_id.in_(user.organization_ids),
+                        resource_filter,
+                    )
+                )
+                org_permissions = org_permission_result.scalars().all()
+                for perm_str in org_permissions:
+                    if Permission(perm_str).includes(permission):
+                        return True
+
+            return False
+
+    async def set_acl_permission(
+        self,
+        subject_type: SubjectType,
+        subject_id: str,
+        resource_type: ResourceType,
+        resource_id: str,
+        permission: Permission,
+    ) -> None:
+        # Build the resource filter based on ResourceType
+        if resource_type == ResourceType.FRAME_GRID:
+            resource_filter = SQLAAccessControlEntry.fg_id == resource_id
+            resource_fields = {"fg_id": resource_id, "view_id": None}
+        elif resource_type == ResourceType.VIEW:
+            resource_filter = SQLAAccessControlEntry.view_id == resource_id
+            resource_fields = {"fg_id": None, "view_id": resource_id}
+        else:
+            raise ValueError(f"Unsupported resource type: {resource_type}")
+
+        # Build the subject filter and fields based on SubjectType
+        if subject_type == SubjectType.USER:
+            subject_filter = SQLAAccessControlEntry.user_id == subject_id
+            subject_fields = {
+                "user_id": subject_id,
+                "organization_id": None,
+                "is_public": False,
+            }
+        elif subject_type == SubjectType.ORGANIZATION:
+            subject_filter = SQLAAccessControlEntry.organization_id == subject_id
+            subject_fields = {
+                "user_id": None,
+                "organization_id": subject_id,
+                "is_public": False,
+            }
+        elif subject_type == SubjectType.PUBLIC:
+            subject_filter = SQLAAccessControlEntry.is_public
+            subject_fields = {"user_id": None, "organization_id": None, "is_public": True}
+        else:
+            raise ValueError(f"Unsupported subject type: {subject_type}")
+
+        # Check if any permission already exists for this subject/resource combination
+        async with self.session() as session:
+            existing = await session.execute(
+                select(SQLAAccessControlEntry).where(
+                    subject_filter,
+                    resource_filter,
+                )
+            )
+            existing_entry = existing.scalar_one_or_none()
+
+        # Permission doesn't exist, create it
+        if existing_entry is None:
+            acl_entry = SQLAAccessControlEntry(
+                id=str(uuid4()),
+                permission=permission.value,
+                **subject_fields,
+                **resource_fields,
+            )
+
+            async with self.session() as session:
+                session.add(acl_entry)
+
+            logger.info(
+                f"Granted {permission.value} permission on {resource_type.value}:{resource_id} "
+                f"to {subject_type.value}:{subject_id}"
+            )
+
+        # Permission exists, update it
+        else:
+            async with self.session() as session:
+                await session.execute(
+                    update(SQLAAccessControlEntry)
+                    .where(SQLAAccessControlEntry.id == existing_entry.id)
+                    .values(
+                        **subject_fields,
+                        **resource_fields,
+                        permission=permission.value,
+                    )
+                )
+
+            logger.info(
+                f"Updated permission on {resource_type.value}:{resource_id} "
+                f"for {subject_type.value}:{subject_id} from {existing_entry.permission} to {permission.value}"
+            )
+
+    async def clear_acl_permission(
+        self,
+        subject_type: SubjectType,
+        subject_id: str,
+        resource_type: ResourceType,
+        resource_id: str,
+    ) -> int:
+        async with self.session() as session:
+            # Build the delete query with the provided filters
+            query = delete(SQLAAccessControlEntry)
+
+            # Handle subject filtering based on SubjectType
+            if subject_type == SubjectType.USER:
+                query = query.where(SQLAAccessControlEntry.user_id == subject_id)
+            elif subject_type == SubjectType.ORGANIZATION:
+                query = query.where(SQLAAccessControlEntry.organization_id == subject_id)
+            elif subject_type == SubjectType.PUBLIC:
+                query = query.where(SQLAAccessControlEntry.is_public)
+            else:
+                raise ValueError(f"Unsupported subject type: {subject_type}")
+
+            # Handle resource filtering based on ResourceType
+            if resource_type == ResourceType.FRAME_GRID:
+                query = query.where(SQLAAccessControlEntry.fg_id == resource_id)
+            elif resource_type == ResourceType.VIEW:
+                query = query.where(SQLAAccessControlEntry.view_id == resource_id)
+            else:
+                raise ValueError(f"Unsupported resource type: {resource_type}")
+
+            result = await session.execute(query)
+            count = result.rowcount or 0
+
+            if count > 0:
+                logger.info(
+                    f"Cleared {count} ACL permissions with filters: "
+                    f"subject_type={subject_type}, subject_id={subject_id}, "
+                    f"resource_type={resource_type}, resource_id={resource_id}"
+                )
+            else:
+                logger.info("No ACL permissions matched the provided filters")
+
+            return count
 
     ###########
     # Locking #
