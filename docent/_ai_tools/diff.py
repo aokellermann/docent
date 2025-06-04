@@ -11,6 +11,7 @@ from docent.data_models.transcript import (
     MULTI_BLOCK_CITE_INSTRUCTION,
     SINGLE_BLOCK_CITE_INSTRUCTION,
 )
+from docent._ai_tools.diffs.models import MessageState
 
 
 class DiffAttribute(BaseModel):
@@ -94,17 +95,6 @@ Relevant past actions: [summary of past actions that are relevant to the current
     if text is None:
         return ""
     return text
-
-
-class MessageState:
-    def __init__(self, message_idx: int, action: str, goal: str, past_actions: str):
-        self.message_idx = message_idx
-        self.action = action
-        self.goal = goal
-        self.past_actions = past_actions
-
-    def __str__(self):
-        return f"[B{self.message_idx}]\nAction: {self.action}\nGoal: {self.goal}\nRelevant past actions: {self.past_actions}"
 
 
 def parse_output(output: str) -> list[MessageState]:
