@@ -665,7 +665,7 @@ const InnerCard: React.FC<InnerCard> = ({
               const initialDiffResults = getDiffResults(agentRunId);
 
               if (curSearchQuery && attributes === null) return null;
-              if (diffMap && !initialDiffResults) return null;
+              // if (diffMap && !initialDiffResults) return null;
 
               const diffResults = initialDiffResults
                 ? initialDiffResults[1]
