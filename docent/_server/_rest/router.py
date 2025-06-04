@@ -1131,6 +1131,7 @@ class StreamedDiffs(TypedDict):
     evidence: list[EvidenceWithCitation] | None
     num_pairs_done: int
     num_pairs_total: int
+    transcript_diff: dict[str, Any] | None # a TranscriptDiff as json
 
 
 @authenticated_router.post("/{fg_id}/start_compute_diffs")
@@ -1176,11 +1177,13 @@ async def listen_compute_diffs(
     progress_lock = anyio.Lock()
     num_done, num_total = 0, 0  # Will be set after getting datapoints
 
+    from docent._ai_tools.diffs.models import TranscriptDiff
     async def _ws_diff_streaming_callback(
         data_id_1: str,
         data_id_2: str,
         claim: list[str],
         evidence: list[str],
+        transcript_diff: TranscriptDiff | None,
     ) -> None:
         nonlocal num_done
 
@@ -1196,6 +1199,7 @@ async def listen_compute_diffs(
                 ],
                 "num_pairs_done": num_done,
                 "num_pairs_total": num_total,
+                "transcript_diff": transcript_diff.model_dump() if transcript_diff else None,
             }
 
         # Send to event_stream so it can be sent back to the client
@@ -1246,6 +1250,7 @@ async def listen_compute_diffs(
                 evidence=None,
                 num_pairs_done=0,
                 num_pairs_total=num_total,
+                transcript_diff=None,
             )
             await send_stream.send(init_data)
 

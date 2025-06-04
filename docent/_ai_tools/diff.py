@@ -103,7 +103,11 @@ def parse_output(output: str) -> list[MessageState]:
     idx, action, goal, past_actions = -1, "", "", ""
     for line in output.split("\n"):
         if line.startswith("[B"):
-            idx = int(line.removeprefix("[B").removesuffix("]"))
+            try:
+                # TODO(sherwin): this is a hack in case the idx doesn't parse correctly
+                idx = int(line.removeprefix("[B").removesuffix("]"))
+            except ValueError:
+                idx = 0
             action, goal, past_actions = "", "", ""
         elif line.startswith("Action:"):
             action = line.removeprefix("Action:").strip()
@@ -252,6 +256,7 @@ def parse_diff_output(output: str) -> list[tuple[str, str]]:
         curr_index = end_evidence_index + 1
     return result
 
+    
 
 async def extract_states_and_diffs(
     transcript_1: AgentRun,
