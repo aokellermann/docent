@@ -1216,18 +1216,6 @@ class DBService:
         search_query: str,
         search_result_callback: SearchResultStreamingCallback | None = None,
     ):
-        await self._compute_search(
-            ctx,
-            search_query,
-            search_result_callback=search_result_callback,
-        )
-
-    async def _compute_search(
-        self,
-        ctx: ViewContext,
-        search_query: str,
-        search_result_callback: SearchResultStreamingCallback | None = None,
-    ):
         # If the callback is set, the caller is expecting all results to be streamed back
         # So, retrieve them and send them
         if search_result_callback is not None:
