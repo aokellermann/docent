@@ -764,12 +764,12 @@ async def start_cluster_dimension(
     _: None = Depends(require_fg_permission(Permission.WRITE)),
 ):
     job_id = await db.add_job(
+        "cluster_dimension",
         {
-            "type": "cluster_dimension",
             "fg_id": fg_id,
             "dim_id": request.dim_id,
             "feedback": request.feedback,
-        }
+        },
     )
     return job_id
 
@@ -787,6 +787,7 @@ async def listen_cluster_dimension(
     job = await db.get_job(job_id)
     if job is None:
         raise ValueError(f"Job {job_id} not found")
+    job = job.job_json
     fg_id, dim_id, feedback = job["fg_id"], job["dim_id"], job.get("feedback")
 
     dim = await db.get_dim(dim_id)
@@ -1164,12 +1165,12 @@ async def start_compute_diffs(
     ctx: ViewContext = Depends(get_default_view_ctx),
 ):
     job_id = await db.add_job(
+        "compute_diffs",
         {
-            "type": "compute_diffs",
             "fg_id": fg_id,
             "experiment_id_1": request.experiment_id_1,
             "experiment_id_2": request.experiment_id_2,
-        }
+        },
     )
     return job_id
 
@@ -1185,6 +1186,7 @@ async def listen_compute_diffs(
     job = await db.get_job(job_id)
     if job is None:
         raise ValueError(f"Job {job_id} not found")
+    job = job.job_json
     experiment_id_1, experiment_id_2 = (
         job["experiment_id_1"],
         job["experiment_id_2"],

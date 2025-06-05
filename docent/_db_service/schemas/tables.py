@@ -419,6 +419,7 @@ class SQLAJob(SQLABase):
     __tablename__ = TABLE_JOB
 
     id = mapped_column(String(36), primary_key=True)
+    type = mapped_column(Text)
     job_json = mapped_column(JSONB, nullable=False)
 
 

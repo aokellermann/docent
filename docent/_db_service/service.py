@@ -1862,7 +1862,7 @@ class DBService:
     # Jobs #
     ########
 
-    async def add_job(self, job_json: dict[str, Any], job_id: str | None = None) -> str:
+    async def add_job(self, type: str, job_json: dict[str, Any], job_id: str | None = None) -> str:
         """
         Save a job specification to the database.
 
@@ -1875,7 +1875,7 @@ class DBService:
         """
         job_id = job_id or str(uuid4())
         async with self.session() as session:
-            session.add(SQLAJob(id=job_id, job_json=job_json))
+            session.add(SQLAJob(id=job_id, type=type, job_json=job_json))
             logger.info(f"Added job with ID: {job_id}")
         return job_id
 
@@ -1888,7 +1888,7 @@ class DBService:
             # Check if an equivalent job already exists
             result = await session.execute(
                 select(SQLAJob)
-                .filter(SQLAJob.job_json["type"].astext == "compute_search")
+                .filter(SQLAJob.type == "compute_search")
                 .filter(SQLAJob.job_json["query_id"].astext == query_id)
             )
             existing = result.scalar_one_or_none()
@@ -1897,14 +1897,12 @@ class DBService:
 
             # Otherwise, create a new job
             job_id = str(uuid4())
-            session.add(
-                SQLAJob(id=job_id, job_json={"type": "compute_search", "query_id": query_id})
-            )
+            session.add(SQLAJob(id=job_id, type="compute_search", job_json={"query_id": query_id}))
             logger.info(f"Added job with ID: {job_id}")
 
             return True, job_id
 
-    async def get_job(self, job_id: str) -> dict[str, Any] | None:
+    async def get_job(self, job_id: str) -> SQLAJob | None:
         """
         Retrieve a job specification from the database.
 
@@ -1916,14 +1914,13 @@ class DBService:
         """
         async with self.session() as session:
             result = await session.execute(select(SQLAJob).where(SQLAJob.id == job_id))
-            job = result.scalar_one_or_none()
-            return job.job_json if job else None
+            return result.scalar_one_or_none()
 
     async def list_search_jobs_and_queries(self):
         async with self.session() as session:
             result = await session.execute(
                 select(SQLAJob, SQLASearchQuery)
-                .filter(SQLAJob.job_json["type"].astext == "compute_search")
+                .filter(SQLAJob.type == "compute_search")
                 .filter(SQLAJob.job_json["query_id"].astext == SQLASearchQuery.id)
             )
 
@@ -1934,7 +1931,7 @@ class DBService:
             result = await session.execute(
                 select(SQLAJob, SQLASearchQuery)
                 .filter(SQLAJob.id == job_id)
-                .filter(SQLAJob.job_json["type"].astext == "compute_search")
+                .filter(SQLAJob.type == "compute_search")
                 .filter(SQLAJob.job_json["query_id"].astext == SQLASearchQuery.id)
             )
 
