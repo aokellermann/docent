@@ -39,7 +39,9 @@ jobs:
           pip install modal
           
       - name: Deploy to Modal
-        run: modal deploy docent/_server/modal_app.py
+        run: |
+          modal token set --token-id ${{ secrets.PROD_MODAL_TOKEN_ID }} --token-secret ${{ secrets.PROD_MODAL_TOKEN_SECRET }}
+          modal deploy docent/_server/modal_app.py
         env:
           MODAL_TOKEN_ID: ${{ secrets.PROD_MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.PROD_MODAL_TOKEN_SECRET }}
