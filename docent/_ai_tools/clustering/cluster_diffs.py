@@ -111,13 +111,11 @@ Here is your input:
 C: {cluster}
 B: {item}
 """.strip()
-    stripped_item = item.removeprefix("<claim>").split("</claim>")[0].strip()
-    return ASSIGNMENT_PROMPT.format(cluster=cluster, item=stripped_item)
+    return ASSIGNMENT_PROMPT.format(cluster=cluster, item=item)
 
 
-async def search_over_diffs(search_query: str, attributes: list[str]) -> list[tuple[bool, bool]]:
+async def search_over_diffs(search_query: str, claims: list[str]) -> list[tuple[bool, bool]]:
     assigner = LlmApiClusterAssigner.from_sonnet_37_thinking(assign_prompt_fn)
-    # TODO(vincent): semaphore, each fn should compare both directions
     semaphore = asyncio.Semaphore(50)
     reverse_query = (
         search_query.replace("Agent 1", "Agent 3")
@@ -125,19 +123,19 @@ async def search_over_diffs(search_query: str, attributes: list[str]) -> list[tu
         .replace("Agent 3", "Agent 2")
     )
 
-    async def search_fn(attribute: str) -> tuple[bool, bool]:
-        results = await assigner.assign(
-            [attribute, attribute],
-            [search_query, reverse_query],
-        )
+    async def search_fn(claim: str) -> tuple[bool, bool]:
+        async with semaphore:
+            results = await assigner.assign(
+                [claim, claim],
+                [search_query, reverse_query],
+            )
         return (
             results[0] is not None and results[0][0],
             results[1] is not None and results[1][0],
         )
 
     tasks: list[Coroutine[Any, Any, tuple[bool, bool]]] = []
-    for attribute in attributes:
-        async with semaphore:
-            tasks.append(search_fn(attribute))
+    for claim in claims:
+        tasks.append(search_fn(claim))
     results = await asyncio.gather(*tasks)
     return results

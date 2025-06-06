@@ -1639,7 +1639,9 @@ class DBService:
             and expid_by_datapoint.get(d.data_id_2) == experiment_id_2
         ]
 
-        results = await search_over_diffs(search_query, [d.attribute for d in valid_existing_diffs])
+        results = await search_over_diffs(
+            search_query, [d.claim or "" for d in valid_existing_diffs]
+        )
 
         # TODO(vincent): stream the results
         return results
