@@ -126,7 +126,8 @@ export default function ExperimentViewer({
   // Filter to IDs to ones that have the attribute query
   const idMarginals = useMemo(() => {
     if (!rawIdMarginals) return rawIdMarginals;
-    if (!curSearchQuery && !diffMap) return rawIdMarginals;
+    if (!curSearchQuery && !Object.entries(diffMap).length)
+      return rawIdMarginals;
 
     // Filter the keys and their datapoints based on attribute query or diff results
     const filtered = Object.entries(rawIdMarginals).reduce(

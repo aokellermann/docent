@@ -32,14 +32,19 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.sql import ColumnElement
 
+from docent._ai_tools.clustering.cluster_diffs import cluster_diffs, search_over_diffs
 from docent._ai_tools.clustering.cluster_generator import propose_clusters
 from docent._ai_tools.diff import extract_states_and_diffs
+from docent._ai_tools.diffs.llm_diff_summaries import compute_transcript_diff
+from docent._ai_tools.diffs.models import TranscriptDiff
+
 from docent._ai_tools.search import SearchResult, SearchResultStreamingCallback, execute_search
 from docent._db_service.contexts import ViewContext
+from docent._db_service.schemas.auth_models import Permission, ResourceType, SubjectType, User
 from docent._db_service.schemas.base import SQLABase
 from docent._db_service.schemas.tables import (
+    SQLAAccessControlEntry,
     SQLAAgentRun,
     SQLADiffAttribute,
     SQLAFilter,
@@ -52,6 +57,7 @@ from docent._db_service.schemas.tables import (
     SQLASession,
     SQLATranscript,
     SQLAUser,
+    SQLAUserOrganization,
     SQLAView,
 )
 from docent._env_util import ENV
@@ -66,7 +72,6 @@ from docent.data_models.filters import (
     SearchResultPredicateFilter,
 )
 from docent.data_models.transcript import Transcript
-from docent.data_models.user import User
 
 logger = get_logger(__name__)
 
@@ -311,11 +316,22 @@ class DBService:
         name: str | None = None,
         description: str | None = None,
     ):
+        # Create FG
         fg_id = fg_id or str(uuid4())
         async with self.session() as session:
             session.add(
                 SQLAFrameGrid(id=fg_id, name=name, description=description, created_by=user.id)
             )
+
+        # Create ACL entry for the user
+        await self.set_acl_permission(
+            SubjectType.USER,
+            subject_id=user.id,
+            resource_type=ResourceType.FRAME_GRID,
+            resource_id=fg_id,
+            permission=Permission.ADMIN,
+        )
+
         logger.info(f"Created FrameGrid with ID: {fg_id}")
         return fg_id
 
@@ -409,13 +425,13 @@ class DBService:
     # Agent Runs #
     ##############
 
-    async def add_agent_runs(self, ctx: ViewContext, agent_runs: list[AgentRun]):
+    async def add_agent_runs(self, fg_id: str, agent_runs: list[AgentRun]):
         async with self.session() as session:
             # Add agent runs
-            session.add_all([SQLAAgentRun.from_agent_run(ar, ctx.fg_id) for ar in agent_runs])
+            session.add_all([SQLAAgentRun.from_agent_run(ar, fg_id) for ar in agent_runs])
             # Add associated transcripts
             sqla_transcripts = [
-                SQLATranscript.from_transcript(t, dk, ctx.fg_id, ar.id)
+                SQLATranscript.from_transcript(t, dk, fg_id, ar.id)
                 for ar in agent_runs
                 for dk, t in ar.transcripts.items()
             ]
@@ -425,18 +441,19 @@ class DBService:
         # Get all MECE metadata dimensions associated with this FG, regardless of view
         async with self.session() as session:
             result = await session.execute(
-                select(SQLAFrameDimension.id).where(
-                    SQLAFrameDimension.fg_id == ctx.fg_id,
+                select(SQLAFrameDimension.id, SQLAFrameDimension.view_id).where(
+                    SQLAFrameDimension.fg_id == fg_id,
                     SQLAFrameDimension.metadata_key.isnot(None),
                     SQLAFrameDimension.maintain_mece,
                 )
             )
-            mece_dim_ids = result.scalars().all()
+            mece_dim_ids_and_view_ids = result.all()
 
         # Re-cluster all MECE metadata dimensions
         async with anyio.create_task_group() as tg:
-            for dim_id in mece_dim_ids:
-                tg.start_soon(self.cluster_metadata_dim, ctx, dim_id)
+            for dim_id, view_id in mece_dim_ids_and_view_ids:
+                cur_ctx = await self.get_view_ctx(view_id)
+                tg.start_soon(self.cluster_metadata_dim, cur_ctx, dim_id)
 
     async def get_agent_runs(
         self,
@@ -522,6 +539,32 @@ class DBService:
     # Views #
     #########
 
+    async def get_all_view_ctxs(self, fg_id: str) -> list[ViewContext]:
+        async with self.session() as session:
+            result = await session.execute(select(SQLAView.id).where(SQLAView.fg_id == fg_id))
+            view_ids = result.scalars().all()
+            return [await self.get_view_ctx(view_id) for view_id in view_ids]
+
+    async def get_view_ctx(self, view_id: str) -> ViewContext:
+        async with self.session() as session:
+            # Get the view
+            result = await session.execute(select(SQLAView).where(SQLAView.id == view_id))
+            view = result.scalar_one_or_none()
+            if view is None:
+                raise ValueError(f"View with ID {view_id} not found")
+
+            # Get the base filter for this view
+            base_filter = (
+                await self.get_filter(view.base_filter_id)
+                if view.base_filter_id is not None
+                else None
+            )
+            # Check that the base filter is a ComplexFilter
+            if base_filter is not None:
+                assert isinstance(base_filter, ComplexFilter), "Base filter must be a ComplexFilter"
+
+            return ViewContext(fg_id=view.fg_id, view_id=view.id, base_filter=base_filter)
+
     async def get_default_view_ctx(self, fg_id: str) -> ViewContext:
         # Check if a default view exists for this fg
         async with self.session() as session:
@@ -530,7 +573,7 @@ class DBService:
             )
             view = result.scalar_one_or_none()
 
-        # If not, create a new view
+        # If not, create a new view whose admin is the user who created the FG
         if view is None:
             async with self.session() as session:
                 view = SQLAView(
@@ -539,6 +582,22 @@ class DBService:
                     is_default=True,
                 )
                 session.add(view)
+
+            # Who created the FG?
+            async with self.session() as session:
+                result = await session.execute(
+                    select(SQLAFrameGrid.created_by).where(SQLAFrameGrid.id == fg_id)
+                )
+                user_id = result.scalar_one()
+
+            # Create ACL entry for the user
+            await self.set_acl_permission(
+                SubjectType.USER,
+                subject_id=user_id,
+                resource_type=ResourceType.VIEW,
+                resource_id=view.id,
+                permission=Permission.ADMIN,
+            )
 
         # Get the base filter for this view
         base_filter = (
@@ -950,7 +1009,7 @@ class DBService:
         logger.info(f"Added new search query {search_query} with id {new_id} to fg_id {ctx.fg_id}")
         return new_id
 
-    async def delete_search_query(self, ctx: ViewContext, search_query_id: str):
+    async def delete_search_query(self, fg_id: str, search_query_id: str):
         """
         Delete a search query from the database.
 
@@ -969,7 +1028,7 @@ class DBService:
         # Get all search queries
         async with self.session() as session:
             result = await session.execute(
-                select(SQLASearchQuery.search_query).where(SQLASearchQuery.fg_id == ctx.fg_id)
+                select(SQLASearchQuery.search_query).where(SQLASearchQuery.fg_id == fg_id)
             )
             search_queries = list(set(result.scalars().all()))
 
@@ -977,7 +1036,7 @@ class DBService:
         async with self.session() as session:
             result = await session.execute(
                 select(SQLAFrameDimension.id).where(
-                    SQLAFrameDimension.fg_id == ctx.fg_id,
+                    SQLAFrameDimension.fg_id == fg_id,
                     SQLAFrameDimension.search_query.isnot(None),
                     ~SQLAFrameDimension.search_query.in_(search_queries),
                 )
@@ -1055,7 +1114,7 @@ class DBService:
     ) -> list[SearchResult]:
         # Ensure we have fresh search results
         if ensure_fresh:
-            await self._compute_search(
+            await self.compute_search(
                 ctx,
                 search_query,
                 search_result_callback=search_result_callback,
@@ -1078,8 +1137,13 @@ class DBService:
         experiment_id_1: str,
         experiment_id_2: str,
         diff_callback: (
-            Callable[[str, str, list[str], list[str]], Coroutine[Any, Any, None]] | None
+            Callable[
+                [str, str, list[str], list[str], TranscriptDiff | None], Coroutine[Any, Any, None]
+            ]
+            | None
         ) = None,
+        should_include_existing_diffs: bool = True,
+        should_persist: bool = False,
     ):
         # TODO(vincent): intersect with a filter, maybe allow user to pass in attribute as well
         # get pairs of datapoints from fg_id where (sample_id, task_id, epoch_id) match
@@ -1103,42 +1167,48 @@ class DBService:
                 datapoints_by_sample_task_epoch[key] = []
             datapoints_by_sample_task_epoch[key].append(dp)
 
-        # Get existing diff results from database
-        async with self.session() as session:
-            result = await session.execute(
-                select(SQLADiffAttribute).where(
-                    SQLADiffAttribute.frame_grid_id == ctx.fg_id,
+        existing_diff_pairs = {}
+        if should_include_existing_diffs:
+            # Get existing diff results from database
+            async with self.session() as session:
+                result = await session.execute(
+                    select(SQLADiffAttribute).where(
+                        SQLADiffAttribute.frame_grid_id == ctx.fg_id,
+                    )
                 )
-            )
-            existing_diffs = result.scalars().all()
-            existing_diff_pairs = {
-                (diff.data_id_1, diff.data_id_2): diff for diff in existing_diffs
-            }
+                existing_diffs = result.scalars().all()
+                existing_diff_pairs = {
+                    (diff.data_id_1, diff.data_id_2): diff for diff in existing_diffs
+                }
+                # TODO(vincent): we didn't actually check for exp_ids...
 
-        print(f"have {len(existing_diff_pairs)} existing diffs")
-        for k in existing_diff_pairs:
-            print(existing_diff_pairs[k].claim)
+            print(f"have {len(existing_diff_pairs)} existing diffs")
 
-        # First stream existing diffs
-        if diff_callback is not None:
-            for (data_id_1, data_id_2), _ in existing_diff_pairs.items():
-                # Group diffs by data_id pairs
+            # Stream existing diffs - group by data_id pairs directly
+            if diff_callback is not None:
+                # Group diffs by data_id pairs in a single pass
                 diffs_by_pair: dict[tuple[str, str], tuple[list[str], list[str]]] = {}
-                for d in existing_diffs:
-                    if d.data_id_1 == data_id_1 and d.data_id_2 == data_id_2:
-                        pair = (d.data_id_1, d.data_id_2)
+                for diff in existing_diffs:
+                    if diff.claim:  # Only process diffs with claims
+                        pair = (diff.data_id_1, diff.data_id_2)
                         if pair not in diffs_by_pair:
                             diffs_by_pair[pair] = ([], [])
-                        if d.claim:
-                            diffs_by_pair[pair][0].append(d.claim)
-                            diffs_by_pair[pair][1].append(d.evidence)
+                        diffs_by_pair[pair][0].append(diff.claim)
+                        diffs_by_pair[pair][1].append(diff.evidence)
 
                 # Stream each pair's diffs
-                for (d1, d2), (claims, evidences) in diffs_by_pair.items():
-                    await diff_callback(d1, d2, claims, evidences)
+                for (data_id_1, data_id_2), (claims, evidences) in diffs_by_pair.items():
+                    await diff_callback(data_id_1, data_id_2, claims, evidences, None)
 
-        tasks: list[Coroutine[Any, Any, list[tuple[str, str]]]] = []
+        tasks: list[Coroutine[Any, Any, tuple[list[tuple[str, str]], TranscriptDiff]]] = []
         pairs_to_compute: list[tuple[str, str]] = []
+
+        async def _compute_old_and_new_diffs(
+            tx_a: AgentRun, tx_b: AgentRun
+        ) -> tuple[list[tuple[str, str]], TranscriptDiff]:
+            old = await extract_states_and_diffs(tx_a, tx_b)
+            transcript_diff = await compute_transcript_diff(tx_a, tx_b)
+            return old, transcript_diff
 
         for datapoint_lists in datapoints_by_sample_task_epoch.values():
             first_pair_candidates = [
@@ -1154,12 +1224,7 @@ class DBService:
 
                 # Check if we already have results for this pair
                 if (first_dp.id, second_dp.id) not in existing_diff_pairs:
-                    tasks.append(
-                        extract_states_and_diffs(
-                            first_dp,
-                            second_dp,
-                        )
-                    )
+                    tasks.append(_compute_old_and_new_diffs(first_dp, second_dp))
                     pairs_to_compute.append((first_dp.id, second_dp.id))
 
         logger.info(f"Computing diffs for {len(tasks)} new pairs")
@@ -1167,9 +1232,12 @@ class DBService:
         # Compute diffs for pairs that don't have results yet
         results = await asyncio.gather(*tasks)
 
-        # Store results in database
+        # Store results in database if should_persist is True
         to_upload: list[SQLADiffAttribute] = []
-        for (data_id_1, data_id_2), diff_results in zip(pairs_to_compute, results):
+        for (data_id_1, data_id_2), (diff_results, transcript_diff) in zip(
+            pairs_to_compute, results
+        ):
+
             if len(diff_results) == 0:
                 to_upload.append(
                     SQLADiffAttribute.from_diff_attribute(
@@ -1182,8 +1250,6 @@ class DBService:
                         fg_id=ctx.fg_id,
                     )
                 )
-                if diff_callback is not None:
-                    await diff_callback(data_id_1, data_id_2, [], [])
                 continue
             diffs: list[str] = []
             evidences: list[str] = []
@@ -1201,28 +1267,17 @@ class DBService:
                 )
                 diffs.append(claim)
                 evidences.append(evidence)
-            if diff_callback is not None:
-                await diff_callback(data_id_1, data_id_2, diffs, evidences)
 
-        if to_upload:
+            if diff_callback is not None:
+                await diff_callback(data_id_1, data_id_2, diffs, evidences, transcript_diff)
+
+        if to_upload and should_persist:
             async with self.session() as session:
                 session.add_all(to_upload)
                 logger.info(f"Pushed {len(to_upload)} diff attributes")
         return to_upload
 
     async def compute_search(
-        self,
-        ctx: ViewContext,
-        search_query: str,
-        search_result_callback: SearchResultStreamingCallback | None = None,
-    ):
-        await self._compute_search(
-            ctx,
-            search_query,
-            search_result_callback=search_result_callback,
-        )
-
-    async def _compute_search(
         self,
         ctx: ViewContext,
         search_query: str,
@@ -1244,21 +1299,9 @@ class DBService:
         else:
             logger.info(f"Computing results for {len(agent_runs)} datapoints")
 
-        new_search_results: list[SearchResult] = []
-
-        async def _save_and_callback(search_results: list[SearchResult]):
-            """When each search result comes back, both call the callback and also save to
-            a running list of search results that will be uploaded to the database.
-            """
-            nonlocal new_search_results
-
-            new_search_results.extend(search_results)
+        async def _results_callback(search_results: list[SearchResult]):
             if search_result_callback:
                 await search_result_callback(search_results)
-
-        async def _upload():
-            """Upload the search results we have to the database."""
-            nonlocal new_search_results
 
             with anyio.CancelScope(shield=True):
                 to_upload: list[SQLASearchResult] = [
@@ -1266,7 +1309,7 @@ class DBService:
                         search_result=attr,
                         fg_id=ctx.fg_id,
                     )
-                    for attr in new_search_results
+                    for attr in search_results
                 ]
                 async with self.session() as session:
                     session.add_all(to_upload)
@@ -1274,14 +1317,9 @@ class DBService:
                 logger.info(f"Pushed {len(to_upload)} attributes")
 
         try:
-            await execute_search(
-                agent_runs, search_query, search_result_callback=_save_and_callback
-            )
+            await execute_search(agent_runs, search_query, search_result_callback=_results_callback)
         except anyio.get_cancelled_exc_class():
             logger.info("Attribute computation cancelled")
-        finally:
-            # Upload what we have, even given cancellation
-            await _upload()
 
     async def _get_agent_runs_without_judgments(
         self, ctx: ViewContext, filter_id: str
@@ -1437,7 +1475,6 @@ class DBService:
             if dim.metadata_key is not None:
                 await self.cluster_metadata_dim(ctx, dim.id)
 
-    @time_this
     async def cluster_metadata_dim(self, ctx: ViewContext, dim_id: str):
         # Get rid of existing filters on this dim
         filters = await self._get_dim_filters(dim_id)
@@ -1545,6 +1582,74 @@ class DBService:
         async with self.session() as session:
             session.add_all(sqla_filters)
             logger.info(f"Pushed {len(sqla_filters)} filters")
+
+    #########################
+    # Clustering diffs
+    #########################
+
+    async def compute_diff_clusters(
+        self,
+        ctx: ViewContext,
+        experiment_id_1: str,
+        experiment_id_2: str,
+    ):
+        datapoints = await self.get_agent_runs(ctx)
+        expid_by_datapoint = {d.id: d.metadata.get("experiment_id") for d in datapoints}
+        async with self.session() as session:
+            result = await session.execute(
+                select(SQLADiffAttribute)
+                .where(
+                    SQLADiffAttribute.frame_grid_id == ctx.fg_id,
+                )
+                .order_by(SQLADiffAttribute.id)
+            )
+            existing_diffs = result.scalars().all()
+        valid_existing_diffs = [
+            d.to_diff_attribute()
+            for d in existing_diffs
+            if expid_by_datapoint.get(d.data_id_1) == experiment_id_1
+            and expid_by_datapoint.get(d.data_id_2) == experiment_id_2
+        ]
+        print(f"have {len(valid_existing_diffs)} valid existing diffs")
+        clusters = await cluster_diffs(valid_existing_diffs)
+        return clusters
+
+    async def compute_diff_search(
+        self,
+        ctx: ViewContext,
+        experiment_id_1: str,
+        experiment_id_2: str,
+        search_query: str,
+        search_result_callback: (
+            Callable[[tuple[str, int]], Coroutine[Any, Any, None]] | None
+        ) = None,
+    ) -> list[tuple[str, int]]:
+        datapoints = await self.get_agent_runs(ctx)
+        expid_by_datapoint = {d.id: d.metadata.get("experiment_id") for d in datapoints}
+        async with self.session() as session:
+            result = await session.execute(
+                select(SQLADiffAttribute)
+                .where(
+                    SQLADiffAttribute.frame_grid_id == ctx.fg_id,
+                )
+                .order_by(SQLADiffAttribute.id)
+            )
+            existing_diffs = result.scalars().all()
+        valid_existing_diffs = [
+            d.to_diff_attribute()
+            for d in existing_diffs
+            if expid_by_datapoint.get(d.data_id_1) == experiment_id_1
+            and expid_by_datapoint.get(d.data_id_2) == experiment_id_2
+        ]
+
+        results = await search_over_diffs(
+            search_query,
+            [d.claim or "" for d in valid_existing_diffs],
+            search_result_callback=search_result_callback,
+        )
+
+        # TODO(vincent): stream the results
+        return results
 
     ###################
     # Marginalization #
@@ -1784,6 +1889,26 @@ class DBService:
     # Users #
     #########
 
+    async def get_users(self) -> list[User]:
+        async with self.session() as session:
+            # Get all users
+            users_result = await session.execute(select(SQLAUser))
+            sqla_users = users_result.scalars().all()
+
+            # Get all user-organization relationships
+            user_orgs_result = await session.execute(select(SQLAUserOrganization))
+            user_orgs = user_orgs_result.scalars().all()
+
+            # Group organizations by user_id
+            user_org_map: dict[str, list[str]] = {}
+            for user_org in user_orgs:
+                user_org_map.setdefault(user_org.user_id, []).append(user_org.organization_id)
+
+            # Convert to User objects with organization_ids
+            return [
+                user.to_user(organization_ids=user_org_map.get(user.id, [])) for user in sqla_users
+            ]
+
     async def create_user(self, email: str) -> User:
         """
         Create a new user. Raises an error if a user with the given email already exists.
@@ -1800,14 +1925,14 @@ class DBService:
             raise ValueError("User already exists for {email}")
 
         user_id = str(uuid4())
-        sqa_user = SQLAUser(id=user_id, email=email)
+        sqla_user = SQLAUser(id=user_id, email=email)
 
         async with self.session() as session:
-            session.add(sqa_user)
+            session.add(sqla_user)
             await session.flush()  # Not strictly needed for uuid, but good for autoincrement fields
 
-        logger.info(f"Created new user with ID: {sqa_user.id} and email: {sqa_user.email}")
-        return User(id=sqa_user.id, email=sqa_user.email, created_at=sqa_user.created_at)
+        logger.info(f"Created new user with ID: {sqla_user.id} and email: {sqla_user.email}")
+        return sqla_user.to_user(organization_ids=[])
 
     async def get_user_by_email(self, email: str) -> User | None:
         """
@@ -1820,11 +1945,21 @@ class DBService:
             The User object if found, None otherwise
         """
         async with self.session() as session:
+            # Get the user
             result = await session.execute(select(SQLAUser).where(SQLAUser.email == email))
             sqla_user = result.scalar_one_or_none()
-            if sqla_user:
-                return User(id=sqla_user.id, email=sqla_user.email, created_at=sqla_user.created_at)
-            return None
+            if not sqla_user:
+                return None
+
+            # Get the user's organization IDs
+            org_result = await session.execute(
+                select(SQLAUserOrganization.organization_id).where(
+                    SQLAUserOrganization.user_id == sqla_user.id
+                )
+            )
+            organization_ids = org_result.scalars().all()
+
+            return sqla_user.to_user(organization_ids=list(organization_ids))
 
     async def create_session(self, user_id: str, expires_in_days: int = 30) -> str:
         """
@@ -1875,9 +2010,18 @@ class DBService:
                 )
             )
             sqla_user = result.scalar_one_or_none()
-            if sqla_user:
-                return User(id=sqla_user.id, email=sqla_user.email, created_at=sqla_user.created_at)
-            return None
+            if not sqla_user:
+                return None
+
+            # Get the user's organization IDs
+            org_result = await session.execute(
+                select(SQLAUserOrganization.organization_id).where(
+                    SQLAUserOrganization.user_id == sqla_user.id
+                )
+            )
+            organization_ids = org_result.scalars().all()
+
+            return sqla_user.to_user(organization_ids=list(organization_ids))
 
     async def invalidate_session(self, session_id: str) -> bool:
         """
@@ -1894,6 +2038,193 @@ class DBService:
                 update(SQLASession).where(SQLASession.id == session_id).values(is_active=False)
             )
             return result.rowcount > 0
+
+    ###############
+    # Permissions #
+    ###############
+
+    async def has_permission(
+        self,
+        user: User,
+        resource_type: ResourceType,
+        resource_id: str,
+        permission: Permission,
+    ) -> bool:
+        async with self.session() as session:
+            return True
+            # Build the resource filter based on ResourceType
+            if resource_type == ResourceType.FRAME_GRID:
+                resource_filter = SQLAAccessControlEntry.fg_id == resource_id
+            elif resource_type == ResourceType.VIEW:
+                resource_filter = SQLAAccessControlEntry.view_id == resource_id
+            else:
+                raise ValueError(f"Unsupported resource type: {resource_type}")
+
+            # Check public permissions
+            public_permission_result = await session.execute(
+                select(SQLAAccessControlEntry.permission).where(
+                    SQLAAccessControlEntry.is_public == True,
+                    resource_filter,
+                )
+            )
+            public_permissions = public_permission_result.scalars().all()
+            for perm_str in public_permissions:
+                if Permission(perm_str).includes(permission):
+                    return True
+
+            # Check direct user permissions
+            direct_permission_result = await session.execute(
+                select(SQLAAccessControlEntry.permission).where(
+                    SQLAAccessControlEntry.user_id == user.id,
+                    resource_filter,
+                )
+            )
+            user_permissions = direct_permission_result.scalars().all()
+            for perm_str in user_permissions:
+                if Permission(perm_str).includes(permission):
+                    return True
+
+            # Check organization permissions for all user's organizations
+            if user.organization_ids:
+                org_permission_result = await session.execute(
+                    select(SQLAAccessControlEntry.permission).where(
+                        SQLAAccessControlEntry.organization_id.in_(user.organization_ids),
+                        resource_filter,
+                    )
+                )
+                org_permissions = org_permission_result.scalars().all()
+                for perm_str in org_permissions:
+                    if Permission(perm_str).includes(permission):
+                        return True
+
+            return False
+
+    async def set_acl_permission(
+        self,
+        subject_type: SubjectType,
+        subject_id: str,
+        resource_type: ResourceType,
+        resource_id: str,
+        permission: Permission,
+    ) -> None:
+        # Build the resource filter based on ResourceType
+        if resource_type == ResourceType.FRAME_GRID:
+            resource_filter = SQLAAccessControlEntry.fg_id == resource_id
+            resource_fields = {"fg_id": resource_id, "view_id": None}
+        elif resource_type == ResourceType.VIEW:
+            resource_filter = SQLAAccessControlEntry.view_id == resource_id
+            resource_fields = {"fg_id": None, "view_id": resource_id}
+        else:
+            raise ValueError(f"Unsupported resource type: {resource_type}")
+
+        # Build the subject filter and fields based on SubjectType
+        if subject_type == SubjectType.USER:
+            subject_filter = SQLAAccessControlEntry.user_id == subject_id
+            subject_fields = {
+                "user_id": subject_id,
+                "organization_id": None,
+                "is_public": False,
+            }
+        elif subject_type == SubjectType.ORGANIZATION:
+            subject_filter = SQLAAccessControlEntry.organization_id == subject_id
+            subject_fields = {
+                "user_id": None,
+                "organization_id": subject_id,
+                "is_public": False,
+            }
+        elif subject_type == SubjectType.PUBLIC:
+            subject_filter = SQLAAccessControlEntry.is_public
+            subject_fields = {"user_id": None, "organization_id": None, "is_public": True}
+        else:
+            raise ValueError(f"Unsupported subject type: {subject_type}")
+
+        # Check if any permission already exists for this subject/resource combination
+        async with self.session() as session:
+            existing = await session.execute(
+                select(SQLAAccessControlEntry).where(
+                    subject_filter,
+                    resource_filter,
+                )
+            )
+            existing_entry = existing.scalar_one_or_none()
+
+        # Permission doesn't exist, create it
+        if existing_entry is None:
+            acl_entry = SQLAAccessControlEntry(
+                id=str(uuid4()),
+                permission=permission.value,
+                **subject_fields,
+                **resource_fields,
+            )
+
+            async with self.session() as session:
+                session.add(acl_entry)
+
+            logger.info(
+                f"Granted {permission.value} permission on {resource_type.value}:{resource_id} "
+                f"to {subject_type.value}:{subject_id}"
+            )
+
+        # Permission exists, update it
+        else:
+            async with self.session() as session:
+                await session.execute(
+                    update(SQLAAccessControlEntry)
+                    .where(SQLAAccessControlEntry.id == existing_entry.id)
+                    .values(
+                        **subject_fields,
+                        **resource_fields,
+                        permission=permission.value,
+                    )
+                )
+
+            logger.info(
+                f"Updated permission on {resource_type.value}:{resource_id} "
+                f"for {subject_type.value}:{subject_id} from {existing_entry.permission} to {permission.value}"
+            )
+
+    async def clear_acl_permission(
+        self,
+        subject_type: SubjectType,
+        subject_id: str,
+        resource_type: ResourceType,
+        resource_id: str,
+    ) -> int:
+        async with self.session() as session:
+            # Build the delete query with the provided filters
+            query = delete(SQLAAccessControlEntry)
+
+            # Handle subject filtering based on SubjectType
+            if subject_type == SubjectType.USER:
+                query = query.where(SQLAAccessControlEntry.user_id == subject_id)
+            elif subject_type == SubjectType.ORGANIZATION:
+                query = query.where(SQLAAccessControlEntry.organization_id == subject_id)
+            elif subject_type == SubjectType.PUBLIC:
+                query = query.where(SQLAAccessControlEntry.is_public)
+            else:
+                raise ValueError(f"Unsupported subject type: {subject_type}")
+
+            # Handle resource filtering based on ResourceType
+            if resource_type == ResourceType.FRAME_GRID:
+                query = query.where(SQLAAccessControlEntry.fg_id == resource_id)
+            elif resource_type == ResourceType.VIEW:
+                query = query.where(SQLAAccessControlEntry.view_id == resource_id)
+            else:
+                raise ValueError(f"Unsupported resource type: {resource_type}")
+
+            result = await session.execute(query)
+            count = result.rowcount or 0
+
+            if count > 0:
+                logger.info(
+                    f"Cleared {count} ACL permissions with filters: "
+                    f"subject_type={subject_type}, subject_id={subject_id}, "
+                    f"resource_type={resource_type}, resource_id={resource_id}"
+                )
+            else:
+                logger.info("No ACL permissions matched the provided filters")
+
+            return count
 
     ###########
     # Locking #

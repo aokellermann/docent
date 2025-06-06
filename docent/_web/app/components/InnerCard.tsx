@@ -16,6 +16,7 @@ import { getAgentRunMetadata } from '../store/frameSlice';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { RootState } from '../store/store';
 import { SearchResultWithCitations } from '../types/frameTypes';
+import { AgentRunMetadata } from './AgentRunMetadata';
 
 // Helper function to handle transcript navigation with special clicks
 const handleTranscriptNavigation = (
@@ -427,45 +428,6 @@ const DiffSection: React.FC<DiffSectionProps> = ({
     </div>
   );
 };
-const formatMetadataValue = (value: any): string => {
-  if (typeof value === 'object' && value !== null) {
-    return JSON.stringify(value, null, 2);
-  }
-  return String(value);
-};
-
-function MetadataDisplay({
-  metadata,
-  isLoading,
-}: {
-  metadata: Record<string, any>;
-  isLoading?: boolean;
-}) {
-  if (isLoading) {
-    return (
-      <span className="whitespace-nowrap flex items-center">
-        <Loader2 className="h-3 w-3 animate-spin text-blue-500 mr-1" />
-        <span className="text-blue-500 font-medium">
-          Running experiment (click to view progress)...
-        </span>
-      </span>
-    );
-  }
-
-  const entries = Object.entries(metadata);
-
-  return (
-    <div className="pt-1 border-t border-gray-100 flex items-center gap-1.5 group text-[10px] text-gray-500 flex-1 truncate">
-      {entries.map(([key, value], index) => (
-        <span key={key}>
-          <span className="font-medium">{key}: </span>
-          {formatMetadataValue(value) || 'N/A'}
-          {index < entries.length - 1 ? ' • ' : ''}
-        </span>
-      ))}
-    </div>
-  );
-}
 
 const InnerCard: React.FC<InnerCard> = ({
   innerId,
@@ -536,19 +498,10 @@ const InnerCard: React.FC<InnerCard> = ({
 
   const formatAccuracy = (value: number) => `${value.toFixed(2)}`;
 
-  const formatDiff = (diff: number) =>
-    diff > 0 ? `+${formatAccuracy(diff)}` : formatAccuracy(diff);
-
   const getColorForAccuracy = (accuracy: number) => {
     if (accuracy >= 0.8) return 'bg-green-100 text-green-800';
     if (accuracy > 0.0) return 'bg-yellow-100 text-yellow-800';
     return 'bg-red-100 text-red-800';
-  };
-
-  const getColorForDiff = (diff: number) => {
-    if (diff > 0.05) return 'text-green-600';
-    if (diff < -0.05) return 'text-red-600';
-    return 'text-gray-500';
   };
 
   useEffect(() => {
@@ -712,7 +665,7 @@ const InnerCard: React.FC<InnerCard> = ({
               const initialDiffResults = getDiffResults(agentRunId);
 
               if (curSearchQuery && attributes === null) return null;
-              if (diffMap && !initialDiffResults) return null;
+              // if (diffMap && !initialDiffResults) return null;
 
               const diffResults = initialDiffResults
                 ? initialDiffResults[1]
@@ -794,29 +747,7 @@ const InnerCard: React.FC<InnerCard> = ({
                     )} */}
                     {/* Display metadata if available */}
                     {agentRunMetadata && agentRunMetadata[agentRunId] && (
-                      <MetadataDisplay
-                        metadata={agentRunMetadata[agentRunId]}
-                      />
-                      // <div className="pt-1 border-t border-gray-100 text-[10px] text-gray-500 flex flex-wrap gap-x-3 gap-y-0.5">
-                      //   {agentRunMetadata[agentRunId].is_loading_messages ? (
-                      //     <span className="whitespace-nowrap flex items-center">
-                      //       <Loader2 className="h-3 w-3 animate-spin text-blue-500 mr-1" />
-                      //       <span className="text-blue-500 font-medium">
-                      //         Running experiment (click to view progress)...
-                      //       </span>
-                      //     </span>
-                      //   ) : (
-                      //     <>
-                      //       {Object.entries(agentRunMetadata[agentRunId]).map(
-                      //         ([key, value]) => (
-                      //           <span key={key}>
-                      //             {key}: {formatMetadataValue(value) || 'N/A'}
-                      //           </span>
-                      //         )
-                      //       )}
-                      //     </>
-                      //   )}
-                      // </div>
+                      <AgentRunMetadata agentRunId={agentRunId} />
                     )}
                   </div>
 

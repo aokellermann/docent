@@ -1,8 +1,10 @@
+from typing import cast
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
 from tqdm.asyncio import tqdm
 
+from docent._ai_tools.diffs.models import MessageState
 from docent._llm_util.data_models.llm_output import LLMOutput
 from docent._llm_util.prod_llms import get_llm_completions_async
 from docent._llm_util.providers.preferences import PROVIDER_PREFERENCES
@@ -96,23 +98,16 @@ Relevant past actions: [summary of past actions that are relevant to the current
     return text
 
 
-class MessageState:
-    def __init__(self, message_idx: int, action: str, goal: str, past_actions: str):
-        self.message_idx = message_idx
-        self.action = action
-        self.goal = goal
-        self.past_actions = past_actions
-
-    def __str__(self):
-        return f"[B{self.message_idx}]\nAction: {self.action}\nGoal: {self.goal}\nRelevant past actions: {self.past_actions}"
-
-
 def parse_output(output: str) -> list[MessageState]:
     result: list[MessageState] = []
     idx, action, goal, past_actions = -1, "", "", ""
     for line in output.split("\n"):
         if line.startswith("[B"):
-            idx = int(line.removeprefix("[B").removesuffix("]"))
+            try:
+                # TODO(sherwin): this is a hack in case the idx doesn't parse correctly
+                idx = int(line.removeprefix("[B").removesuffix("]"))
+            except ValueError:
+                idx = 0
             action, goal, past_actions = "", "", ""
         elif line.startswith("Action:"):
             action = line.removeprefix("Action:").strip()
@@ -268,7 +263,7 @@ async def extract_states_and_diffs(
 ) -> list[tuple[str, str]]:
 
     tasks = [extract_states(t) for t in [transcript_1, transcript_2]]
-    results: list[str] = await tqdm.gather(*tasks)
+    results = cast(list[str], await tqdm.gather(*tasks))  # type: ignore
     first_states = results[0]
     second_states = results[1]
 

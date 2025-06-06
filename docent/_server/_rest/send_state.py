@@ -139,8 +139,9 @@ async def publish_io_dims(db: DBService, ctx: ViewContext):
 
 
 async def publish_searches(db: DBService, ctx: ViewContext):
-    await publish_framegrid_update(
+    await publish_view_update(
         ctx.fg_id,
+        ctx.view_id,
         {
             "action": "searches",
             "payload": await db.get_searches_with_result_counts(ctx),

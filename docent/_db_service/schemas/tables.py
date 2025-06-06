@@ -3,7 +3,16 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from pydantic_core import to_jsonable_python
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import mapped_column
 from sqlalchemy.schema import UniqueConstraint
@@ -11,6 +20,7 @@ from sqlalchemy.schema import UniqueConstraint
 from docent._ai_tools.diff import DiffAttribute
 from docent._ai_tools.search import SearchResult
 from docent._db_service.contexts import ViewContext
+from docent._db_service.schemas.auth_models import Permission, User
 from docent._db_service.schemas.base import SQLABase
 from docent.data_models.agent_run import AgentRun
 from docent.data_models.filters import FrameDimension, FrameFilter, Judgment, parse_filter_dict
@@ -25,10 +35,16 @@ TABLE_FILTER = "filters"
 TABLE_JUDGMENT = "judgments"
 TABLE_JOB = "jobs"
 TABLE_DIFF_ATTRIBUTE = "diff_attributes"
+TABLE_DIFF_CLUSTER = "diff_clusters"
 TABLE_TRANSCRIPT = "transcripts"
 TABLE_USER = "users"
 TABLE_SESSION = "sessions"
 TABLE_VIEW = "views"
+TABLE_ROLE = "roles"
+TABLE_USER_ROLE = "user_roles"
+TABLE_ACCESS_CONTROL_ENTRY = "access_control_entries"
+TABLE_ORGANIZATION = "organizations"
+TABLE_USER_ORGANIZATION = "user_organizations"
 
 
 def _sanitize_pg_text(text: str) -> str:
@@ -144,10 +160,6 @@ class SQLAFrameGrid(SQLABase):
     id = mapped_column(String(36), primary_key=True)
     name = mapped_column(Text)
     description = mapped_column(Text)
-
-    # base_filter_id = mapped_column(String(36), ForeignKey(f"{TABLE_FILTER}.id"), index=True)
-    # outer_dim_id = mapped_column(String(36), ForeignKey(f"{TABLE_FRAME_DIMENSION}.id"))
-    # inner_dim_id = mapped_column(String(36), ForeignKey(f"{TABLE_FRAME_DIMENSION}.id"))
 
     # User who created this frame grid
     created_by = mapped_column(
@@ -284,9 +296,6 @@ class SQLAJudgment(SQLABase):
         String(36), ForeignKey(f"{TABLE_FRAME_GRID}.id"), nullable=False, index=True
     )
 
-    # Key that must remain unique
-    uniqueness_key = mapped_column(Text, nullable=False, unique=True)
-
     # Metadata on the location of the judgment
     filter_id = mapped_column(
         String(36), ForeignKey(f"{TABLE_FILTER}.id"), nullable=False, index=True
@@ -304,14 +313,23 @@ class SQLAJudgment(SQLABase):
     matches = mapped_column(Boolean, nullable=False, index=True)
     reason = mapped_column(Text)
 
+    __table_args__ = (
+        UniqueConstraint(
+            "fg_id",
+            "filter_id",
+            "agent_run_id",
+            "search_query",
+            "search_result_idx",
+            name="uq_judgment_key_combination",
+            nulls_not_distinct=True,
+        ),
+    )
+
     @classmethod
     def from_judgment(cls, judgment: Judgment, fg_id: str) -> "SQLAJudgment":
-        uniqueness_key = f"{fg_id}|{judgment.filter_id}|{judgment.agent_run_id}|{judgment.search_query}|{judgment.search_result_idx}"
-
         return cls(
             id=judgment.id,
             fg_id=fg_id,
-            uniqueness_key=uniqueness_key,
             agent_run_id=judgment.agent_run_id,
             filter_id=judgment.filter_id,
             search_query=judgment.search_query,
@@ -480,6 +498,31 @@ class SQLAUser(SQLABase):
         DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False
     )
 
+    @classmethod
+    def from_user(cls, user: User) -> "SQLAUser":
+        return cls(
+            id=user.id,
+            email=user.email,
+        )
+
+    def to_user(self, organization_ids: list[str]) -> User:
+        return User(
+            id=self.id,
+            email=self.email,
+            organization_ids=organization_ids,
+        )
+
+
+class SQLAUserOrganization(SQLABase):
+    __tablename__ = TABLE_USER_ORGANIZATION
+
+    user_id = mapped_column(
+        String(36), ForeignKey(f"{TABLE_USER}.id"), primary_key=True, index=True
+    )
+    organization_id = mapped_column(
+        String(36), ForeignKey(f"{TABLE_ORGANIZATION}.id"), primary_key=True, index=True
+    )
+
 
 class SQLASession(SQLABase):
     __tablename__ = TABLE_SESSION
@@ -491,3 +534,62 @@ class SQLASession(SQLABase):
     )
     expires_at = mapped_column(DateTime, nullable=False, index=True)
     is_active = mapped_column(Boolean, default=True, nullable=False, index=True)
+
+
+class SQLAAccessControlEntry(SQLABase):
+    __tablename__ = TABLE_ACCESS_CONTROL_ENTRY
+
+    id = mapped_column(String(36), primary_key=True)
+
+    # Who gets the permission: exactly one must be set
+    user_id = mapped_column(String(36), ForeignKey(f"{TABLE_USER}.id"), nullable=True, index=True)
+    organization_id = mapped_column(
+        String(36), ForeignKey(f"{TABLE_ORGANIZATION}.id"), nullable=True, index=True
+    )
+    is_public = mapped_column(Boolean, nullable=False, default=False, index=True)
+
+    # Which resource the permission is for: exactly one must be set
+    fg_id = mapped_column(
+        String(36), ForeignKey(f"{TABLE_FRAME_GRID}.id"), nullable=True, index=True
+    )
+    view_id = mapped_column(String(36), ForeignKey(f"{TABLE_VIEW}.id"), nullable=True, index=True)
+
+    # Permission
+    permission = mapped_column(Text, nullable=False, index=True)
+
+    __table_args__ = (
+        # Ensure exactly one subject is set
+        CheckConstraint(
+            "(user_id IS NOT NULL)::int + (organization_id IS NOT NULL)::int + is_public::int = 1",
+            name="check_exactly_one_subject",
+        ),
+        # Ensure exactly one resource is set
+        CheckConstraint(
+            "(fg_id IS NOT NULL)::int + (view_id IS NOT NULL)::int = 1",
+            name="check_exactly_one_resource",
+        ),
+        # Validate permission values
+        # TODO(mengk): figure out how to get SQLA Enum to work; was broken last I tried
+        CheckConstraint(
+            f"permission IN ({', '.join(repr(p.value) for p in Permission)})",
+            name="check_permission_values",
+        ),
+        # Unique constraint on the combination
+        UniqueConstraint(
+            "user_id",
+            "organization_id",
+            "is_public",
+            "fg_id",
+            "view_id",
+            "permission",
+            name="uq_access_control_entry_combination",
+        ),
+    )
+
+
+class SQLAOrganization(SQLABase):
+    __tablename__ = TABLE_ORGANIZATION
+
+    id = mapped_column(String(36), primary_key=True)
+    name = mapped_column(Text, nullable=False)
+    description = mapped_column(Text, nullable=True)
