@@ -1,7 +1,6 @@
 import modal
 from pathlib import Path
 import os
-from docent._env_util import ENV
 
 def find_project_root() -> Path:
     current_dir = Path(__file__).resolve().parent
@@ -17,7 +16,7 @@ LOCAL_ROOT = find_project_root()
 print(f"Local root: {LOCAL_ROOT}")
 print(f"Remote root: {REMOTE_ROOT}")
 
-environment = ENV.get("ENVIRONMENT")
+environment = os.getenv("ENVIRONMENT")
 if not environment:
     raise ValueError("MODAL_DEPLOY_ENV environment variable is not set")
 

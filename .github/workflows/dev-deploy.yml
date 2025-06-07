@@ -4,6 +4,9 @@ on:
     branches: [dev]
   workflow_dispatch:
 
+env:
+  ENVIRONMENT: dev
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
