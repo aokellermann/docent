@@ -16,9 +16,9 @@ LOCAL_ROOT = find_project_root()
 print(f"Local root: {LOCAL_ROOT}")
 print(f"Remote root: {REMOTE_ROOT}")
 
-environment = os.getenv("ENVIRONMENT")
+environment = 'dev'
 if not environment:
-    raise ValueError("MODAL_DEPLOY_ENV environment variable is not set")
+    raise ValueError("ENVIRONMENT environment variable is not set")
 
 # Set server name and domain based on environment
 if environment == "dev":
