@@ -95,7 +95,9 @@ PICOCTF_LOGS_36: dict[str, str | tuple[str, dict[str, Any]]] = {
     "intercode_sonnet_new": f"{LOG_DIR_PREFIX}/sonnet-36-pico.eval",
 }
 AGENTHARM_LOGS: dict[str, str | tuple[str, dict[str, Any]]] = {
-    "agentharm_sonnet35": f"{LOG_DIR_PREFIX}/2025-03-17T01-22-50+00-00_agentharm_ZBeMFNAyBaXovmmrXUmyDD.eval",
+    # "agentharm_sonnet35": f"{LOG_DIR_PREFIX}/2025-03-17T01-22-50+00-00_agentharm_ZBeMFNAyBaXovmmrXUmyDD.eval",
+    "gpt4o-default": "/home/ubuntu/docent/logs/2025-06-06T22-56-07+00-00_agentharm_WWvhzx25mQXc2YV7DczfYy.eval",
+    "gpt4o-react": "/home/ubuntu/docent/logs/2025-06-06T23-00-08+00-00_agentharm_VLhyHuaFtqW7fdC7sS9Ux9.eval",
 }
 CYBENCH_LOGS: dict[str, str | tuple[str, dict[str, Any]]] = {
     "ctf_cybench_full": f"{LOG_DIR_PREFIX}/2025-02-19T09-52-46+00-00_cybench_RF6ADFv3MANhLzyumkmwj9.eval",

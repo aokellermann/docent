@@ -1143,7 +1143,7 @@ class DBService:
             | None
         ) = None,
         should_include_existing_diffs: bool = True,
-        should_persist: bool = False,
+        should_persist: bool = True,
     ):
         # TODO(vincent): intersect with a filter, maybe allow user to pass in attribute as well
         # get pairs of datapoints from fg_id where (sample_id, task_id, epoch_id) match
