@@ -10,6 +10,8 @@ from docent._db_service.service import DBService
 from docent._env_util import ENV
 
 ENVIRONMENT = ENV.get("ENVIRONMENT")
+if ENVIRONMENT == "":
+    raise ValueError(f"Must set ENVIRONMENT environment variable. Look at .env.template for an example.")
 
 if ENVIRONMENT == "local":
     cookie_secure = False

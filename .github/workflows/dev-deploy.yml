@@ -19,6 +19,7 @@ jobs:
 
       - name: Create .env file
         run: |
+          echo "ENVIRONMENT=dev" >> .env
           echo "OPENAI_API_KEY=${{ secrets.DEV_OPENAI_API_KEY }}" >> .env
           echo "DOCENT_PG_USER=${{ vars.DEV_DATABASE_USER }}" >> .env
           echo "DOCENT_PG_PASSWORD=${{ secrets.DEV_DATABASE_PASSWORD }}" >> .env
@@ -37,7 +38,7 @@ jobs:
           pip install modal
           
       - name: Deploy to Modal
-        run: modal deploy docent/_server/modal_app.py --environment dev
+        run: modal deploy docent/_server/modal_app.py
         env:
           MODAL_TOKEN_ID: ${{ vars.DEV_MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.DEV_MODAL_TOKEN_SECRET }}

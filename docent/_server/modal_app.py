@@ -1,6 +1,7 @@
 import modal
 from pathlib import Path
-import argparse
+import os
+from docent._env_util import ENV
 
 def find_project_root() -> Path:
     current_dir = Path(__file__).resolve().parent
@@ -16,20 +17,19 @@ LOCAL_ROOT = find_project_root()
 print(f"Local root: {LOCAL_ROOT}")
 print(f"Remote root: {REMOTE_ROOT}")
 
-# Parse command-line arguments
-parser = argparse.ArgumentParser(description='Set the environment for the server.')
-parser.add_argument('--environment', type=str, required=True, choices=['dev', 'prod'], help='Environment to run the server in (dev or prod)')
-args = parser.parse_args()
+environment = ENV.get("ENVIRONMENT")
+if not environment:
+    raise ValueError("MODAL_DEPLOY_ENV environment variable is not set")
 
-# Set server name and domain based on command-line input
-if args.environment == "dev":
+# Set server name and domain based on environment
+if environment == "dev":
     server_name = "docent-dev-server"
-    domain = "docent-dev-backend.transluce.org"
-elif args.environment == "prod":
+    domain = "docent-backend.dev.transluce.org"
+elif environment == "prod":
     server_name = "docent-server"
     domain = "docent-backend.transluce.org"
 else:
-    raise ValueError(f"Invalid environment: {args.environment}")
+    raise ValueError(f"Invalid environment: {environment}. Must be either 'dev' or 'prod'")
 
 app = modal.App(server_name)
 image = (
