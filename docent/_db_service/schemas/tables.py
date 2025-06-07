@@ -321,7 +321,7 @@ class SQLAJudgment(SQLABase):
             "search_query",
             "search_result_idx",
             name="uq_judgment_key_combination",
-            nulls_not_distinct=True,
+            postgresql_nulls_not_distinct=True,
         ),
     )
 
@@ -497,12 +497,14 @@ class SQLAUser(SQLABase):
     created_at = mapped_column(
         DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False
     )
+    is_anonymous = mapped_column(Boolean, nullable=False, default=False, index=True)
 
     @classmethod
     def from_user(cls, user: User) -> "SQLAUser":
         return cls(
             id=user.id,
             email=user.email,
+            is_anonymous=user.is_anonymous,
         )
 
     def to_user(self, organization_ids: list[str]) -> User:
@@ -510,6 +512,7 @@ class SQLAUser(SQLABase):
             id=self.id,
             email=self.email,
             organization_ids=organization_ids,
+            is_anonymous=self.is_anonymous,
         )
 
 

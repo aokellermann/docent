@@ -38,10 +38,15 @@ from docent._ai_tools.clustering.cluster_generator import propose_clusters
 from docent._ai_tools.diff import extract_states_and_diffs
 from docent._ai_tools.diffs.llm_diff_summaries import compute_transcript_diff
 from docent._ai_tools.diffs.models import TranscriptDiff
-
 from docent._ai_tools.search import SearchResult, SearchResultStreamingCallback, execute_search
 from docent._db_service.contexts import ViewContext
-from docent._db_service.schemas.auth_models import Permission, ResourceType, SubjectType, User
+from docent._db_service.schemas.auth_models import (
+    PERMISSION_LEVELS,
+    Permission,
+    ResourceType,
+    SubjectType,
+    User,
+)
 from docent._db_service.schemas.base import SQLABase
 from docent._db_service.schemas.tables import (
     SQLAAccessControlEntry,
@@ -1459,8 +1464,6 @@ class DBService:
                 search_results = await self._get_search_results(ctx, filter.search_query)
                 agent_runs = list(datapoints_dict.values())
 
-            print(search_results)
-
             # Apply filter
             judgments = await filter.apply(agent_runs, search_results, return_all=True)
 
@@ -1929,9 +1932,26 @@ class DBService:
 
         async with self.session() as session:
             session.add(sqla_user)
-            await session.flush()  # Not strictly needed for uuid, but good for autoincrement fields
 
         logger.info(f"Created new user with ID: {sqla_user.id} and email: {sqla_user.email}")
+        return sqla_user.to_user(organization_ids=[])
+
+    async def create_anonymous_user(self) -> User:
+        """
+        Create an anonymous user that is persisted to the database.
+
+        Returns:
+            A User object with anonymous properties
+        """
+        user_id = str(uuid4())
+        email = f"anonymous_{user_id}"
+
+        # Persist anonymous user to database
+        async with self.session() as session:
+            sqla_user = SQLAUser(id=user_id, email=email, is_anonymous=True)
+            session.add(sqla_user)
+
+        logger.info(f"Created anonymous user with ID: {user_id}")
         return sqla_user.to_user(organization_ids=[])
 
     async def get_user_by_email(self, email: str) -> User | None:
@@ -2050,27 +2070,38 @@ class DBService:
         resource_id: str,
         permission: Permission,
     ) -> bool:
-        async with self.session() as session:
-            return True
-            # Build the resource filter based on ResourceType
-            if resource_type == ResourceType.FRAME_GRID:
-                resource_filter = SQLAAccessControlEntry.fg_id == resource_id
-            elif resource_type == ResourceType.VIEW:
-                resource_filter = SQLAAccessControlEntry.view_id == resource_id
-            else:
-                raise ValueError(f"Unsupported resource type: {resource_type}")
+        user_permission_level = await self.get_permission_level(user, resource_type, resource_id)
+        if user_permission_level is None:
+            return False
+        return user_permission_level.includes(permission)
 
+    async def get_permission_level(
+        self,
+        user: User,
+        resource_type: ResourceType,
+        resource_id: str,
+    ) -> Permission | None:
+        """Get the highest permission level a user has for a resource."""
+
+        # Build the resource filter based on ResourceType
+        if resource_type == ResourceType.FRAME_GRID:
+            resource_filter = SQLAAccessControlEntry.fg_id == resource_id
+        elif resource_type == ResourceType.VIEW:
+            resource_filter = SQLAAccessControlEntry.view_id == resource_id
+        else:
+            raise ValueError(f"Unsupported resource type: {resource_type}")
+
+        all_perm_strs: list[str] = []
+
+        async with self.session() as session:
             # Check public permissions
             public_permission_result = await session.execute(
                 select(SQLAAccessControlEntry.permission).where(
-                    SQLAAccessControlEntry.is_public == True,
+                    SQLAAccessControlEntry.is_public,
                     resource_filter,
                 )
             )
-            public_permissions = public_permission_result.scalars().all()
-            for perm_str in public_permissions:
-                if Permission(perm_str).includes(permission):
-                    return True
+            all_perm_strs.extend(public_permission_result.scalars().all())
 
             # Check direct user permissions
             direct_permission_result = await session.execute(
@@ -2079,10 +2110,7 @@ class DBService:
                     resource_filter,
                 )
             )
-            user_permissions = direct_permission_result.scalars().all()
-            for perm_str in user_permissions:
-                if Permission(perm_str).includes(permission):
-                    return True
+            all_perm_strs.extend(direct_permission_result.scalars().all())
 
             # Check organization permissions for all user's organizations
             if user.organization_ids:
@@ -2092,12 +2120,12 @@ class DBService:
                         resource_filter,
                     )
                 )
-                org_permissions = org_permission_result.scalars().all()
-                for perm_str in org_permissions:
-                    if Permission(perm_str).includes(permission):
-                        return True
+                all_perm_strs.extend(org_permission_result.scalars().all())
 
-            return False
+        # Return the highest permission level
+        if not all_perm_strs:
+            return None
+        return Permission(max(all_perm_strs, key=lambda p: PERMISSION_LEVELS[p]))
 
     async def set_acl_permission(
         self,

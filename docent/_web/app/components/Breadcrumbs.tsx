@@ -22,6 +22,7 @@ import {
   removeConnectionStatusListener,
 } from '../services/socketService';
 import { RootState } from '../store/store';
+import { UserProfile } from './auth/UserProfile';
 
 interface BreadcrumbsProps {}
 
@@ -119,10 +120,10 @@ const Breadcrumbs: React.FC<BreadcrumbsProps> = () => {
         </div>
       </div>
 
-      <div className="flex items-center gap-x-3">
+      <div className="flex items-center gap-x-2">
         {/* Connection status indicator */}
         <div className="flex items-center">
-          <div className="flex items-center border rounded h-7 px-2 text-xs whitespace-nowrap">
+          <div className="flex items-center border rounded-md h-7 px-2 text-xs whitespace-nowrap">
             <div
               className={`w-2.5 h-2.5 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'} mr-1.5`}
             />
@@ -130,18 +131,7 @@ const Breadcrumbs: React.FC<BreadcrumbsProps> = () => {
           </div>
         </div>
 
-        <Button
-          size="sm"
-          className="h-7 text-xs whitespace-nowrap px-2 py-0"
-          onClick={() =>
-            window.open(
-              'https://docs.google.com/forms/d/e/1FAIpQLSe_vYg8UJMwZJDaYTCFkxxJxOibpkZK4llVmWoCSqiRN2Q-cQ/viewform?usp=header',
-              '_blank'
-            )
-          }
-        >
-          Become an early user!
-        </Button>
+        <UserProfile />
       </div>
     </div>
   );

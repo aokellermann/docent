@@ -11,11 +11,11 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from '@/hooks/use-toast';
 
 import { login } from '../services/authService';
-import { useUser } from '../contexts/UserContext';
+import { useUserContext } from '../contexts/UserContext';
 
 function LoginPageContent() {
   const router = useRouter();
-  const { setUser } = useUser();
+  const { setUser } = useUserContext();
   const searchParams = useSearchParams();
   const emailParam = searchParams.get('email') || '';
 

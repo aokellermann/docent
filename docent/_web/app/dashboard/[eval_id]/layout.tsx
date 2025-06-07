@@ -1,98 +1,75 @@
-'use client';
+import { cookies, headers } from 'next/headers';
+import DocentDashboardClientLayout from './client-layout';
+import { PermissionsProvider } from '../../contexts/PermissionsContext';
+import { serverPermissionsService } from '../../services/permissionsService';
 
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import React, { useEffect, Suspense, useState, useRef } from 'react';
-
-import Breadcrumbs from '../../components/Breadcrumbs';
-import ResponsiveCheck from '../../components/ResponsiveCheck';
-import { initSession, setHasInitSearchQuery } from '../../store/frameSlice';
-import { useAppDispatch, useAppSelector } from '../../store/hooks';
-import { computeSearch } from '@/app/store/searchSlice';
-
-export default function DocentLayout({
+export default async function DocentDashboardLayout({
   children,
+  params,
 }: {
   children: React.ReactNode;
+  params: { eval_id: string };
 }) {
-  const dispatch = useAppDispatch();
-  const params = useParams();
-  const evalId = params.eval_id as string;
+  const frameGridId = params.eval_id;
 
-  // Fetch state from the server
-  const fetchRef = React.useRef(false); // Prevent double fetch
-  useEffect(() => {
-    if (!evalId || fetchRef.current) {
-      return;
-    }
-    fetchRef.current = true;
-    console.log(`Starting eval with ID from URL: ${evalId}`);
-    dispatch(initSession(evalId));
-  }, [evalId, dispatch]);
+  try {
+    // Check for middleware-provided cookies first, then fall back to actual cookies
+    const headerStore = headers();
+    const middlewareCookies = headerStore.get('x-middleware-cookies');
 
-  /**
-   * Handle shared persisted search
-   */
-  const router = useRouter();
-  const searchParams = useSearchParams();
-
-  const frameGridId = useAppSelector((state) => state.frame.frameGridId);
-  const dimensionsMap = useAppSelector((state) => state.frame.dimensionsMap);
-
-  const [initSearchQuery, setInitSearchQuery] = useState<string | undefined>(
-    undefined
-  );
-
-  // Check if the URL contains a searchQuery parameter
-  const searchParamsCheckedRef = useRef(false);
-  useEffect(() => {
-    if (searchParamsCheckedRef.current) return;
-
-    const searchQuery = searchParams.get('searchQuery');
-    if (searchQuery) {
-      setInitSearchQuery(searchQuery);
-      dispatch(setHasInitSearchQuery(true));
-      console.log('Found searchQuery in URL:', searchQuery);
-
-      // Create a new URLSearchParams object without the searchQuery
-      const newSearchParams = new URLSearchParams(searchParams.toString());
-      newSearchParams.delete('searchQuery');
-
-      // Update the URL without adding to history
-      router.replace(
-        `${window.location.pathname}?${newSearchParams.toString()}`
-      );
+    let cookieString: string;
+    if (middlewareCookies) {
+      cookieString = middlewareCookies;
     } else {
-      dispatch(setHasInitSearchQuery(false));
-      console.log('No searchQuery found in URL');
+      const cookieStore = cookies();
+      cookieString = cookieStore.toString();
     }
 
-    searchParamsCheckedRef.current = true;
-  }, [searchParams, router, dispatch]);
+    const permissions = await serverPermissionsService.getUserPermissions(
+      frameGridId,
+      cookieString
+    );
 
-  // If the URL comes with an searchQuery, we need to request the search
-  const alreadyRequestedInitSearch = useRef(false);
-  useEffect(() => {
-    if (
-      !alreadyRequestedInitSearch.current &&
-      frameGridId &&
-      initSearchQuery &&
-      dimensionsMap
-    ) {
-      dispatch(
-        computeSearch({
-          searchQuery: initSearchQuery,
-        })
-      );
-      alreadyRequestedInitSearch.current = true;
+    // Check if user has read access to this framegrid
+    const userLevel = permissions.framegrid_permissions[frameGridId] || 'none';
+    const PERMISSION_LEVELS = {
+      none: 0,
+      read: 1,
+      write: 2,
+      admin: 3,
+    };
+
+    const hasReadAccess =
+      PERMISSION_LEVELS[userLevel as keyof typeof PERMISSION_LEVELS] >=
+      PERMISSION_LEVELS.read;
+
+    if (!hasReadAccess) {
+      // Show permission denied page
+      return <PermissionDeniedPage />;
     }
-  }, [initSearchQuery, dispatch, frameGridId, dimensionsMap]);
 
+    return (
+      <PermissionsProvider frameGridId={frameGridId} permissions={permissions}>
+        <DocentDashboardClientLayout>{children}</DocentDashboardClientLayout>
+      </PermissionsProvider>
+    );
+  } catch (error) {
+    console.error('Failed to fetch permissions:', error);
+    return <PermissionDeniedPage />;
+  }
+}
+
+function PermissionDeniedPage() {
   return (
-    <div className="flex flex-col h-screen w-screen p-3 pt-2 space-y-2 min-h-0 min-w-0">
-      <Suspense fallback={<div className="h-6">Loading breadcrumbs...</div>}>
-        <Breadcrumbs />
-      </Suspense>
-      <ResponsiveCheck>{children}</ResponsiveCheck>
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="text-center">
+        <h1 className="text-base font-semibold text-gray-900 mb-2">
+          Access Denied
+        </h1>
+        <p className="text-gray-600 text-sm">
+          You don&apos;t have permission to view this resource
+        </p>
+      </div>
     </div>
   );
 }
