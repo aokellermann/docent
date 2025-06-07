@@ -4,7 +4,7 @@ import {
   EvidenceWithCitation,
 } from '../types/experimentViewerTypes';
 
-import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo } from 'react';
 import { BASE_DOCENT_PATH } from '../constants';
 import {
