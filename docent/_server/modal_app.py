@@ -46,7 +46,11 @@ image = (
 @app.function(
     image=image,
     region="us-east-1",
+    cpu=8,
+    min_containers=0,
+    max_containers=10,
 )
+@modal.concurrent(max_inputs=8)  # type: ignore
 @modal.asgi_app(custom_domains=[domain])  # type: ignore
 def fastapi_app():
     from docent._server.api import asgi_app

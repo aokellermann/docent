@@ -207,7 +207,7 @@ class LLMManager:
         try:
             self.cache = LLMCache() if use_cache else None
         except RuntimeError as e:
-            logger.error(f"Error initializing LLMCache: {e}")
+            logger.error(f"Disabling LLM cache due to initialization error: {e}")
             self.cache = None
 
         self.model_options = model_options
