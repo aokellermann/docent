@@ -203,7 +203,13 @@ class LLMManager:
         model_options: list[ModelOption],
         use_cache: bool = False,
     ):
-        self.cache = LLMCache() if use_cache else None
+        # TODO(mengk): make this more robust, possibly move to a NoSQL database or something
+        try:
+            self.cache = LLMCache() if use_cache else None
+        except RuntimeError as e:
+            logger.error(f"Disabling LLM cache due to initialization error: {e}")
+            self.cache = None
+
         self.model_options = model_options
         self.current_model_option_index = 0
 

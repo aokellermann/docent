@@ -14,7 +14,7 @@ from sqlalchemy.inspection import inspect as sqla_inspect
 
 from docent._ai_tools.search import SearchResult, SearchResultWithCitations
 from docent._db_service.contexts import ViewContext
-from docent._db_service.schemas.auth_models import Permission, User
+from docent._db_service.schemas.auth_models import Permission, ResourceType, User
 from docent._db_service.schemas.tables import SQLADiffAttribute
 from docent._db_service.service import DBService
 from docent._llm_util.data_models.llm_output import LLMOutput
@@ -37,7 +37,7 @@ from docent._server._auth.session import create_user_session, invalidate_user_se
 from docent._server._broker.redis_client import REDIS, enqueue_search_job, publish_to_broker
 from docent._server._dependencies.database import get_db
 from docent._server._dependencies.permissions import require_fg_permission, require_view_permission
-from docent._server._dependencies.user import get_default_view_ctx, require_authenticated_user
+from docent._server._dependencies.user import get_default_view_ctx, get_user_anonymous_ok
 from docent._server._rest.send_state import (
     publish_dims,
     publish_framegrids,
@@ -57,13 +57,10 @@ from docent.data_models.regex import RegexSnippet, get_regex_snippets
 
 logger = get_logger(__name__)
 
-# Public router - for endpoints that don't require authentication
-# These endpoints are accessible without login or API key
 public_router = APIRouter()
-
-# Authenticated router - all endpoints require valid authentication
-# Authentication is enforced at the router level via dependencies
-authenticated_router = APIRouter(dependencies=[Depends(require_authenticated_user)])
+# FIXME(mengk): we should move all API endpoints to another router that explicitly requires API key auth
+#   This router creates an anonymous user for each session, which is an anti-pattern for API endpoints.
+user_router = APIRouter(dependencies=[Depends(get_user_anonymous_ok)])
 
 ####################
 # Public endpoints #
@@ -145,12 +142,33 @@ async def login(request: LoginRequest, response: Response, db: DBService = Depen
     return user
 
 
-############################
-# Authenticated endpopints #
-############################
+@public_router.post("/anonymous_session")
+async def create_anonymous_session(response: Response, db: DBService = Depends(get_db)):
+    """
+    Create anonymous user endpoint. Creates a temporary anonymous user and session.
+
+    Args:
+        response: FastAPI Response object to set cookies
+        db: Database service dependency
+
+    Returns:
+        User object with anonymous properties
+    """
+    # Create and persist anonymous user
+    anonymous_user = await db.create_anonymous_user()
+
+    # Create a session for the anonymous user
+    await create_user_session(anonymous_user.id, response)
+
+    return anonymous_user
 
 
-@authenticated_router.get("/me")
+###########################
+# Authenticated endpoints #
+###########################
+
+
+@user_router.get("/me")
 async def get_current_user(request: Request, db: DBService = Depends(get_db)):
     """
     Get current user endpoint. Retrieves user information from session cookie.
@@ -178,7 +196,7 @@ async def get_current_user(request: Request, db: DBService = Depends(get_db)):
     return user
 
 
-@authenticated_router.post("/logout")
+@user_router.post("/logout")
 async def logout(request: Request, response: Response):
     """
     User logout endpoint. Invalidates the current session.
@@ -204,7 +222,7 @@ async def logout(request: Request, response: Response):
 #############
 
 
-@authenticated_router.get("/framegrids")
+@user_router.get("/framegrids")
 async def get_framegrids(db: DBService = Depends(get_db)):
     sqla_fgs = await db.get_fgs()
     return [
@@ -220,10 +238,10 @@ class CreateFrameGridRequest(BaseModel):
     description: str | None = None
 
 
-@authenticated_router.post("/create")
+@user_router.post("/create")
 async def create_fg(
     request: CreateFrameGridRequest = CreateFrameGridRequest(),
-    user: User = Depends(require_authenticated_user),
+    user: User = Depends(get_user_anonymous_ok),
     db: DBService = Depends(get_db),
 ):
     fg_id = await db.create_fg(
@@ -239,7 +257,7 @@ class UpdateFrameGridRequest(BaseModel):
     description: str | None = None
 
 
-@authenticated_router.put("/{fg_id}/framegrid")
+@user_router.put("/{fg_id}/framegrid")
 async def update_framegrid(
     fg_id: str,
     request: UpdateFrameGridRequest,
@@ -254,7 +272,7 @@ async def update_framegrid(
     return {"fg_id": fg_id}
 
 
-@authenticated_router.delete("/{fg_id}/framegrid")
+@user_router.delete("/{fg_id}/framegrid")
 async def delete_framegrid(
     fg_id: str,
     db: DBService = Depends(get_db),
@@ -279,7 +297,7 @@ async def delete_framegrid(
 ##############
 
 
-@authenticated_router.get("/{fg_id}/agent_run_metadata_fields")
+@user_router.get("/{fg_id}/agent_run_metadata_fields")
 async def agent_run_metadata_fields(
     db: DBService = Depends(get_db),
     ctx: ViewContext = Depends(get_default_view_ctx),
@@ -295,7 +313,7 @@ async def agent_run_metadata_fields(
     return {"fields": fields}
 
 
-@authenticated_router.get("/{fg_id}/agent_run")
+@user_router.get("/{fg_id}/agent_run")
 async def get_agent_run(
     agent_run_id: str,
     db: DBService = Depends(get_db),
@@ -309,7 +327,7 @@ class AgentRunMetadataRequest(BaseModel):
     agent_run_ids: list[str]
 
 
-@authenticated_router.post("/{fg_id}/agent_run_metadata")
+@user_router.post("/{fg_id}/agent_run_metadata")
 async def get_agent_run_metadata(
     request: AgentRunMetadataRequest,
     db: DBService = Depends(get_db),
@@ -324,7 +342,7 @@ class PostAgentRunsRequest(BaseModel):
     agent_runs: list[AgentRun]
 
 
-@authenticated_router.post("/{fg_id}/agent_runs")
+@user_router.post("/{fg_id}/agent_runs")
 async def post_agent_runs(
     fg_id: str,
     request: PostAgentRunsRequest,
@@ -344,7 +362,7 @@ async def post_agent_runs(
 ########
 
 
-@authenticated_router.post("/{fg_id}/join")
+@user_router.post("/{fg_id}/join")
 async def join(
     fg_id: str,
     db: DBService = Depends(get_db),
@@ -362,7 +380,7 @@ class SetIODimsRequest(BaseModel):
     outer_dim_id: str | None = None
 
 
-@authenticated_router.post("/{fg_id}/io_dims")
+@user_router.post("/{fg_id}/io_dims")
 async def set_io_dims_endpoint(
     fg_id: str,
     request: SetIODimsRequest,
@@ -380,7 +398,7 @@ class SetIODimWithMetadataKeyRequest(BaseModel):
     type: Literal["inner", "outer"]
 
 
-@authenticated_router.post("/{fg_id}/io_dims_with_metadata_key")
+@user_router.post("/{fg_id}/io_dims_with_metadata_key")
 async def set_io_dim_with_metadata_key_endpoint(
     fg_id: str,
     request: SetIODimWithMetadataKeyRequest,
@@ -397,7 +415,7 @@ class PostBaseFilterRequest(BaseModel):
     filter: ComplexFilter | None
 
 
-@authenticated_router.post("/{fg_id}/base_filter")
+@user_router.post("/{fg_id}/base_filter")
 async def post_base_filter(
     fg_id: str,
     request: PostBaseFilterRequest,
@@ -417,7 +435,7 @@ async def post_base_filter(
         return request.filter.id if request.filter else None
 
 
-@authenticated_router.get("/{fg_id}/base_filter")
+@user_router.get("/{fg_id}/base_filter")
 async def get_base_filter_endpoint(
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.READ)),
@@ -430,7 +448,7 @@ class GetRegexSnippetsRequest(BaseModel):
     agent_run_ids: list[str]
 
 
-@authenticated_router.post("/{fg_id}/get_regex_snippets")
+@user_router.post("/{fg_id}/get_regex_snippets")
 async def get_regex_snippets_endpoint(
     fg_id: str,
     request: GetRegexSnippetsRequest,
@@ -470,7 +488,7 @@ async def get_regex_snippets_endpoint(
     }
 
 
-@authenticated_router.get("/{fg_id}/state")
+@user_router.get("/{fg_id}/state")
 async def get_state(
     db: DBService = Depends(get_db),
     ctx: ViewContext = Depends(get_default_view_ctx),
@@ -479,7 +497,7 @@ async def get_state(
     await publish_homepage_state(db, ctx)
 
 
-@authenticated_router.get("/{fg_id}/searches")
+@user_router.get("/{fg_id}/searches")
 async def get_searches(
     db: DBService = Depends(get_db),
     ctx: ViewContext = Depends(get_default_view_ctx),
@@ -489,7 +507,7 @@ async def get_searches(
     return await db.get_searches_with_result_counts(ctx)
 
 
-@authenticated_router.delete("/{fg_id}/search")
+@user_router.delete("/{fg_id}/search")
 async def delete_search(
     fg_id: str,
     search_query_id: str,
@@ -505,6 +523,37 @@ async def delete_search(
     return {"status": "success", "search_query_id": search_query_id}
 
 
+class UserPermissionsResponse(BaseModel):
+    framegrid_permissions: dict[str, str | None]
+    view_permissions: dict[str, str | None]
+
+
+@user_router.get("/{fg_id}/permissions")
+async def get_user_permissions(
+    fg_id: str,
+    user: User = Depends(get_user_anonymous_ok),
+    db: DBService = Depends(get_db),
+    ctx: ViewContext = Depends(get_default_view_ctx),
+    _: None = Depends(require_fg_permission(Permission.READ)),
+):
+    fg_permission = await db.get_permission_level(
+        user=user,
+        resource_type=ResourceType.FRAME_GRID,
+        resource_id=fg_id,
+    )
+
+    view_permission = await db.get_permission_level(
+        user=user,
+        resource_type=ResourceType.VIEW,
+        resource_id=ctx.view_id,
+    )
+
+    return UserPermissionsResponse(
+        framegrid_permissions={fg_id: fg_permission.value if fg_permission else None},
+        view_permissions={ctx.view_id: view_permission.value if view_permission else None},
+    )
+
+
 ##################################
 # (View-specific) dims + filters #
 ##################################
@@ -514,7 +563,7 @@ class PostDimensionRequest(BaseModel):
     dim: FrameDimension
 
 
-@authenticated_router.post("/{fg_id}/dimension")
+@user_router.post("/{fg_id}/dimension")
 async def post_dimension(
     request: PostDimensionRequest,
     db: DBService = Depends(get_db),
@@ -533,7 +582,7 @@ class GetDimensionsRequest(BaseModel):
     dim_ids: list[str] | None = None
 
 
-@authenticated_router.post("/{fg_id}/get_dimensions")
+@user_router.post("/{fg_id}/get_dimensions")
 async def get_dimensions(
     request: GetDimensionsRequest,
     db: DBService = Depends(get_db),
@@ -546,7 +595,7 @@ async def get_dimensions(
         return await db.get_dims(request.dim_ids)
 
 
-@authenticated_router.delete("/{fg_id}/dimension")
+@user_router.delete("/{fg_id}/dimension")
 async def delete_dimension(
     fg_id: str,
     dim_id: str,
@@ -566,7 +615,7 @@ async def delete_dimension(
         await publish_searches(db, ctx)
 
 
-@authenticated_router.delete("/{fg_id}/filter")
+@user_router.delete("/{fg_id}/filter")
 async def delete_filter(
     fg_id: str,
     dim_id: str,
@@ -587,7 +636,7 @@ class PostFilterRequest(BaseModel):
     new_predicate: str
 
 
-@authenticated_router.post("/{fg_id}/filter")
+@user_router.post("/{fg_id}/filter")
 async def post_filter(
     fg_id: str,
     request: PostFilterRequest,
@@ -647,7 +696,7 @@ class ComputeSearchRequest(BaseModel):
     search_query: str
 
 
-@authenticated_router.post("/{fg_id}/start_compute_search")
+@user_router.post("/{fg_id}/start_compute_search")
 async def start_compute_search(
     fg_id: str,
     request: ComputeSearchRequest,
@@ -662,7 +711,7 @@ async def start_compute_search(
     return job_id
 
 
-@authenticated_router.get("/{fg_id}/listen_compute_search")
+@user_router.get("/{fg_id}/listen_compute_search")
 async def listen_compute_search(
     fg_id: str,
     job_id: str,
@@ -779,7 +828,7 @@ class ClusterDimensionRequest(BaseModel):
     feedback: str | None
 
 
-@authenticated_router.post("/{fg_id}/start_cluster_dimension")
+@user_router.post("/{fg_id}/start_cluster_dimension")
 async def start_cluster_dimension(
     fg_id: str,
     request: ClusterDimensionRequest,
@@ -797,7 +846,7 @@ async def start_cluster_dimension(
     return job_id
 
 
-@authenticated_router.get("/{fg_id}/listen_cluster_dimension")
+@user_router.get("/{fg_id}/listen_cluster_dimension")
 async def listen_cluster_dimension(
     fg_id: str,
     job_id: str,
@@ -881,7 +930,7 @@ async def listen_cluster_dimension(
 #######################
 
 
-@authenticated_router.get("/{fg_id}/actions_summary")
+@user_router.get("/{fg_id}/actions_summary")
 async def get_actions_summary(
     agent_run_id: str,
     db: DBService = Depends(get_db),
@@ -979,7 +1028,7 @@ async def get_actions_summary(
     )
 
 
-@authenticated_router.get("/{fg_id}/solution_summary")
+@user_router.get("/{fg_id}/solution_summary")
 async def get_solution_summary(
     agent_run_id: str,
     db: DBService = Depends(get_db),
@@ -1043,7 +1092,7 @@ class TASession(BaseModel):
 TA_SESSIONS: dict[str, TASession] = {}  # session_id -> TASession
 
 
-@authenticated_router.post("/{fg_id}/ta_session")
+@user_router.post("/{fg_id}/ta_session")
 async def create_ta_session(
     request: CreateTASessionRequest,
     db: DBService = Depends(get_db),
@@ -1082,7 +1131,7 @@ async def create_ta_session(
     }
 
 
-@authenticated_router.get("/{fg_id}/ta_message")
+@user_router.get("/{fg_id}/ta_message")
 async def get_ta_message(
     session_id: str,
     message: str,
@@ -1180,7 +1229,7 @@ class StreamedDiffSearchResult(TypedDict):
     num_results_total: int
 
 
-@authenticated_router.post("/{fg_id}/start_compute_diffs")
+@user_router.post("/{fg_id}/start_compute_diffs")
 async def start_compute_diffs(
     fg_id: str,
     request: ComputeDiffRequest,
@@ -1198,7 +1247,7 @@ async def start_compute_diffs(
     return job_id
 
 
-@authenticated_router.get("/{fg_id}/listen_compute_diffs")
+@user_router.get("/{fg_id}/listen_compute_diffs")
 async def listen_compute_diffs(
     fg_id: str,
     job_id: str,
@@ -1325,7 +1374,7 @@ class ComputeClusteringDiffsRequest(BaseModel):
     experiment_id_2: str
 
 
-@authenticated_router.post("/{fg_id}/compute_diff_clusters")
+@user_router.post("/{fg_id}/compute_diff_clusters")
 async def compute_diff_clusters(
     fg_id: str,
     request: ComputeClusteringDiffsRequest,
@@ -1347,7 +1396,7 @@ class ComputeDiffSearchRequest(BaseModel):
     search_query: str
 
 
-@authenticated_router.post("/{fg_id}/start_compute_diff_search")
+@user_router.post("/{fg_id}/start_compute_diff_search")
 async def start_compute_diff_search(
     fg_id: str,
     request: ComputeDiffSearchRequest,
@@ -1366,7 +1415,7 @@ async def start_compute_diff_search(
     return job_id
 
 
-@authenticated_router.get("/{fg_id}/listen_compute_diff_search")
+@user_router.get("/{fg_id}/listen_compute_diff_search")
 async def listen_compute_diff_search(
     fg_id: str,
     job_id: str,
