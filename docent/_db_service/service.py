@@ -33,11 +33,13 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from docent._ai_tools.clustering.cluster_diffs import cluster_diffs, search_over_diffs
+from docent._ai_tools.diffs.models import Claim
+from docent._ai_tools.clustering.cluster_diffs import cluster_diff_claims, search_over_diffs
 from docent._ai_tools.clustering.cluster_generator import propose_clusters
 from docent._ai_tools.diff import extract_states_and_diffs
 from docent._ai_tools.diffs.llm_diff_summaries import compute_transcript_diff
-from docent._ai_tools.diffs.models import TranscriptDiff
+from docent._ai_tools.diffs.models import TranscriptDiff, SQLADiffsReport
+
 from docent._ai_tools.search import SearchResult, SearchResultStreamingCallback, execute_search
 from docent._db_service.contexts import ViewContext
 from docent._db_service.schemas.auth_models import (
@@ -1135,19 +1137,24 @@ class DBService:
 
             result = await session.execute(query)
             return [a.to_search_result() for a in result.scalars().all()]
-
+    
+    
+    
+    async def get_diffs_report(self, diffs_report_id: str) -> SQLADiffsReport:
+        async with self.session() as session:
+            result = await session.execute(
+                select(SQLADiffsReport).where(SQLADiffsReport.id == diffs_report_id)
+            )
+        return result.scalar_one()
+        
     async def compute_diffs(
         self,
         ctx: ViewContext,
-        experiment_id_1: str,
-        experiment_id_2: str,
+        diffs_report_id: str,
         diff_callback: (
-            Callable[
-                [str, str, list[str], list[str], TranscriptDiff | None], Coroutine[Any, Any, None]
-            ]
-            | None
+            Callable[[TranscriptDiff | None], Coroutine[Any, Any, None]] | None
         ) = None,
-        should_include_existing_diffs: bool = True,
+        should_include_existing_diffs: bool = False,
         should_persist: bool = True,
     ):
         # TODO(vincent): intersect with a filter, maybe allow user to pass in attribute as well
@@ -1157,8 +1164,16 @@ class DBService:
         # TODO(vincent): flexible binning and comparisons
 
         datapoints = await self.get_agent_runs(ctx)
+        from docent._ai_tools.diffs.models import SQLADiffsReport
+        dbs = self.Session()
+        result = await dbs.execute(
+            select(SQLADiffsReport).where(SQLADiffsReport.id == diffs_report_id)
+        )
+        diffs_report = result.scalar_one()
+        experiment_id_1 = diffs_report.experiment_id_1
+        experiment_id_2 = diffs_report.experiment_id_2
 
-        print(f"have {len(datapoints)} datapoints")
+        print(f"have {len(datapoints)} datapoints", experiment_id_1, experiment_id_2)
 
         # group by sample_id, task_id, epoch_id
         datapoints_by_sample_task_epoch: dict[tuple[str, str, str], list[AgentRun]] = {}
@@ -1173,48 +1188,29 @@ class DBService:
             datapoints_by_sample_task_epoch[key].append(dp)
 
         existing_diff_pairs = {}
+        from docent._ai_tools.diffs.models import SQLATranscriptDiff
         if should_include_existing_diffs:
             # Get existing diff results from database
             async with self.session() as session:
+                 
                 result = await session.execute(
-                    select(SQLADiffAttribute).where(
-                        SQLADiffAttribute.frame_grid_id == ctx.fg_id,
+                    select(SQLATranscriptDiff).where(
+                        SQLATranscriptDiff.frame_grid_id == ctx.fg_id,
                     )
                 )
                 existing_diffs = result.scalars().all()
-                existing_diff_pairs = {
-                    (diff.data_id_1, diff.data_id_2): diff for diff in existing_diffs
-                }
                 # TODO(vincent): we didn't actually check for exp_ids...
 
-            print(f"have {len(existing_diff_pairs)} existing diffs")
-
-            # Stream existing diffs - group by data_id pairs directly
+            # Stream existing diffs
             if diff_callback is not None:
-                # Group diffs by data_id pairs in a single pass
-                diffs_by_pair: dict[tuple[str, str], tuple[list[str], list[str]]] = {}
                 for diff in existing_diffs:
-                    if diff.claim:  # Only process diffs with claims
-                        pair = (diff.data_id_1, diff.data_id_2)
-                        if pair not in diffs_by_pair:
-                            diffs_by_pair[pair] = ([], [])
-                        diffs_by_pair[pair][0].append(diff.claim)
-                        diffs_by_pair[pair][1].append(diff.evidence)
+                    print(diff)
+                    await diff_callback(diff.to_pydantic())
+                   
 
-                # Stream each pair's diffs
-                for (data_id_1, data_id_2), (claims, evidences) in diffs_by_pair.items():
-                    await diff_callback(data_id_1, data_id_2, claims, evidences, None)
-
-        tasks: list[Coroutine[Any, Any, tuple[list[tuple[str, str]], TranscriptDiff]]] = []
+        tasks: list[Coroutine[Any, Any, TranscriptDiff]] = []
         pairs_to_compute: list[tuple[str, str]] = []
-
-        async def _compute_old_and_new_diffs(
-            tx_a: AgentRun, tx_b: AgentRun
-        ) -> tuple[list[tuple[str, str]], TranscriptDiff]:
-            old = await extract_states_and_diffs(tx_a, tx_b)
-            transcript_diff = await compute_transcript_diff(tx_a, tx_b)
-            return old, transcript_diff
-
+        
         for datapoint_lists in datapoints_by_sample_task_epoch.values():
             first_pair_candidates = [
                 dp for dp in datapoint_lists if dp.metadata.get("experiment_id") == experiment_id_1
@@ -1229,7 +1225,9 @@ class DBService:
 
                 # Check if we already have results for this pair
                 if (first_dp.id, second_dp.id) not in existing_diff_pairs:
-                    tasks.append(_compute_old_and_new_diffs(first_dp, second_dp))
+                    tasks.append(
+                        compute_transcript_diff(first_dp, second_dp, diffs_report_id)
+                    )
                     pairs_to_compute.append((first_dp.id, second_dp.id))
 
         logger.info(f"Computing diffs for {len(tasks)} new pairs")
@@ -1238,49 +1236,23 @@ class DBService:
         results = await asyncio.gather(*tasks)
 
         # Store results in database if should_persist is True
-        to_upload: list[SQLADiffAttribute] = []
-        for (data_id_1, data_id_2), (diff_results, transcript_diff) in zip(
-            pairs_to_compute, results
-        ):
-
-            if len(diff_results) == 0:
-                to_upload.append(
-                    SQLADiffAttribute.from_diff_attribute(
-                        data_id_1=data_id_1,
-                        data_id_2=data_id_2,
-                        attribute="",  # unused for now
-                        attribute_idx=None,
-                        claim="",
-                        evidence="",
-                        fg_id=ctx.fg_id,
-                    )
-                )
-                continue
-            diffs: list[str] = []
-            evidences: list[str] = []
-            for i, (claim, evidence) in enumerate(diff_results):
-                to_upload.append(
-                    SQLADiffAttribute.from_diff_attribute(
-                        data_id_1=data_id_1,
-                        data_id_2=data_id_2,
-                        attribute="",  # unused for now
-                        attribute_idx=i,
-                        claim=claim,
-                        evidence=evidence,
-                        fg_id=ctx.fg_id,
-                    )
-                )
-                diffs.append(claim)
-                evidences.append(evidence)
-
+        
+        from docent._ai_tools.diffs.models import SQLATranscriptDiff
+        transcript_diffs_models: list[SQLATranscriptDiff] = []
+        for transcript_diff in results:
+            transcript_diffs_models.append(SQLATranscriptDiff.from_pydantic(transcript_diff, ctx))
             if diff_callback is not None:
-                await diff_callback(data_id_1, data_id_2, diffs, evidences, transcript_diff)
+                await diff_callback(transcript_diff)
 
-        if to_upload and should_persist:
-            async with self.session() as session:
-                session.add_all(to_upload)
-                logger.info(f"Pushed {len(to_upload)} diff attributes")
-        return to_upload
+        print("tdms", transcript_diffs_models)
+        if transcript_diffs_models and should_persist:
+            for transcript_diff in transcript_diffs_models:
+                transcript_diff.diffs_report_id = diffs_report.id
+            dbs.add_all(transcript_diffs_models)
+            dbs.add(diffs_report)
+            await dbs.commit()
+            logger.info(f"Pushed {len(transcript_diffs_models)} diff attributes and updated Report{diffs_report.id}")
+        return transcript_diffs_models
 
     async def compute_search(
         self,
@@ -1593,28 +1565,30 @@ class DBService:
     async def compute_diff_clusters(
         self,
         ctx: ViewContext,
-        experiment_id_1: str,
-        experiment_id_2: str,
+        claims: list[Claim],
     ):
-        datapoints = await self.get_agent_runs(ctx)
-        expid_by_datapoint = {d.id: d.metadata.get("experiment_id") for d in datapoints}
-        async with self.session() as session:
-            result = await session.execute(
-                select(SQLADiffAttribute)
-                .where(
-                    SQLADiffAttribute.frame_grid_id == ctx.fg_id,
-                )
-                .order_by(SQLADiffAttribute.id)
-            )
-            existing_diffs = result.scalars().all()
-        valid_existing_diffs = [
-            d.to_diff_attribute()
-            for d in existing_diffs
-            if expid_by_datapoint.get(d.data_id_1) == experiment_id_1
-            and expid_by_datapoint.get(d.data_id_2) == experiment_id_2
-        ]
-        print(f"have {len(valid_existing_diffs)} valid existing diffs")
-        clusters = await cluster_diffs(valid_existing_diffs)
+        # datapoints = await self.get_agent_runs(ctx)
+        # expid_by_datapoint = {d.id: d.metadata.get("experiment_id") for d in datapoints}
+        # async with self.session() as session:
+        #     result = await session.execute(
+        #         select(SQLADiffAttribute)
+        #         .where(
+        #             SQLADiffAttribute.frame_grid_id == ctx.fg_id,
+        #         )
+        #         .order_by(SQLADiffAttribute.id)
+        #     )
+        #     existing_diffs = result.scalars().all()
+        # valid_existing_diffs = [
+        #     d.to_diff_attribute()
+        #     for d in existing_diffs
+        #     if expid_by_datapoint.get(d.data_id_1) == experiment_id_1
+        #     and expid_by_datapoint.get(d.data_id_2) == experiment_id_2
+        # ]
+        # print(f"have {len(valid_existing_diffs)} valid existing diffs")
+        print('-------------------------------- Claims --------------------------------')
+        print(claims)
+        from docent._ai_tools.diffs.models import DiffTheme
+        clusters = await cluster_diff_claims(claims)
         return clusters
 
     async def compute_diff_search(

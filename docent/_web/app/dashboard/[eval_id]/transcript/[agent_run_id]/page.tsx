@@ -95,7 +95,7 @@ export default function AgentRunPage() {
   };
 
   return (
-    <Suspense fallback={<div>Loading...</div>}>
+    <Suspense>
       <div className="flex-1 flex space-x-3 min-h-0">
         <TranscriptViewer ref={transcriptViewerRef} secondary={false} />
 

@@ -1,8 +1,4 @@
-import {
-  RegexSnippet,
-  TaskStats,
-  EvidenceWithCitation,
-} from '../types/experimentViewerTypes';
+import { RegexSnippet, TaskStats } from '../types/experimentViewerTypes';
 
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo } from 'react';
@@ -357,78 +353,6 @@ const RegexSnippetsSection: React.FC<{
   );
 };
 
-interface DiffSectionProps {
-  dataId: string;
-  otherId: string;
-  diffResults: {
-    claim: string[];
-    evidence: EvidenceWithCitation[];
-  };
-  onShowAgentRun?: (
-    datapointId: string,
-    blockId?: number,
-    blockId2?: number,
-    paired?: boolean
-  ) => void;
-}
-
-const DiffSection: React.FC<DiffSectionProps> = ({
-  dataId,
-  otherId,
-  diffResults,
-  onShowAgentRun,
-}) => {
-  if (!diffResults) {
-    return null;
-  }
-
-  // Create an array of (claim, evidence) tuples
-  const diffTriples = diffResults.claim.map((claim, idx) => ({
-    claim,
-    evidence: diffResults.evidence[idx] || null,
-  }));
-
-  return (
-    <div className="pt-1 mt-1 border-t border-indigo-100 text-xs space-y-1">
-      <div className="flex items-center mb-1">
-        <div className="h-2 w-2 rounded-full bg-indigo-500 mr-1.5"></div>
-        <span className="text-xs font-medium text-indigo-700">
-          Diff results with {otherId}
-        </span>
-      </div>
-
-      {diffTriples.map((triple, idx) => (
-        <div
-          key={idx}
-          className="bg-indigo-50 rounded-md p-1.5 text-xs text-indigo-900 leading-snug mt-1"
-          onClick={(e) => {
-            e.stopPropagation();
-            const leftCitations = triple.evidence.citations.filter(
-              (x) => x.transcript_idx == 0
-            );
-            const rightCitations = triple.evidence.citations.filter(
-              (x) => x.transcript_idx == 1
-            );
-            onShowAgentRun?.(
-              dataId + '___' + otherId,
-              leftCitations.length > 0 ? leftCitations[0].block_idx : undefined,
-              rightCitations.length > 0
-                ? rightCitations[0].block_idx
-                : undefined,
-              true
-            );
-          }}
-        >
-          {/* Claim */}
-          <div className="mb-1.5">
-            <p className="mt-0.5">{triple.claim}</p>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-};
-
 const InnerCard: React.FC<InnerCard> = ({
   innerId,
   innerName,
@@ -446,8 +370,6 @@ const InnerCard: React.FC<InnerCard> = ({
     searchResultMap: attributeMap,
     loadingSearchQuery: loadingAttributesForId,
   } = useAppSelector((state: RootState) => state.search);
-
-  const { diffMap } = useAppSelector((state: RootState) => state.diff);
 
   const { baseFilter, agentRunMetadata, frameGridId } = useAppSelector(
     (state: RootState) => state.frame
@@ -545,21 +467,21 @@ const InnerCard: React.FC<InnerCard> = ({
     [curSearchQuery, attributeMap]
   );
 
-  const getDiffResults = useCallback(
-    (dataId: string) => {
-      if (!diffMap) return null;
-
-      // Find any diff results where this datapoint is involved
-      const diffEntry = Object.entries(diffMap).find(([key]) => {
-        const [id1, id2] = key.split('___');
-        return id1 === dataId; // || id2 === dataId;
-      });
-
-      if (!diffEntry) return null;
-      return diffEntry;
-    },
-    [diffMap]
-  );
+  // const getDiffResults = useCallback(
+  //   (dataId: string) => {
+  //     if (!diffMap) return null;
+  //
+  //     // Find any diff results where this datapoint is involved
+  //     const diffEntry = Object.entries(diffMap).find(([key]) => {
+  //       const [id1, id2] = key.split('___');
+  //       return id1 === dataId; // || id2 === dataId;
+  //     });
+  //
+  //     if (!diffEntry) return null;
+  //     return diffEntry;
+  //   },
+  //   [diffMap]
+  // );
 
   return (
     agentRunIds.length > 0 && (
@@ -662,19 +584,8 @@ const InnerCard: React.FC<InnerCard> = ({
             {agentRunIds.map((agentRunId) => {
               // Skip if there is an active query but there are no matching attribute values
               const attributes = getAttributes(agentRunId);
-              const initialDiffResults = getDiffResults(agentRunId);
 
               if (curSearchQuery && attributes === null) return null;
-              // if (diffMap && !initialDiffResults) return null;
-
-              const diffResults = initialDiffResults
-                ? initialDiffResults[1]
-                : null;
-              const otherId = initialDiffResults
-                ? initialDiffResults[0]
-                    .split('___')
-                    .filter((id) => id !== agentRunId)[0]
-                : null;
 
               return (
                 <div
@@ -687,14 +598,14 @@ const InnerCard: React.FC<InnerCard> = ({
                   }`}
                   onClick={() =>
                     onShowAgentRun
-                      ? otherId
-                        ? onShowAgentRun(
-                            agentRunId + '___' + otherId,
-                            undefined,
-                            undefined,
-                            true
-                          )
-                        : onShowAgentRun(agentRunId)
+                      ? // ? otherId
+                        //   ? onShowAgentRun(
+                        //       agentRunId + '___' + otherId,
+                        //       undefined,
+                        //       undefined,
+                        //       true
+                        //     )
+                        onShowAgentRun(agentRunId)
                       : undefined
                   }
                 >
@@ -742,8 +653,6 @@ const InnerCard: React.FC<InnerCard> = ({
                         >
                           View
                         </span>
-                        </div>
-                      </div>
                     )} */}
                     {/* Display metadata if available */}
                     {agentRunMetadata && agentRunMetadata[agentRunId] && (
@@ -762,15 +671,6 @@ const InnerCard: React.FC<InnerCard> = ({
                       dataId={agentRunId}
                       curAttributeQuery={curSearchQuery}
                       attributes={attributes}
-                      onShowAgentRun={onShowAgentRun}
-                    />
-                  )}
-                  {/* Display diff results if available */}
-                  {diffResults && (
-                    <DiffSection
-                      dataId={agentRunId}
-                      otherId={otherId ?? ''}
-                      diffResults={diffResults}
                       onShowAgentRun={onShowAgentRun}
                     />
                   )}

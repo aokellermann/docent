@@ -23,6 +23,7 @@ import { PrimitiveFilter } from '../types/frameTypes';
 
 import DimensionSelector from './DimensionSelector';
 import InnerCard from './InnerCard';
+import { Citation } from '../types/experimentViewerTypes';
 
 interface ExperimentViewerProps {
   onShowAgentRun?: (
@@ -54,7 +55,12 @@ export default function ExperimentViewer({
     // voteState,
   } = useAppSelector((state) => state.search);
 
-  const { diffMap } = useAppSelector((state) => state.diff);
+  const diffMap: Record<
+    string,
+    { claim: string[]; evidence: { evidence: string; citations: Citation[] }[] }
+  > = useMemo(() => {
+    return {};
+  }, []);
 
   const {
     expandedOuter,
@@ -567,7 +573,7 @@ export default function ExperimentViewer({
         {/* No outer grouping, but has an inner grouping */}
         {!hasOuterDimension &&
           hasInnerDimension &&
-          innerFilterIds?.map((innerId, index) => (
+          innerFilterIds?.map((innerId, _index) => (
             <InnerCard
               key={innerId}
               innerId={innerId}
