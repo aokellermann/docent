@@ -47,10 +47,6 @@ import { ProgressBar } from './ProgressBar';
 import { requestDiffs } from '../store/diffSlice';
 import DebugReduxState from '../debug/DebugReduxState';
 
-interface SearchAreaProps {
-  onShowAgentRun?: (agentRunId: string, blockId?: number) => void;
-}
-
 // Preset search queries with custom icons
 const PRESET_QUERIES = [
   {
@@ -77,7 +73,7 @@ const PRESET_QUERIES = [
 const DEFAULT_PLACEHOLDER_TEXT =
   "Describe what you're looking for in detail, or try a sample preset above";
 
-const SearchArea: React.FC<SearchAreaProps> = ({ onShowAgentRun }) => {
+const SearchArea = () => {
   const dispatch = useAppDispatch();
   const router = useRouter();
 
@@ -763,7 +759,6 @@ const SearchArea: React.FC<SearchAreaProps> = ({ onShowAgentRun }) => {
                         marginalJudgments={
                           marginals?.[activeDim.id]?.[bin.id] || undefined
                         }
-                        onShowAgentRun={onShowAgentRun || (() => {})}
                       />
                     ))}
                   </div>

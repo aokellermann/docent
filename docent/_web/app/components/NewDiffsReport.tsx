@@ -24,7 +24,8 @@ export function NewDiffsReport({
   const experiment2Ref = useRef<HTMLInputElement>(null);
 
   // Get frameGridId from URL for navigation
-  const frameGridId = searchParams.get('eval_id') || searchParams.get('frameGridId');
+  const frameGridId =
+    searchParams.get('fg_id') || searchParams.get('frameGridId');
 
   useEffect(() => {
     const param1 = searchParams.get('experimentId1') || '';
@@ -47,11 +48,15 @@ export function NewDiffsReport({
     }
     setLoading(true);
     try {
-      const diffsReportId = await dispatch(requestDiffs({ experimentId1: exp1, experimentId2: exp2 })).unwrap();
+      const diffsReportId = await dispatch(
+        requestDiffs({ experimentId1: exp1, experimentId2: exp2 })
+      ).unwrap();
       // Navigate to the diff reports page with the diffs report ID
-      console.log("Diff Report ID", diffsReportId)
+      console.log('Diff Report ID', diffsReportId);
       if (frameGridId) {
-        router.push(`/dashboard/${frameGridId}/diff_reports?diffsReportId=${diffsReportId}`);
+        router.push(
+          `/dashboard/${frameGridId}/diff_reports?diffsReportId=${diffsReportId}`
+        );
       }
     } finally {
       setLoading(false);
@@ -66,13 +71,17 @@ export function NewDiffsReport({
           Compare results between two different experiment runs.
         </div>
       </div>
-      <div className={cn(
-        'border rounded-md p-2 space-y-2',
-        'bg-gray-50 dark:bg-gray-900/60'
-      )}>
+      <div
+        className={cn(
+          'border rounded-md p-2 space-y-2',
+          'bg-gray-50 dark:bg-gray-900/60'
+        )}
+      >
         <div className="grid grid-cols-2 gap-2">
           <div className="space-y-1">
-            <div className="text-xs text-gray-600 dark:text-gray-400">Experiment 1</div>
+            <div className="text-xs text-gray-600 dark:text-gray-400">
+              Experiment 1
+            </div>
             <Input
               ref={experiment1Ref}
               defaultValue={experimentId1}
@@ -86,7 +95,9 @@ export function NewDiffsReport({
             />
           </div>
           <div className="space-y-1">
-            <div className="text-xs text-gray-600 dark:text-gray-400">Experiment 2</div>
+            <div className="text-xs text-gray-600 dark:text-gray-400">
+              Experiment 2
+            </div>
             <Input
               ref={experiment2Ref}
               defaultValue={experimentId2}

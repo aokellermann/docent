@@ -6,11 +6,15 @@ import { useAppSelector } from '../store/hooks';
 import { Claim, TranscriptDiff } from '../store/diffSlice';
 import { AgentRunMetadata } from './AgentRunMetadata';
 import React, { useCallback, useState } from 'react';
-import { ChevronRight, Info , FileText } from 'lucide-react';
+import { ChevronRight, Info, FileText } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { BASE_DOCENT_PATH } from '../constants';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { CitationRenderer } from '@/components/CitationRenderer';
 
 type Props = {
@@ -18,7 +22,7 @@ type Props = {
 };
 const useHandleShowAgentRun = () => {
   const router = useRouter();
-  const evalId = useAppSelector((state) => state.frame.evalId);
+  const fgId = useAppSelector((state) => state.frame.frameGridId);
 
   const handleShowAgentRun = useCallback(
     (
@@ -29,7 +33,7 @@ const useHandleShowAgentRun = () => {
     ) => {
       console.log('PARAMS', agentRunId, blockIdx, blockIdx2, paired);
       let prefix =
-        `${BASE_DOCENT_PATH}/${evalId}/` +
+        `${BASE_DOCENT_PATH}/${fgId}/` +
         (paired ? 'paired_transcript' : 'transcript') +
         `/${agentRunId}`;
       if (blockIdx != undefined) {
@@ -41,7 +45,7 @@ const useHandleShowAgentRun = () => {
       console.log('PUSHING', prefix);
       router.push(prefix);
     },
-    [router, evalId]
+    [router, fgId]
   );
 
   return handleShowAgentRun;
@@ -50,12 +54,26 @@ const useHandleShowAgentRun = () => {
 // Badge helper for agent names
 export const agentBadge = (agent: 'Agent 1' | 'Agent 2') => {
   const map = {
-    'Agent 1': { name: 'Sonnet 3.5', badge: '[Agent 1]', color: 'bg-orange-100/20 text-orange-800 dark:bg-orange-900/50 dark:text-orange-200' },
-    'Agent 2': { name: 'Sonnet 3.7', badge: '[Agent 2]', color: 'bg-sky-100/20 text-sky-800 dark:bg-sky-900/50 dark:text-sky-200' },
+    'Agent 1': {
+      name: 'Sonnet 3.5',
+      badge: '[Agent 1]',
+      color:
+        'bg-orange-100/20 text-orange-800 dark:bg-orange-900/50 dark:text-orange-200',
+    },
+    'Agent 2': {
+      name: 'Sonnet 3.7',
+      badge: '[Agent 2]',
+      color: 'bg-sky-100/20 text-sky-800 dark:bg-sky-900/50 dark:text-sky-200',
+    },
   };
   const { name, badge, color } = map[agent];
   return (
-    <span className={cn('inline-flex items-center gap-1 rounded px-1 py-0.5 text-xs font-semibold', color)}>
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 rounded px-1 py-0.5 text-xs font-semibold',
+        color
+      )}
+    >
       {name} <span className="opacity-70">{badge}</span>
     </span>
   );
@@ -67,7 +85,11 @@ export const interpolateAgentBadges = (text: string) => {
   const parts = text.split(/(Agent 1|Agent 2)/g);
   return parts.map((part, idx) => {
     if (part === 'Agent 1' || part === 'Agent 2') {
-      return <React.Fragment key={idx}>{agentBadge(part as 'Agent 1' | 'Agent 2')}</React.Fragment>;
+      return (
+        <React.Fragment key={idx}>
+          {agentBadge(part as 'Agent 1' | 'Agent 2')}
+        </React.Fragment>
+      );
     }
     return <React.Fragment key={idx}>{part}</React.Fragment>;
   });
@@ -78,8 +100,13 @@ type AgentMetadataSummaryProps = {
   agentLabel: 'Agent 1' | 'Agent 2';
 };
 
-const AgentMetadataSummary = ({ agentRunId, agentLabel }: AgentMetadataSummaryProps) => {
-  const agentRunMetadata = useAppSelector((state) => state.frame.agentRunMetadata);
+const AgentMetadataSummary = ({
+  agentRunId,
+  agentLabel,
+}: AgentMetadataSummaryProps) => {
+  const agentRunMetadata = useAppSelector(
+    (state) => state.frame.agentRunMetadata
+  );
   const meta = agentRunMetadata?.[agentRunId];
   let isCorrect: boolean | undefined = undefined;
   if (meta && meta.scores && typeof meta.default_score_key === 'string') {
@@ -96,15 +123,25 @@ const AgentMetadataSummary = ({ agentRunId, agentLabel }: AgentMetadataSummaryPr
       <div className="flex items-center gap-0.5 text-xs py-1">
         {agentBadge(agentLabel)}
         {isCorrect !== undefined && (
-          <span className={cn(
-            "text-xs px-1 py-0.5 font-semibold rounded",
-            isCorrect ? "text-green-500 dark:text-green-400" : "text-red-500 dark:text-red-400"
-          )}>
-            {isCorrect ? "✓ Correct" : "✗ Incorrect"}
+          <span
+            className={cn(
+              'text-xs px-1 py-0.5 font-semibold rounded',
+              isCorrect
+                ? 'text-green-500 dark:text-green-400'
+                : 'text-red-500 dark:text-red-400'
+            )}
+          >
+            {isCorrect ? '✓ Correct' : '✗ Incorrect'}
           </span>
         )}
-        <button onClick={toggle} className="ml-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 focus:outline-none" aria-label="Show details">
-          <span className="text-lg leading-none"><Info className="w-4 h-4" /> </span>
+        <button
+          onClick={toggle}
+          className="ml-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 focus:outline-none"
+          aria-label="Show details"
+        >
+          <span className="text-lg leading-none">
+            <Info className="w-4 h-4" />{' '}
+          </span>
         </button>
       </div>
       {showDetails && (
@@ -120,10 +157,12 @@ export const TranscriptDiffSummary = ({ diffKey }: Props) => {
   const diff = useAppSelector(
     (state) => state.diff.transcriptDiffsByKey[diffKey]
   );
-  const filteredClaimIds = useAppSelector((state) => state.diff.filteredClaimIds);
+  const filteredClaimIds = useAppSelector(
+    (state) => state.diff.filteredClaimIds
+  );
   if (!diff) {
     return null;
-}
+  }
   if (!diff.claims || diff.claims.length === 0) {
     return (
       <Card>
@@ -147,7 +186,6 @@ export const TranscriptDiffSummary = ({ diffKey }: Props) => {
 
   return (
     <Card>
-
       <div className="">
         <h2
           className={cn(
@@ -157,19 +195,20 @@ export const TranscriptDiffSummary = ({ diffKey }: Props) => {
         >
           Transcript Differences for Task
         </h2>
-        <h1
-          className={cn(
-            'text-sm  mb-1',
-            'text-gray-900 dark:text-gray-100'
-          )}
-        >
+        <h1 className={cn('text-sm  mb-1', 'text-gray-900 dark:text-gray-100')}>
           {diff.title}
         </h1>
       </div>
       <CardContent className="space-y-1">
-        <div className={cn("grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2")}>
-          <AgentMetadataSummary agentRunId={diff.agent_run_1_id} agentLabel="Agent 1" />
-          <AgentMetadataSummary agentRunId={diff.agent_run_2_id} agentLabel="Agent 2" />
+        <div className={cn('grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2')}>
+          <AgentMetadataSummary
+            agentRunId={diff.agent_run_1_id}
+            agentLabel="Agent 1"
+          />
+          <AgentMetadataSummary
+            agentRunId={diff.agent_run_2_id}
+            agentLabel="Agent 2"
+          />
         </div>
         {filteredClaims.map((claim, idx) => (
           <DiffClaimView key={idx} claim={claim} transcriptDiff={diff} />
@@ -187,7 +226,7 @@ const DiffClaimView = ({ claim, transcriptDiff }: ClaimProps) => {
   const [expanded, setExpanded] = useState(false);
   const [showEvidence, setShowEvidence] = useState(false);
   const handleShowAgentRun = useHandleShowAgentRun();
-  const evalId = useAppSelector((state) => state.frame.evalId);
+  const fgId = useAppSelector((state) => state.frame.frameGridId);
   const router = useRouter();
 
   return (
@@ -247,7 +286,7 @@ const DiffClaimView = ({ claim, transcriptDiff }: ClaimProps) => {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Link
-                  href={`${BASE_DOCENT_PATH}/${evalId}/paired_transcript/${transcriptDiff.agent_run_1_id}___${transcriptDiff.agent_run_2_id}?block_id=0&block_id_2=0&claim_id=${claim.id}`}
+                  href={`${BASE_DOCENT_PATH}/${fgId}/paired_transcript/${transcriptDiff.agent_run_1_id}___${transcriptDiff.agent_run_2_id}?block_id=0&block_id_2=0&claim_id=${claim.id}`}
                   className={cn(
                     'ml-2 p-1 rounded-full',
                     'hover:bg-gray-200 dark:hover:bg-gray-700',
@@ -327,7 +366,7 @@ const DiffClaimView = ({ claim, transcriptDiff }: ClaimProps) => {
                     text={claim.evidence_with_citations.evidence}
                     citations={claim.evidence_with_citations.citations || []}
                     onCitationClick={(citation) => {
-                      const url = `${BASE_DOCENT_PATH}/${evalId}/paired_transcript/${transcriptDiff.agent_run_1_id}___${transcriptDiff.agent_run_2_id}?block_id=${citation.block_idx}${citation.transcript_idx === 1 ? `&block_id_2=${citation.block_idx}` : ''}&claim_id=${claim.id}`;
+                      const url = `${BASE_DOCENT_PATH}/${fgId}/paired_transcript/${transcriptDiff.agent_run_1_id}___${transcriptDiff.agent_run_2_id}?block_id=${citation.block_idx}${citation.transcript_idx === 1 ? `&block_id_2=${citation.block_idx}` : ''}&claim_id=${claim.id}`;
                       router.push(url);
                     }}
                   />

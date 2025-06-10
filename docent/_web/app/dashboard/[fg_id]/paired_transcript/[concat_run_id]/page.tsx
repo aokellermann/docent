@@ -8,7 +8,7 @@ import { getCurAgentRun, getAltAgentRun } from '@/app/store/transcriptSlice';
 
 import TranscriptViewer, {
   TranscriptViewerHandle,
-} from '@/app/dashboard/[eval_id]/transcript/components/TranscriptViewer';
+} from '@/app/dashboard/[fg_id]/transcript/components/TranscriptViewer';
 import DiffPanel from './components/DiffPanel';
 
 const SCROLL_DELAY = 250;
