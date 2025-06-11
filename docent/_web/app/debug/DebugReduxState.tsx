@@ -259,12 +259,14 @@ const DebugReduxState: React.FC<DebugReduxStateProps> = ({
   return (
     <div
       className={cn(
-        'rounded-lg border bg-card p-2 shadow-sm bg-yellow-500/10 font-mono text-sm',
+        'rounded-lg border bg-card p-2 shadow-sm bg-yellow-500/10 font-mono',
         className
       )}
     >
-      <h3 className="mb-2 font-semibold">Debug: {sliceName}</h3>
-      <div className="space-y-1">{formatValue(state, 0, 1, 'root')}</div>
+      <h3 className="mb-2 font-semibold text-sm">Debug: {sliceName}</h3>
+      <div className="space-y-1 text-xs">
+        {formatValue(state, 0, 1, 'root')}
+      </div>
     </div>
   );
 };
