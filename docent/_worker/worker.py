@@ -65,9 +65,8 @@ async def compute_search(ctx: dict[Any, Any], view_ctx: ViewContext, job_id: str
                     print(f"job {job_id} completed")
                     await db.set_job_status(job_id, JobStatus.COMPLETED)
 
-                await REDIS.delete(f"results_{job_id}")
-
                 await publish_searches(db, view_ctx)
+                await REDIS.delete(f"results_{job_id}")
 
     async def await_commands():
         q = f"commands_{job_id}"
