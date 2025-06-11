@@ -16,6 +16,7 @@ from typing import (
     Literal,
     ParamSpec,
     Sequence,
+    Tuple,
     TypedDict,
     TypeVar,
     cast,

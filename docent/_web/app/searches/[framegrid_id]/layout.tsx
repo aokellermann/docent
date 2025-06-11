@@ -12,5 +12,6 @@ export default async function AuthenticatedLayout({ children }: { children: Reac
   // TODO(vincent): this import no longer exists
   // await requireAuth();
 
+
   return <>{children}</>;
 }

@@ -11,7 +11,6 @@ from pydantic_core import to_jsonable_python
 
 from docent._ai_tools.search import SearchResult
 from docent._db_service.contexts import ViewContext
-
 from docent._db_service.schemas.tables import JobStatus
 from docent._db_service.service import DBService
 from docent._env_util import ENV
