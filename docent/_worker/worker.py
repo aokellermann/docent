@@ -99,5 +99,6 @@ def run():
             "functions": [compute_search],
             "redis_settings": RedisSettings(host=REDIS_HOST, port=REDIS_PORT),
             "queue_name": "compute_search_queue",
+            "max_jobs": 5,  # Allow up to 5 concurrent jobs per worker
         }
     )
