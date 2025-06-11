@@ -652,7 +652,7 @@ class DBService:
         new_ctx = ViewContext(fg_id=ctx.fg_id, view_id=ctx.view_id, base_filter=None)
 
         # Base filter might trigger a new clustering of metadata dimensions
-        await self._refresh_metadata_dims(ctx)
+        await self._refresh_metadata_dims(new_ctx)
 
         return new_ctx
 
