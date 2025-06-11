@@ -1317,11 +1317,13 @@ class DBService:
         else:
             logger.info(f"Computing results for {len(agent_runs)} datapoints")
 
-        async def _results_callback(search_results: list[SearchResult]):
+        async def _results_callback(search_results: list[SearchResult] | None):
             if search_result_callback:
                 await search_result_callback(search_results)
 
             with anyio.CancelScope(shield=True):
+                if search_results is None:
+                    return
                 to_upload: list[SQLASearchResult] = [
                     SQLASearchResult.from_search_result(
                         search_result=attr,
@@ -1901,7 +1903,7 @@ class DBService:
                 .limit(1)
             )
             existing: SQLAJob | None = result.scalar_one_or_none()
-            if existing is not None and existing.status != JobStatus.CANCELED:
+            if existing is not None and existing.status in [JobStatus.PENDING, JobStatus.RUNNING]:
                 return False, existing.id
 
             # Otherwise, create a new job

@@ -156,8 +156,8 @@ def _parse_tool_choice(tool_choice: Literal["auto", "required"] | None) -> ToolC
     or isinstance(e, PermissionDeniedError)
     or isinstance(e, NotFoundError)
     or isinstance(e, UnprocessableEntityError),
-    max_tries=3,
-    factor=2.0,
+    max_tries=5,
+    factor=3.0,
     on_backoff=_print_backoff_message,
 )
 async def get_anthropic_chat_completion_streaming_async(
@@ -289,8 +289,8 @@ def update_llm_output(
     or isinstance(e, PermissionDeniedError)
     or isinstance(e, NotFoundError)
     or isinstance(e, UnprocessableEntityError),
-    max_tries=3,
-    factor=2.0,
+    max_tries=5,
+    factor=3.0,
     on_backoff=_print_backoff_message,
 )
 async def get_anthropic_chat_completion_async(

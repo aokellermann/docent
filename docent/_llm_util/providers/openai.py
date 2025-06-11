@@ -166,8 +166,8 @@ def _parse_tools(tools: list[ToolInfo]) -> list[ChatCompletionToolParam]:
     or isinstance(e, PermissionDeniedError)
     or isinstance(e, NotFoundError)
     or isinstance(e, UnprocessableEntityError),
-    max_tries=3,
-    factor=2.0,
+    max_tries=5,
+    factor=3.0,
     on_backoff=_print_backoff_message,
 )
 async def get_openai_chat_completion_streaming_async(
@@ -339,8 +339,8 @@ def update_llm_output(llm_output_partial: LLMOutputPartial | None, chunk: ChatCo
     or isinstance(e, PermissionDeniedError)
     or isinstance(e, NotFoundError)
     or isinstance(e, UnprocessableEntityError),
-    max_tries=3,
-    factor=2.0,
+    max_tries=5,
+    factor=3.0,
     on_backoff=_print_backoff_message,
 )
 async def get_openai_chat_completion_async(
