@@ -8,16 +8,17 @@ import {
   useCallback,
 } from 'react';
 import { UserPermissions } from '../services/permissionsService';
+import { PERMISSION_LEVELS, PermissionLevel } from '@/lib/permissions/types';
 
 interface PermissionsContextType {
   permissions: UserPermissions | null;
   hasFramegridPermission: (
     frameGridId: string,
-    requiredLevel: 'read' | 'write' | 'admin'
+    requiredLevel: PermissionLevel
   ) => boolean;
   hasViewPermission: (
     viewId: string,
-    requiredLevel: 'read' | 'write' | 'admin'
+    requiredLevel: PermissionLevel
   ) => boolean;
   frameGridId: string;
 }
@@ -32,23 +33,13 @@ interface PermissionsProviderProps {
   permissions: UserPermissions | null;
 }
 
-const PERMISSION_LEVELS = {
-  none: 0,
-  read: 1,
-  write: 2,
-  admin: 3,
-};
-
 export const PermissionsProvider = ({
   children,
   frameGridId,
   permissions,
 }: PermissionsProviderProps) => {
   const hasFramegridPermission = useCallback(
-    (
-      frameGridId: string,
-      requiredLevel: 'read' | 'write' | 'admin'
-    ): boolean => {
+    (frameGridId: string, requiredLevel: PermissionLevel): boolean => {
       if (!permissions?.framegrid_permissions) return false;
 
       const userLevel =
@@ -62,14 +53,11 @@ export const PermissionsProvider = ({
   );
 
   const hasViewPermission = useCallback(
-    (viewId: string, requiredLevel: 'read' | 'write' | 'admin'): boolean => {
+    (viewId: string, requiredLevel: PermissionLevel): boolean => {
       if (!permissions?.view_permissions) return false;
 
       const userLevel = permissions.view_permissions[viewId] || 'none';
-      return (
-        PERMISSION_LEVELS[userLevel as keyof typeof PERMISSION_LEVELS] >=
-        PERMISSION_LEVELS[requiredLevel]
-      );
+      return PERMISSION_LEVELS[userLevel] >= PERMISSION_LEVELS[requiredLevel];
     },
     [permissions]
   );

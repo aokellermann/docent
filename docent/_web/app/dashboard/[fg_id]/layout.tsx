@@ -2,6 +2,7 @@ import { cookies, headers } from 'next/headers';
 import DocentDashboardClientLayout from './client-layout';
 import { PermissionsProvider } from '../../contexts/PermissionsContext';
 import { serverPermissionsService } from '../../services/permissionsService';
+import { PERMISSION_LEVELS } from '@/lib/permissions/types';
 
 export default async function DocentDashboardLayout({
   children,
@@ -32,12 +33,6 @@ export default async function DocentDashboardLayout({
 
     // Check if user has read access to this framegrid
     const userLevel = permissions.framegrid_permissions[fgId] || 'none';
-    const PERMISSION_LEVELS = {
-      none: 0,
-      read: 1,
-      write: 2,
-      admin: 3,
-    };
 
     const hasReadAccess =
       PERMISSION_LEVELS[userLevel as keyof typeof PERMISSION_LEVELS] >=

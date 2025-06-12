@@ -1,9 +1,10 @@
+import { PermissionLevel } from '@/lib/permissions/types';
 import { apiRestClient } from './apiService';
 import { BASE_URL } from '@/app/constants';
 
 export interface UserPermissions {
-  framegrid_permissions: Record<string, string | null>;
-  view_permissions: Record<string, string | null>;
+  framegrid_permissions: Record<string, PermissionLevel>;
+  view_permissions: Record<string, PermissionLevel>;
 }
 
 export const permissionsService = {
