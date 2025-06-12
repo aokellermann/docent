@@ -16,7 +16,6 @@ from typing import (
     Literal,
     ParamSpec,
     Sequence,
-    Tuple,
     TypedDict,
     TypeVar,
     cast,
@@ -158,8 +157,8 @@ class DBService:
         engine: AsyncEngine,
         Session: async_sessionmaker[AsyncSession],
     ):
-        self.engine = engine
-        self.Session = Session
+        self._engine = engine
+        self._Session = Session
 
     @classmethod
     async def init(cls):
@@ -291,16 +290,16 @@ class DBService:
         WARNING: This will permanently delete all data.
         """
         # Safety check to prevent dropping tables from the postgres system database
-        if self.engine.url.database == "postgres":
+        if self._engine.url.database == "postgres":
             raise ValueError("Refusing to drop tables from the 'postgres' system database")
 
-        async with self.engine.begin() as conn:
+        async with self._engine.begin() as conn:
             await conn.run_sync(SQLABase.metadata.drop_all)
 
     @asynccontextmanager
     async def session(self) -> AsyncIterator[AsyncSession]:
         """Provide a transactional scope around a series of operations."""
-        session = self.Session()
+        session = self._Session()
         try:
             yield session
             await session.commit()
@@ -1177,30 +1176,31 @@ class DBService:
 
         # TODO(vincent): flexible binning and comparisons
 
-        datapoints = await self.get_agent_runs(ctx)
+        agent_runs = await self.get_agent_runs(ctx)
         from docent._ai_tools.diffs.models import SQLADiffsReport
 
-        dbs = self.Session()
-        result = await dbs.execute(
-            select(SQLADiffsReport).where(SQLADiffsReport.id == diffs_report_id)
-        )
-        diffs_report = result.scalar_one()
+        async with self.session() as session:
+            result = await session.execute(
+                select(SQLADiffsReport).where(SQLADiffsReport.id == diffs_report_id)
+            )
+            diffs_report = result.scalar_one()
+
         experiment_id_1 = diffs_report.experiment_id_1
         experiment_id_2 = diffs_report.experiment_id_2
 
-        print(f"have {len(datapoints)} datapoints", experiment_id_1, experiment_id_2)
+        logger.info(f"have {len(agent_runs)} datapoints", experiment_id_1, experiment_id_2)
 
         # group by sample_id, task_id, epoch_id
-        datapoints_by_sample_task_epoch: dict[tuple[str, str, str], list[AgentRun]] = {}
-        for dp in datapoints:
+        agent_runs_by_sample_task_epoch: dict[tuple[str, str, str], list[AgentRun]] = {}
+        for dp in agent_runs:
             key = (
                 str(dp.metadata.get("sample_id")),
                 str(dp.metadata.get("task_id")),
                 str(dp.metadata.get("epoch_id")),
             )
-            if key not in datapoints_by_sample_task_epoch:
-                datapoints_by_sample_task_epoch[key] = []
-            datapoints_by_sample_task_epoch[key].append(dp)
+            if key not in agent_runs_by_sample_task_epoch:
+                agent_runs_by_sample_task_epoch[key] = []
+            agent_runs_by_sample_task_epoch[key].append(dp)
 
         existing_diff_pairs = {}
         from docent._ai_tools.diffs.models import SQLATranscriptDiff
@@ -1208,7 +1208,6 @@ class DBService:
         if should_include_existing_diffs:
             # Get existing diff results from database
             async with self.session() as session:
-
                 result = await session.execute(
                     select(SQLATranscriptDiff).where(
                         SQLATranscriptDiff.frame_grid_id == ctx.fg_id,
@@ -1226,12 +1225,12 @@ class DBService:
         tasks: list[Coroutine[Any, Any, TranscriptDiff]] = []
         pairs_to_compute: list[tuple[str, str]] = []
 
-        for datapoint_lists in datapoints_by_sample_task_epoch.values():
+        for agent_run_lists in agent_runs_by_sample_task_epoch.values():
             first_pair_candidates = [
-                dp for dp in datapoint_lists if dp.metadata.get("experiment_id") == experiment_id_1
+                dp for dp in agent_run_lists if dp.metadata.get("experiment_id") == experiment_id_1
             ]
             second_pair_candidates = [
-                dp for dp in datapoint_lists if dp.metadata.get("experiment_id") == experiment_id_2
+                dp for dp in agent_run_lists if dp.metadata.get("experiment_id") == experiment_id_2
             ]
 
             if len(first_pair_candidates) > 0 and len(second_pair_candidates) > 0:
@@ -1249,7 +1248,6 @@ class DBService:
         results = await asyncio.gather(*tasks)
 
         # Store results in database if should_persist is True
-
         from docent._ai_tools.diffs.models import SQLATranscriptDiff
 
         transcript_diffs_models: list[SQLATranscriptDiff] = []
@@ -1262,9 +1260,11 @@ class DBService:
         if transcript_diffs_models and should_persist:
             for transcript_diff in transcript_diffs_models:
                 transcript_diff.diffs_report_id = diffs_report.id
-            dbs.add_all(transcript_diffs_models)
-            dbs.add(diffs_report)
-            await dbs.commit()
+
+            async with self.session() as session:
+                session.add_all(transcript_diffs_models)
+                session.add(diffs_report)
+
             logger.info(
                 f"Pushed {len(transcript_diffs_models)} diff attributes and updated Report{diffs_report.id}"
             )
@@ -1285,13 +1285,13 @@ class DBService:
             if existing_search_results:
                 await search_result_callback(existing_search_results)
 
-        # Figure out which datapoints don't have search results computed
+        # Figure out which runs don't have search results computed
         agent_runs = await self._get_agent_runs_without_search_results(ctx, search_query)
         if not agent_runs:
-            logger.info(f"All datapoints already have results for {search_query}")
+            logger.info(f"All agent runs already have results for {search_query}")
             return
         else:
-            logger.info(f"Computing results for {len(agent_runs)} datapoints")
+            logger.info(f"Computing results for {len(agent_runs)} agent runs")
 
         async def _results_callback(search_results: list[SearchResult] | None):
             if search_result_callback:

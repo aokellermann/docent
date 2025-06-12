@@ -1,6 +1,5 @@
 'use client';
 
-import DebugReduxState from '@/app/debug/DebugReduxState';
 import { useSearchParams } from 'next/navigation';
 import { TranscriptDiffExplorer } from '@/app/components/TranscriptDiffExplorer';
 import { requestDiffsReport } from '@/app/store/diffSlice';
@@ -24,7 +23,7 @@ export default function DiffReportPage() {
 
   return (
     <div className="p-4">
-      <DebugReduxState sliceName="diff" />
+      {/* <DebugReduxState sliceName="diff" /> */}
       {diffReport ? (
         <TranscriptDiffExplorer />
       ) : (

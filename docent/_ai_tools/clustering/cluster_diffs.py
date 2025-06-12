@@ -1,54 +1,62 @@
 import asyncio
 from typing import Any, Callable, Coroutine
+
 from docent._ai_tools.clustering.cluster_assigner import LlmApiClusterAssigner
 from docent._ai_tools.clustering.cluster_generator import propose_clusters
 from docent._ai_tools.diffs.models import Claim, DiffTheme
 
 
-def extract_fn(llm_output: str) -> list[DiffTheme]:
+def make_extract_fn(indices_to_ids: dict[int, str]) -> Callable[[str], list[DiffTheme]]:
     import json
+
     from docent._ai_tools.diffs.models import DiffTheme
 
-    try:
-        print('-------------------------------- JSON extraction --------------------------------')
-        print(llm_output)
-        response = json.loads(llm_output)
-        return [
-            DiffTheme(
-                name=theme["name"],
-                description=theme["description"],
-                claim_ids=theme["claim_ids"]
+    def _f(llm_output: str) -> list[DiffTheme]:
+        try:
+            print(
+                "-------------------------------- JSON extraction --------------------------------"
             )
-            for theme in response["themes"]
-        ]
-    except json.JSONDecodeError:
-        return []
+            print(llm_output)
+            response = json.loads(llm_output)
+            return [
+                DiffTheme(
+                    name=theme["name"],
+                    description=theme["description"],
+                    claim_ids=[indices_to_ids[int(x)] for x in theme["claim_indices"]],
+                )
+                for theme in response["themes"]
+            ]
+        except json.JSONDecodeError:
+            return []
+
+    return _f
 
 
-CLAIM_FMT_2 = """
-<claim>
-    {{claim.claim_summary}}
-    <claim_id>{{claim.id}}</claim_id>
-    <shared_context>
-        {{claim.shared_context}}
-    </shared_context>
-    <agent_1_action>
-        {{claim.agent_1_action}}
-    </agent_1_action>
-    <agent_2_action>
-        {{claim.agent_2_action}}
-    </agent_2_action>
-    <evidence>
-        {{claim.evidence}}
-    </evidence>
-</claim>
-"""
+# CLAIM_FMT_2 = """
+# <claim>
+#     {{claim_summary}}
+#     <claim_index>{{claim_index}}</claim_index>
+#     <shared_context>
+#         {{shared_context}}
+#     </shared_context>
+#     <agent_1_action>
+#         {{agent_1_action}}
+#     </agent_1_action>
+#     <agent_2_action>
+#         {{agent_2_action}}
+#     </agent_2_action>
+#     <evidence>
+#         {{evidence}}
+#     </evidence>
+# </claim>
+# """
+
+# The list will be given in the following format:
+# {CLAIM_FMT_2}
 
 
 def prompt_build_fn(extra_instructions: str, diffs: list[str]) -> str:
-    prompt = f"""You will be given a list of summaries of differences between two agents' performances on a variety of tasks. The list will be given in the following format:
-
-            {CLAIM_FMT_2}
+    prompt = f"""You will be given a list of summaries of differences between two agents' performances on a variety of tasks.
 
 Based on this list, please propose a list of recurring themes where the first agent and the second agent consistently have different behaviors. Avoid repeating yourself in the output.
 Try to choose recurring themes where the evidence for the theme clearly outweighs evidence in the reverse direction.
@@ -56,7 +64,7 @@ Try to choose recurring themes where the evidence for the theme clearly outweigh
 Themes should contain exactly one idea/concept each.
 Themes should be mutually exclusive: no two themes should describe the same thing.
 Themes should be collectively exhaustive: no item of the list should be left out.
-Themes should include all the claims that are relevant to the theme; cite these by their claimIds.
+Themes should include all the claims that are relevant to the theme; cite these by their claim indices.
 
 Format the entirety of your output as a json object with the following format:
 {{
@@ -64,7 +72,7 @@ Format the entirety of your output as a json object with the following format:
         {{
             "name": "Theme Name",
             "description": "Description of the theme and how it relates to the observed differences between agent 1 and agent 2",
-            "claim_ids": ["claimId1", "claimId2", "claimId3"]
+            "claim_indices": [0, 1, 2]
         }},
         ...
     ]
@@ -79,16 +87,16 @@ Here is the list of differences:
 {'\n----------------\n'.join(diffs)}
     """.strip()
 
-    print('-------------------------------- Prompt --------------------------------')
+    print("-------------------------------- Prompt --------------------------------")
     print(prompt)
     return prompt
 
 
-def format_transcript_diff_claim(claim: Claim) -> str:
+def format_transcript_diff_claim(claim: Claim, index: int) -> str:
     return f"""
 <claim>
     {claim.claim_summary}
-    <claim_id>{claim.id}</claim_id>
+    <claim_index>{index}</claim_index>
     <shared_context>
         {claim.shared_context}
     </shared_context>
@@ -108,9 +116,15 @@ def format_transcript_diff_claim(claim: Claim) -> str:
 async def cluster_diff_claims(
     claims: list[Claim],
 ) -> list[DiffTheme]:
+    formatted_claims = [
+        format_transcript_diff_claim(claim, index) for index, claim in enumerate(claims)
+    ]
+
+    indices_to_ids = {index: claim.id for index, claim in enumerate(claims)}
+
     cluster_centroids: list[DiffTheme] = (
         await propose_clusters(
-            [format_transcript_diff_claim(claim) for claim in claims],
+            formatted_claims,
             n_clusters_list=[None],
             extra_instructions_list=[
                 "Specifically focus on the following attribute: ways in which agent 1 and agent 2 differ"
@@ -118,7 +132,7 @@ async def cluster_diff_claims(
             feedback_list=[],
             k=1,
             clustering_prompt_fn=prompt_build_fn,
-            output_extractor=extract_fn,
+            output_extractor=make_extract_fn(indices_to_ids),
         )
     )[0]
     return cluster_centroids
@@ -174,6 +188,7 @@ async def search_over_diffs(
         tasks.append(search_fn(claim))
     results = await asyncio.gather(*tasks)
     return results
+
 
 # async def assign_diff_claims_to_clusters(
 #     claims: list[Claim],

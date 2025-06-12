@@ -1241,21 +1241,26 @@ async def start_compute_diffs(
     from docent._ai_tools.diffs.models import SQLADiffsReport
 
     # Check if a report already exists for these experiment IDs
-    existing_report = (
-        await db.Session().execute(
-            select(SQLADiffsReport).where(
-                SQLADiffsReport.experiment_id_1 == request.experiment_id_1,
-                SQLADiffsReport.experiment_id_2 == request.experiment_id_2,
-                SQLADiffsReport.frame_grid_id == fg_id,
+    # FIXME(mengk): SQL should not be in the router
+    async with db.session() as session:
+        existing_report = (
+            await session.execute(
+                select(SQLADiffsReport).where(
+                    SQLADiffsReport.experiment_id_1 == request.experiment_id_1,
+                    SQLADiffsReport.experiment_id_2 == request.experiment_id_2,
+                    SQLADiffsReport.frame_grid_id == fg_id,
+                )
             )
-        )
-    ).scalar_one_or_none()
+        ).scalar_one_or_none()
+
+    existing_report = None  # FIXME(kevin): remove this
 
     if existing_report:
         return {
             "job_id": None,
             "diffs_report_id": existing_report.id,
         }
+
     report = SQLADiffsReport(
         id=str(uuid4()),
         frame_grid_id=fg_id,
@@ -1263,10 +1268,8 @@ async def start_compute_diffs(
         experiment_id_1=request.experiment_id_1,
         experiment_id_2=request.experiment_id_2,
     )
-    dbs = db.Session()
-    dbs.add(report)
-    await dbs.commit()
-
+    async with db.session() as session:
+        session.add(report)
     job_id = await db.add_job(
         "compute_diffs",
         {
@@ -1274,7 +1277,8 @@ async def start_compute_diffs(
             "diffs_report_id": report.id,
         },
     )
-    print("New Diff Report", report.id)
+
+    logger.info("New Diff Report", report.id)
     return {
         "job_id": job_id,
         "diffs_report_id": report.id,
@@ -1297,11 +1301,14 @@ async def listen_compute_diffs(
     if job is None:
         raise ValueError(f"Job {job_id} not found")
     diffs_report_id = job["diffs_report_id"]
-    diffs_report = (
-        await db.Session().execute(
-            select(SQLADiffsReport).where(SQLADiffsReport.id == diffs_report_id)
-        )
-    ).scalar_one()
+
+    async with db.session() as session:
+        diffs_report = (
+            await session.execute(
+                select(SQLADiffsReport).where(SQLADiffsReport.id == diffs_report_id)
+            )
+        ).scalar_one()
+
     experiment_id_1, experiment_id_2 = diffs_report.experiment_id_1, diffs_report.experiment_id_2
 
     # Create AnyIO queue that we can write intermediate results to
@@ -1547,21 +1554,22 @@ async def get_transcript_diff(
     from docent._ai_tools.diffs.models import SQLATranscriptDiff
 
     # Query for transcript diff in either direction
-    result = await db.Session().execute(
-        select(SQLATranscriptDiff).where(
-            or_(
-                and_(
-                    SQLATranscriptDiff.agent_run_1_id == agent_run_1_id,
-                    SQLATranscriptDiff.agent_run_2_id == agent_run_2_id,
-                ),
-                and_(
-                    SQLATranscriptDiff.agent_run_1_id == agent_run_2_id,
-                    SQLATranscriptDiff.agent_run_2_id == agent_run_1_id,
-                ),
+    async with db.session() as session:
+        result = await session.execute(
+            select(SQLATranscriptDiff).where(
+                or_(
+                    and_(
+                        SQLATranscriptDiff.agent_run_1_id == agent_run_1_id,
+                        SQLATranscriptDiff.agent_run_2_id == agent_run_2_id,
+                    ),
+                    and_(
+                        SQLATranscriptDiff.agent_run_1_id == agent_run_2_id,
+                        SQLATranscriptDiff.agent_run_2_id == agent_run_1_id,
+                    ),
+                )
             )
         )
-    )
-    transcript_diff = result.scalar_one_or_none()
+        transcript_diff = result.scalar_one_or_none()
 
     if not transcript_diff:
         return None

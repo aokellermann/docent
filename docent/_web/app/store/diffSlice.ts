@@ -145,11 +145,14 @@ export const requestDiffsReport = createAsyncThunk(
       experiment_id_2,
     };
 
-    const diffsByKey = diffs.reduce((acc: Record<string, TranscriptDiff>, diff: TranscriptDiff) => {
-      const pairKey = `${diff.agent_run_1_id}___${diff.agent_run_2_id}`;
-      acc[pairKey] = diff;
-      return acc;
-    }, {});
+    const diffsByKey = diffs.reduce(
+      (acc: Record<string, TranscriptDiff>, diff: TranscriptDiff) => {
+        const pairKey = `${diff.agent_run_1_id}___${diff.agent_run_2_id}`;
+        acc[pairKey] = diff;
+        return acc;
+      },
+      {}
+    );
 
     dispatch(setDiffs(diffsByKey));
     dispatch(setDiffsReport(diffReport));
@@ -198,6 +201,8 @@ export const requestDiffs = createAsyncThunk(
       );
 
       const { job_id, diffs_report_id } = response.data;
+      console.log('diffs_report_id', diffs_report_id);
+      console.log('job_id', job_id);
 
       // Set the job ID as the active diff task ID
       dispatch(setActiveDiffTaskId(job_id));

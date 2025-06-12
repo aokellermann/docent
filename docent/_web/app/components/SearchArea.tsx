@@ -33,7 +33,6 @@ import { RootState } from '../store/store';
 import BinEditor from './BinEditor';
 import { ProgressBar } from './ProgressBar';
 import { requestDiffs } from '../store/diffSlice';
-import DebugReduxState from '../debug/DebugReduxState';
 import { TranscriptFilterControls } from './TranscriptFilterControls';
 
 // Preset search queries with custom icons
@@ -250,8 +249,8 @@ const SearchArea = () => {
 
   return (
     <Card className="h-full flex overflow-y-auto flex-col flex-1 p-3">
-      <DebugReduxState sliceName="search" />
-      <DebugReduxState sliceName="diff" />
+      {/* <DebugReduxState sliceName="search" />
+      <DebugReduxState sliceName="diff" /> */}
       <div className="space-y-4">
         <TranscriptFilterControls />
         <div className="border-t" />
@@ -367,9 +366,16 @@ const SearchArea = () => {
                     </div>
                     {loadingProgress && !loadingSearchQuery && (
                       <div className="py-1 text-xs text-gray-600 ml-2">
-                        {loadingProgress[0]} searches finished, {loadingProgress[1] - loadingProgress[0]} had API issues {loadingProgress[1] - loadingProgress[0] > 0 && (
+                        {loadingProgress[0]} searches finished,{' '}
+                        {loadingProgress[1] - loadingProgress[0]} had API issues{' '}
+                        {loadingProgress[1] - loadingProgress[0] > 0 && (
                           <>
-                            <span className="cursor-pointer text-indigo-500 hover:text-indigo-600" onClick={() => handleSearch(curSearchQuery)}>(retry)</span>
+                            <span
+                              className="cursor-pointer text-indigo-500 hover:text-indigo-600"
+                              onClick={() => handleSearch(curSearchQuery)}
+                            >
+                              (retry)
+                            </span>
                           </>
                         )}
                       </div>
