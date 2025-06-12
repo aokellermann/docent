@@ -34,7 +34,7 @@ from docent._server._assistant.summarizer import (
     summarize_intended_solution,
 )
 from docent._server._auth.session import create_user_session, invalidate_user_session
-from docent._server._broker.redis_client import publish_to_broker
+from docent._server._broker.redis_client import REDIS, enqueue_search_job, publish_to_broker
 from docent._server._dependencies.database import get_db
 from docent._server._dependencies.permissions import require_fg_permission, require_view_permission
 from docent._server._dependencies.user import get_default_view_ctx, get_user_anonymous_ok
@@ -694,15 +694,13 @@ async def start_compute_search(
     fg_id: str,
     request: ComputeSearchRequest,
     db: DBService = Depends(get_db),
+    ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_fg_permission(Permission.WRITE)),
 ):
-    job_id = await db.add_job(
-        {
-            "type": "compute_search",
-            "fg_id": fg_id,
-            "search_query": request.search_query,
-        }
-    )
+    query_id = await db.add_search_query(ctx, request.search_query)
+    new, job_id = await db.add_search_job(query_id)
+    if new:
+        await enqueue_search_job(ctx, job_id)
     return job_id
 
 
@@ -718,10 +716,6 @@ async def listen_compute_search(
     job = await db.get_job(job_id)
     if job is None:
         raise ValueError(f"Job {job_id} not found")
-    fg_id, search_query = job["fg_id"], job["search_query"]
-
-    # Add search query to DB
-    await db.add_search_query(ctx, search_query)
 
     # Create AnyIO queue that we can write intermediate results to
     # At the max size of the queue, the producer will block
@@ -730,56 +724,97 @@ async def listen_compute_search(
     )
 
     # Track intermediate progress
-    progress_lock = anyio.Lock()
+    num_errors = 0
     num_done, num_total = 0, await db.count_base_agent_runs(ctx)
 
-    async def _ws_search_result_callback(search_results: list[SearchResult]) -> None:
-        nonlocal num_done
+    async def _execute():
+        # Send initial 0% state message
+        init_data = StreamedSearchResult(
+            data_dict={},
+            num_agent_runs_done=0,
+            num_agent_runs_total=num_total,
+        )
+        await send_stream.send(init_data)
+        nonlocal num_done, num_errors
 
-        async with progress_lock:
-            # Construct a map from agent_run_id -> search query -> list of SearchResultWithCitations
-            data_dict: dict[str, dict[str, list[SearchResultWithCitations]]] = {}
-            for result in search_results:
-                data_dict.setdefault(result.agent_run_id, {}).setdefault(
-                    result.search_query, []
-                ).append(SearchResultWithCitations.from_search_result(result))
+        try:
+            last_id = 0
+            while True:
+                results_batch = await REDIS.xread({f"results_{job_id}": last_id}, block=0)
 
-            # Each agent_run is only included in one callback
-            num_done += len(data_dict.keys())
+                # xread can handle multiple streams and returns a list of (stream, results) pairs; we
+                # only have one, so just index by 0 and then 1 to go directly to the results we want.
+                results_batch = results_batch[0][1]
 
-            payload = StreamedSearchResult(
-                data_dict=data_dict,
-                num_agent_runs_done=num_done,
-                num_agent_runs_total=num_total,
-            )
+                last_id = results_batch[-1][0]
 
-        # Send to event_stream so it can be sent back to the client
-        await send_stream.send(payload)
+                for _, sub_batch in results_batch:
+                    results = json.loads(sub_batch["results"])
+                    if results is None:
+                        num_errors += 1
+                        if num_done + num_errors == num_total:
+                            return
+                        continue
 
-        if num_done == num_total:
+                    results = [SearchResult.model_validate(r) for r in results]
+
+                    # Construct a map from agent_run_id -> search query -> list of SearchResultWithCitations
+                    data_dict: dict[str, dict[str, list[SearchResultWithCitations]]] = {}
+                    for result in results:
+                        data_dict.setdefault(result.agent_run_id, {}).setdefault(
+                            result.search_query, []
+                        ).append(SearchResultWithCitations.from_search_result(result))
+
+                    # Each agent_run is only included in one callback
+                    num_done += len(data_dict.keys())
+
+                    payload = StreamedSearchResult(
+                        data_dict=data_dict,
+                        num_agent_runs_done=num_done,
+                        num_agent_runs_total=num_total,
+                    )
+
+                    # Send to event_stream so it can be sent back to the client
+                    await send_stream.send(payload)
+
+                    if num_done + num_errors == num_total:
+                        return
+        finally:
             # Terminate the stream so the event_stream stops waiting
             await send_stream.aclose()
-
-    async def _execute():
-        async with db.advisory_lock(fg_id, action_id="mutation"):
-            try:
-                # Send initial 0% state message
-                init_data = StreamedSearchResult(
-                    data_dict={},
-                    num_agent_runs_done=0,
-                    num_agent_runs_total=num_total,
-                )
-                await send_stream.send(init_data)
-
-                # Compute attributes
-                await db.compute_search(ctx, search_query, _ws_search_result_callback)
-            finally:
-                with anyio.CancelScope(shield=True):
-                    await publish_searches(db, ctx)
 
     return StreamingResponse(
         sse_event_stream(_execute, recv_stream), media_type="text/event-stream"
     )
+
+
+@user_router.post("/{job_id}/cancel_compute_search")
+async def cancel_compute_search(job_id: str):
+    q = f"commands_{job_id}"
+    await REDIS.rpush(q, "cancel")
+
+
+@user_router.post("/{query_id}/resume_compute_search")
+async def resume_compute_search(
+    query_id: str,
+    db: DBService = Depends(get_db),
+):
+    new, job_id = await db.add_search_job(query_id)
+    query = await db.get_search_query(query_id)
+    ctx = await get_default_view_ctx(query.fg_id, db)
+    if new:
+        await enqueue_search_job(ctx, job_id)
+    return job_id
+
+
+@user_router.get("/search_jobs")
+async def search_jobs(
+    db: DBService = Depends(get_db),
+):
+    jobs = await db.list_search_jobs_and_queries()
+    for job in jobs:
+        print("-", job)
+    return [[job.dict(), query.dict()] for job, query in jobs]
 
 
 class ClusterDimensionRequest(BaseModel):
@@ -795,12 +830,12 @@ async def start_cluster_dimension(
     _: None = Depends(require_fg_permission(Permission.WRITE)),
 ):
     job_id = await db.add_job(
+        "cluster_dimension",
         {
-            "type": "cluster_dimension",
             "fg_id": fg_id,
             "dim_id": request.dim_id,
             "feedback": request.feedback,
-        }
+        },
     )
     return job_id
 
@@ -818,6 +853,7 @@ async def listen_cluster_dimension(
     job = await db.get_job(job_id)
     if job is None:
         raise ValueError(f"Job {job_id} not found")
+    job = job.job_json
     fg_id, dim_id, feedback = job["fg_id"], job["dim_id"], job.get("feedback")
 
     dim = await db.get_dim(dim_id)
@@ -1232,11 +1268,11 @@ async def start_compute_diffs(
     await dbs.commit()
 
     job_id = await db.add_job(
+        "compute_diffs",
         {
-            "type": "compute_diffs",
             "fg_id": fg_id,
             "diffs_report_id": report.id,
-        }
+        },
     )
     print("New Diff Report", report.id)
     return {

@@ -16,6 +16,7 @@ from typing import (
     Literal,
     ParamSpec,
     Sequence,
+    Tuple,
     TypedDict,
     TypeVar,
     cast,
@@ -48,6 +49,7 @@ from docent._db_service.schemas.auth_models import (
 )
 from docent._db_service.schemas.base import SQLABase
 from docent._db_service.schemas.tables import (
+    JobStatus,
     SQLAAccessControlEntry,
     SQLAAgentRun,
     SQLADiffAttribute,
@@ -1021,6 +1023,14 @@ class DBService:
         logger.info(f"Added new search query {search_query} with id {new_id} to fg_id {ctx.fg_id}")
         return new_id
 
+    async def get_search_query(self, query_id: str) -> SQLASearchQuery:
+        async with self.session() as session:
+            # Check if the search query already exists for this frame grid
+            result = await session.execute(
+                select(SQLASearchQuery).where(SQLASearchQuery.id == query_id)
+            )
+            return result.scalar_one()
+
     async def delete_search_query(self, fg_id: str, search_query_id: str):
         """
         Delete a search query from the database.
@@ -1088,6 +1098,8 @@ class DBService:
             )
             result = await session.execute(query)
 
+        latest_jobs = {query.id: job for job, query in await self.list_search_jobs_and_queries()}
+
         # Return search queries with judgment counts
         counts = {query: count for query, count in result.all()}
         num_total = await self.count_base_agent_runs(ctx)
@@ -1097,6 +1109,7 @@ class DBService:
                 "search_query": search_query,
                 "num_judgments_computed": counts.get(search_query, 0),
                 "num_total": num_total,
+                "job": latest_jobs[search_id],
             }
             for search_id, search_query in search_ids_and_queries
         ]
@@ -1269,7 +1282,8 @@ class DBService:
             existing_search_results = await self._get_search_results(
                 ctx, search_query, ensure_fresh=False
             )
-            await search_result_callback(existing_search_results)
+            if existing_search_results:
+                await search_result_callback(existing_search_results)
 
         # Figure out which datapoints don't have search results computed
         agent_runs = await self._get_agent_runs_without_search_results(ctx, search_query)
@@ -1279,11 +1293,13 @@ class DBService:
         else:
             logger.info(f"Computing results for {len(agent_runs)} datapoints")
 
-        async def _results_callback(search_results: list[SearchResult]):
+        async def _results_callback(search_results: list[SearchResult] | None):
             if search_result_callback:
                 await search_result_callback(search_results)
 
             with anyio.CancelScope(shield=True):
+                if search_results is None:
+                    return
                 to_upload: list[SQLASearchResult] = [
                     SQLASearchResult.from_search_result(
                         search_result=attr,
@@ -1834,7 +1850,7 @@ class DBService:
     # Jobs #
     ########
 
-    async def add_job(self, job_json: dict[str, Any], job_id: str | None = None) -> str:
+    async def add_job(self, type: str, job_json: dict[str, Any], job_id: str | None = None) -> str:
         """
         Save a job specification to the database.
 
@@ -1847,11 +1863,36 @@ class DBService:
         """
         job_id = job_id or str(uuid4())
         async with self.session() as session:
-            session.add(SQLAJob(id=job_id, job_json=job_json))
+            session.add(SQLAJob(id=job_id, type=type, created_at=datetime.now(), job_json=job_json))
             logger.info(f"Added job with ID: {job_id}")
         return job_id
 
-    async def get_job(self, job_id: str) -> dict[str, Any] | None:
+    async def add_search_job(self, query_id: str) -> tuple[bool, str]:
+        """
+        Adds or finds a search job for the given query. The first return value is whether this
+        call added a new job.
+        """
+        async with self.session() as session:
+            # Check if an equivalent job already exists
+            result = await session.execute(
+                select(SQLAJob)
+                .filter(SQLAJob.type == "compute_search")
+                .filter(SQLAJob.job_json["query_id"].astext == query_id)
+                .order_by(SQLAJob.created_at.desc())
+                .limit(1)
+            )
+            existing: SQLAJob | None = result.scalar_one_or_none()
+            if existing is not None and existing.status in [JobStatus.PENDING, JobStatus.RUNNING]:
+                return False, existing.id
+
+            # Otherwise, create a new job
+            job_id = str(uuid4())
+            session.add(SQLAJob(id=job_id, type="compute_search", job_json={"query_id": query_id}))
+            logger.info(f"Added job with ID: {job_id}")
+
+            return True, job_id
+
+    async def get_job(self, job_id: str) -> SQLAJob | None:
         """
         Retrieve a job specification from the database.
 
@@ -1863,8 +1904,54 @@ class DBService:
         """
         async with self.session() as session:
             result = await session.execute(select(SQLAJob).where(SQLAJob.id == job_id))
-            job = result.scalar_one_or_none()
-            return job.job_json if job else None
+            return result.scalar_one_or_none()
+
+    async def list_search_jobs_and_queries(self) -> list[tuple[SQLAJob, SQLASearchQuery]]:
+        async with self.session() as session:
+            # Find the latest job creation time corresponding to each query ID.
+            sub_q = (
+                select(
+                    SQLAJob.job_json["query_id"].astext.label("query_id"),
+                    func.max(SQLAJob.created_at).label("created_at"),
+                )
+                .group_by("query_id")
+                .filter(SQLAJob.type == "compute_search")
+            ).subquery()
+            # Find all search queries, along with the latest job corresponding to each one.
+            q = (
+                select(SQLAJob, SQLASearchQuery)
+                .select_from(sub_q)
+                .filter(SQLAJob.type == "compute_search")
+                .filter(SQLASearchQuery.id == sub_q.c.query_id)
+                .filter(SQLAJob.created_at == sub_q.c.created_at)
+                .order_by(SQLASearchQuery.created_at.desc())
+            )
+            result = await session.execute(q)
+
+        return result.all()
+
+    async def set_job_status(self, job_id: str, status: JobStatus):
+        async with self.session() as session:
+            await session.execute(
+                update(SQLAJob).filter(SQLAJob.id == job_id).values(status=status)
+            )
+
+    async def get_search_job_and_query(
+        self, job_id: str
+    ) -> tuple[dict[Any, Any], SQLASearchQuery] | None:
+        async with self.session() as session:
+            result = await session.execute(
+                select(SQLAJob, SQLASearchQuery)
+                .filter(SQLAJob.id == job_id)
+                .filter(SQLAJob.type == "compute_search")
+                .filter(SQLAJob.job_json["query_id"].astext == SQLASearchQuery.id)
+            )
+
+        row = result.one_or_none()
+        if row is None:
+            return None
+        job, query = row
+        return job.job_json, query
 
     #########
     # Users #
