@@ -91,12 +91,10 @@ const SearchArea = () => {
       if (marginals == null && activeClusterTaskId == null) {
         // if we have bins for a search result and no ongoing clustering task, then we've already
         // computed the marginals in an earlier query and just need to request them
-        dispatch(
-          requestClusters({ dimensionId: activeDim.id, feedback: '' })
-        );
+        dispatch(requestClusters({ dimensionId: activeDim.id, feedback: '' }));
       }
     }
-  }, [activeDim, marginals, dispatch, activeClusterTaskId])
+  }, [activeDim, marginals, dispatch, activeClusterTaskId]);
 
   /**
    * Local state for UI components
@@ -368,7 +366,25 @@ const SearchArea = () => {
           </div>
 
           <div className="border rounded-md bg-gray-50 p-2 space-y-1">
-            <div className="text-xs text-gray-600">Search query</div>
+            <div className="flex items-center justify-between text-xs">
+              <div className="text-gray-600">Search query</div>
+              {loadingProgress && !loadingSearchQuery && (
+                <div className="text-gray-400">
+                  {loadingProgress[0]} searches finished
+                  {loadingProgress[1] - loadingProgress[0] > 0 && (
+                    <>
+                      , {loadingProgress[1] - loadingProgress[0]} had API issues{' '}
+                      <span
+                        className="cursor-pointer text-indigo-500 hover:text-indigo-600"
+                        onClick={() => handleSearch(curSearchQuery)}
+                      >
+                        (retry)
+                      </span>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
             {curSearchQuery ? (
               <div className="space-y-2">
                 <div className="flex items-center">
@@ -376,22 +392,6 @@ const SearchArea = () => {
                     <div className="px-2 py-1 bg-indigo-50 border border-indigo-100 rounded text-xs font-mono whitespace-pre-wrap text-indigo-800">
                       {curSearchQuery}
                     </div>
-                    {loadingProgress && !loadingSearchQuery && (
-                      <div className="py-1 text-xs text-gray-600 ml-2">
-                        {loadingProgress[0]} searches finished,{' '}
-                        {loadingProgress[1] - loadingProgress[0]} had API issues{' '}
-                        {loadingProgress[1] - loadingProgress[0] > 0 && (
-                          <>
-                            <span
-                              className="cursor-pointer text-indigo-500 hover:text-indigo-600"
-                              onClick={() => handleSearch(curSearchQuery)}
-                            >
-                              (retry)
-                            </span>
-                          </>
-                        )}
-                      </div>
-                    )}
                   </div>
                   <div className="flex flex-col xl:flex-row ml-2 space-y-1 xl:space-y-0 xl:space-x-1">
                     <button
