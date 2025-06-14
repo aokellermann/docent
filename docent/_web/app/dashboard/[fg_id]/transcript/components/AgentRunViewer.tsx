@@ -388,6 +388,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                         id={`r-${secondary ? 1 : 0}_t-${transcriptIdx}_b-${index}`}
                         agentRun={agentRun}
                         scrollToBlock={scrollToBlock}
+                        transcriptIdx={transcriptIdx}
                       />
                     ))}
                   </div>
@@ -437,12 +438,13 @@ const AttributeDisplay: React.FC<{
   agentRunId: string;
   blockIndex: number;
   scrollToBlock?: (blockIndex: number, transcriptIdx?: number) => void;
-}> = ({ agentRunId, blockIndex, scrollToBlock }) => {
+  transcriptIdx: number;
+}> = ({ agentRunId, blockIndex, scrollToBlock, transcriptIdx }) => {
   const { curSearchQuery, searchResultMap } = useAppSelector(
     (state) => state.search
   );
 
-  // Get all attributes that reference this specific block
+  // Get all attributes that reference this specific block and transcript
   const relevantAttributes = useMemo(() => {
     if (!curSearchQuery || !searchResultMap || !searchResultMap[agentRunId]) {
       return [];
@@ -454,12 +456,18 @@ const AttributeDisplay: React.FC<{
       return [];
     }
     return attributes.filter((attr) =>
-      attr.citations?.some((citation) => citation.block_idx === blockIndex)
+      attr.citations?.some(
+        (citation) =>
+          citation.block_idx === blockIndex &&
+          citation.transcript_idx === transcriptIdx
+      )
     );
-  }, [searchResultMap, agentRunId, curSearchQuery, blockIndex]);
+  }, [searchResultMap, agentRunId, curSearchQuery, blockIndex, transcriptIdx]);
   if (relevantAttributes.length === 0) {
     return null;
   }
+
+  console.log('relevantAttributes', relevantAttributes);
 
   const handleShareAttribute = () => {
     if (!curSearchQuery) {
@@ -603,7 +611,8 @@ const MessageBox: React.FC<{
   id?: string;
   agentRun: AgentRun;
   scrollToBlock: (blockIndex: number, transcriptIdx?: number) => void;
-}> = ({ message, index, id, agentRun, scrollToBlock }) => {
+  transcriptIdx: number;
+}> = ({ message, index, id, agentRun, scrollToBlock, transcriptIdx }) => {
   const agentRunId = agentRun.id;
 
   const getRoleStyle = () => {
@@ -732,6 +741,7 @@ const MessageBox: React.FC<{
         agentRunId={agentRunId}
         blockIndex={index}
         scrollToBlock={scrollToBlock}
+        transcriptIdx={transcriptIdx}
       />
     </div>
   );
