@@ -34,3 +34,8 @@ class User(BaseModel):
     email: str
     organization_ids: list[str]
     is_anonymous: bool = False
+
+class Organization(BaseModel):
+    id: str
+    name: str
+    description: str | None = None

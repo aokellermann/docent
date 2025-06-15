@@ -1,0 +1,51 @@
+from typing import Literal
+from pydantic import BaseModel
+
+from docent._db_service.schemas.auth_models import Permission, SubjectType, User, Organization
+from docent._db_service.schemas.tables import SQLAAccessControlEntry, SQLAUser, SQLAOrganization
+
+class FramegridCollaborator(BaseModel):
+    framegrid_id: str
+    subject_type: SubjectType
+    subject: User | Organization | Literal["public"]
+    permission: Permission
+
+    @classmethod
+    def from_sqla_acl(cls, sqla_acl: SQLAAccessControlEntry) -> "FramegridCollaborator":
+        assert sqla_acl.fg_id is not None
+        subject_type = SubjectType.USER if sqla_acl.user_id else SubjectType.ORGANIZATION if sqla_acl.organization_id else SubjectType.PUBLIC
+        subject = sqla_acl.subject()
+        if isinstance(subject, SQLAUser):
+            subject = subject.to_user()
+        elif isinstance(subject, SQLAOrganization):
+            subject = subject.to_organization()
+        
+        return cls(
+            framegrid_id=sqla_acl.fg_id,
+            subject_type=subject_type,
+            subject=subject,
+            permission=sqla_acl.permission,
+        )
+
+class ViewCollaborator(BaseModel):
+    view_id: str
+    subject_type: SubjectType
+    subject: User | Organization | Literal["public"]
+    permission: Permission
+
+    @classmethod
+    def from_sqla_acl(cls, sqla_acl: SQLAAccessControlEntry) -> "ViewCollaborator":
+        assert sqla_acl.view_id is not None
+        subject_type = SubjectType.USER if sqla_acl.user_id else SubjectType.ORGANIZATION if sqla_acl.organization_id else SubjectType.PUBLIC
+        subject = sqla_acl.subject()
+        if isinstance(subject, SQLAUser):
+            subject = subject.to_user()
+        elif isinstance(subject, SQLAOrganization):
+            subject = subject.to_organization()
+        
+        return cls(
+            view_id=sqla_acl.view_id,
+            subject_type=subject_type,
+            subject=subject,
+            permission=sqla_acl.permission,
+        )

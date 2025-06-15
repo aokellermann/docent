@@ -2,6 +2,7 @@ import enum
 import json
 from datetime import UTC, datetime
 from uuid import uuid4
+from typing import Literal
 
 from pydantic_core import to_jsonable_python
 from sqlalchemy import (
@@ -16,16 +17,17 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.schema import UniqueConstraint
 
 from docent._ai_tools.search import SearchResult
 from docent._db_service.contexts import ViewContext
-from docent._db_service.schemas.auth_models import Permission, User
+from docent._db_service.schemas.auth_models import Permission, User, Organization
 from docent._db_service.schemas.base import SQLABase
 from docent.data_models.agent_run import AgentRun
 from docent.data_models.filters import FrameDimension, FrameFilter, Judgment, parse_filter_dict
 from docent.data_models.transcript import Transcript
+
 
 TABLE_FRAME_GRID = "frame_grids"
 TABLE_AGENT_RUN = "agent_runs"
@@ -517,7 +519,14 @@ class SQLAUser(SQLABase):
         DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False
     )
     is_anonymous = mapped_column(Boolean, nullable=False, default=False, index=True)
-
+    
+    organizations: Mapped[list["SQLAOrganization"]] = relationship(
+        "SQLAOrganization",
+        secondary=TABLE_USER_ORGANIZATION,
+        back_populates="users",
+        lazy="selectin",
+    )
+    
     @classmethod
     def from_user(cls, user: User) -> "SQLAUser":
         return cls(
@@ -526,12 +535,31 @@ class SQLAUser(SQLABase):
             is_anonymous=user.is_anonymous,
         )
 
-    def to_user(self, organization_ids: list[str]) -> User:
+    def to_user(self) -> User:
         return User(
             id=self.id,
             email=self.email,
-            organization_ids=organization_ids,
+            organization_ids=[org.id for org in self.organizations],
             is_anonymous=self.is_anonymous,
+        )
+
+class SQLAOrganization(SQLABase):
+    __tablename__ = TABLE_ORGANIZATION
+
+    id = mapped_column(String(36), primary_key=True)
+    name = mapped_column(Text, nullable=False)
+    description = mapped_column(Text, nullable=True)
+
+    users: Mapped[list["SQLAUser"]] = relationship(
+        "SQLAUser",
+        secondary=TABLE_USER_ORGANIZATION,
+        back_populates="organizations",
+    )
+    def to_organization(self) -> Organization:
+        return Organization(
+            id=self.id,
+            name=self.name,
+            description=self.description,
         )
 
 
@@ -578,6 +606,14 @@ class SQLAAccessControlEntry(SQLABase):
 
     # Permission
     permission = mapped_column(Text, nullable=False, index=True)
+    user: Mapped["SQLAUser"] = relationship("SQLAUser", backref="access_control_entries")
+    organization: Mapped["SQLAOrganization"] = relationship("SQLAOrganization", backref="access_control_entries")
+    
+    def __repr__(self):
+        return f"SQLAAccessControlEntry(id={self.id}, subject={self.subject()}, permission={self.permission})"
+
+    def subject(self) -> SQLAUser | SQLAOrganization | Literal["public"]:
+        return self.user or self.organization or "public"
 
     __table_args__ = (
         # Ensure exactly one subject is set
@@ -608,10 +644,3 @@ class SQLAAccessControlEntry(SQLABase):
         ),
     )
 
-
-class SQLAOrganization(SQLABase):
-    __tablename__ = TABLE_ORGANIZATION
-
-    id = mapped_column(String(36), primary_key=True)
-    name = mapped_column(Text, nullable=False)
-    description = mapped_column(Text, nullable=True)

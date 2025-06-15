@@ -14,7 +14,12 @@ from sqlalchemy.inspection import inspect as sqla_inspect
 
 from docent._ai_tools.search import SearchResult, SearchResultWithCitations
 from docent._db_service.contexts import ViewContext
-from docent._db_service.schemas.auth_models import Permission, ResourceType, User
+from docent._db_service.schemas.auth_models import (
+    Permission,
+    ResourceType,
+    SubjectType,
+    User,
+)
 from docent._db_service.schemas.tables import SQLADiffAttribute
 from docent._db_service.service import DBService
 from docent._llm_util.data_models.llm_output import LLMOutput
@@ -32,11 +37,22 @@ from docent._server._assistant.summarizer import (
     interesting_agent_observations,
     summarize_agent_actions,
 )
+from docent._db_service.schemas.collab_models import FramegridCollaborator
 from docent._server._auth.session import create_user_session, invalidate_user_session
-from docent._server._broker.redis_client import REDIS, enqueue_search_job, publish_to_broker
+from docent._server._broker.redis_client import (
+    REDIS,
+    enqueue_search_job,
+    publish_to_broker,
+)
 from docent._server._dependencies.database import get_db
-from docent._server._dependencies.permissions import require_fg_permission, require_view_permission
-from docent._server._dependencies.user import get_default_view_ctx, get_user_anonymous_ok
+from docent._server._dependencies.permissions import (
+    require_fg_permission,
+    require_view_permission,
+)
+from docent._server._dependencies.user import (
+    get_default_view_ctx,
+    get_user_anonymous_ok,
+)
 from docent._server._rest.send_state import (
     publish_dims,
     publish_framegrids,
@@ -50,7 +66,12 @@ from docent.data_models.citation import (
     Citation,
     parse_citations_single_run,
 )
-from docent.data_models.filters import ComplexFilter, FrameDimension, FrameFilter, parse_filter_dict
+from docent.data_models.filters import (
+    ComplexFilter,
+    FrameDimension,
+    FrameFilter,
+    parse_filter_dict,
+)
 from docent.data_models.regex import RegexSnippet, get_regex_snippets
 
 logger = get_logger(__name__)
@@ -549,6 +570,52 @@ async def get_user_permissions(
         framegrid_permissions={fg_id: fg_permission.value if fg_permission else None},
         view_permissions={ctx.view_id: view_permission.value if view_permission else None},
     )
+
+
+class FramegridCollaboratorsResponse(BaseModel):
+    collaborators: list[FramegridCollaborator]
+
+
+@user_router.get("/framegrids/{fg_id}/collaborators")
+async def get_framegrid_collaborators(
+    fg_id: str,
+    db: DBService = Depends(get_db),
+    # You need READ permissions to see other people's permissions
+    _: None = Depends(require_fg_permission(Permission.READ)),
+):
+    return FramegridCollaboratorsResponse(
+        collaborators=[
+            FramegridCollaborator.from_sqla_acl(acl)
+            for acl in await db.get_acl_entries(
+                resource_id=fg_id,
+                resource_type=ResourceType.FRAME_GRID,
+            )
+        ]
+    )
+
+
+class ShareViewRequest(BaseModel):
+    subject_type: Literal["user", "organization", "public"]
+    subject_id: str
+    level: Literal["read"]
+
+
+@user_router.post("/{fg_id}/share_view")
+async def share_view(
+    fg_id: str,
+    request: ShareViewRequest,
+    db: DBService = Depends(get_db),
+    ctx: ViewContext = Depends(get_default_view_ctx),
+    _: None = Depends(require_fg_permission(Permission.READ)),
+):  
+    await db.set_acl_permission(
+        subject_type=SubjectType(request.subject_type),
+        subject_id=request.subject_id,
+        resource_type=ResourceType.VIEW,
+        resource_id=ctx.view_id,
+        permission=Permission(request.level),
+    )
+    return {"status": "success"}
 
 
 ##################################

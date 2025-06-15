@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.orm import selectinload
 
 from docent._ai_tools.clustering.cluster_diffs import cluster_diff_claims, search_over_diffs
 from docent._ai_tools.clustering.cluster_generator import propose_clusters
@@ -1979,18 +1980,8 @@ class DBService:
             users_result = await session.execute(select(SQLAUser))
             sqla_users = users_result.scalars().all()
 
-            # Get all user-organization relationships
-            user_orgs_result = await session.execute(select(SQLAUserOrganization))
-            user_orgs = user_orgs_result.scalars().all()
-
-            # Group organizations by user_id
-            user_org_map: dict[str, list[str]] = {}
-            for user_org in user_orgs:
-                user_org_map.setdefault(user_org.user_id, []).append(user_org.organization_id)
-
-            # Convert to User objects with organization_ids
             return [
-                user.to_user(organization_ids=user_org_map.get(user.id, [])) for user in sqla_users
+                user.to_user() for user in sqla_users
             ]
 
     async def create_user(self, email: str) -> User:
@@ -2015,7 +2006,7 @@ class DBService:
             session.add(sqla_user)
 
         logger.info(f"Created new user with ID: {sqla_user.id} and email: {sqla_user.email}")
-        return sqla_user.to_user(organization_ids=[])
+        return sqla_user.to_user()
 
     async def create_anonymous_user(self) -> User:
         """
@@ -2033,7 +2024,7 @@ class DBService:
             session.add(sqla_user)
 
         logger.info(f"Created anonymous user with ID: {user_id}")
-        return sqla_user.to_user(organization_ids=[])
+        return sqla_user.to_user()
 
     async def get_user_by_email(self, email: str) -> User | None:
         """
@@ -2052,15 +2043,7 @@ class DBService:
             if not sqla_user:
                 return None
 
-            # Get the user's organization IDs
-            org_result = await session.execute(
-                select(SQLAUserOrganization.organization_id).where(
-                    SQLAUserOrganization.user_id == sqla_user.id
-                )
-            )
-            organization_ids = org_result.scalars().all()
-
-            return sqla_user.to_user(organization_ids=list(organization_ids))
+            return sqla_user.to_user()
 
     async def create_session(self, user_id: str, expires_in_days: int = 30) -> str:
         """
@@ -2114,15 +2097,7 @@ class DBService:
             if not sqla_user:
                 return None
 
-            # Get the user's organization IDs
-            org_result = await session.execute(
-                select(SQLAUserOrganization.organization_id).where(
-                    SQLAUserOrganization.user_id == sqla_user.id
-                )
-            )
-            organization_ids = org_result.scalars().all()
-
-            return sqla_user.to_user(organization_ids=list(organization_ids))
+            return sqla_user.to_user()
 
     async def invalidate_session(self, session_id: str) -> bool:
         """
@@ -2155,6 +2130,26 @@ class DBService:
         if user_permission_level is None:
             return False
         return user_permission_level.includes(permission)
+
+    async def get_acl_entries(
+        self,
+        resource_id: str,
+        resource_type: ResourceType,
+    ) -> list[SQLAAccessControlEntry]:
+        if resource_type == ResourceType.FRAME_GRID:
+            resource_filter = SQLAAccessControlEntry.fg_id == resource_id
+        elif resource_type == ResourceType.VIEW:
+            resource_filter = SQLAAccessControlEntry.view_id == resource_id
+        else:
+            raise ValueError(f"Unsupported resource type: {resource_type}")
+        async with self.session() as session:
+            result = await session.execute(
+                select(SQLAAccessControlEntry)
+                .options(selectinload(SQLAAccessControlEntry.user))
+                .options(selectinload(SQLAAccessControlEntry.organization))
+                .where(resource_filter)
+            )
+            return [acl for acl in result.scalars().all()]
 
     async def get_permission_level(
         self,
