@@ -612,7 +612,7 @@ async def upsert_collaborator(
     fg_id: str,
     request: UpsertCollaboratorRequest,
     db: DBService = Depends(get_db),
-    _: None = Depends(require_fg_permission(Permission.READ)),
+    _: None = Depends(require_fg_permission(Permission.WRITE)),
 ):
     collaborator = await db.set_acl_permission(
         subject_type=request.subject_type,
@@ -634,7 +634,7 @@ async def remove_collaborator(
     fg_id: str,
     request: RemoveCollaboratorRequest,
     db: DBService = Depends(get_db),
-    _: None = Depends(require_fg_permission(Permission.READ)),
+    _: None = Depends(require_fg_permission(Permission.WRITE)),
 ):
     await db.clear_acl_permission(
         subject_type=request.subject_type,

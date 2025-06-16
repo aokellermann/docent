@@ -15,6 +15,7 @@ import {
 } from './collabSlice';
 import { Button } from '@/components/ui/button';
 import { useRequireUserContext } from '@/app/contexts/UserContext';
+import { useHasFramegridWritePermission } from './hooks';
 
 // Types matching ShareViewPopover
 
@@ -49,6 +50,7 @@ interface CollaboratorRowProps {
 const CollaboratorRow = ({ collaborator }: CollaboratorRowProps) => {
   const [upsertCollaborator] = useUpsertCollaboratorMutation();
   const [removeCollaborator] = useRemoveCollaboratorMutation();
+  const hasWritePermission = useHasFramegridWritePermission()
   const onPermissionChange = (newPermission: PermissionLevel) => {
     upsertCollaborator({
       subject_id: collaborator.subject_id,
@@ -114,7 +116,9 @@ const CollaboratorRow = ({ collaborator }: CollaboratorRowProps) => {
           value={collaborator.permission_level}
           onChange={(newPermission) => onPermissionChange(newPermission)}
         />
-        <Button variant="ghost" size="sm" onClick={() => removeCollaborator({
+        <Button variant="ghost" size="sm"
+        disabled={!hasWritePermission}
+         onClick={() => removeCollaborator({
           subject_id: collaborator.subject_id,
           subject_type: collaborator.subject_type,
           framegrid_id: collaborator.framegrid_id,
@@ -145,14 +149,11 @@ const CollaboratorsList = ({ framegridId }: CollaboratorsListProps) => {
     }
   });
 
-  console.log(userCollaborators, orgCollaborators)
-
   if (!userCollaborators?.length && !orgCollaborators?.length) {
     return (
       <div className="text-center py-6 text-muted-foreground">
         <User className="mx-auto h-8 w-8 mb-2 opacity-50" />
         <p className="text-sm">No collaborators yet</p>
-        <p className="text-xs">Invite someone above to get started</p>
       </div>
     );
   }

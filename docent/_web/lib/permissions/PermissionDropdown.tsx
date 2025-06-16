@@ -1,16 +1,17 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { PermissionLevel } from "./types"
 import { cn } from "@/lib/utils"
+import { useHasFramegridWritePermission } from "./hooks";
 
 
 // Permission Dropdown Component
 interface PermissionDropdownProps {
     value: PermissionLevel;
     onChange: (newPermission: PermissionLevel) => void;
-    disabled?: boolean;
   }
   
-  const PermissionDropdown = ({ value, onChange, disabled }: PermissionDropdownProps) => {
+  const PermissionDropdown = ({ value, onChange }: PermissionDropdownProps) => {
+    const hasWritePermission = useHasFramegridWritePermission()
     const permissionLabels = {
       none: "No access",
       read: "Can view",
@@ -25,7 +26,7 @@ interface PermissionDropdownProps {
     };
   
     return (
-      <Select value={value} onValueChange={(val) => onChange(val as PermissionLevel)} disabled={disabled}>
+      <Select value={value} onValueChange={(val) => onChange(val as PermissionLevel)} disabled={!hasWritePermission}>
         <SelectTrigger className="w-32">
           <SelectValue>
             <span className="text-xs font-medium">{permissionLabels[value]}</span>

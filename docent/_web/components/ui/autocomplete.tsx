@@ -23,6 +23,7 @@ type Props<T extends string, I extends { value: T; label: string }> = {
   isLoading?: boolean;
   emptyMessage?: React.ReactNode;
   placeholder?: string;
+  disabled?: boolean;
 };
 
 export function AutoComplete<T extends string, I extends { value: T; label: string }>({
@@ -35,6 +36,7 @@ export function AutoComplete<T extends string, I extends { value: T; label: stri
   isLoading,
   emptyMessage = "No items.",
   placeholder = "Search...",
+  disabled = false,
 }: Props<T, I>) {
   const [open, setOpen] = useState(false);
 
@@ -70,6 +72,7 @@ export function AutoComplete<T extends string, I extends { value: T; label: stri
     }
     setOpen(false);
   };
+  console.log('is disabled', disabled)
 
   return (
     <div className="flex items-center">
@@ -86,8 +89,9 @@ export function AutoComplete<T extends string, I extends { value: T; label: stri
               }}
               onKeyDown={(e) => setOpen(e.key !== 'Escape')}
               onBlur={onInputBlur}
+              disabled={disabled}
             >
-              <Input placeholder={placeholder} />
+              <Input placeholder={placeholder} disabled={disabled} />
             </CommandPrimitive.Input>
           </PopoverAnchor>
           {!open && <CommandList aria-hidden="true" className="hidden" />}

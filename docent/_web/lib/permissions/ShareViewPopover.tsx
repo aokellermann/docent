@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/popover';
 import { Share2, UserPlus } from 'lucide-react';
 import CollaboratorsList from './CollaboratorsList';
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import {
   useGetCollaboratorsQuery,
   useGetOrgUsersQuery,
@@ -21,6 +21,7 @@ import { PermissionLevel } from './types';
 import PermissionDropdown from './PermissionDropdown';
 import { toast } from '@/hooks/use-toast';
 import { useRequireUserContext } from '@/app/contexts/UserContext';
+import { useHasFramegridWritePermission } from './hooks';
 
 const AddCollaborator = ({ framegridId }: { framegridId: string }) => {
   const { data: orgUsers, isLoading: isLoadingOrgUsers } =
@@ -29,9 +30,7 @@ const AddCollaborator = ({ framegridId }: { framegridId: string }) => {
   const { user } = useRequireUserContext();
 
   const potentialUserCollaborators = useMemo(() => {
-    console.log('collaborators', collaborators)
     const existingCollaborators = new Set(collaborators?.map(c => c.subject_id));
-    console.log('existingCollaborators', existingCollaborators)
     return orgUsers?.filter((u) => u.id !== user.id && !existingCollaborators.has(u.id)) ?? [];
   }, [orgUsers, user, collaborators]);
 
@@ -64,6 +63,7 @@ const AddCollaborator = ({ framegridId }: { framegridId: string }) => {
       setSearchValue(item?.label ?? '');
     }
   };
+  const hasWritePermission = useHasFramegridWritePermission()
   const handleClearSelectedInvitee = () => {
     setInviteeId(null);
   };
@@ -77,6 +77,9 @@ const AddCollaborator = ({ framegridId }: { framegridId: string }) => {
       permission_level: inviteePermissionLevel,
     });
   };
+  if (!hasWritePermission) {
+    return <div className="text-sm text-muted-foreground">You don't have permission to add or edit collaborators.</div>
+  }
 
   return (
     <div className="flex gap-2">
@@ -89,6 +92,7 @@ const AddCollaborator = ({ framegridId }: { framegridId: string }) => {
           onSearchValueChange={setSearchValue}
           items={userItems}
           isLoading={isLoadingOrgUsers}
+          disabled={!hasWritePermission}
           emptyMessage={
             <div className="p-3 text-center space-y-2">
               <p className="text-sm text-muted-foreground">
@@ -109,7 +113,7 @@ const AddCollaborator = ({ framegridId }: { framegridId: string }) => {
               </button>
             </div>
           }
-          placeholder="Add collab"
+          placeholder={hasWritePermission ? "Add collaborators by name or email" : "You don't have permission to add collaborators s"}
         />
       </div>
       <PermissionDropdown
@@ -138,19 +142,14 @@ const ShareViewPopover = ({ framegridId }: { framegridId: string }) => {
     }),
   });
 
-  const [isPublic, setIsPublic] = useState<boolean>(false);
+//   const [isPublic, setIsPublic] = useState<boolean>(false);
   const [upsertCollaborator] = useUpsertCollaboratorMutation();
   const [removeCollaborator] = useRemoveCollaboratorMutation();
 
-  // Sync local state when data arrives/changes
-  useEffect(() => {
-    setIsPublic(isPublicCollab);
-  }, [isPublicCollab]);
 
   // Toggle handler that also updates backend
   const handlePublicToggle = useCallback(
     (checked: boolean) => {
-      setIsPublic(checked);
 
       if (checked) {
         upsertCollaborator({
@@ -169,6 +168,7 @@ const ShareViewPopover = ({ framegridId }: { framegridId: string }) => {
     },
     [framegridId, upsertCollaborator, removeCollaborator]
   );
+  const hasWritePermission = useHasFramegridWritePermission();
 
   return (
     <Popover>
@@ -198,7 +198,8 @@ const ShareViewPopover = ({ framegridId }: { framegridId: string }) => {
               </div>
               <Switch
                 id="public-access"
-                checked={isPublic}
+                checked={isPublicCollab}
+                disabled={!hasWritePermission}
                 onCheckedChange={handlePublicToggle}
               />
             </div>
