@@ -4,6 +4,7 @@ import { apiRestClient } from '@/app/services/apiService';
 import { User } from '@/app/types/userTypes';
 import {createApi, fetchBaseQuery} from '@reduxjs/toolkit/query/react'
 import { BASE_URL } from '@/app/constants';
+import { UserPermissions } from '@/app/services/permissionsService';
 
 type CollaboratorIdentifier = Pick<Collaborator, "framegrid_id" | "subject_type" | "subject_id">;
 export const collabApi = createApi({
@@ -12,8 +13,12 @@ export const collabApi = createApi({
     baseUrl: `${BASE_URL}/rest`,
     credentials: 'include',
   }),
-  tagTypes: ['Collaborators', 'Users'],
+  tagTypes: ['Collaborators', 'Users', 'FramegridPermissions'],
   endpoints: (build) => ({
+    getFramegridPermissions: build.query<UserPermissions, string>({
+      query: (framegridId) => `/${framegridId}/permissions`,
+      providesTags: ['FramegridPermissions']
+    }),
     getOrgUsers: build.query<User[], string>({
       query: (orgId) => `/organizations/${orgId}/users`,
       providesTags: ['Users']
@@ -53,7 +58,7 @@ export const collabApi = createApi({
   }),
 });
 
-export const {useGetOrgUsersQuery, useGetCollaboratorsQuery, useUpsertCollaboratorMutation, useRemoveCollaboratorMutation} = collabApi;
+export const {useGetFramegridPermissionsQuery, useGetOrgUsersQuery, useGetCollaboratorsQuery, useUpsertCollaboratorMutation, useRemoveCollaboratorMutation} = collabApi;
 
 export interface Organization {
   id: string;
