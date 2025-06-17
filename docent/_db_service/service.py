@@ -35,7 +35,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import selectinload
 
 from docent._ai_tools.clustering.cluster_diffs import cluster_diff_claims, search_over_diffs
-from docent._ai_tools.clustering.cluster_generator import propose_clusters
+from docent._ai_tools.clustering.cluster_generator import ClusterFeedback, propose_clusters
 from docent._ai_tools.diffs.llm_diff_summaries import compute_transcript_diff
 from docent._ai_tools.diffs.models import Claim, SQLADiffsReport, TranscriptDiff
 from docent._ai_tools.search import SearchResult, SearchResultStreamingCallback, execute_search
@@ -1561,6 +1561,7 @@ class DBService:
         self,
         ctx: ViewContext,
         dim_id: str,
+        feedback: str | None = None,
         search_result_callback: SearchResultStreamingCallback | None = None,
     ):
         dim = await self.get_dim(dim_id)
@@ -1579,14 +1580,26 @@ class DBService:
 
         # Propose clusters with guidance on what attribute to focus on
         guidance = f"Specifically focus on the following attribute: {dim.search_query}"
-        predicates: list[str] = await propose_clusters(
-            to_cluster,
-            extra_instructions_list=[guidance],
-            feedback_list=[],
-        )
+        existing_filters = await self._get_dim_filters(dim_id)
+        if feedback is not None:
+            predicates: list[str] = await propose_clusters(
+                to_cluster,
+                extra_instructions_list=[guidance],
+                feedback_list=[
+                    ClusterFeedback(
+                        clusters=[f.name for f in existing_filters if f.name is not None],
+                        feedback=feedback,
+                    )
+                ],
+            )
+        else:
+            predicates: list[str] = await propose_clusters(
+                to_cluster,
+                extra_instructions_list=[guidance],
+            )
 
         # Delete existing filters
-        await self._delete_filters([f.id for f in await self._get_dim_filters(dim_id)])
+        await self._delete_filters([f.id for f in existing_filters])
 
         # Push filters
         sqla_filters = [
