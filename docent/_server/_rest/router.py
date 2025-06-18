@@ -21,7 +21,7 @@ from docent._db_service.schemas.auth_models import (
     User,
 )
 from docent._db_service.schemas.collab_models import FramegridCollaborator
-from docent._db_service.schemas.tables import SQLADiffAttribute
+from docent._db_service.schemas.tables import SQLADiffAttribute, SQLAFilter
 from docent._db_service.service import DBService
 from docent._llm_util.data_models.llm_output import LLMOutput
 from docent._llm_util.prod_llms import get_llm_completions_async
@@ -464,6 +464,33 @@ async def post_base_filter(
         await publish_homepage_state(db, new_ctx)
 
         return request.filter.id if request.filter else None
+
+
+@user_router.post("/{fg_id}/copy_filter")
+async def copy_filter(
+    fg_id: str,
+    db: DBService = Depends(get_db),
+    ctx: ViewContext = Depends(get_default_view_ctx),
+    _: None = Depends(require_view_permission(Permission.WRITE)),
+):
+    current_filter = ctx.base_filter
+    if current_filter is None:
+        return None
+    # upload a copy of the current filter to database and grab its id
+    async with db.session() as session:
+        new_id = str(uuid4())
+        filter = SQLAFilter(
+            id=new_id,
+            fg_id=ctx.fg_id,
+            view_id=ctx.view_id,
+            dimension_id=None,
+            filter_json=current_filter.model_dump(),
+            filter_type=current_filter.type,
+            supports_sql=current_filter.supports_sql,
+        )
+        session.add(filter)
+        await session.commit()
+    return new_id
 
 
 @user_router.get("/{fg_id}/base_filter")
@@ -947,7 +974,7 @@ async def get_existing_clusters(
     dim_id: str,
     db: DBService = Depends(get_db),
     ctx: ViewContext = Depends(get_default_view_ctx),
-    _: None = Depends(require_view_permission(Permission.WRITE)),
+    _: None = Depends(require_view_permission(Permission.READ)),
 ):
     # Publish latest marginals in case there was an update
     await publish_marginals(db, ctx, dim_ids=[dim_id], ensure_fresh=False)

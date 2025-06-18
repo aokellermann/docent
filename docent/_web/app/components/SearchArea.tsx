@@ -35,6 +35,7 @@ import BinEditor from './BinEditor';
 import { ProgressBar } from './ProgressBar';
 import { requestDiffs } from '../store/diffSlice';
 import { TranscriptFilterControls } from './TranscriptFilterControls';
+import { apiRestClient } from '../services/apiService';
 
 // Preset search queries with custom icons
 const PRESET_QUERIES = [
@@ -237,9 +238,10 @@ const SearchArea = () => {
   /**
    * Handle share button
    */
-  const handleShare = (searchQuery: string) => {
+  const handleShare = async (searchQuery: string) => {
+    const response = await apiRestClient.post(`/${frameGridId}/copy_filter`);
     navigator.clipboard
-      .writeText(`${window.location.href}?searchQuery=${searchQuery}`)
+      .writeText(`${window.location.href}?filterId=${response.data}&searchQuery=${searchQuery}`)
       .then(() => {
         toast({
           title: 'Search URL copied',
@@ -392,7 +394,7 @@ const SearchArea = () => {
                   </div>
                   <div className="flex flex-col xl:flex-row ml-2 space-y-1 xl:space-y-0 xl:space-x-1">
                     <button
-                      onClick={() => handleShare(curSearchQuery)}
+                      onClick={async () => await handleShare(curSearchQuery)}
                       className="inline-flex items-center gap-x-1 text-xs bg-blue-50 text-blue-500 border border-blue-100 px-1.5 py-0.5 rounded-md hover:bg-blue-100 transition-colors"
                       title="Share this search"
                     >
@@ -618,9 +620,9 @@ const SearchArea = () => {
                               </div>
                               <button
                                 className="hover:bg-indigo-50 rounded p-0.5 text-indigo-400 hover:text-indigo-600 transition-colors"
-                                onClick={(e) => {
+                                onClick={async (e) => {
                                   e.stopPropagation();
-                                  handleShare(search.search_query);
+                                  await handleShare(search.search_query);
                                 }}
                                 title="Share this search"
                               >
