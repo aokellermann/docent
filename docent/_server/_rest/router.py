@@ -21,7 +21,12 @@ from docent._db_service.schemas.auth_models import (
     User,
 )
 from docent._db_service.schemas.collab_models import FramegridCollaborator
-from docent._db_service.schemas.tables import SQLADiffAttribute, SQLAFilter, SQLAFrameDimension
+from docent._db_service.schemas.tables import (
+    SQLAAccessControlEntry,
+    SQLADiffAttribute,
+    SQLAFilter,
+    SQLAFrameDimension,
+)
 from docent._db_service.service import DBService
 from docent._llm_util.data_models.llm_output import LLMOutput
 from docent._llm_util.prod_llms import get_llm_completions_async
@@ -706,9 +711,18 @@ class UpsertCollaboratorRequest(BaseModel):
 async def upsert_collaborator(
     fg_id: str,
     request: UpsertCollaboratorRequest,
+    user: User = Depends(get_user_anonymous_ok),
     db: DBService = Depends(get_db),
     _: None = Depends(require_fg_permission(Permission.WRITE)),
 ):
+    allowed = await db.has_permission(
+        user=user,
+        resource_type=ResourceType.FRAME_GRID,
+        resource_id=fg_id,
+        permission=request.permission_level,
+    )
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Cannot set permissions higher than your own")
     collaborator = await db.set_acl_permission(
         subject_type=request.subject_type,
         subject_id=request.subject_id,
@@ -731,8 +745,44 @@ async def remove_collaborator(
     fg_id: str,
     request: RemoveCollaboratorRequest,
     db: DBService = Depends(get_db),
+    user: User = Depends(get_user_anonymous_ok),
     _: None = Depends(require_fg_permission(Permission.WRITE)),
 ):
+    async with db.session() as session:
+        # Build the delete query with the provided filters
+        query = select(SQLAAccessControlEntry).where(SQLAAccessControlEntry.fg_id == fg_id)
+
+        # Handle subject filtering based on SubjectType
+        if request.subject_type == SubjectType.USER:
+            query = query.where(SQLAAccessControlEntry.user_id == request.subject_id)
+        elif request.subject_type == SubjectType.ORGANIZATION:
+            query = query.where(SQLAAccessControlEntry.organization_id == request.subject_id)
+        elif request.subject_type == SubjectType.PUBLIC:
+            query = query.where(SQLAAccessControlEntry.is_public)
+        else:
+            raise HTTPException(
+                status_code=400, detail=f"Unsupported subject type: {request.subject_type}"
+            )
+
+        # Execute the query
+        result = await session.execute(query)
+        acl_entry = result.scalar_one_or_none()
+
+        if acl_entry is None:
+            raise HTTPException(
+                status_code=400, detail=f"Collaborator {request.subject_id} not found"
+            )
+        allowed = await db.has_permission(
+            user=user,
+            resource_type=ResourceType.FRAME_GRID,
+            resource_id=fg_id,
+            permission=Permission(acl_entry.permission),
+        )
+        if not allowed:
+            raise HTTPException(
+                status_code=403, detail="Cannot delete collaborator with higher permissions"
+            )
+
     await db.clear_acl_permission(
         subject_type=request.subject_type,
         subject_id=request.subject_id,
