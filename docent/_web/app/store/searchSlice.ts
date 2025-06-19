@@ -15,6 +15,7 @@ import {
   SearchResultWithCitations,
   ComplexFilter,
   FrameFilter,
+  PrimitiveFilter,
 } from '../types/frameTypes';
 
 import { clearRegexSnippets } from './experimentViewerSlice';
@@ -329,17 +330,42 @@ export const updateBaseFilter = createAsyncThunk(
 
 export const addBaseFilter = createAsyncThunk(
   'experimentViewer/addBaseFilter',
-  async (filter: FrameFilter, { dispatch, getState }) => {
+  async (filter: FrameFilter, { dispatch }) => {
+    dispatch(addBaseFilters([filter]));
+  }
+);
+
+export const addBaseFilters = createAsyncThunk(
+  'experimentViewer/addBaseFilters',
+  async (filters: FrameFilter[], { dispatch, getState }) => {
     const state = getState() as RootState;
 
-    // Clone the current filter
+    // Create new base filter with all filters added
     const newBaseFilter: ComplexFilter = state.frame.baseFilter
       ? {
           ...state.frame.baseFilter,
-          filters: [...state.frame.baseFilter.filters],
+          filters: [...state.frame.baseFilter.filters, ...filters]
         }
-      : { filters: [], type: 'complex', op: 'and', id: uuid4(), name: null };
-    newBaseFilter.filters.push(filter);
+      : { 
+          filters: [...filters], 
+          type: 'complex', 
+          op: 'and', 
+          id: uuid4(), 
+          name: null 
+        };
+
+    // Remove duplicate primitive filters
+    const seenKeyPaths = new Set<string>();
+    newBaseFilter.filters = newBaseFilter.filters.reduceRight((acc, filter) => {
+      if (filter.type === 'primitive') {
+        const keyPath = (filter as PrimitiveFilter).key_path?.join('.') || '';
+        if (seenKeyPaths.has(keyPath)) {
+          return acc;
+        }
+        seenKeyPaths.add(keyPath);
+      }
+      return [filter, ...acc];
+    }, [] as FrameFilter[]);
 
     dispatch(updateBaseFilter(newBaseFilter));
   }
