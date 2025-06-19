@@ -76,6 +76,8 @@ const AddCollaborator = ({ framegridId }: { framegridId: string }) => {
       framegrid_id: framegridId,
       permission_level: inviteePermissionLevel,
     });
+    handleClearSelectedInvitee();
+    setSearchValue('');
   };
   if (!hasWritePermission) {
     return <div className="text-sm text-muted-foreground">You don't have permission to add or edit collaborators.</div>

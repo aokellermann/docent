@@ -400,8 +400,9 @@ const SearchArea = () => {
                   <div className="flex flex-col xl:flex-row ml-2 space-y-1 xl:space-y-0 xl:space-x-1">
                     <button
                       onClick={async () => await handleShare(curSearchQuery)}
-                      className="inline-flex items-center gap-x-1 text-xs bg-blue-50 text-blue-500 border border-blue-100 px-1.5 py-0.5 rounded-md hover:bg-blue-100 transition-colors"
+                      className="inline-flex items-center gap-x-1 text-xs bg-blue-50 text-blue-500 border border-blue-100 px-1.5 py-0.5 rounded-md disabled:opacity-50 hover:bg-blue-100 transition-colors"
                       title="Share this search"
+                      disabled={!hasWritePermission}
                     >
                       <Share2 className="h-3 w-3" />
                       Share
@@ -522,7 +523,7 @@ const SearchArea = () => {
                         onClick={() => handleSelectPreset(preset.query)}
                         onMouseEnter={() => handlePresetHover(preset.query)}
                         onMouseLeave={handlePresetLeave}
-                        className="inline-flex items-center gap-1.5 px-2 py-1 bg-white border border-gray-200 rounded-full text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
+                        className="inline-flex items-center gap-1.5 px-2 py-1 bg-white border border-gray-200 rounded-full text-xs font-medium text-gray-700 disabled:opacity-50 hover:bg-gray-50 hover:border-gray-300 transition-colors"
                         disabled={!hasWritePermission}
                       >
                         <IconComponent className="h-3 w-3 text-blue-500" />

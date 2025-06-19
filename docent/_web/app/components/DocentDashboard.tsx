@@ -114,8 +114,7 @@ export default function DocentDashboard() {
                 Docent Dashboard
               </div>
               <div className="text-xs text-gray-500">
-                Welcome {user.email}! Create a new FrameGrid for each benchmark
-                or set of experiments.
+                Welcome {user.email}! {user.is_anonymous ? 'Make an account to create new FrameGrids.' : 'Create a new FrameGrid for each benchmark or set of experiments.'}
               </div>
             </div>
             <div className="flex items-center gap-2">
