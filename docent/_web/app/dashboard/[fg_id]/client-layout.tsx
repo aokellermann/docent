@@ -64,44 +64,8 @@ export default function DocentDashboardClientLayout({
       });
     });
     return;
-    // if (searchQuery) {
-    //   setInitSearchQuery(searchQuery);
-    //   dispatch(setHasInitSearchQuery(true));
-    //   console.log('Found searchQuery in URL:', searchQuery);
 
-    //   // Create a new URLSearchParams object without the searchQuery
-    //   const newSearchParams = new URLSearchParams(searchParams.toString());
-    //   newSearchParams.delete('searchQuery');
-
-    //   // Update the URL without adding to history
-    //   router.replace(
-    //     `${window.location.pathname}?${newSearchParams.toString()}`
-    //   );
-    // } else {
-    //   dispatch(setHasInitSearchQuery(false));
-    //   console.log('No searchQuery found in URL');
-    // }
-
-    // searchParamsCheckedRef.current = true;
   }, [searchParams, dispatch]);
-
-  // If the URL comes with an searchQuery, we need to request the search
-  const alreadyRequestedInitSearch = useRef(false);
-  // useEffect(() => {
-  //   if (
-  //     !alreadyRequestedInitSearch.current &&
-  //     fgId &&
-  //     initSearchQuery &&
-  //     dimensionsMap
-  //   ) {
-  //     dispatch(
-  //       computeSearch({
-  //         searchQuery: initSearchQuery,
-  //       })
-  //     );
-  //     alreadyRequestedInitSearch.current = true;
-  //   }
-  // }, [initSearchQuery, dispatch, fgId, dimensionsMap]);
 
   return (
     <div className="flex flex-col h-screen w-screen p-3 pt-2 space-y-2 min-h-0 min-w-0">
