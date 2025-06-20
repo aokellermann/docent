@@ -506,39 +506,26 @@ export const submitAttributeFeedback = createAsyncThunk(
   }
 );
 
-// export const submitAttributeFeedback = createAsyncThunk(
-//   'experimentViewer/submitAttributeFeedback',
-//   async (
-//     {
-//       originalQuery,
-//       feedback,
-//       missingQueries,
-//     }: {
-//       originalQuery: string;
-//       feedback: AttributeFeedback[];
-//       missingQueries: string;
-//     },
-//     { dispatch }
-//   ) => {
-//     try {
-//       const response = await apiRestClient.post('/submit_attribute_feedback', {
-//         original_query: originalQuery,
-//         attribute_feedback: feedback,
-//         missing_queries: missingQueries,
-//       });
-//       return response.data.rewritten_query;
-//     } catch (error) {
-//       dispatch(
-//         setToastNotification({
-//           title: 'Error submitting attribute feedback',
-//           description: 'Failed to submit attribute feedback',
-//           variant: 'destructive',
-//         })
-//       );
-//       throw error;
-//     }
-//   }
-// );
+export const executeRawQuery = createAsyncThunk(
+  'search/executeRawQuery',
+  async ({ query }: { query: string }, { dispatch }) => {
+    try {
+      const response = await apiRestClient.post('/raw_query', {
+        query: query,
+      });
+      return response.data;
+    } catch (error) {
+      dispatch(
+        setToastNotification({
+          title: 'Error executing raw query',
+          description: 'Failed to execute raw SQL query',
+          variant: 'destructive',
+        })
+      );
+      throw error;
+    }
+  }
+);
 
 export const searchSlice = createSlice({
   name: 'search',

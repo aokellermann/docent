@@ -1,229 +1,110 @@
-import { ChevronDown, ChevronRight, Loader2, ChevronLeft, ChevronFirst, ChevronLast } from 'lucide-react';
+import {
+  ChevronRight,
+  Loader2,
+  ChevronLeft,
+  ChevronFirst,
+  ChevronLast,
+} from 'lucide-react';
 import React, {
   useMemo,
   useState,
   useEffect,
   useCallback,
+  useRef,
 } from 'react';
-import { useRouter } from 'next/navigation';
 
 import { Card } from '@/components/ui/card';
+import GraphArea from './GraphArea';
 
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { PrimitiveFilter } from '../types/frameTypes';
 
 import DimensionSelector from './DimensionSelector';
-import { AgentRunMetadata } from './AgentRunMetadata';
-import { Citation } from '../types/experimentViewerTypes';
-import { RegexSnippet } from '../types/experimentViewerTypes';
-import { navToAgentRun } from '@/lib/nav';
-import { renderTextWithCitations } from '@/lib/renderCitations';
-import { RootState } from '../store/store';
-import { SearchResultWithCitations } from '../types/frameTypes';
-import { addBaseFilter, addBaseFilters, updateBaseFilter } from '../store/searchSlice';
+
+import AgentRunCard from './AgentRunCard';
+import { useDebounce } from '@/hooks/use-debounce';
+import {
+  setExperimentViewerScrollPosition,
+  setChartType,
+} from '../store/experimentViewerSlice';
+import { getAgentRunMetadata } from '../store/frameSlice';
+import TableArea from './TableArea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { TranscriptFilterControls } from './TranscriptFilterControls';
 
 // Constants for magic numbers
 const PAGINATION_LIMIT = 100;
-const MAX_DIMENSION_VALUES = 100;
-const HIGH_SCORE_THRESHOLD = 0.8;
-const LOW_SCORE_THRESHOLD = 0;
-
-const getScoreFromStats = (stats: any) => {
-  if (!stats) return { score: 0 };
-  const scoreKey = Object.keys(stats).find(k => k.toLowerCase().includes('default')) || Object.keys(stats)[0];
-  if (!scoreKey || stats[scoreKey]?.mean === undefined || stats[scoreKey].mean === null) {
-    return { score: 0 };
-  }
-  return {
-    score: stats[scoreKey].mean as number,
-    n: stats[scoreKey].n,
-    ci: stats[scoreKey].ci
-  };
-};
-
-const getScoreDisplay = (score: number | undefined, ci?: number) => {
-  if (typeof score !== 'number') return '';
-  let display = score.toFixed(2);
-  if (ci && ci > 0) display += ` ±${ci.toFixed(3)}`;
-  return display;
-};
-
-const getScoreClass = (score: number | undefined) => {
-  if (typeof score !== 'number') return 'bg-red-50';
-  if (score >= HIGH_SCORE_THRESHOLD) return 'bg-green-50';
-  if (score > LOW_SCORE_THRESHOLD) return 'bg-yellow-50';
-  return 'bg-red-50';
-};
-
-const getFilterTitle = (rowName: string, rowValue: string, colName?: string, colValue?: string) => {
-  if (colName && colValue) {
-    return `Filter to ${rowName}: ${rowValue}, ${colName}: ${colValue}`;
-  }
-  return `Filter to ${rowName}: ${rowValue}`;
-};
-
-interface AttributeSectionProps {
-  dataId: string;
-  curAttributeQuery: string;
-  attributes: SearchResultWithCitations[];
-}
-
-const AttributeSection: React.FC<AttributeSectionProps> = ({
-  dataId,
-  curAttributeQuery,
-  attributes,
-}) => {
-  const router = useRouter();
-  const frameGridId = useAppSelector((state: RootState) => state.frame.frameGridId);
-
-  if (attributes.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="pt-1 mt-1 border-t border-indigo-100 text-xs space-y-1">
-      <div className="flex items-center mb-1">
-        <div className="h-2 w-2 rounded-full bg-indigo-500 mr-1.5"></div>
-        <span className="text-xs font-medium text-indigo-700">
-          Attributes from your query
-        </span>
-      </div>
-      {attributes.map((attribute, idx) => {
-        const attributeText = attribute.value;
-        if (!attributeText) {
-          return null;
-        }
-        const citations = attribute.citations || [];
-        return (
-          <div
-            key={idx}
-            className="group bg-indigo-50 rounded-md p-1 text-xs text-indigo-900 leading-snug mt-1 hover:bg-indigo-100 transition-colors cursor-pointer border border-transparent hover:border-indigo-200"
-            onMouseDown={(e) => {
-              const firstCitation = citations.length > 0 ? citations[0] : null;
-              navToAgentRun(
-                e,
-                router,
-                window,
-                dataId,
-                firstCitation?.transcript_idx ?? undefined,
-                firstCitation?.block_idx,
-                frameGridId,
-                curAttributeQuery
-              );
-            }}
-          >
-            <div className="flex flex-col">
-              <div className="flex items-start justify-between gap-2">
-                <p className="mb-0.5 flex-1">
-                  {renderTextWithCitations(
-                    attributeText,
-                    citations,
-                    dataId,
-                    router,
-                    window,
-                    curAttributeQuery,
-                    frameGridId
-                  )}
-                </p>
-                <div className="flex shrink-0"></div>
-              </div>
-              <div className="flex items-center gap-1 text-[10px] text-indigo-600 mt-1">
-                <span className="opacity-70">{curAttributeQuery}</span>
-              </div>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-};
-
-const HighlightedSnippet: React.FC<{ snippetData: RegexSnippet }> = ({ snippetData }) => {
-  const [isExpanded, setIsExpanded] = React.useState(false);
-  try {
-    if (!snippetData || typeof snippetData !== 'object') {
-      return <p className="text-xs text-red-600">Error: Invalid snippet data</p>;
-    }
-    const { snippet, match_start, match_end } = snippetData;
-    if (
-      typeof snippet !== 'string' ||
-      typeof match_start !== 'number' ||
-      typeof match_end !== 'number'
-    ) {
-      return <p className="text-xs text-red-600">Error: Invalid snippet format</p>;
-    }
-    if (
-      match_start < 0 ||
-      match_end > snippet.length ||
-      match_start >= match_end
-    ) {
-      return <p className="text-xs">{snippet}</p>;
-    }
-    const before = snippet.substring(0, match_start);
-    const matched = snippet.substring(match_start, match_end);
-    const after = snippet.substring(match_end);
-    return (
-      <div
-        className="bg-indigo-50 p-2 rounded-md border border-transparent hover:border-indigo-200 max-w-full cursor-pointer transition-colors"
-        onClick={() => setIsExpanded(!isExpanded)}
-      >
-        <div
-          className={`overflow-y-auto ${isExpanded ? '' : 'max-h-20'}`}
-          style={{ scrollbarWidth: 'thin', scrollbarColor: '#a5b3e6 #e0e7ff' }}
-        >
-          <span className="text-xs text-indigo-900 break-words whitespace-pre-wrap">
-            {before}
-            <span className="px-0.5 py-0.25 bg-indigo-200 text-indigo-800 rounded">{matched}</span>
-            {after}
-          </span>
-        </div>
-      </div>
-    );
-  } catch (error) {
-    return <p className="text-xs text-red-600">Error rendering snippet</p>;
-  }
-};
-
-const RegexSnippetsSection: React.FC<{ regexSnippets?: RegexSnippet[] }> = ({ regexSnippets }) => {
-  if (!regexSnippets || regexSnippets.length === 0) {
-    return null;
-  }
-  return (
-    <div className="border-indigo-100 border-t pt-1 mt-1 space-y-1">
-      <div className="flex items-center">
-        <div className="h-2 w-2 rounded-full bg-indigo-500 mr-1.5"></div>
-        <span className="text-xs font-medium text-indigo-700">Regex matches</span>
-      </div>
-      {regexSnippets?.map((snippetData, index) => (
-        <HighlightedSnippet key={index} snippetData={snippetData} />
-      ))}
-    </div>
-  );
-};
 
 export default function ExperimentViewer() {
   const dispatch = useAppDispatch();
-  const router = useRouter();
-  
-  // Get all state at the top level
-  const { innerDimId, outerDimId, dimensionsMap, agentRunMetadata, frameGridId, baseFilter } = useAppSelector(
-    (state) => state.frame
+
+  // Frame state
+  const frameGridId = useAppSelector((state) => state.frame.frameGridId);
+  const innerDimId = useAppSelector((state) => state.frame.innerDimId);
+  const outerDimId = useAppSelector((state) => state.frame.outerDimId);
+
+  // Search state
+  const loadingSearchQuery = useAppSelector(
+    (state) => state.search.loadingSearchQuery
+  );
+  const curSearchQuery = useAppSelector((state) => state.search.curSearchQuery);
+  const searchResultMap = useAppSelector(
+    (state) => state.search.searchResultMap
   );
 
-  const {
-    loadingSearchQuery,
-    curSearchQuery,
-    searchResultMap: attributeMap,
-  } = useAppSelector((state) => state.search);
+  // EV state
+  const experimentViewerScrollPosition = useAppSelector(
+    (state) => state.experimentViewer.experimentViewerScrollPosition
+  );
+  const chartType = useAppSelector((state) => state.experimentViewer.chartType);
+  const rawStatMarginals = useAppSelector(
+    (state) => state.experimentViewer.statMarginals
+  );
+  const rawIdMarginals = useAppSelector(
+    (state) => state.experimentViewer.idMarginals
+  );
 
-  const {
-    experimentViewerScrollPosition,
-    dimIdsToFilterIds,
-    filtersMap,
-    regexSnippets,
-    statMarginals: rawStatMarginals,
-    idMarginals: rawIdMarginals,
-  } = useAppSelector((state) => state.experimentViewer);
+  /**
+   * Scrolling
+   */
+
+  const scrolledOnceRef = useRef(false);
+  const [scrollPosition, setScrollPosition] = useState<number | undefined>(
+    undefined
+  );
+  const debouncedScrollPosition = useDebounce(scrollPosition, 100);
+
+  // Use debouncing to prevent too many updates
+  useEffect(() => {
+    if (debouncedScrollPosition) {
+      dispatch(setExperimentViewerScrollPosition(debouncedScrollPosition));
+    }
+  }, [debouncedScrollPosition, dispatch]);
+
+  const containerRef = useCallback(
+    (node: HTMLDivElement) => {
+      if (!node) return;
+
+      // If there is an existing scroll position, set it
+      if (experimentViewerScrollPosition && !scrolledOnceRef.current) {
+        node.scrollTop = experimentViewerScrollPosition;
+        scrolledOnceRef.current = true;
+      }
+
+      // Save scroll position when user scrolls
+      const handleScroll = () => setScrollPosition(node.scrollTop);
+      node.addEventListener('scroll', handleScroll);
+      return () => {
+        node.removeEventListener('scroll', handleScroll);
+      };
+    },
+    [experimentViewerScrollPosition]
+  );
 
   // Create a function to get the marginal key - safe to use even if data is null
   const getMarginalKey = useCallback(
@@ -252,7 +133,7 @@ export default function ExperimentViewer() {
         // Filter datapoints to ones that have the attributes
         const filteredAgentRuns = datapointsList.filter((datapointId) => {
           if (curSearchQuery) {
-            const attrs = attributeMap?.[datapointId]?.[curSearchQuery];
+            const attrs = searchResultMap?.[datapointId]?.[curSearchQuery];
             return attrs && attrs.length && attrs[0].value !== null;
           }
           return true;
@@ -269,7 +150,7 @@ export default function ExperimentViewer() {
     );
 
     return filtered;
-  }, [rawIdMarginals, curSearchQuery, attributeMap]);
+  }, [rawIdMarginals, curSearchQuery, searchResultMap]);
 
   // Only keep stat marginals that have datapoints, after filtering by attribute query
   const statMarginals = useMemo(() => {
@@ -292,142 +173,65 @@ export default function ExperimentViewer() {
   const flatAgentRuns = useMemo(() => {
     const result: { agentRunId: string; marginalKey: string }[] = [];
     allAgentRunEntries.forEach(([marginalKey, agentRunIds]) => {
-      agentRunIds.forEach(agentRunId => {
+      agentRunIds.forEach((agentRunId) => {
         result.push({ agentRunId, marginalKey });
       });
     });
     return result;
   }, [allAgentRunEntries]);
 
-  // Get unique outer and inner dimension values with their IDs
-  const outerValuesWithIds = useMemo(() => {
-    if (!outerDimId || !filtersMap || !dimIdsToFilterIds) return [];
-    const allValues = dimIdsToFilterIds[outerDimId]?.map(id => ({
-      id,
-      value: filtersMap[id].value
-    })) || [];
-    return allValues.slice(0, MAX_DIMENSION_VALUES);
-  }, [outerDimId, filtersMap, dimIdsToFilterIds]);
-
-  const innerValuesWithIds = useMemo(() => {
-    if (!innerDimId || !filtersMap || !dimIdsToFilterIds) return [];
-    const allValues = dimIdsToFilterIds[innerDimId]?.map(id => ({
-      id,
-      value: filtersMap[id].value
-    })) || [];
-    return allValues.slice(0, MAX_DIMENSION_VALUES);
-  }, [innerDimId, filtersMap, dimIdsToFilterIds]);
-
-  // Get total counts for UI indicators
-  const totalOuterValues = useMemo(() => {
-    if (!outerDimId || !filtersMap || !dimIdsToFilterIds) return 0;
-    return dimIdsToFilterIds[outerDimId]?.length || 0;
-  }, [outerDimId, filtersMap, dimIdsToFilterIds]);
-
-  const totalInnerValues = useMemo(() => {
-    if (!innerDimId || !filtersMap || !dimIdsToFilterIds) return 0;
-    return dimIdsToFilterIds[innerDimId]?.length || 0;
-  }, [innerDimId, filtersMap, dimIdsToFilterIds]);
-
-  // Helper to safely get dimension name
-  const getDimensionName = (dimId: string | undefined) => {
-    if (!dimId || !dimensionsMap) return 'Dimension';
-    return dimensionsMap[dimId]?.name ?? 'Dimension';
-  };
-
-  const tableData = useMemo(() => {
-    const hasOuter = outerValuesWithIds.length > 0;
-    const hasInner = innerValuesWithIds.length > 0;
-    
-    if (!hasOuter && !hasInner) return null;
-    
-    // 2D case: outer as rows, inner as columns
-    if (hasOuter && hasInner) {
-      return {
-        rows: outerValuesWithIds,
-        cols: innerValuesWithIds,
-        is2D: true,
-        rowDimId: outerDimId,
-        colDimId: innerDimId,
-        rowName: getDimensionName(outerDimId),
-        colName: getDimensionName(innerDimId)
-      };
-    }
-    
-    // 1D case: use available dimension as rows, "Score" as column
-    const availableValues = hasOuter ? outerValuesWithIds : innerValuesWithIds;
-    const availableDimId = hasOuter ? outerDimId : innerDimId;
-    
-    return {
-      rows: availableValues,
-      cols: [{ id: 'score', value: 'Score' }],
-      is2D: false,
-      rowDimId: availableDimId,
-      colDimId: undefined,
-      rowName: getDimensionName(availableDimId),
-      colName: 'Score'
-    };
-  }, [outerValuesWithIds, innerValuesWithIds, outerDimId, innerDimId, getDimensionName]);
-
-  // Calculate average scores for each dimension combination or single dimension
-  const dimensionScores = useMemo(() => {
-    if (!statMarginals) return {};
-    if (!outerValuesWithIds.length && !innerValuesWithIds.length) return {};
-    
-    // 2D case: both dimensions present
-    if (outerValuesWithIds.length && innerValuesWithIds.length) {
-      const scores: Record<string, Record<string, { score: number; n?: number; ci?: number }>> = {};
-      outerValuesWithIds.forEach(({ id: outerId, value: outerValue }) => {
-        scores[outerValue] = {};
-        innerValuesWithIds.forEach(({ id: innerId, value: innerValue }) => {
-          const key = `${innerDimId},${innerId}|${outerDimId},${outerId}`;
-          const stats = statMarginals[key];
-          scores[outerValue][innerValue] = getScoreFromStats(stats);
-        });
-      });
-      return scores;
-    }
-    
-    // 1D case: only one dimension present
-    const availableValues = outerValuesWithIds.length ? outerValuesWithIds : innerValuesWithIds;
-    const availableDimId = outerValuesWithIds.length ? outerDimId : innerDimId;
-    
-    const scores: Record<string, { score: number; n?: number; ci?: number }> = {};
-    availableValues.forEach(({ id, value }) => {
-      const key = `${availableDimId},${id}`;
-      const stats = statMarginals[key];
-      scores[value] = getScoreFromStats(stats);
-    });
-    
-    return scores;
-  }, [statMarginals, outerValuesWithIds, innerValuesWithIds, innerDimId, outerDimId]);
-
   // Add pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = PAGINATION_LIMIT; // Use constant instead of hardcoded value
 
-  // Calculate pagination values
-  const totalPages = Math.ceil(flatAgentRuns.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const endIndex = Math.min(startIndex + itemsPerPage, flatAgentRuns.length);
-  const currentPageItems = flatAgentRuns.slice(startIndex, endIndex);
+  // Calculate pagination values (memoized)
+  const totalPages = useMemo(
+    () => Math.ceil(flatAgentRuns.length / itemsPerPage),
+    [flatAgentRuns.length, itemsPerPage]
+  );
+  const startIndex = useMemo(
+    () => (currentPage - 1) * itemsPerPage,
+    [currentPage, itemsPerPage]
+  );
+  const endIndex = useMemo(
+    () => Math.min(startIndex + itemsPerPage, flatAgentRuns.length),
+    [startIndex, itemsPerPage, flatAgentRuns.length]
+  );
+  const currentPageItems = useMemo(
+    () => flatAgentRuns.slice(startIndex, endIndex),
+    [flatAgentRuns, startIndex, endIndex]
+  );
+
+  // When the page changes, request metadata for the new page
+  useEffect(() => {
+    if (!frameGridId) return;
+    dispatch(
+      getAgentRunMetadata(currentPageItems.map(({ agentRunId }) => agentRunId))
+    );
+  }, [currentPageItems, dispatch, frameGridId]);
 
   // Pagination controls
-  const goToPage = (page: number) => {
-    setCurrentPage(Math.max(1, Math.min(page, totalPages)));
-  };
+  const goToPage = useCallback(
+    (page: number) => {
+      setCurrentPage(Math.max(1, Math.min(page, totalPages)));
 
-  // Helper function to create filters
-  const createFilter = useCallback((dimId: string, value: string): PrimitiveFilter => ({
-    type: 'primitive',
-    key_path: dimensionsMap?.[dimId]?.metadata_key
-      ? ['metadata', ...dimensionsMap[dimId].metadata_key.split('.')]
-      : [],
-    value,
-    op: '==',
-    id: crypto.randomUUID(),
-    name: null,
-  }), [dimensionsMap]);
+      // Recompute in this function so we can figure out which IDs to request metadata for
+      // TODO(mengk): refactor this.
+      const startIndex = (currentPage - 1) * itemsPerPage;
+      const endIndex = Math.min(
+        startIndex + itemsPerPage,
+        flatAgentRuns.length
+      );
+      const currentPageItems = flatAgentRuns.slice(startIndex, endIndex);
+
+      dispatch(
+        getAgentRunMetadata(
+          currentPageItems.map(({ agentRunId }) => agentRunId)
+        )
+      );
+    },
+    [currentPage, dispatch, flatAgentRuns, itemsPerPage, totalPages]
+  );
 
   // If data isn't available, show a loading spinner
   if (!statMarginals || !idMarginals) {
@@ -441,239 +245,61 @@ export default function ExperimentViewer() {
   }
 
   return (
-    <Card className="flex-1 p-3 flex flex-col min-h-0">
+    <Card className="flex-1 p-3 flex flex-col min-w-0 space-y-3">
       {/* Header with organization dropdown - always visible */}
       <div className="flex justify-between items-center shrink-0">
         <div>
-          <div className="text-sm font-semibold">
-            Agent Run Viewer
+          <div className="text-sm font-semibold">Grouped Visualization</div>
+          <div className="text-xs">Select fields to group by</div>
+        </div>
+        {/* Place dimension selector and chart type selector in the header */}
+        <div className="flex items-center gap-4">
+          <DimensionSelector />
+          <div className="flex items-center space-x-1">
+            <span className="text-xs text-gray-500">Chart:</span>
+            <Select
+              value={chartType || 'bar'}
+              onValueChange={(value: 'bar' | 'line' | 'table') =>
+                dispatch(setChartType(value))
+              }
+            >
+              <SelectTrigger className="h-6 w-16 text-xs border-gray-200 bg-transparent hover:bg-gray-50 px-2 font-normal">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="table" className="text-xs">
+                  Table
+                </SelectItem>
+                <SelectItem value="bar" className="text-xs">
+                  Bar
+                </SelectItem>
+                <SelectItem value="line" className="text-xs">
+                  Line
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-          <div className="text-xs">Compare agent performance across runs.</div>
         </div>
-        {/* Place dimension selector in the header */}
-        <DimensionSelector />
       </div>
+      {chartType === 'table' && <TableArea />}
+      {(chartType === 'bar' || chartType === 'line') && <GraphArea />}
 
-      {/* Dimension scores table - always visible */}
-      {tableData && (
-        <div className="w-full border border-gray-200 rounded mb-4 shrink-0">
-          <table className="w-full border-collapse text-xs">
-            <thead>
-              <tr>
-                <th className="border border-gray-200 p-2 bg-gray-50 sticky left-0"></th>
-                {tableData.cols.map(({ id: colId, value: colValue }) => (
-                  <th
-                    key={colId}
-                    className="border border-gray-200 p-2 bg-gray-50 cursor-pointer hover:bg-indigo-100 transition-colors"
-                    title={tableData.colDimId ? `Filter to ${tableData.colName}: ${colValue}` : undefined}
-                    onClick={() => {
-                      if (tableData.colDimId && dimensionsMap) {
-                        const filter = createFilter(tableData.colDimId, colValue);
-                        dispatch(addBaseFilter(filter));
-                      }
-                    }}
-                  >
-                    <span className="underline decoration-dotted underline-offset-2 cursor-pointer" style={{textDecorationStyle: 'dotted'}}>{colValue}</span>
-                    {tableData.colDimId && <span className="absolute right-1 top-1 text-xs text-indigo-400" style={{fontSize: '10px'}}>&#128269;</span>}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {tableData.rows.map(({ id: rowId, value: rowValue }) => (
-                <tr key={rowId}>
-                  <td
-                    className="border border-gray-200 p-2 bg-gray-50 font-medium sticky left-0 cursor-pointer hover:bg-indigo-100 transition-colors relative"
-                    title={`Filter to ${tableData.rowName}: ${rowValue}`}
-                    onClick={() => {
-                      if (tableData.rowDimId && dimensionsMap) {
-                        const filter = createFilter(tableData.rowDimId, rowValue);
-                        dispatch(addBaseFilter(filter));
-                      }
-                    }}
-                  >
-                    <span className="underline decoration-dotted underline-offset-2 cursor-pointer" style={{textDecorationStyle: 'dotted'}}>{rowValue}</span>
-                    <span className="absolute right-1 top-1 text-xs text-indigo-400" style={{fontSize: '10px'}}>&#128269;</span>
-                  </td>
-                  {tableData.cols.map(({ id: colId, value: colValue }) => {
-                    // Get score data based on table type
-                    let score: number | undefined;
-                    let n: number | undefined;
-                    let ci: number | undefined;
-                    
-                    if (tableData.is2D) {
-                      // 2D case: use both dimensions
-                      const row = dimensionScores[rowValue];
-                      const cellData = typeof row === 'object' && row !== null ? (row as Record<string, { score: number; n?: number; ci?: number }>)[colValue] : undefined;
-                      score = cellData?.score;
-                      n = cellData?.n;
-                      ci = cellData?.ci;
-                    } else {
-                      // 1D case: use single dimension
-                      const cellData = dimensionScores[rowValue] as { score: number; n?: number; ci?: number } | undefined;
-                      score = cellData?.score;
-                      n = cellData?.n;
-                      ci = cellData?.ci;
-                    }
-                    
-                    return (
-                      <td 
-                        key={colId} 
-                        className={`border border-gray-200 p-2 cursor-pointer hover:bg-indigo-100 transition-colors relative ${getScoreClass(score)}`}
-                        title={getFilterTitle(tableData.rowName, rowValue, tableData.colName, colValue)}
-                        onClick={() => {
-                          if (tableData.rowDimId && dimensionsMap) {
-                            if (tableData.is2D && tableData.colDimId) {
-                              // 2D case: add both filters
-                              const rowFilter = createFilter(tableData.rowDimId, rowValue);
-                              const colFilter = createFilter(tableData.colDimId, colValue);
-                              dispatch(addBaseFilters([rowFilter, colFilter]));
-                            } else {
-                              // 1D case: add single filter
-                              const filter = createFilter(tableData.rowDimId, rowValue);
-                              dispatch(addBaseFilter(filter));
-                            }
-                          }
-                        }}
-                      >
-                        <span className="underline decoration-dotted underline-offset-2 cursor-pointer" style={{textDecorationStyle: 'dotted'}}>
-                          {getScoreDisplay(score, ci)}
-                        </span>
-                        {n !== undefined && <span className="text-gray-500 ml-1">(n={n})</span>}
-                        <span className="absolute right-1 top-1 text-xs text-indigo-400" style={{fontSize: '10px'}}>&#128269;</span>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {/* Show indicator when there are more than MAX_DIMENSION_VALUES rows */}
-          {(totalOuterValues > MAX_DIMENSION_VALUES || totalInnerValues > MAX_DIMENSION_VALUES) && (
-            <div className="px-2 py-1 bg-yellow-50 border-t border-yellow-200 text-xs text-yellow-700">
-              {totalOuterValues > MAX_DIMENSION_VALUES && totalInnerValues > MAX_DIMENSION_VALUES ? (
-                `Showing first ${MAX_DIMENSION_VALUES} of ${totalOuterValues} rows and first ${MAX_DIMENSION_VALUES} of ${totalInnerValues} columns`
-              ) : totalOuterValues > MAX_DIMENSION_VALUES ? (
-                `Showing first ${MAX_DIMENSION_VALUES} of ${totalOuterValues} rows`
-              ) : (
-                `Showing first ${MAX_DIMENSION_VALUES} of ${totalInnerValues} columns`
-              )}
-            </div>
-          )}
+      {/* Agent run list */}
+      <div>
+        <div className="text-sm font-semibold">Agent Run List</div>
+        <div className="text-xs">
+          {flatAgentRuns.length} agent runs matching the current view
         </div>
-      )}
-
-      {/* Content area: FLAT LIST of all agent runs - scrollable */}
-      <div className="flex flex-col flex-1 min-h-0">
-        {flatAgentRuns.length > 0 ? (
-          <>
-            <div className="flex-1 min-h-0 overflow-auto">
-              {currentPageItems.map(({ agentRunId }) => {
-                const attributes = curSearchQuery ? (attributeMap?.[agentRunId]?.[curSearchQuery]?.filter((attr: any) => attr.value !== null) || null) : null;
-                return (
-                  <div
-                    key={agentRunId}
-                    className="flex flex-col p-1 pb-[6px] border rounded text-xs bg-white/80 hover:bg-gray-50 mb-1"
-                  >
-                    <div
-                      className="cursor-pointer"
-                      onMouseDown={(e) =>
-                        navToAgentRun(
-                          e,
-                          router,
-                          window,
-                          agentRunId,
-                          undefined,
-                          undefined,
-                          frameGridId
-                        )
-                      }
-                    >
-                      <div className="flex justify-between items-center">
-                        <span className="text-gray-600">
-                          Agent Run <span className="font-mono">{agentRunId}</span>
-                        </span>
-                        <div className="flex gap-2">
-                          <span
-                            className="text-blue-600 font-medium hover:text-blue-700"
-                            onMouseDown={(e) => {
-                              navToAgentRun(
-                                e,
-                                router,
-                                window,
-                                agentRunId,
-                                undefined,
-                                undefined,
-                                frameGridId,
-                                curSearchQuery
-                              );
-                            }}
-                          >
-                            View
-                          </span>
-                        </div>
-                      </div>
-                      {/* Display metadata if available */}
-                      {agentRunMetadata && agentRunMetadata[agentRunId] && (
-                        <AgentRunMetadata agentRunId={agentRunId} />
-                      )}
-                    </div>
-                    {/* Regex matches */}
-                    <RegexSnippetsSection regexSnippets={regexSnippets?.[agentRunId]} />
-                    {/* Attribute section if search query is active */}
-                    {attributes && curSearchQuery && (
-                      <AttributeSection
-                        dataId={agentRunId}
-                        curAttributeQuery={curSearchQuery}
-                        attributes={attributes}
-                      />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Pagination Controls - always visible */}
-            <div className="flex items-center justify-between px-2 py-2 border-t shrink-0">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => goToPage(1)}
-                  disabled={currentPage === 1}
-                  className="p-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <ChevronFirst className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => goToPage(currentPage - 1)}
-                  disabled={currentPage === 1}
-                  className="p-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-                <span className="text-sm">
-                  Page {currentPage} of {totalPages}
-                </span>
-                <button
-                  onClick={() => goToPage(currentPage + 1)}
-                  disabled={currentPage === totalPages}
-                  className="p-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => goToPage(totalPages)}
-                  disabled={currentPage === totalPages}
-                  className="p-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <ChevronLast className="h-4 w-4" />
-                </button>
-              </div>
-              <div className="text-sm text-gray-500">
-                Showing {startIndex + 1}-{endIndex} of {flatAgentRuns.length} runs
-              </div>
-            </div>
-          </>
-        ) : (
+      </div>
+      <TranscriptFilterControls />
+      <div
+        className="flex-1 space-y-1 custom-scrollbar min-w-0 overflow-y-auto ml-3"
+        ref={containerRef}
+      >
+        {currentPageItems.map(({ agentRunId }) => (
+          <AgentRunCard key={agentRunId} agentRunId={agentRunId} />
+        ))}
+        {flatAgentRuns.length === 0 && (
           <div className="text-xs text-gray-500 min-h-[24px]">
             {loadingSearchQuery ? (
               <div className="flex items-center space-x-2">
@@ -685,6 +311,46 @@ export default function ExperimentViewer() {
             )}
           </div>
         )}
+      </div>
+
+      {/* Pagination controls */}
+      <div className="flex items-center justify-between shrink-0 ml-2">
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => goToPage(1)}
+            disabled={currentPage === 1}
+            className="p-0.5 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <ChevronFirst className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={() => goToPage(currentPage - 1)}
+            disabled={currentPage === 1}
+            className="p-0.5 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
+          </button>
+          <span className="text-xs font-mono px-1">
+            {currentPage}/{totalPages}
+          </span>
+          <button
+            onClick={() => goToPage(currentPage + 1)}
+            disabled={currentPage === totalPages}
+            className="p-0.5 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <ChevronRight className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={() => goToPage(totalPages)}
+            disabled={currentPage === totalPages}
+            className="p-0.5 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <ChevronLast className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <div className="text-[11px] text-gray-500">
+          {startIndex + 1}-{endIndex} of {flatAgentRuns.length}
+        </div>
       </div>
     </Card>
   );
