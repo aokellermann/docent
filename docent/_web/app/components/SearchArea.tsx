@@ -20,7 +20,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
 
-import { addSearchDimension, deleteSearch } from '../store/frameSlice';
+import { addSearchDimension, deleteSearch, setMarginals } from '../store/frameSlice';
 import { useAppDispatch } from '../store/hooks';
 import {
   clearSearch,
@@ -91,13 +91,13 @@ const SearchArea = () => {
 
   useEffect(() => {
     if (activeDim && activeDim.bins && activeDim.bins.length > 0) {
-      if (marginals == null && activeClusterTaskId == null) {
+      if (activeClusterTaskId == null) {
         // if we have bins for a search result and no ongoing clustering task, then we've already
         // computed the marginals in an earlier query and just need to request them
         dispatch(getExistingClusters({ dimensionId: activeDim.id}));
       }
     }
-  }, [activeDim, marginals, dispatch, activeClusterTaskId]);
+  }, [activeDim, dispatch, activeClusterTaskId]);
 
   /**
    * Local state for UI components
@@ -372,7 +372,7 @@ const SearchArea = () => {
           <div className="border rounded-md bg-gray-50 p-2 space-y-1">
             <div className="flex items-center justify-between text-xs">
               <div className="text-gray-600">Search query</div>
-              {loadingProgress && !loadingSearchQuery && (
+              {curSearchQuery && loadingProgress && !loadingSearchQuery && (
                 <div className="text-gray-400">
                   {loadingProgress[0]} searches finished
                   {loadingProgress[1] - loadingProgress[0] > 0 && (
@@ -504,6 +504,7 @@ const SearchArea = () => {
                         key={bin.id}
                         bin={bin}
                         loading={activeDim.loading_marginals || false}
+                        dimId={activeDim.id}
                         marginalJudgments={
                           marginals?.[activeDim.id]?.[bin.id] || undefined
                         }
@@ -626,16 +627,6 @@ const SearchArea = () => {
                                   {Math.round(completionPercentage)}% computed
                                 </span>
                               </div>
-                              <button
-                                className="hover:bg-indigo-50 rounded p-0.5 text-indigo-400 hover:text-indigo-600 transition-colors"
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  await handleShare(search.search_query);
-                                }}
-                                title="Share this search"
-                              >
-                                <Share2 className="h-3 w-3" />
-                              </button>
                               <button
                                 className="hover:bg-indigo-50 rounded p-0.5 text-indigo-400 hover:text-indigo-600 transition-colors"
                                 onClick={(e) => {

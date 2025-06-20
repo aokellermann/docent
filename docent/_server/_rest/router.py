@@ -1138,7 +1138,9 @@ async def listen_cluster_dimension(
         raise ValueError(f"Dimension {dim_id} not found")
 
     async def event_stream():
-        async with db.advisory_lock(fg_id, action_id="mutation"):
+        async with db.advisory_lock(
+            fg_id + "__cluster__" + str(dim.search_query), action_id="mutation"
+        ):
             try:
                 # Send new dim state indicating that clusters are being loaded
                 await db.set_dim_loading_state(dim_id, loading_clusters=True)
