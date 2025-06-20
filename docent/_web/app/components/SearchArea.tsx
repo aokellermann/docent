@@ -22,14 +22,13 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
 
-import { addSearchDimension, deleteSearch, setMarginals } from '../store/frameSlice';
+import { addSearchDimension, deleteSearch } from '../store/frameSlice';
 import { useAppDispatch } from '../store/hooks';
 import {
   clearSearch,
   computeSearch,
   getExistingClusters,
   requestClusters,
-  setActiveSearchTaskId,
   setSearchQueryTextboxValue,
 } from '../store/searchSlice';
 import { RootState } from '../store/store';

@@ -1,6 +1,4 @@
-import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
-import { PermissionLevel, SubjectType } from './types';
-import { apiRestClient } from '@/app/services/apiService';
+import { PermissionLevel } from './types';
 import { User } from '@/app/types/userTypes';
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import { BASE_URL } from '@/app/constants';

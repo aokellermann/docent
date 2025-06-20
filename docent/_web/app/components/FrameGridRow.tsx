@@ -4,7 +4,6 @@ import {
   CalendarIcon,
   CheckIcon,
   ClipboardCopyIcon,
-  ExternalLinkIcon,
   Layers,
   Pencil,
   Trash2,

@@ -80,7 +80,7 @@ const AddCollaborator = ({ framegridId }: { framegridId: string }) => {
     setSearchValue('');
   };
   if (!hasWritePermission) {
-    return <div className="text-sm text-muted-foreground">You don't have permission to add or edit collaborators.</div>
+    return <div className="text-sm text-muted-foreground">You do not have permission to add or edit collaborators.</div>
   }
 
   return (

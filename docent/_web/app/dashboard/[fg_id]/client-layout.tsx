@@ -1,13 +1,13 @@
 'use client';
 
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import React, { useEffect, Suspense, useState, useRef } from 'react';
+import React, { useEffect, Suspense, useRef } from 'react';
 
 import Breadcrumbs from '../../components/Breadcrumbs';
 import ResponsiveCheck from '../../components/ResponsiveCheck';
 import { getDimensions, initSession, setHasInitSearchQuery } from '../../store/frameSlice';
-import { useAppDispatch, useAppSelector } from '../../store/hooks';
-import { computeSearch, handleSearchUpdate, setSearchQuery } from '@/app/store/searchSlice';
+import { useAppDispatch } from '../../store/hooks';
+import { handleSearchUpdate, setSearchQuery } from '@/app/store/searchSlice';
 import { apiRestClient } from '@/app/services/apiService';
 
 export default function DocentDashboardClientLayout({
@@ -53,7 +53,7 @@ export default function DocentDashboardClientLayout({
       search_query: searchQuery,
       view_id: viewId,
     }).then((response) => {
-      let dimId = response.data;
+      const dimId = response.data;
       dispatch(setSearchQuery(searchQuery));
       dispatch(setHasInitSearchQuery(true));
       apiRestClient.get(`/${fgId}/get_existing_search_results?search_query=${searchQuery}`).then((response) => {
