@@ -37,7 +37,6 @@ import { RootState } from '../store/store';
 import BinEditor from './BinEditor';
 import { ProgressBar } from './ProgressBar';
 import { requestDiffs } from '../store/diffSlice';
-import { TranscriptFilterControls } from './TranscriptFilterControls';
 import { apiRestClient } from '../services/apiService';
 import { useHasFramegridWritePermission } from '@/lib/permissions/hooks';
 import { setGraphData } from '../store/experimentViewerSlice';
