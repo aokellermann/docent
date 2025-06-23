@@ -157,9 +157,20 @@ async def execute_search_paired(
         completion_callback=llm_callback,
     )
 
-    return [
+    instances_per_input = [
         _parse_output(output.first_text) if output.first_text is not None else None
         for output in outputs
+    ]
+    return [
+        SearchPairedResult(
+            agent_run_1_id=agent_run_1_id,
+            agent_run_2_id=agent_run_2_id,
+            context=context,
+            action_1=action_1,
+            action_2=action_2,
+            instances=instances,
+        )
+        for instances, (agent_run_1_id, agent_run_2_id) in zip(instances_per_input, paired_run_ids)
     ]
 
 

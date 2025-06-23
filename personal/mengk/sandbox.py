@@ -79,6 +79,20 @@ runs = await db.get_agent_runs(ctx)
 len(runs)
 
 
+# %%
+
+
+await db.compute_paired_search(
+    ctx,
+    grouping_md_fields=["sample_id"],
+    identifying_md_field_value_1=("model", "anthropic/claude-3-7-sonnet-latest"),
+    identifying_md_field_value_2=("model", "anthropic/claude-3-5-sonnet-latest"),
+    shared_context="Both agents knew the name of the specific file or function they needed to find.",
+    action_1="Agent used tools like grep or find to search for the object",
+    action_2="Agent searched manually without tools",
+)
+
+
 # %%%
 
 

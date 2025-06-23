@@ -250,7 +250,9 @@ export default function ExperimentViewer() {
       <div className="flex justify-between items-center shrink-0">
         <div>
           <div className="text-sm font-semibold">Grouped Visualization</div>
-          <div className="text-xs">Select fields to group by</div>
+          <div className="text-xs">
+            Select fields to group by, and click to filter
+          </div>
         </div>
         {/* Place dimension selector and chart type selector in the header */}
         <div className="flex items-center gap-4">
@@ -293,7 +295,7 @@ export default function ExperimentViewer() {
       </div>
       <TranscriptFilterControls />
       <div
-        className="flex-1 space-y-1 custom-scrollbar min-w-0 overflow-y-auto ml-3"
+        className="flex-1 space-y-1 custom-scrollbar min-w-0 overflow-y-auto"
         ref={containerRef}
       >
         {currentPageItems.map(({ agentRunId }) => (
@@ -314,7 +316,7 @@ export default function ExperimentViewer() {
       </div>
 
       {/* Pagination controls */}
-      <div className="flex items-center justify-between shrink-0 ml-2">
+      <div className="flex items-center justify-between shrink-0">
         <div className="flex items-center gap-1">
           <button
             onClick={() => goToPage(1)}

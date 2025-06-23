@@ -39,6 +39,10 @@ from docent._ai_tools.clustering.cluster_generator import ClusterFeedback, propo
 from docent._ai_tools.diffs.llm_diff_summaries import compute_transcript_diff
 from docent._ai_tools.diffs.models import Claim, SQLADiffsReport, TranscriptDiff
 from docent._ai_tools.search import SearchResult, SearchResultStreamingCallback, execute_search
+from docent._ai_tools.search_paired import (
+    SearchPairedResultStreamingCallback,
+    execute_search_paired,
+)
 from docent._db_service.contexts import ViewContext
 from docent._db_service.schemas.auth_models import (
     PERMISSION_LEVELS,
@@ -309,25 +313,6 @@ class DBService:
             raise
         finally:
             await session.close()
-
-    ###########################
-    # Raw access (dangerous!) #
-    ###########################
-
-    async def run_raw_query(self, query: str) -> list[dict[str, Any]]:
-        raise NotImplementedError("This method is not implemented")
-        logger.error("RUNNING A RAW QUERY!!!!!!!!!!")
-        async with self.session() as session:
-            result = await session.execute(text(query))
-            rows = result.all()
-            if not rows:
-                return []
-
-            # Get column names from the result
-            column_names = list(result.keys())
-
-            # Convert each row to a dictionary
-            return [dict(zip(column_names, row)) for row in rows]
 
     #############
     # FrameGrid #
@@ -1223,6 +1208,120 @@ class DBService:
             result = await session.execute(query)
             return [a.to_search_result() for a in result.scalars().all()]
 
+    async def _get_agent_runs_without_judgments(
+        self, ctx: ViewContext, filter_id: str
+    ) -> list[AgentRun]:
+        # Does this datapoint have a judgment for the given filter?
+        subquery = (
+            select(SQLAJudgment.id)
+            .where(SQLAJudgment.agent_run_id == SQLAAgentRun.id)
+            .where(SQLAJudgment.filter_id == filter_id)
+            .correlate(SQLAAgentRun)  # Explicitly correlate with the outer SQLAAgentRun table
+            .exists()
+        )
+        where_clause = ~subquery
+
+        return await self.get_agent_runs(ctx, _where_clause=where_clause)
+
+    async def compute_search(
+        self,
+        ctx: ViewContext,
+        search_query: str,
+        search_result_callback: SearchResultStreamingCallback | None = None,
+    ):
+        # If the callback is set, the caller is expecting all results to be streamed back
+        # So, retrieve them and send them
+        if search_result_callback is not None:
+            existing_search_results = await self._get_search_results(
+                ctx, search_query, ensure_fresh=False
+            )
+            if existing_search_results:
+                await search_result_callback(existing_search_results)
+
+        # Figure out which runs don't have search results computed
+        agent_runs = await self._get_agent_runs_without_search_results(ctx, search_query)
+        if not agent_runs:
+            logger.info(f"All agent runs already have results for {search_query}")
+            return
+        else:
+            logger.info(f"Computing results for {len(agent_runs)} agent runs")
+
+        async def _results_callback(search_results: list[SearchResult] | None):
+            if search_result_callback:
+                await search_result_callback(search_results)
+
+            with anyio.CancelScope(shield=True):
+                if search_results is None:
+                    return
+                to_upload: list[SQLASearchResult] = [
+                    SQLASearchResult.from_search_result(
+                        search_result=attr,
+                        fg_id=ctx.fg_id,
+                    )
+                    for attr in search_results
+                ]
+                async with self.session() as session:
+                    session.add_all(to_upload)
+
+                logger.info(f"Pushed {len(to_upload)} attributes")
+
+        try:
+            await execute_search(agent_runs, search_query, search_result_callback=_results_callback)
+        except anyio.get_cancelled_exc_class():
+            logger.info("Attribute computation cancelled")
+
+    #################
+    # Paired search #
+    #################
+
+    async def compute_paired_search(
+        self,
+        ctx: ViewContext,
+        # How to pair the runs up
+        grouping_md_fields: list[str],
+        identifying_md_field_value_1: tuple[str, Any],
+        identifying_md_field_value_2: tuple[str, Any],
+        # What to search for
+        shared_context: str,
+        action_1: str,
+        action_2: str,
+        # Callback
+        search_result_callback: SearchPairedResultStreamingCallback | None = None,
+    ):
+        # Pair agent runs up
+        agent_runs = await self.get_agent_runs(ctx)
+        m: dict[tuple[Any, ...], dict[tuple[str, Any], AgentRun]] = {}
+        for run in agent_runs:
+            key = tuple(run.metadata.get(field) for field in grouping_md_fields)
+            if key not in m:
+                m[key] = {}
+            if run.metadata.get(identifying_md_field_value_1[0]) == identifying_md_field_value_1[1]:
+                m[key][identifying_md_field_value_1] = run
+            elif (
+                run.metadata.get(identifying_md_field_value_2[0]) == identifying_md_field_value_2[1]
+            ):
+                m[key][identifying_md_field_value_2] = run
+            else:
+                raise ValueError(f"Run {run.id} does not match any identifying field value")
+
+        paired_list: list[tuple[AgentRun, AgentRun]] = []
+        for k, v in m.items():
+            if len(v) > 2:
+                raise ValueError(f"Paired failed. Found {len(v)} runs for key {k}")
+            paired_list.append((v[identifying_md_field_value_1], v[identifying_md_field_value_2]))
+
+        return await execute_search_paired(
+            paired_list,
+            shared_context,
+            action_1,
+            action_2,
+            search_result_callback=search_result_callback,
+        )
+
+    #########
+    # Diffs #
+    #########
+
     async def get_diffs_report(self, diffs_report_id: str) -> SQLADiffsReport:
         async with self.session() as session:
             result = await session.execute(
@@ -1337,68 +1436,6 @@ class DBService:
                 f"Pushed {len(transcript_diffs_models)} diff attributes and updated Report{diffs_report.id}"
             )
         return transcript_diffs_models
-
-    async def compute_search(
-        self,
-        ctx: ViewContext,
-        search_query: str,
-        search_result_callback: SearchResultStreamingCallback | None = None,
-    ):
-        # If the callback is set, the caller is expecting all results to be streamed back
-        # So, retrieve them and send them
-        if search_result_callback is not None:
-            existing_search_results = await self._get_search_results(
-                ctx, search_query, ensure_fresh=False
-            )
-            if existing_search_results:
-                await search_result_callback(existing_search_results)
-
-        # Figure out which runs don't have search results computed
-        agent_runs = await self._get_agent_runs_without_search_results(ctx, search_query)
-        if not agent_runs:
-            logger.info(f"All agent runs already have results for {search_query}")
-            return
-        else:
-            logger.info(f"Computing results for {len(agent_runs)} agent runs")
-
-        async def _results_callback(search_results: list[SearchResult] | None):
-            if search_result_callback:
-                await search_result_callback(search_results)
-
-            with anyio.CancelScope(shield=True):
-                if search_results is None:
-                    return
-                to_upload: list[SQLASearchResult] = [
-                    SQLASearchResult.from_search_result(
-                        search_result=attr,
-                        fg_id=ctx.fg_id,
-                    )
-                    for attr in search_results
-                ]
-                async with self.session() as session:
-                    session.add_all(to_upload)
-
-                logger.info(f"Pushed {len(to_upload)} attributes")
-
-        try:
-            await execute_search(agent_runs, search_query, search_result_callback=_results_callback)
-        except anyio.get_cancelled_exc_class():
-            logger.info("Attribute computation cancelled")
-
-    async def _get_agent_runs_without_judgments(
-        self, ctx: ViewContext, filter_id: str
-    ) -> list[AgentRun]:
-        # Does this datapoint have a judgment for the given filter?
-        subquery = (
-            select(SQLAJudgment.id)
-            .where(SQLAJudgment.agent_run_id == SQLAAgentRun.id)
-            .where(SQLAJudgment.filter_id == filter_id)
-            .correlate(SQLAAgentRun)  # Explicitly correlate with the outer SQLAAgentRun table
-            .exists()
-        )
-        where_clause = ~subquery
-
-        return await self.get_agent_runs(ctx, _where_clause=where_clause)
 
     #########################################
     # Computing filters and clustering dims #
@@ -1575,7 +1612,7 @@ class DBService:
                 prefix, suffix = key.split(".", 1)
                 if (field := metadata.get(prefix)) is not None:
                     if isinstance(field, dict):
-                        return cast(dict[str, Any], field).get(suffix, None)
+                        return field.get(suffix, None)
             return None
 
         for id, metadata in all_metadata_with_ids:

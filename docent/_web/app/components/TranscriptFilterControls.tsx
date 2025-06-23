@@ -237,7 +237,7 @@ export const TranscriptFilterControls = () => {
           {baseFilter.filters.map((subFilter: FrameFilter) => (
             <div
               key={subFilter.id}
-              className="inline-flex items-center gap-x-1 text-xs bg-indigo-50 text-indigo-800 border border-indigo-100 pl-1.5 pr-1 py-0.5 rounded-md"
+              className="inline-flex items-center gap-x-1 text-[11px] bg-indigo-50 text-indigo-800 border border-indigo-100 pl-1.5 pr-1 py-0.5 rounded-md"
             >
               {(() => {
                 if (subFilter.type === 'primitive') {
@@ -269,7 +269,7 @@ export const TranscriptFilterControls = () => {
           ))}
           <button
             onClick={() => dispatch(clearBaseFilters())}
-            className="inline-flex items-center gap-x-1 text-xs bg-red-50 text-red-500 border border-red-100 px-1.5 py-0.5 rounded-md hover:bg-red-100 transition-colors"
+            className="inline-flex items-center gap-x-1 text-[11px] bg-red-50 text-red-500 border border-red-100 px-1.5 py-0.5 rounded-md hover:bg-red-100 transition-colors"
           >
             <RefreshCw className="h-3 w-3 mr" />
             Clear
