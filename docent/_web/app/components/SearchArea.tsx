@@ -131,9 +131,11 @@ const SearchArea = () => {
 
   const handleStopSearch = useCallback(() => {
     if (activeSearchTaskId) {
-      apiRestClient.post(`/${activeSearchTaskId}/cancel_compute_search`).then(() => {
-        handleClearSearch();
-      });
+      apiRestClient
+        .post(`/${activeSearchTaskId}/cancel_compute_search`)
+        .then(() => {
+          handleClearSearch();
+        });
     } else {
       handleClearSearch();
     }
@@ -283,9 +285,13 @@ const SearchArea = () => {
    * Handle share button
    */
   const handleShare = async (searchQuery: string) => {
-    const response = await apiRestClient.post(`/${frameGridId}/copy_own_filter`);
+    const response = await apiRestClient.post(
+      `/${frameGridId}/copy_own_filter`
+    );
     navigator.clipboard
-      .writeText(`${window.location.origin}${window.location.pathname}?viewId=${response.data.view_id}&filterId=${response.data.filter_id}&searchQuery=${searchQuery}`)
+      .writeText(
+        `${window.location.origin}${window.location.pathname}?viewId=${response.data.view_id}&filterId=${response.data.filter_id}&searchQuery=${searchQuery}`
+      )
       .then(() => {
         toast({
           title: 'Search URL copied',
@@ -502,34 +508,35 @@ const SearchArea = () => {
                       <Share2 className="h-3 w-3" />
                       Share
                     </button>
-                    {loadingSearchQuery ?
-                    <>
-                      <button
-                        onClick={() => handleClearSearch()}
-                        className="inline-flex items-center gap-x-1 text-xs bg-gray-50 text-gray-600 border border-gray-200 px-1.5 py-0.5 rounded-md hover:bg-gray-100 transition-colors"
-                        title="Clear display (search continues in background)"
-                      >
-                        <EyeOff className="h-3 w-3" />
-                        Run in background
-                      </button>
+                    {loadingSearchQuery ? (
+                      <>
+                        <button
+                          onClick={() => handleClearSearch()}
+                          className="inline-flex items-center gap-x-1 text-xs bg-gray-50 text-gray-600 border border-gray-200 px-1.5 py-0.5 rounded-md hover:bg-gray-100 transition-colors"
+                          title="Clear display (search continues in background)"
+                        >
+                          <EyeOff className="h-3 w-3" />
+                          Run in background
+                        </button>
+                        <button
+                          onClick={() => handleStopSearch()}
+                          className="inline-flex items-center gap-x-1 text-xs bg-red-50 text-red-500 border border-red-100 px-1.5 py-0.5 rounded-md hover:bg-red-100 transition-colors"
+                          title="Stop search and clear results"
+                        >
+                          <Square className="h-3 w-3" />
+                          Stop
+                        </button>
+                      </>
+                    ) : (
                       <button
                         onClick={() => handleStopSearch()}
                         className="inline-flex items-center gap-x-1 text-xs bg-red-50 text-red-500 border border-red-100 px-1.5 py-0.5 rounded-md hover:bg-red-100 transition-colors"
                         title="Stop search and clear results"
                       >
-                        <Square className="h-3 w-3" />
-                        Stop
+                        <RefreshCw className="h-3 w-3 mr" />
+                        Clear
                       </button>
-                    </> :
-                    <button
-                      onClick={() => handleStopSearch()}
-                      className="inline-flex items-center gap-x-1 text-xs bg-red-50 text-red-500 border border-red-100 px-1.5 py-0.5 rounded-md hover:bg-red-100 transition-colors"
-                      title="Stop search and clear results"
-                    >
-                      <RefreshCw className="h-3 w-3 mr" />
-                      Clear
-                    </button>
-                    }
+                    )}
                   </div>
                 </div>
 
@@ -548,7 +555,8 @@ const SearchArea = () => {
                   className="text-xs w-full"
                   onClick={handleRequestClusters}
                   disabled={
-                    !frameGridId || !hasWritePermission ||
+                    !frameGridId ||
+                    !hasWritePermission ||
                     // Already loading clusters or marginals
                     (activeDim &&
                       (activeDim.loading_clusters ||
@@ -684,428 +692,124 @@ const SearchArea = () => {
                 </div>
 
                 {/* Search History Section - Updated with consistent colors */}
-                {searchesWithStats && searchesWithStats.length > 0 && hasWritePermission && (
-                  <div className="max-h-[20rem] overflow-y-auto pr-1">
-                    <div className="flex justify-between items-center mb-1">
-                      <div className="text-xs font-medium text-gray-500">
-                        Saved Searches
+                {searchesWithStats &&
+                  searchesWithStats.length > 0 &&
+                  hasWritePermission && (
+                    <div className="max-h-[20rem] overflow-y-auto pr-1">
+                      <div className="flex justify-between items-center mb-1">
+                        <div className="text-xs font-medium text-gray-500">
+                          Saved Searches
+                        </div>
                       </div>
-                    </div>
-                    {searchesWithStats.map((search, index) => {
-                      const completionPercentage =
-                        search.num_total > 0
-                          ? Math.min(
-                              (search.num_judgments_computed /
-                                search.num_total) *
-                                100,
-                              100
-                            )
-                          : 0;
-                      const isComplete = completionPercentage === 100;
-                      // Extract first 8 characters of UUID for display
-                      const shortDimId = search.search_id.split('-')[0];
+                      {searchesWithStats.map((search, index) => {
+                        const completionPercentage =
+                          search.num_total > 0
+                            ? Math.min(
+                                (search.num_judgments_computed /
+                                  search.num_total) *
+                                  100,
+                                100
+                              )
+                            : 0;
+                        const isComplete = completionPercentage === 100;
+                        // Extract first 8 characters of UUID for display
+                        const shortDimId = search.search_id.split('-')[0];
 
-                      return (
-                        <div
-                          key={index}
-                          className="group mb-1 border border-gray-100 rounded hover:border-indigo-300 hover:bg-indigo-50 transition-all"
-                        >
-                          <div className="flex items-center py-1.5 px-2 text-xs bg-white">
-                            <code
-                              className="px-1 bg-gray-50 border border-gray-100 rounded text-[10px] text-gray-500 mr-2 flex-shrink-0"
-                              title={search.search_id}
-                            >
-                              {shortDimId}
-                            </code>
-                            <div
-                              className="font-mono text-gray-800 truncate flex-1 cursor-pointer"
-                              title={search.search_query}
-                              onClick={() => {
-                                handleSearch(search.search_query);
-                              }}
-                            >
-                              {search.search_query}
-                            </div>
-                            <div className="flex items-center ml-2 space-x-1.5 flex-shrink-0">
-                              <div className="flex items-center gap-1.5">
-                                <div
-                                  className="relative w-12 h-1.5 bg-gray-100 rounded-full overflow-hidden flex-shrink-0"
-                                  title={`${search.num_judgments_computed} of ${search.num_total} processed`}
-                                >
-                                  <div
-                                    className={`absolute top-0 left-0 h-full ${isComplete ? 'bg-indigo-500' : 'bg-blue-500'}`}
-                                    style={{
-                                      width: `${completionPercentage}%`,
-                                    }}
-                                  ></div>
-                                </div>
-                                <span className="text-[9px] text-gray-500 whitespace-nowrap">
-                                  {Math.round(completionPercentage)}% computed
-                                </span>
+                        return (
+                          <div
+                            key={index}
+                            className="group mb-1 border border-gray-100 rounded hover:border-indigo-300 hover:bg-indigo-50 transition-all"
+                          >
+                            <div className="flex items-center py-1.5 px-2 text-xs bg-white">
+                              <code
+                                className="px-1 bg-gray-50 border border-gray-100 rounded text-[10px] text-gray-500 mr-2 flex-shrink-0"
+                                title={search.search_id}
+                              >
+                                {shortDimId}
+                              </code>
+                              <div
+                                className="font-mono text-gray-800 truncate flex-1 cursor-pointer"
+                                title={search.search_query}
+                                onClick={() => {
+                                  handleSearch(search.search_query);
+                                }}
+                              >
+                                {search.search_query}
                               </div>
-                              <button
-                                className="hover:bg-indigo-50 rounded p-0.5 text-indigo-400 hover:text-indigo-600 transition-colors"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  dispatch(
-                                    setSearchQueryTextboxValue(
-                                      search.search_query
+                              <div className="flex items-center ml-2 space-x-1.5 flex-shrink-0">
+                                <div className="flex items-center gap-1.5">
+                                  <div
+                                    className="relative w-12 h-1.5 bg-gray-100 rounded-full overflow-hidden flex-shrink-0"
+                                    title={`${search.num_judgments_computed} of ${search.num_total} processed`}
+                                  >
+                                    <div
+                                      className={`absolute top-0 left-0 h-full ${isComplete ? 'bg-indigo-500' : 'bg-blue-500'}`}
+                                      style={{
+                                        width: `${completionPercentage}%`,
+                                      }}
+                                    ></div>
+                                  </div>
+                                  <span className="text-[9px] text-gray-500 whitespace-nowrap">
+                                    {Math.round(completionPercentage)}% computed
+                                  </span>
+                                </div>
+                                <button
+                                  className="hover:bg-indigo-50 rounded p-0.5 text-indigo-400 hover:text-indigo-600 transition-colors"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    dispatch(
+                                      setSearchQueryTextboxValue(
+                                        search.search_query
+                                      )
+                                    );
+                                    dispatch(clearSearch());
+                                  }}
+                                  title="Edit this search query"
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                </button>
+                                <button
+                                  className="hover:bg-red-50 rounded p-0.5 text-red-400 hover:text-red-600 transition-colors"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    await dispatch(
+                                      deleteSearch(search.search_id)
                                     )
-                                  );
-                                  dispatch(clearSearch());
-                                }}
-                                title="Edit this search query"
-                              >
-                                <Pencil className="h-3 w-3" />
-                              </button>
-                              <button
-                                className="hover:bg-red-50 rounded p-0.5 text-red-400 hover:text-red-600 transition-colors"
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  await dispatch(deleteSearch(search.search_id))
-                                    .unwrap()
-                                    .then(() => {
-                                      toast({
-                                        title: 'Deleted saved search',
-                                        description:
-                                          'Your saved search has been deleted successfully',
-                                        variant: 'default',
+                                      .unwrap()
+                                      .then(() => {
+                                        toast({
+                                          title: 'Deleted saved search',
+                                          description:
+                                            'Your saved search has been deleted successfully',
+                                          variant: 'default',
+                                        });
                                       });
-                                    });
-                                }}
-                                title="Delete this saved search"
-                              >
-                                <XOctagon className="h-3 w-3" />
-                              </button>
+                                  }}
+                                  title="Delete this saved search"
+                                >
+                                  <XOctagon className="h-3 w-3" />
+                                </button>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                        );
+                      })}
+                    </div>
+                  )}
               </>
             )}
           </div>
         </div>
         {/* Paired search */}
-        <div className="space-y-2">
+        {/* <div className="space-y-2">
           <div>
             <div className="text-sm font-semibold">Paired Search</div>
             <div className="text-xs">
               Compare pairs of agent runs for behavioral differences
             </div>
           </div>
-
-          <div className="border rounded-md bg-gray-50 p-2 space-y-1">
-            <div className="flex items-center justify-between text-xs">
-              <div className="text-gray-600">Search query</div>
-              {loadingProgress && !loadingSearchQuery && (
-                <div className="text-gray-400">
-                  {loadingProgress[0]} searches finished
-                  {loadingProgress[1] - loadingProgress[0] > 0 && (
-                    <>
-                      , {loadingProgress[1] - loadingProgress[0]} had API issues{' '}
-                      <span
-                        className="cursor-pointer text-indigo-500 hover:text-indigo-600"
-                        onClick={() => handleSearch(curSearchQuery)}
-                      >
-                        (retry)
-                      </span>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-            {curSearchQuery ? (
-              <div className="space-y-2">
-                <div className="flex items-center">
-                  <div className="flex-1">
-                    <div className="px-2 py-1 bg-indigo-50 border border-indigo-100 rounded text-xs font-mono whitespace-pre-wrap text-indigo-800">
-                      {curSearchQuery}
-                    </div>
-                  </div>
-                  <div className="flex flex-col xl:flex-row ml-2 space-y-1 xl:space-y-0 xl:space-x-1">
-                    <button
-                      onClick={() => handleShare(curSearchQuery)}
-                      className="inline-flex items-center gap-x-1 text-xs bg-blue-50 text-blue-500 border border-blue-100 px-1.5 py-0.5 rounded-md hover:bg-blue-100 transition-colors"
-                      title="Share this search"
-                    >
-                      <Share2 className="h-3 w-3" />
-                      Share
-                    </button>
-                    <button
-                      onClick={() => handleClearSearch()}
-                      className="inline-flex items-center gap-x-1 text-xs bg-red-50 text-red-500 border border-red-100 px-1.5 py-0.5 rounded-md hover:bg-red-100 transition-colors"
-                    >
-                      <RefreshCw className="h-3 w-3 mr" />
-                      Clear
-                    </button>
-                  </div>
-                </div>
-
-                {/* Progress bar for updates */}
-                {loadingSearchQuery &&
-                  loadingSearchQuery === curSearchQuery &&
-                  loadingProgress && (
-                    <ProgressBar
-                      current={loadingProgress[0]}
-                      total={loadingProgress[1]}
-                    />
-                  )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="text-xs w-full"
-                  onClick={handleRequestClusters}
-                  disabled={
-                    !frameGridId ||
-                    // Already loading clusters or marginals
-                    (activeDim &&
-                      (activeDim.loading_clusters ||
-                        activeDim.loading_marginals)) ||
-                    // Already clustering
-                    activeClusterTaskId !== undefined ||
-                    // Loading a search currently
-                    loadingSearchQuery !== undefined ||
-                    // Disable button when feedback input is visible
-                    showFeedbackInput
-                  }
-                >
-                  {activeDim && activeDim.loading_clusters ? (
-                    <Loader2 className="h-3 w-3 mr-2 animate-spin" />
-                  ) : (
-                    <Sparkles className="h-3 w-3 mr-2" />
-                  )}
-                  {activeDim && activeDim.bins && activeDim.bins.length > 0
-                    ? 'Re-cluster with feedback'
-                    : 'Cluster matching results'}
-                </Button>
-
-                {/* Feedback input for re-clustering - only show when requested */}
-                {showFeedbackInput && (
-                  <div className="mt-1.5 space-y-0.5">
-                    <div className="text-xs text-gray-600 mb-0.5">
-                      Feedback for re-clustering
-                    </div>
-                    <div className="flex space-x-1 items-center">
-                      <Input
-                        autoFocus
-                        value={clusterFeedback}
-                        onChange={(e) => setClusterFeedback(e.target.value)}
-                        placeholder="Describe how clusters should be improved..."
-                        className="text-xs bg-white font-mono text-gray-600 flex-1 h-7"
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            handleRequestClusters();
-                          }
-                        }}
-                      />
-                      <Button
-                        size="sm"
-                        onClick={handleRequestClusters}
-                        className="text-xs h-7 px-2"
-                      >
-                        Submit
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={handleCancelFeedback}
-                        className="text-xs h-7 px-2"
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Display bins if they exist */}
-                {activeDim && activeDim.bins && activeDim.bins.length > 0 && (
-                  <div className="space-y-2 mt-3">
-                    <div className="text-xs text-gray-600 font-medium">
-                      Clusters
-                    </div>
-                    {activeDim.bins.map((bin) => (
-                      <BinEditor
-                        key={bin.id}
-                        bin={bin}
-                        loading={activeDim.loading_marginals || false}
-                        marginalJudgments={
-                          marginals?.[activeDim.id]?.[bin.id] || undefined
-                        }
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <>
-                <div className="flex flex-wrap gap-2">
-                  {PRESET_QUERIES.map((preset) => {
-                    const IconComponent = preset.icon;
-                    return (
-                      <button
-                        key={preset.id}
-                        onClick={() => handleSelectPreset(preset.query)}
-                        onMouseEnter={() => handlePresetHover(preset.query)}
-                        onMouseLeave={handlePresetLeave}
-                        className="inline-flex items-center gap-1.5 px-2 py-1 bg-white border border-gray-200 rounded-full text-xs font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
-                      >
-                        <IconComponent className="h-3 w-3 text-blue-500" />
-                        {preset.label}
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="relative overflow-hidden rounded-md border bg-background focus-within:ring-1 focus-within:ring-ring">
-                  <fieldset>
-                    <Textarea
-                      className="h-[10rem] resize-none border-0 p-2 shadow-none focus-visible:ring-0 text-xs font-mono"
-                      placeholder={placeholderText}
-                      value={isPresetHovered ? '' : searchQueryTextboxValue}
-                      onChange={(e) =>
-                        dispatch(setSearchQueryTextboxValue(e.target.value))
-                      }
-                      onKeyDown={(
-                        e: React.KeyboardEvent<HTMLTextAreaElement>
-                      ) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          handleSearch(searchQueryTextboxValue);
-                        }
-                      }}
-                    />
-                    <div className="flex items-center justify-end p-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="gap-1 h-8 text-xs"
-                        onClick={() => handleSearch(searchQueryTextboxValue)}
-                        disabled={!searchQueryTextboxValue?.trim()}
-                      >
-                        Search
-                        <CornerDownLeft className="size-3" />
-                      </Button>
-                    </div>
-                  </fieldset>
-                </div>
-
-                {/* Search History Section - Updated with consistent colors */}
-                {searchesWithStats && searchesWithStats.length > 0 && (
-                  <div className="max-h-[20rem] overflow-y-auto pr-1">
-                    <div className="flex justify-between items-center mb-1">
-                      <div className="text-xs font-medium text-gray-500">
-                        Saved Searches
-                      </div>
-                    </div>
-                    {searchesWithStats.map((search, index) => {
-                      const completionPercentage =
-                        search.num_total > 0
-                          ? Math.min(
-                              (search.num_judgments_computed /
-                                search.num_total) *
-                                100,
-                              100
-                            )
-                          : 0;
-                      const isComplete = completionPercentage === 100;
-                      // Extract first 8 characters of UUID for display
-                      const shortDimId = search.search_id.split('-')[0];
-
-                      return (
-                        <div
-                          key={index}
-                          className="group mb-1 border border-gray-100 rounded hover:border-indigo-300 hover:bg-indigo-50 transition-all"
-                        >
-                          <div className="flex items-center py-1.5 px-2 text-xs bg-white">
-                            <code
-                              className="px-1 bg-gray-50 border border-gray-100 rounded text-[10px] text-gray-500 mr-2 flex-shrink-0"
-                              title={search.search_id}
-                            >
-                              {shortDimId}
-                            </code>
-                            <div
-                              className="font-mono text-gray-800 truncate flex-1 cursor-pointer"
-                              title={search.search_query}
-                              onClick={() => {
-                                handleSearch(search.search_query);
-                              }}
-                            >
-                              {search.search_query}
-                            </div>
-                            <div className="flex items-center ml-2 space-x-1.5 flex-shrink-0">
-                              <div className="flex items-center gap-1.5">
-                                <div
-                                  className="relative w-12 h-1.5 bg-gray-100 rounded-full overflow-hidden flex-shrink-0"
-                                  title={`${search.num_judgments_computed} of ${search.num_total} processed`}
-                                >
-                                  <div
-                                    className={`absolute top-0 left-0 h-full ${isComplete ? 'bg-indigo-500' : 'bg-blue-500'}`}
-                                    style={{
-                                      width: `${completionPercentage}%`,
-                                    }}
-                                  ></div>
-                                </div>
-                                <span className="text-[9px] text-gray-500 whitespace-nowrap">
-                                  {Math.round(completionPercentage)}% computed
-                                </span>
-                              </div>
-                              <button
-                                className="hover:bg-indigo-50 rounded p-0.5 text-indigo-400 hover:text-indigo-600 transition-colors"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleShare(search.search_query);
-                                }}
-                                title="Share this search"
-                              >
-                                <Share2 className="h-3 w-3" />
-                              </button>
-                              <button
-                                className="hover:bg-indigo-50 rounded p-0.5 text-indigo-400 hover:text-indigo-600 transition-colors"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  dispatch(
-                                    setSearchQueryTextboxValue(
-                                      search.search_query
-                                    )
-                                  );
-                                  dispatch(clearSearch());
-                                }}
-                                title="Edit this search query"
-                              >
-                                <Pencil className="h-3 w-3" />
-                              </button>
-                              <button
-                                className="hover:bg-red-50 rounded p-0.5 text-red-400 hover:text-red-600 transition-colors"
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  await dispatch(deleteSearch(search.search_id))
-                                    .unwrap()
-                                    .then(() => {
-                                      toast({
-                                        title: 'Deleted saved search',
-                                        description:
-                                          'Your saved search has been deleted successfully',
-                                        variant: 'default',
-                                      });
-                                    });
-                                }}
-                                title="Delete this saved search"
-                              >
-                                <XOctagon className="h-3 w-3" />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
+          Not implemented yet
+        </div> */}
       </div>
     </Card>
   );
