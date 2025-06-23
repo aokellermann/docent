@@ -257,7 +257,7 @@ export default function TableArea() {
             {tableData.rows.map(({ id: rowId, value: rowValue }) => (
               <tr key={rowId} className="hover:bg-gray-50/50">
                 <td
-                  className="border-r border-gray-200 px-2 py-1 text-gray-700 sticky left-0 bg-white cursor-pointer hover:bg-indigo-50 transition-colors relative"
+                  className="border-r border-gray-200 px-2 py-1 text-gray-700 sticky left-0 bg-white cursor-pointer hover:bg-indigo-50 transition-colors relative z-[9]"
                   title={`Filter to ${tableData.rowName}: ${rowValue}`}
                   onClick={() => {
                     if (tableData.rowDimId && dimensionsMap) {
