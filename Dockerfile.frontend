@@ -5,8 +5,11 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Install git (needed if pip install pulls git repositories)
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+# OS prerequisites (git, build chain, openssl headers, curl for nvm)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      git build-essential libssl-dev pkg-config curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 # Install uv - it's way faster than pip
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
