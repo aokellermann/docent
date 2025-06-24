@@ -212,7 +212,7 @@ def load_inspect_experiment(
             continue
 
         # Gather scores
-        scores: dict[str, int | float | bool] = {}
+        scores: dict[str, int | float | bool | None] = {}
         default_score_key: str | None = None
 
         # Evaluate correctness (CTF)

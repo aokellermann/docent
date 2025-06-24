@@ -247,13 +247,13 @@ async def logout(request: Request, response: Response):
 ##############
 
 
-class RawQueryRequest(BaseModel):
-    query: str
+# class RawQueryRequest(BaseModel):
+#     query: str
 
 
-@user_router.post("/raw_query")
-async def raw_query(request: RawQueryRequest, db: DBService = Depends(get_db)):
-    return await db.run_raw_query(request.query)
+# @user_router.post("/raw_query")
+# async def raw_query(request: RawQueryRequest, db: DBService = Depends(get_db)):
+#     return await db.run_raw_query(request.query)
 
 
 #############

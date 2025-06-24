@@ -1184,7 +1184,7 @@ class DBService:
             }
             for search_id, search_query in search_ids_and_queries
         ]
-        searches.sort(key=lambda x: x["job"].created_at, reverse=True)
+        searches.sort(key=lambda x: cast(SQLASearchQuery, x["job"]).created_at, reverse=True)
         return searches
 
     async def _get_agent_runs_without_search_results(
@@ -1633,7 +1633,7 @@ class DBService:
                 prefix, suffix = key.split(".", 1)
                 if (field := metadata.get(prefix)) is not None:
                     if isinstance(field, dict):
-                        return field.get(suffix, None)
+                        return cast(dict[str, Any], field).get(suffix, None)
             return None
 
         for id, metadata in all_metadata_with_ids:
