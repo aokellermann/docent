@@ -5,7 +5,11 @@ import React, { useEffect, Suspense, useRef } from 'react';
 
 import Breadcrumbs from '../../components/Breadcrumbs';
 import ResponsiveCheck from '../../components/ResponsiveCheck';
-import { getDimensions, initSession, setHasInitSearchQuery } from '../../store/frameSlice';
+import {
+  getDimensions,
+  initSession,
+  setHasInitSearchQuery,
+} from '../../store/frameSlice';
 import { useAppDispatch } from '../../store/hooks';
 import { handleSearchUpdate, setSearchQuery } from '@/app/store/searchSlice';
 import { apiRestClient } from '@/app/services/apiService';
@@ -46,25 +50,32 @@ export default function DocentDashboardClientLayout({
     const filterId = searchParams.get('filterId');
     const viewId = searchParams.get('viewId');
     if (searchQuery === null || viewId === null) {
+      dispatch(setHasInitSearchQuery(false));
       return;
     }
-    apiRestClient.post(`/${fgId}/apply_existing_filter`, {
-      filter_id: filterId === 'null' ? null : filterId,
-      search_query: searchQuery,
-      view_id: viewId,
-    }).then((response) => {
-      const dimId = response.data;
-      dispatch(setSearchQuery(searchQuery));
-      dispatch(setHasInitSearchQuery(true));
-      apiRestClient.get(`/${fgId}/get_existing_search_results?search_query=${searchQuery}`).then((response) => {
-        dispatch(handleSearchUpdate(response.data));
-        if (dimId) {
-          dispatch(getDimensions([dimId]));
-        }
+    dispatch(setHasInitSearchQuery(true));
+    apiRestClient
+      .post(`/${fgId}/apply_existing_filter`, {
+        filter_id: filterId === 'null' ? null : filterId,
+        search_query: searchQuery,
+        view_id: viewId,
+      })
+      .then((response) => {
+        const dimId = response.data;
+        dispatch(setSearchQuery(searchQuery));
+        dispatch(setHasInitSearchQuery(true));
+        apiRestClient
+          .get(
+            `/${fgId}/get_existing_search_results?search_query=${searchQuery}`
+          )
+          .then((response) => {
+            dispatch(handleSearchUpdate(response.data));
+            if (dimId) {
+              dispatch(getDimensions([dimId]));
+            }
+          });
       });
-    });
     return;
-
   }, [searchParams, dispatch]);
 
   return (

@@ -198,9 +198,6 @@ const SearchResultsSection: React.FC<SearchResultsSectionProps> = ({
   curSearchQuery,
   searchResults,
 }) => {
-  const router = useRouter();
-  const frameGridId = useAppSelector((state) => state.frame.frameGridId);
-
   if (searchResults.length === 0) {
     return null;
   }
@@ -215,53 +212,68 @@ const SearchResultsSection: React.FC<SearchResultsSectionProps> = ({
       </div>
 
       {/* Render only the attributes for the current query */}
-      {searchResults.map((searchResult, idx) => {
-        const resultText = searchResult.value;
-        if (!resultText) {
-          return null;
-        }
-        const citations = searchResult.citations || [];
-        // const currentVote = voteState?.[dataId]?.[attributeText];
+      {searchResults.map((searchResult, idx) => (
+        <SearchResultCard
+          key={idx}
+          agentRunId={agentRunId}
+          curSearchQuery={curSearchQuery}
+          searchResult={searchResult}
+        />
+      ))}
+    </div>
+  );
+};
 
-        return (
-          <div
-            key={idx}
-            className="group bg-indigo-50 rounded-md p-1 text-xs text-indigo-900 leading-snug mt-1 hover:bg-indigo-100 transition-colors cursor-pointer border border-transparent hover:border-indigo-200"
-            onMouseDown={(e) => {
-              const firstCitation = citations.length > 0 ? citations[0] : null;
-              navToAgentRun(
-                e,
-                router,
-                window,
-                agentRunId,
-                firstCitation?.transcript_idx ?? undefined,
-                firstCitation?.block_idx,
-                frameGridId,
-                curSearchQuery
-              );
-            }}
-          >
-            <div className="flex flex-col">
-              <div className="flex items-start justify-between gap-2">
-                <p className="mb-0.5 flex-1">
-                  {renderTextWithCitations(
-                    resultText,
-                    citations,
-                    agentRunId,
-                    router,
-                    window,
-                    curSearchQuery,
-                    frameGridId
-                  )}
-                </p>
-              </div>
-              <div className="flex items-center gap-1 text-[10px] text-indigo-600 mt-1">
-                <span className="opacity-70">{curSearchQuery}</span>
-              </div>
-            </div>
-          </div>
+export const SearchResultCard: React.FC<{
+  agentRunId: string;
+  curSearchQuery: string;
+  searchResult: SearchResultWithCitations;
+}> = ({ agentRunId, curSearchQuery, searchResult }) => {
+  const router = useRouter();
+  const frameGridId = useAppSelector((state) => state.frame.frameGridId);
+
+  const resultText = searchResult.value;
+  if (!resultText) {
+    return null;
+  }
+  const citations = searchResult.citations || [];
+  // const currentVote = voteState?.[dataId]?.[attributeText];
+
+  return (
+    <div
+      className="group bg-indigo-50 rounded-md p-1 text-xs text-indigo-900 leading-snug mt-1 hover:bg-indigo-100 transition-colors cursor-pointer border border-transparent hover:border-indigo-200"
+      onMouseDown={(e) => {
+        const firstCitation = citations.length > 0 ? citations[0] : null;
+        navToAgentRun(
+          e,
+          router,
+          window,
+          agentRunId,
+          firstCitation?.transcript_idx ?? undefined,
+          firstCitation?.block_idx,
+          frameGridId,
+          curSearchQuery
         );
-      })}
+      }}
+    >
+      <div className="flex flex-col">
+        <div className="flex items-start justify-between gap-2">
+          <p className="mb-0.5 flex-1">
+            {renderTextWithCitations(
+              resultText,
+              citations,
+              agentRunId,
+              router,
+              window,
+              curSearchQuery,
+              frameGridId
+            )}
+          </p>
+        </div>
+        <div className="flex items-center gap-1 text-[10px] text-indigo-600 mt-1">
+          <span className="opacity-70">{curSearchQuery}</span>
+        </div>
+      </div>
     </div>
   );
 };

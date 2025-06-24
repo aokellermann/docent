@@ -20,9 +20,8 @@ import {
   FrameFilter,
 } from '../types/frameTypes';
 import { useRouter } from 'next/navigation';
-import { navToAgentRun } from '@/lib/nav';
-import { renderTextWithCitations } from '@/lib/renderCitations';
 import { useHasFramegridWritePermission } from '@/lib/permissions/hooks';
+import { SearchResultCard } from './AgentRunCard';
 
 interface BinEditorProps {
   bin: FrameFilter;
@@ -45,7 +44,7 @@ const JudgmentList: React.FC<{
   binId: string;
   judgments: Judgment[];
 }> = ({ binId, judgments }) => {
-  const attributeMap = useSelector(
+  const searchResultMap = useSelector(
     (state: RootState) => state.search.searchResultMap
   );
   const fgId = useAppSelector((state) => state.frame.frameGridId);
@@ -63,55 +62,21 @@ const JudgmentList: React.FC<{
       {judgments &&
         judgments.map((judgment, i) => {
           if (!judgment) return null;
-          const attributeValue =
-            attributeMap?.[judgment.agent_run_id]?.[
+          const searchResult =
+            searchResultMap?.[judgment.agent_run_id]?.[
               judgment.search_query || ''
-            ]?.[judgment.search_result_idx || 0]?.value;
-          if (!attributeValue) {
+            ]?.[judgment.search_result_idx || 0];
+          if (!searchResult) {
             return null;
           }
 
           return (
-            <div
+            <SearchResultCard
               key={i}
-              className={`group bg-indigo-50 rounded-md p-1.5 text-xs text-indigo-900 leading-snug mt-1 hover:bg-indigo-100 transition-colors cursor-pointer border border-transparent hover:border-indigo-200`}
-              onClick={(e) =>
-                navToAgentRun(
-                  e,
-                  router,
-                  window,
-                  judgment.agent_run_id,
-                  undefined,
-                  undefined,
-                  fgId
-                )
-              }
-            >
-              {attributeValue !== undefined && (
-                <p className="mb-0.5">
-                  {renderTextWithCitations(
-                    attributeValue,
-                    [],
-                    judgment.agent_run_id,
-                    router,
-                    window,
-                    undefined,
-                    fgId
-                  )}
-                </p>
-              )}
-              <div className="flex items-center gap-1 text-[10px] text-indigo-600 mt-1">
-                <span className="opacity-70">
-                  {judgment.search_query}
-                  {judgment.search_result_idx !== null && (
-                    <>, idx: {judgment.search_result_idx}</>
-                  )}
-                </span>
-                <span className="ml-1 opacity-70">
-                  agent_run_id: {judgment.agent_run_id}
-                </span>
-              </div>
-            </div>
+              agentRunId={judgment.agent_run_id}
+              curSearchQuery={judgment.search_query || ''}
+              searchResult={searchResult}
+            />
           );
         })}
     </div>
@@ -247,16 +212,18 @@ export default function BinEditor({
               className="h-5 w-5 text-gray-500"
               onClick={() => setIsEditing(true)}
               disabled={loading}
-        >
-          <Pencil className="h-3 w-3" />
-        </Button>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="h-5 w-5 text-gray-500"
-          onClick={() => dispatch(deleteFilter({ filterId: bin.id, dimId }))}
-          disabled={loading}
-        >
+            >
+              <Pencil className="h-3 w-3" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-5 w-5 text-gray-500"
+              onClick={() =>
+                dispatch(deleteFilter({ filterId: bin.id, dimId }))
+              }
+              disabled={loading}
+            >
               <Trash2 className="h-3 w-3" />
             </Button>
           </>

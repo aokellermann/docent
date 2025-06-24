@@ -254,7 +254,6 @@ export const getCurAgentRun = createAsyncThunk(
       const response = await apiRestClient.get(
         `/${frameGridId}/agent_run?agent_run_id=${agentRunId}`
       );
-      console.log('response', response);
       dispatch(setCurAgentRun(response.data));
     } catch (error) {
       dispatch(
