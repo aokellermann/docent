@@ -237,26 +237,32 @@ export default function FrameGridRow({
             >
               <ExternalLinkIcon className="h-3.5 w-3.5" />
             </Button> */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-gray-400 group-hover:text-blue-500"
-              onClick={startEditing}
-              disabled={!hasWritePermission}
-              title="Edit frame grid"
-            >
-              <Pencil className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-gray-400 group-hover:text-red-500"
-              disabled={!hasAdminPermission}
-              onClick={triggerDelete}
-              title="Delete frame grid"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
+            {hasWritePermission ? (
+              <>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-gray-400 group-hover:text-blue-500"
+                  onClick={startEditing}
+                  disabled={!hasWritePermission}
+                  title="Edit frame grid"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-gray-400 group-hover:text-red-500"
+                  disabled={!hasAdminPermission}
+                  onClick={triggerDelete}
+                  title="Delete frame grid"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </>
+            ) : (
+              <div className="text-gray-400 text-xs">Read only</div>
+            )}
           </div>
         )}
       </TableCell>

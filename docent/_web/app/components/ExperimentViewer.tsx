@@ -257,7 +257,7 @@ export default function ExperimentViewer() {
         {/* Place dimension selector and chart type selector in the header */}
         <div className="flex items-center gap-4">
           <DimensionSelector />
-          <div className="flex items-center space-x-1">
+          {/* <div className="flex items-center space-x-1">
             <span className="text-xs text-gray-500">Chart:</span>
             <Select
               value={chartType || 'bar'}
@@ -280,7 +280,7 @@ export default function ExperimentViewer() {
                 </SelectItem>
               </SelectContent>
             </Select>
-          </div>
+          </div> */}
         </div>
       </div>
       {chartType === 'table' && <TableArea />}

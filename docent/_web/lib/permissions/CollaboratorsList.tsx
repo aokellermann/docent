@@ -14,20 +14,22 @@ import {
 } from './collabSlice';
 import { Button } from '@/components/ui/button';
 import { useRequireUserContext } from '@/app/contexts/UserContext';
-import { useHasFramegridAdminPermission, useHasFramegridWritePermission } from './hooks';
+import {
+  useHasFramegridAdminPermission,
+  useHasFramegridWritePermission,
+} from './hooks';
 
 // Types matching ShareViewPopover
-
 
 // Get initials for avatar
 const getInitials = (name?: string, email?: string) => {
   if (name) {
     return name
-    .split(' ')
-    .map((n) => n[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2);
+      .split(' ')
+      .map((n) => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
   }
   if (email) {
     return email.slice(0, 2).toUpperCase();
@@ -35,22 +37,24 @@ const getInitials = (name?: string, email?: string) => {
   return '??';
 };
 
-const getDisplayName = (collaborator: UserCollaborator | OrganizationCollaborator) => {
+const getDisplayName = (
+  collaborator: UserCollaborator | OrganizationCollaborator
+) => {
   if (collaborator.subject_type === 'user') {
     return collaborator.subject.name || collaborator.subject.email || 'Unknown';
   }
   return collaborator.subject.name || 'Unknown';
-}
+};
 
 // Collaborator Row Component
 interface CollaboratorRowProps {
-  collaborator: UserCollaborator | OrganizationCollaborator ;
+  collaborator: UserCollaborator | OrganizationCollaborator;
 }
 const CollaboratorRow = ({ collaborator }: CollaboratorRowProps) => {
   const [upsertCollaborator] = useUpsertCollaboratorMutation();
   const [removeCollaborator] = useRemoveCollaboratorMutation();
-  const hasWritePermission = useHasFramegridWritePermission()
-  const hasAdminPermission = useHasFramegridAdminPermission()
+  const hasWritePermission = useHasFramegridWritePermission();
+  const hasAdminPermission = useHasFramegridAdminPermission();
   const onPermissionChange = (newPermission: PermissionLevel) => {
     upsertCollaborator({
       subject_id: collaborator.subject_id,
@@ -73,7 +77,7 @@ const CollaboratorRow = ({ collaborator }: CollaboratorRowProps) => {
         return <User size={14} />;
     }
   };
-  const displayName = getDisplayName(collaborator)
+  const displayName = getDisplayName(collaborator);
   const displayEmail =
     collaborator.subject_type === 'user'
       ? collaborator.subject.email
@@ -114,13 +118,21 @@ const CollaboratorRow = ({ collaborator }: CollaboratorRowProps) => {
           value={collaborator.permission_level}
           onChange={(newPermission) => onPermissionChange(newPermission)}
         />
-        <Button variant="ghost" size="sm"
-        disabled={!hasWritePermission || (collaborator.permission_level === 'admin' && !hasAdminPermission)}
-         onClick={() => removeCollaborator({
-          subject_id: collaborator.subject_id,
-          subject_type: collaborator.subject_type,
-          framegrid_id: collaborator.framegrid_id,
-        })}>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={
+            !hasWritePermission ||
+            (collaborator.permission_level === 'admin' && !hasAdminPermission)
+          }
+          onClick={() =>
+            removeCollaborator({
+              subject_id: collaborator.subject_id,
+              subject_type: collaborator.subject_type,
+              framegrid_id: collaborator.framegrid_id,
+            })
+          }
+        >
           <X size={14} />
         </Button>
       </div>
@@ -135,32 +147,36 @@ interface CollaboratorsListProps {
 
 const CollaboratorsList = ({ framegridId }: CollaboratorsListProps) => {
   const { user: currentUser } = useRequireUserContext();
-  const {
-    userCollaborators,
-    orgCollaborators,
-  } = useGetCollaboratorsQuery(framegridId, {
-    selectFromResult: (result) => {
-      return {
-        userCollaborators: result.data?.filter(c => c.subject_type === 'user' && c.subject_id !== currentUser.id) as UserCollaborator[],
-        orgCollaborators: result.data?.filter(c => c.subject_type === 'organization') as OrganizationCollaborator[],
-      }
+  const { userCollaborators, orgCollaborators } = useGetCollaboratorsQuery(
+    framegridId,
+    {
+      selectFromResult: (result) => {
+        return {
+          userCollaborators: result.data?.filter(
+            (c) => c.subject_type === 'user' && c.subject_id !== currentUser.id
+          ) as UserCollaborator[],
+          orgCollaborators: result.data?.filter(
+            (c) => c.subject_type === 'organization'
+          ) as OrganizationCollaborator[],
+        };
+      },
     }
-  });
+  );
 
   if (!userCollaborators?.length && !orgCollaborators?.length) {
     return (
       <div className="text-center py-6 text-muted-foreground">
         <User className="mx-auto h-8 w-8 mb-2 opacity-50" />
-        <p className="text-sm">No collaborators yet</p>
+        <p className="text-xs">No collaborators yet</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-2">
-    <h3 className="text-sm font-semibold">
-      Collaborators ({userCollaborators?.length})
-    </h3>
+    <div className="space-y-1">
+      <h3 className="text-sm font-semibold">
+        Collaborators ({userCollaborators?.length})
+      </h3>
 
       {userCollaborators.map((collaborator) => (
         <CollaboratorRow
@@ -168,7 +184,7 @@ const CollaboratorsList = ({ framegridId }: CollaboratorsListProps) => {
           collaborator={collaborator}
         />
       ))}
-       {orgCollaborators.map((collaborator) => (
+      {orgCollaborators.map((collaborator) => (
         <CollaboratorRow
           key={`${collaborator.subject_id}-${collaborator.subject_type}-${collaborator.framegrid_id}`}
           collaborator={collaborator}

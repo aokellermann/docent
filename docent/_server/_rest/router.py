@@ -265,17 +265,11 @@ async def raw_query(request: RawQueryRequest, db: DBService = Depends(get_db)):
 async def get_framegrids(
     user: User = Depends(get_user_anonymous_ok), db: DBService = Depends(get_db)
 ):
-    sqla_fgs = await db.get_fgs()
+    sqla_fgs = await db.get_fgs(user)  # Filters to only framegrids the user has access to
     return [
         # Get all columns from the SQLAlchemy object
         {c.key: getattr(obj, c.key) for c in sqla_inspect(obj).mapper.column_attrs}
         for obj in sqla_fgs
-        if await db.has_permission(
-            user,
-            resource_type=ResourceType.FRAME_GRID,
-            resource_id=obj.id,
-            permission=Permission.READ,
-        )
     ]
 
 
@@ -685,6 +679,21 @@ async def get_user_permissions(
 @user_router.get("/organizations/{org_id}/users")
 async def get_org_users(org_id: str, db: DBService = Depends(get_db)):
     return [u for u in await db.get_users() if not u.is_anonymous]
+
+
+@user_router.get("/users/by-email/{email}")
+async def get_user_by_email(email: str, db: DBService = Depends(get_db)):
+    """
+    Get a user by their email address.
+
+    Args:
+        email: The email address to search for
+        db: Database service dependency
+
+    Returns:
+        User object if found, None otherwise
+    """
+    return await db.get_user_by_email(email)
 
 
 @user_router.get("/framegrids/{fg_id}/collaborators")

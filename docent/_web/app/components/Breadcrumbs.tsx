@@ -122,13 +122,17 @@ const Breadcrumbs: React.FC<BreadcrumbsProps> = () => {
       </div>
 
       <div className="flex items-center gap-x-2">
-          {fgId && <ShareViewPopover framegridId={fgId} />}
-          <Button variant="outline" size="sm" className="gap-x-2">
-            <div
-              className={`w-2.5 h-2.5 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}
-            />
-            {isConnected ? 'Connected' : 'Disconnected'}
-          </Button>
+        {fgId && <ShareViewPopover framegridId={fgId} />}
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-x-2 h-7 cursor-default"
+        >
+          <div
+            className={`w-2.5 h-2.5 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}
+          />
+          {isConnected ? 'Connected' : 'Disconnected'}
+        </Button>
 
         <UserProfile />
       </div>

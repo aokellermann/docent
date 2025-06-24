@@ -44,7 +44,6 @@ export default function HomePage() {
   // User is guaranteed to be present in authenticated pages
   const { user } = useRequireUserContext();
 
-  const frameGridId = useAppSelector((state) => state.frame.frameGridId);
   const frameGrids = useAppSelector((state) => state.frame.frameGrids);
   const isLoadingFrameGrids = useAppSelector(
     (state) => state.frame.isLoadingFrameGrids
@@ -114,7 +113,10 @@ export default function HomePage() {
                 Docent Dashboard
               </div>
               <div className="text-xs text-gray-500">
-                Welcome {user.email}! {user.is_anonymous ? 'Make an account to create new FrameGrids.' : 'Create a new FrameGrid for each benchmark or set of experiments.'}
+                Welcome {user.email}!{' '}
+                {user.is_anonymous
+                  ? 'Make an account to create new FrameGrids.'
+                  : 'Create a new FrameGrid for each benchmark or set of experiments.'}
               </div>
             </div>
             <div className="flex items-center gap-2">

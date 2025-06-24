@@ -24,6 +24,10 @@ export const collabApi = createApi({
       query: (orgId) => `/organizations/${orgId}/users`,
       providesTags: ['Users'],
     }),
+    getUserByEmail: build.query<User | null, string>({
+      query: (email) => `/users/by-email/${encodeURIComponent(email)}`,
+      providesTags: ['Users'],
+    }),
     getCollaborators: build.query<Collaborator[], string>({
       query: (framegridId) => `/framegrids/${framegridId}/collaborators`,
       providesTags: ['Collaborators'],
@@ -70,6 +74,8 @@ export const collabApi = createApi({
 export const {
   useGetFramegridPermissionsQuery,
   useGetOrgUsersQuery,
+  useGetUserByEmailQuery,
+  useLazyGetUserByEmailQuery,
   useGetCollaboratorsQuery,
   useUpsertCollaboratorMutation,
   useRemoveCollaboratorMutation,

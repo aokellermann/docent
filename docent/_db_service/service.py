@@ -431,14 +431,35 @@ class DBService:
             await session.execute(delete(SQLAFrameGrid).where(SQLAFrameGrid.id == fg_id))
             logger.info(f"Deleted framegrid {fg_id}")
 
-    async def get_fgs(self) -> Sequence[SQLAFrameGrid]:
+    async def get_fgs(self, user: User | None = None) -> Sequence[SQLAFrameGrid]:
         """
-        List all FrameGrids in the database.
+        List FrameGrids that the user has access to.
+        If no user provided, returns all framegrids (for backward compatibility).
         """
         async with self.session() as session:
-            result = await session.execute(
-                select(SQLAFrameGrid).order_by(SQLAFrameGrid.created_at.desc())
-            )
+            query = select(SQLAFrameGrid).order_by(SQLAFrameGrid.created_at.desc())
+
+            if user is not None:
+                query = (
+                    query.join(
+                        SQLAAccessControlEntry, SQLAFrameGrid.id == SQLAAccessControlEntry.fg_id
+                    )
+                    .where(
+                        # User has direct permission
+                        (SQLAAccessControlEntry.user_id == user.id)
+                        |
+                        # User's organization has permission (if user has organizations)
+                        (
+                            SQLAAccessControlEntry.organization_id.in_(user.organization_ids)
+                            if user.organization_ids
+                            else False
+                        )
+                        # Notably, we don't make public framegrids discoverable.
+                    )
+                    .distinct()  # Avoid duplicates from multiple ACL entries
+                )
+
+            result = await session.execute(query)
             return result.scalars().all()
 
     ##############

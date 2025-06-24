@@ -1,6 +1,6 @@
 'use client';
 import { Button } from '@/components/ui/button';
-import { AutoComplete } from '@/components/ui/autocomplete';
+import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import {
@@ -14,6 +14,7 @@ import { useState, useMemo, useCallback } from 'react';
 import {
   useGetCollaboratorsQuery,
   useGetOrgUsersQuery,
+  useLazyGetUserByEmailQuery,
   useUpsertCollaboratorMutation,
   useRemoveCollaboratorMutation,
 } from './collabSlice';
@@ -29,104 +30,98 @@ const AddCollaborator = ({ framegridId }: { framegridId: string }) => {
   const { data: collaborators } = useGetCollaboratorsQuery(framegridId);
   const { user } = useRequireUserContext();
 
-  const potentialUserCollaborators = useMemo(() => {
-    const existingCollaborators = new Set(collaborators?.map(c => c.subject_id));
-    return orgUsers?.filter((u) => u.id !== user.id && !existingCollaborators.has(u.id)) ?? [];
-  }, [orgUsers, user, collaborators]);
-
-  // Local state for autocomplete
-  const [searchValue, setSearchValue] = useState('');
-  const [inviteeId, setInviteeId] = useState<string | null>(null);
+  // Local state for input
+  const [emailInput, setEmailInput] = useState('');
   const [inviteePermissionLevel, setInviteePermissionLevel] =
     useState<PermissionLevel>('read');
 
   const [upsertCollaborator] = useUpsertCollaboratorMutation();
+  const [getUserByEmail] = useLazyGetUserByEmailQuery();
 
-  // Transform orgUsers into autocomplete items
-  const userItems = useMemo(() => {
-    if (!potentialUserCollaborators) return [];
+  const hasWritePermission = useHasFramegridWritePermission();
 
-    return potentialUserCollaborators.map((user) => ({
-      value: user.id + ' ' + user.name + ' ' + user.email,
-      label: user.name ? `${user.name} (${user.email})` : user.email,
-      user,
-    }));
-  }, [potentialUserCollaborators]);
-
-  // Handle autocomplete selection
-  const handleUserSelect = (
-    _userId: string,
-    item: (typeof userItems)[number] | undefined
-  ) => {
-    if (item) {
-      setInviteeId(item?.user.id); // Sync with existing inviteeId state for handleSendInvite
-      setSearchValue(item?.label ?? '');
-    }
-  };
-  const hasWritePermission = useHasFramegridWritePermission()
-  const handleClearSelectedInvitee = () => {
-    setInviteeId(null);
-  };
   // Send invite to new collaborator
   const handleSendInvite = async () => {
-    if (!inviteeId) return; // this is an id for now
-    upsertCollaborator({
-      subject_id: inviteeId,
-      subject_type: 'user',
-      framegrid_id: framegridId,
-      permission_level: inviteePermissionLevel,
-    });
-    handleClearSelectedInvitee();
-    setSearchValue('');
+    if (!emailInput.trim()) return;
+
+    try {
+      // First, get the user by email using RTK Query
+      const result = await getUserByEmail(emailInput.trim());
+
+      if (result.error) {
+        toast({
+          title: 'Error',
+          description: 'Failed to look up user. Please try again.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const newUser = result.data;
+      if (!newUser) {
+        toast({
+          title: 'User not found',
+          description: `No user found with email address: ${emailInput.trim()}`,
+          variant: 'destructive',
+        });
+        return;
+      }
+      if (newUser.id === user.id) {
+        toast({
+          title: 'Error',
+          description: 'You cannot invite yourself.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      // Use the user's ID as the subject_id
+      await upsertCollaborator({
+        subject_id: newUser.id,
+        subject_type: 'user',
+        framegrid_id: framegridId,
+        permission_level: inviteePermissionLevel,
+      }).unwrap();
+
+      setEmailInput('');
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to invite user. Please try again.',
+        variant: 'destructive',
+      });
+    }
   };
   if (!hasWritePermission) {
-    return <div className="text-sm text-muted-foreground">You do not have permission to add or edit collaborators.</div>
+    return (
+      <div className="text-sm text-muted-foreground">
+        You do not have permission to add or edit collaborators.
+      </div>
+    );
   }
 
   return (
-    <div className="flex gap-2">
-      <div className="flex-1">
-        <AutoComplete
-          selectedValue={inviteeId ?? ''}
-          onClearSelectedItem={handleClearSelectedInvitee}
-          onSelectedValueChange={handleUserSelect}
-          searchValue={searchValue}
-          onSearchValueChange={setSearchValue}
-          items={userItems}
-          isLoading={isLoadingOrgUsers}
-          disabled={!hasWritePermission}
-          emptyMessage={
-            <div className="p-3 text-center space-y-2">
-              <p className="text-sm text-muted-foreground">
-                No users found in your organization.
-              </p>
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(window.location.href);
-                  toast({
-                    title: 'Invite link copied to clipboard',
-                    description: 'Send this link to your collaborator to join.',
-                  });
-                  setSearchValue('');
-                }}
-                className="text-xs text-primary hover:text-primary/80 underline underline-offset-2 transition-colors cursor-pointer"
-              >
-                Click to copy invite link
-              </button>
-            </div>
-          }
-          placeholder={hasWritePermission ? "Add collaborators by name or email" : "You don't have permission to add collaborators"}
-        />
-      </div>
+    <div className="flex gap-2 items-center">
+      <Input
+        value={emailInput}
+        onChange={(e) => setEmailInput(e.target.value)}
+        disabled={!hasWritePermission}
+        placeholder={
+          hasWritePermission
+            ? 'Enter email address'
+            : "You don't have permission to add collaborators"
+        }
+        className="h-7 text-xs"
+      />
       <PermissionDropdown
         value={inviteePermissionLevel}
         onChange={setInviteePermissionLevel}
       />
       <Button
         onClick={handleSendInvite}
-        disabled={!inviteeId}
+        disabled={!emailInput.trim()}
         size="sm"
-        className="px-3"
+        className="h-7"
       >
         <UserPlus size={16} className="mr-1" />
         Invite
@@ -147,11 +142,9 @@ const ShareViewPopover = ({ framegridId }: { framegridId: string }) => {
   const [upsertCollaborator] = useUpsertCollaboratorMutation();
   const [removeCollaborator] = useRemoveCollaboratorMutation();
 
-
   // Toggle handler that also updates backend
   const handlePublicToggle = useCallback(
     (checked: boolean) => {
-
       if (checked) {
         upsertCollaborator({
           subject_id: 'public',
@@ -174,44 +167,46 @@ const ShareViewPopover = ({ framegridId }: { framegridId: string }) => {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-x-2" disabled={!hasWritePermission}>
-          <Share2 size={16} /> Share view
-        </Button>
+        {hasWritePermission && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-x-2 h-7"
+            disabled={!hasWritePermission}
+          >
+            <Share2 size={14} /> Share view
+          </Button>
+        )}
       </PopoverTrigger>
-      <PopoverContent className="_SharePopover w-[640px]">
-        <div className="p-4 space-y-6">
-          {/* Section 1: Add collaborators */}
-          <div className="space-y-3">
-            <h3 className="text-md font-semibold">Add collaborators</h3>
-            <AddCollaborator framegridId={framegridId} />
-          </div>
-
-          {/* Section 2: Access settings */}
-          <div className="space-y-3 pt-2 border-t">
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <Label htmlFor="public-access" className="text-sm font-medium">
-                  Make public
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  Anyone with the link can view
-                </p>
-              </div>
-              <Switch
-                id="public-access"
-                checked={isPublicCollab}
-                disabled={!hasWritePermission}
-                onCheckedChange={handlePublicToggle}
-              />
-            </div>
-          </div>
-
-          {/* Section 3: Collaborators */}
-          <div className="space-y-3 pt-2 border-t">
-
-            <CollaboratorsList framegridId={framegridId} />
-          </div>
+      <PopoverContent className="_SharePopover w-[640px] p-3 space-y-3 rounded-lg">
+        {/* Section 1: Add collaborators */}
+        <div className="space-y-1">
+          <h3 className="text-sm font-medium">Add collaborators</h3>
+          <AddCollaborator framegridId={framegridId} />
         </div>
+
+        {/* Section 2: Access settings */}
+        <div className="border-t" />
+        <div className="flex items-center justify-between">
+          <div>
+            <Label htmlFor="public-access" className="text-sm font-medium">
+              Make public
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              Anyone with the link can view
+            </p>
+          </div>
+          <Switch
+            id="public-access"
+            checked={isPublicCollab}
+            disabled={!hasWritePermission}
+            onCheckedChange={handlePublicToggle}
+          />
+        </div>
+
+        {/* Section 3: Collaborators */}
+        <div className="border-t" />
+        <CollaboratorsList framegridId={framegridId} />
       </PopoverContent>
     </Popover>
   );
