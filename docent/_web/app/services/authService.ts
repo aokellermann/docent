@@ -31,27 +31,7 @@ export class AuthService {
   static async logout(): Promise<void> {
     await apiRestClient.post('/logout');
   }
-
-  /**
-   * Get current user data (client-side)
-   * Use sparingly - prefer server-side auth via DAL
-   */
-  static async getCurrentUser(): Promise<{
-    id: string;
-    email: string;
-    is_anonymous: boolean;
-  } | null> {
-    try {
-      const response = await apiRestClient.get('/me');
-      return response.data;
-    } catch (error: any) {
-      if (error.response?.status === 401) {
-        return null; // User not authenticated
-      }
-      throw error;
-    }
-  }
 }
 
 // Export convenience functions for easier imports
-export const { login, logout, signup, getCurrentUser } = AuthService;
+export const { login, logout, signup } = AuthService;

@@ -1,6 +1,6 @@
 import { PermissionLevel } from '@/lib/permissions/types';
 import { apiRestClient } from './apiService';
-import { BASE_URL } from '@/app/constants';
+import { INTERNAL_BASE_URL } from '@/app/constants';
 
 export interface UserPermissions {
   framegrid_permissions: Record<string, PermissionLevel>;
@@ -21,7 +21,7 @@ export const serverPermissionsService = {
     cookies?: string
   ): Promise<UserPermissions> {
     const response = await fetch(
-      `${BASE_URL}/rest/${frameGridId}/permissions`,
+      `${INTERNAL_BASE_URL}/rest/${frameGridId}/permissions`,
       {
         method: 'GET',
         headers: {

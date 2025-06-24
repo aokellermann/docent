@@ -45,6 +45,14 @@ def web(
     backend_url: str = typer.Option(
         "http://localhost:8888", help="Backend URL for client-side (browser) requests"
     ),
+    internal_backend_url: str | None = typer.Option(
+        None,
+        help=(
+            "Internal backend URL for server-side requests. "
+            "Only required if the backend is inaccessible from the frontend deployment at the backend_url. "
+            "Ex: the Docker Compose setup."
+        ),
+    ),
     port: int = typer.Option(3000, help="Port to bind to"),
     build: bool = typer.Option(False, help="Build the web app"),
     install: bool = typer.Option(True, help="Install dependencies"),
@@ -56,6 +64,7 @@ def web(
     # Create environment with backend URL
     env = os.environ.copy()
     env["NEXT_PUBLIC_API_HOST"] = backend_url
+    env["NEXT_PUBLIC_INTERNAL_API_HOST"] = internal_backend_url or backend_url
 
     # Install dependencies if requested
     if install:

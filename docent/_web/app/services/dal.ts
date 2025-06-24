@@ -1,5 +1,6 @@
 import { User } from '@/app/types/userTypes';
 import { cookies, headers } from 'next/headers';
+import { INTERNAL_BASE_URL } from '../constants';
 
 /**
  * Verifies the session with the backend
@@ -25,7 +26,7 @@ export async function getUser(): Promise<User | null> {
     return null;
   }
 
-  const response = await fetch(`${process.env.NEXT_PUBLIC_API_HOST}/rest/me`, {
+  const response = await fetch(`${INTERNAL_BASE_URL}/rest/me`, {
     headers: {
       Cookie: `docent_session_id=${sessionCookie.value}`,
       'Content-Type': 'application/json',

@@ -11,9 +11,10 @@ RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # Install nvm and Node 22
-ENV NVM_DIR=/root/.nvm \
+ENV NVM_DIR=/app/.nvm \
     NODE_VERSION=22
-RUN curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash \
+RUN mkdir -p "$NVM_DIR" \
+    && curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash \
     && . "$NVM_DIR/nvm.sh" \
     && nvm install "$NODE_VERSION" \
     && nvm alias default "$NODE_VERSION" \

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUser } from './app/services/dal';
+import { INTERNAL_BASE_URL } from './app/constants';
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
@@ -15,7 +16,7 @@ export async function middleware(request: NextRequest) {
     if (isFgRoute) {
       // Create an anonymous session
       const anonResponse = await fetch(
-        `${process.env.NEXT_PUBLIC_API_HOST}/rest/anonymous_session`,
+        `${INTERNAL_BASE_URL}/rest/anonymous_session`,
         {
           method: 'POST',
           headers: {
