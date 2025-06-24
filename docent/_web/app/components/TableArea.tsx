@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useCallback } from 'react';
+import { v4 as uuid4 } from 'uuid';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { PrimitiveFilter } from '../types/frameTypes';
 import { addBaseFilter, addBaseFilters } from '../store/searchSlice';
@@ -207,7 +208,7 @@ export default function TableArea() {
         : [],
       value,
       op: '==',
-      id: crypto.randomUUID(),
+      id: uuid4(),
       name: null,
     }),
     [dimensionsMap]

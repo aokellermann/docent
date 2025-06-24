@@ -26,6 +26,7 @@ import {
   removeBaseFilter,
 } from '../store/searchSlice';
 import { toast } from '@/hooks/use-toast';
+import { v4 as uuid4 } from 'uuid';
 
 export const TranscriptFilterControls = () => {
   const dispatch = useDispatch<AppDispatch>();
@@ -81,7 +82,7 @@ export const TranscriptFilterControls = () => {
           key_path: parsedKey.split('.'),
           value: parsedValue,
           op: metadataOp,
-          id: crypto.randomUUID(),
+          id: uuid4(),
           name: null,
         } as PrimitiveFilter)
       );
