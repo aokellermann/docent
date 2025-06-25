@@ -212,6 +212,7 @@ export const getDimensions = createAsyncThunk(
   async (dimIds: string[] | undefined, { dispatch, getState }) => {
     const state = getState() as { frame: FrameState };
     const frameGridId = state.frame.frameGridId;
+    const curDimensions = Object.values(state.frame.dimensionsMap ?? {});
 
     if (!frameGridId) {
       dispatch(
@@ -231,7 +232,7 @@ export const getDimensions = createAsyncThunk(
           dim_ids: dimIds,
         }
       );
-      dispatch(setDimensions(response.data));
+      dispatch(setDimensions([...curDimensions, ...response.data]));
       return response.data;
     } catch (error) {
       dispatch(
