@@ -58,5 +58,6 @@ export default async function DocentDashboardLayout({
     } else if (error instanceof ForbiddenError) {
       return <PermissionDeniedPage />;
     }
+    return <PermissionDeniedPage />;
   }
 }
