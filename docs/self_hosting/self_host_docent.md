@@ -1,8 +1,6 @@
 # Self-host Docent
 
-!!! note
-    We recommend getting started with the public version of Docent.
-    For larger organizations, we provide white-glove hosting support; please [reach out](mailto:kevin@transluce.org?subject=Inquiry%20about%20Docent%20hosting) if you're interested.
+For most users, we recommend starting with the [public version](../quickstart.md) of Docent. We also provide white-glove hosting support for larger organizations; please [reach out](mailto:kevin@transluce.org?subject=Inquiry%20about%20Docent%20hosting) if you're interested.
 
 ### 1. Clone the repo and configure `.env`
 
@@ -14,6 +12,9 @@ cp .env.template .env
 
 You should now have a `.env` file at the project root. See [here for details on how to fill it in](./environment_variables.md).
 
+!!! note
+    If you're self-hosting Docent anywhere other than `localhost`, make sure to set the frontend URL as a CORS origin; e.g., `DOCENT_CORS_ORIGINS=http://domain:3001`.
+
 ### 2. Start the backend server and frontend UI
 
 Docker Compose is the easiest way to get started, but you may want a manual installation to support faster development loops (e.g., for hot reloading).
@@ -22,19 +23,19 @@ Docker Compose is the easiest way to get started, but you may want a manual inst
 
     First ensure [Docker Engine](https://docs.docker.com/engine/install/) and [Docker Compose](https://docs.docker.com/compose/install/) are installed. Then run:
 
-    !!! note
-        Make sure `DOCENT_SERVER_HOST` is set to the correct domain if you're not using `localhost`. Make sure to **prefix it correctly** with `http://` or `https://`.
-
     === "As non-root"
         ```bash
-        DOCENT_SERVER_HOST=http://localhost DOCENT_SERVER_PORT=8889 DOCENT_WEB_PORT=3001 docker compose up --build
+        DOCENT_HOST=http://localhost DOCENT_SERVER_PORT=8889 DOCENT_WEB_PORT=3001 docker compose up --build
         ```
 
     === "As root"
         ```bash
         # Note that `sudo` strips environment variables, so you have to set them *inside* the command.
-        sudo DOCENT_SERVER_HOST=http://localhost DOCENT_SERVER_PORT=8889 DOCENT_WEB_PORT=3001 docker compose up --build
+        sudo DOCENT_HOST=http://localhost DOCENT_SERVER_PORT=8889 DOCENT_WEB_PORT=3001 docker compose up --build
         ```
+
+    !!! note
+        If you're not using `localhost`, make sure `DOCENT_HOST` is set to the correct domain. Ensure that it's **prefixed correctly** with `http://` or `https://`.
 
     Cold build + start should take a few minutes. Once finished, you can run
 
@@ -126,7 +127,7 @@ Docker Compose is the easiest way to get started, but you may want a manual inst
 
     to run the frontend. You may need to [install Node.js](https://nodejs.org/en/download/) first.
 
-Finally, check that you can access the Docent UI at [`http://localhost:3001`](http://localhost:3001).
+Finally, try accessing the Docent UI at `http://$DOCENT_HOST:$DOCENT_WEB_PORT`.
 
 ### 3. Customize the Docent client
 
