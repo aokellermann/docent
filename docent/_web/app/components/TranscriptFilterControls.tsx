@@ -105,7 +105,7 @@ export const TranscriptFilterControls = () => {
   };
 
   return (
-    <div className="border rounded-md bg-gray-50 p-1.5 space-y-1.5">
+    <div className="border rounded-sm bg-gray-50 p-1.5 space-y-1.5">
       {/* Input form */}
       <div className="grid grid-cols-[1fr_auto_1fr_auto] gap-1.5">
         <div>

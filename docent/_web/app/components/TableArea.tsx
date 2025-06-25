@@ -42,10 +42,10 @@ const getScoreDisplay = (score: number | undefined, ci?: number) => {
 
 const getScoreClass = (score: number | undefined, n: number | undefined) => {
   if (typeof score !== 'number' || n === undefined || n === 0)
-    return 'bg-gray-50';
-  if (score >= HIGH_SCORE_THRESHOLD) return 'bg-green-50';
-  if (score > LOW_SCORE_THRESHOLD) return 'bg-yellow-50';
-  return 'bg-red-50';
+    return 'bg-gray-50 hover:bg-gray-100';
+  if (score >= HIGH_SCORE_THRESHOLD) return 'bg-green-50 hover:bg-green-100';
+  if (score > LOW_SCORE_THRESHOLD) return 'bg-yellow-50 hover:bg-yellow-100';
+  return 'bg-red-50 hover:bg-red-100';
 };
 
 const getFilterTitle = (
@@ -220,17 +220,17 @@ export default function TableArea() {
 
   return (
     <>
-      <div className="max-h-2/5 flex-1 overflow-y-auto overflow-x-auto custom-scrollbar border rounded-md">
+      <div className="max-h-[40%] overflow-y-auto overflow-x-auto custom-scrollbar border rounded-sm">
         <table className="w-full border-collapse text-xs">
-          <thead className="sticky top-0 bg-gray-50 z-10">
+          <thead className="sticky top-0 bg-white z-10">
             <tr>
-              <th className="border-r border-gray-200 px-2 py-1 sticky left-0 bg-gray-50 " />
+              <th className="border-r border-b border-gray-200 px-2 py-1 sticky left-0" />
               {tableData.cols.map(({ id: colId, value: colValue }, colIdx) => (
                 <th
                   key={colId}
                   className={cn(
                     colIdx !== tableData.cols.length - 1 && 'border-r',
-                    'border-gray-200 px-2 py-1 text-center font-normal text-gray-700 cursor-pointer hover:bg-indigo-50 transition-colors relative'
+                    'border-b border-gray-200 px-2 py-1 text-center font-normal text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors relative'
                   )}
                   title={
                     tableData.colDimId
@@ -258,7 +258,7 @@ export default function TableArea() {
             {tableData.rows.map(({ id: rowId, value: rowValue }) => (
               <tr key={rowId} className="hover:bg-gray-50/50">
                 <td
-                  className="border-r border-gray-200 px-2 py-1 text-gray-700 sticky left-0 bg-white cursor-pointer hover:bg-indigo-50 transition-colors relative z-[9]"
+                  className="border-r border-gray-200 px-2 py-1 text-gray-700 sticky left-0 bg-white cursor-pointer hover:bg-gray-100 transition-colors relative z-[9]"
                   title={`Filter to ${tableData.rowName}: ${rowValue}`}
                   onClick={() => {
                     if (tableData.rowDimId && dimensionsMap) {
@@ -324,7 +324,7 @@ export default function TableArea() {
                         key={colId}
                         className={cn(
                           colIdx !== tableData.cols.length - 1 && 'border-r',
-                          'border-gray-200 px-2 py-1 cursor-pointer hover:bg-indigo-50 transition-colors relative text-center',
+                          'border-gray-200 px-2 py-1 cursor-pointer transition-colors relative text-center',
                           getScoreClass(score, n)
                         )}
                         title={getFilterTitle(
