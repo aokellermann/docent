@@ -621,39 +621,97 @@ class DBService:
         if view:
             logger.critical(f"existing view: {view} {view.id}")
 
-        # If not, create a new view whose admin is the user who created the FG
+        # If not, create a new view that clones the FG creator's default view
         if view is None:
+            # Who is the creator of the FG?
+            async with self.session() as session:
+                result = await session.execute(
+                    select(SQLAFrameGrid.created_by).where(SQLAFrameGrid.id == fg_id)
+                )
+                creator_id = result.scalar_one()
+
+            # Get the creator's default view
+            async with self.session() as session:
+                result = await session.execute(
+                    select(SQLAView).where(SQLAView.fg_id == fg_id, SQLAView.user_id == creator_id)
+                )
+                creator_default_view = result.scalar_one_or_none()
+
+            # Get the inner and outer dimensions of the creator's default view
+            creator_inner_dim = None
+            creator_outer_dim = None
+            if creator_default_view is not None:
+                creator_inner_dim_id = creator_default_view.inner_dim_id
+                creator_outer_dim_id = creator_default_view.outer_dim_id
+                if creator_inner_dim_id is not None:
+                    creator_inner_dim = await self.get_dim(creator_inner_dim_id)
+                if creator_outer_dim_id is not None:
+                    creator_outer_dim = await self.get_dim(creator_outer_dim_id)
+
+            # Create a new view that clones the inner and outer dimensions of that view
             async with self.session() as session:
                 view = SQLAView(
                     id=str(uuid4()),
                     fg_id=fg_id,
-                    is_default=True,
+                    user_id=user.id,
                 )
-                view.user_id = user.id
                 session.add(view)
-                await session.flush()  # Flush to get the view ID
 
-                # Create a default MECE dimension for this view
-                default_dim = FrameDimension(
-                    name="run_id",
-                    metadata_key="run_id",
-                    maintain_mece=True,
+            # Clone inner dim
+            if creator_inner_dim is not None:
+                inner_dim = FrameDimension(
+                    name=creator_inner_dim.name,
+                    metadata_key=creator_inner_dim.metadata_key,
+                    maintain_mece=creator_inner_dim.maintain_mece,
                 )
-                # Convert to SQLA and add to session
-                sqla_dim, _ = SQLAFrameDimension.from_frame_dimension(
-                    default_dim,
+                sqla_inner_dim, _ = SQLAFrameDimension.from_frame_dimension(
+                    inner_dim,
                     ViewContext(fg_id=fg_id, view_id=view.id, base_filter=None, user=user),
                 )
-                session.add(sqla_dim)
-                await session.flush()  # Flush to get the dimension ID
+                async with self.session() as session:
+                    session.add(sqla_inner_dim)
 
-                # Set as inner dimension
-                view.inner_dim_id = sqla_dim.id
-                await session.flush()
-            await self.cluster_metadata_dim(
-                ViewContext(fg_id=fg_id, view_id=view.id, base_filter=None, user=user),
-                sqla_dim.id,
-            )
+                # Cluster the dim
+                await self.cluster_metadata_dim(
+                    ViewContext(fg_id=fg_id, view_id=view.id, base_filter=None, user=user),
+                    sqla_inner_dim.id,
+                )
+
+                # Set inner dim on the view
+                async with self.session() as session:
+                    await session.execute(
+                        update(SQLAView)
+                        .where(SQLAView.id == view.id)
+                        .values(inner_dim_id=sqla_inner_dim.id)
+                    )
+
+            # Clone outer dim
+            if creator_outer_dim is not None:
+                outer_dim = FrameDimension(
+                    name=creator_outer_dim.name,
+                    metadata_key=creator_outer_dim.metadata_key,
+                    maintain_mece=creator_outer_dim.maintain_mece,
+                )
+                sqla_outer_dim, _ = SQLAFrameDimension.from_frame_dimension(
+                    outer_dim,
+                    ViewContext(fg_id=fg_id, view_id=view.id, base_filter=None, user=user),
+                )
+                async with self.session() as session:
+                    session.add(sqla_outer_dim)
+
+                # Cluster the dim
+                await self.cluster_metadata_dim(
+                    ViewContext(fg_id=fg_id, view_id=view.id, base_filter=None, user=user),
+                    sqla_outer_dim.id,
+                )
+
+                # Set outer dim on the view
+                async with self.session() as session:
+                    await session.execute(
+                        update(SQLAView)
+                        .where(SQLAView.id == view.id)
+                        .values(outer_dim_id=sqla_outer_dim.id)
+                    )
 
             # Create ACL entry for the user
             await self.set_acl_permission(

@@ -248,8 +248,6 @@ class SQLAView(SQLABase):
     user_id = mapped_column(String(36), ForeignKey(f"{TABLE_USER}.id"), nullable=False, index=True)
 
     name = mapped_column(Text, nullable=True)
-    # Deprecated now that we have one view per (user, framegrid). Retained for backward-compat.
-    is_default = mapped_column(Boolean, nullable=False, default=False, index=True)
 
     base_filter_id = mapped_column(String(36), ForeignKey(f"{TABLE_FILTER}.id"), nullable=True)
     inner_dim_id = mapped_column(
