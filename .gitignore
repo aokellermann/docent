@@ -7,6 +7,11 @@
 # *.sql  (neil: disabled for ursid)
 *.gz
 
+*.tfstate
+*.tfstate.backup
+*/.terraform/
+*/*.terraform.*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
