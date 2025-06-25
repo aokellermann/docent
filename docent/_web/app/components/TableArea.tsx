@@ -230,7 +230,7 @@ export default function TableArea() {
                   key={colId}
                   className={cn(
                     colIdx !== tableData.cols.length - 1 && 'border-r',
-                    'border-b border-gray-200 px-2 py-1 text-center font-normal text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors relative'
+                    'border-b border-gray-200 px-2 py-1 text-center font-normal text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors relative max-w-[200px]'
                   )}
                   title={
                     tableData.colDimId
@@ -244,7 +244,7 @@ export default function TableArea() {
                     }
                   }}
                 >
-                  <span className="block truncate">
+                  <span className="block truncate overflow-hidden text-ellipsis whitespace-nowrap">
                     <span className="font-light text-[11px]">
                       {tableData.colName}:{' '}
                     </span>
@@ -258,7 +258,7 @@ export default function TableArea() {
             {tableData.rows.map(({ id: rowId, value: rowValue }) => (
               <tr key={rowId} className="hover:bg-gray-50/50">
                 <td
-                  className="border-r border-gray-200 px-2 py-1 text-gray-700 sticky left-0 bg-white cursor-pointer hover:bg-gray-100 transition-colors relative z-[9]"
+                  className="border-r border-gray-200 px-2 py-1 text-gray-700 sticky left-0 bg-white cursor-pointer hover:bg-gray-100 transition-colors relative z-[9] max-w-[200px]"
                   title={`Filter to ${tableData.rowName}: ${rowValue}`}
                   onClick={() => {
                     if (tableData.rowDimId && dimensionsMap) {
@@ -267,7 +267,7 @@ export default function TableArea() {
                     }
                   }}
                 >
-                  <span className="block truncate pr-3">
+                  <span className="block truncate pr-3 overflow-hidden text-ellipsis whitespace-nowrap">
                     <span className="font-light text-[11px]">
                       {tableData.rowName}:{' '}
                     </span>
