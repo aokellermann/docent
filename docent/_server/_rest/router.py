@@ -1138,11 +1138,11 @@ async def resume_compute_search(
     query_id: str,
     db: DBService = Depends(get_db),
     user: User = Depends(get_user_anonymous_ok),
+    ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_fg_permission(Permission.READ)),
 ):
     new, job_id = await db.add_search_job(query_id)
     query = await db.get_search_query(query_id)
-    ctx = await get_default_view_ctx(query.fg_id, db)
     if new:
         # When we enqueue the job, check if the user has write perms
         write_allowed = await db.has_permission(
@@ -1195,6 +1195,7 @@ async def start_cluster_dimension(
     fg_id: str,
     request: ClusterDimensionRequest,
     db: DBService = Depends(get_db),
+    ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_fg_permission(Permission.WRITE)),
 ):
     job_id = await db.add_job(
@@ -1207,7 +1208,6 @@ async def start_cluster_dimension(
     )
 
     # Track analytics - we need to get the user from the context
-    ctx = await get_default_view_ctx(fg_id, db)
     await track_endpoint_with_user(db, Endpoints.START_CLUSTER_DIMENSION, ctx.user, fg_id)
 
     return job_id
