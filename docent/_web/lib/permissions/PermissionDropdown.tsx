@@ -28,9 +28,9 @@ const PermissionDropdown = ({ value, onChange }: PermissionDropdownProps) => {
   };
 
   const permissionDescriptions = {
-    read: 'View transcripts, runs, search, and filter',
-    write: 'Add transcripts and manage sharing',
-    admin: 'Administrative access',
+    read: 'View runs and searches',
+    write: 'Add/remove runs and perform searches',
+    admin: 'Manage sharing and delete the framegrid',
   };
 
   return (

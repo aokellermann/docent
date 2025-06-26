@@ -30,7 +30,9 @@ REDIS = ArqRedis(
 )
 
 
-async def compute_search(ctx: dict[Any, Any], view_ctx: ViewContext, job_id: str):
+async def compute_search(
+    _: dict[Any, Any], view_ctx: ViewContext, job_id: str, write_allowed: bool
+):
 
     db = await DBService.init()
     result = await db.get_search_job_and_query(job_id)
@@ -57,7 +59,12 @@ async def compute_search(ctx: dict[Any, Any], view_ctx: ViewContext, job_id: str
             async with db.advisory_lock(
                 view_ctx.fg_id + "__search__" + query.search_query, action_id="mutation"
             ):
-                await db.compute_search(view_ctx, query.search_query, _search_result_callback)
+                await db.compute_search(
+                    view_ctx,
+                    query.search_query,
+                    _search_result_callback,
+                    write_allowed,
+                )
         except:
             canceled = True
             raise
@@ -92,7 +99,7 @@ async def compute_search(ctx: dict[Any, Any], view_ctx: ViewContext, job_id: str
     run_task = asyncio.create_task(run())
     commands_task = asyncio.create_task(await_commands())
 
-    _, pending = await asyncio.wait([run_task, commands_task], return_when=asyncio.FIRST_COMPLETED)
+    _, pending = await asyncio.wait([run_task, commands_task], return_when=asyncio.FIRST_COMPLETED)  # type: ignore
     for task in pending:
         task.cancel()
 
