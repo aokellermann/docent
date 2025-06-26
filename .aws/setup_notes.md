@@ -4,6 +4,7 @@ terraform apply
 
 # install rsync, tmux, uv, docker, docker-compose
 sudo yum install rsync -y
+sudo yum install nano -y
 sudo yum install tmux -y
 curl -LsSf https://astral.sh/uv/install.sh | sh
 sudo yum update -y
