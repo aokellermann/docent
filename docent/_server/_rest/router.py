@@ -1,4 +1,3 @@
-import asyncio
 import hashlib
 import json
 from functools import partial
@@ -22,8 +21,8 @@ from docent._db_service.schemas.auth_models import (
 )
 from docent._db_service.schemas.collab_models import FramegridCollaborator
 from docent._db_service.schemas.tables import (
+    Endpoints,
     SQLAAccessControlEntry,
-    SQLADiffAttribute,
     SQLAFilter,
     SQLAFrameDimension,
 )
@@ -32,6 +31,7 @@ from docent._llm_util.data_models.llm_output import LLMOutput
 from docent._llm_util.prod_llms import get_llm_completions_async
 from docent._llm_util.providers.preferences import PROVIDER_PREFERENCES
 from docent._log_util.logger import get_logger
+from docent._server._analytics.tracker import track_endpoint_with_user
 from docent._server._assistant.chat import make_single_tasst_system_prompt
 
 # from docent._server._assistant.feedback import generate_new_queries
@@ -136,6 +136,9 @@ async def signup(request: UserCreateRequest, response: Response, db: DBService =
     # Create a session for the new user
     await create_user_session(user.id, response)
 
+    # Track analytics
+    await track_endpoint_with_user(db, Endpoints.SIGNUP, user)
+
     return user
 
 
@@ -184,6 +187,9 @@ async def create_anonymous_session(response: Response, db: DBService = Depends(g
 
     # Create a session for the anonymous user
     await create_user_session(anonymous_user.id, response)
+
+    # Track analytics
+    await track_endpoint_with_user(db, Endpoints.CREATE_ANONYMOUS_SESSION, anonymous_user)
 
     return anonymous_user
 
@@ -290,6 +296,10 @@ async def create_fg(
     )
     # Publish updated framegrids list to all clients
     await publish_framegrids(db)
+
+    # Track analytics
+    await track_endpoint_with_user(db, Endpoints.CREATE_FG, user, fg_id)
+
     return {"fg_id": fg_id}
 
 
@@ -361,6 +371,9 @@ async def get_agent_run(
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.READ)),
 ):
+    # Track analytics
+    await track_endpoint_with_user(db, Endpoints.GET_AGENT_RUN, ctx.user, ctx.fg_id)
+
     return await db.get_agent_run(ctx, agent_run_id)
 
 
@@ -397,6 +410,10 @@ async def post_agent_runs(
         for ctx in await db.get_all_view_ctxs(fg_id):
             await publish_homepage_state(db, ctx)
 
+    # Track analytics - we need to get the user from the context
+    ctx = await get_default_view_ctx(fg_id, db)
+    await track_endpoint_with_user(db, Endpoints.POST_AGENT_RUNS, ctx.user, fg_id)
+
 
 ########
 # View #
@@ -412,6 +429,9 @@ async def join(
 ):
     if not await db.fg_exists(fg_id):
         raise HTTPException(status_code=404, detail=f"Frame grid with ID {fg_id} not found")
+
+    # Track analytics
+    await track_endpoint_with_user(db, Endpoints.JOIN, ctx.user, fg_id)
 
     return {"fg_id": fg_id, "view_id": ctx.view_id}
 
@@ -433,6 +453,9 @@ async def set_io_dims_endpoint(
         await db.set_io_dims(ctx, request.inner_dim_id, request.outer_dim_id)
         await publish_homepage_state(db, ctx)
 
+    # Track analytics
+    await track_endpoint_with_user(db, Endpoints.SET_IO_DIMS_ENDPOINT, ctx.user, fg_id)
+
 
 class SetIODimWithMetadataKeyRequest(BaseModel):
     metadata_key: str
@@ -450,6 +473,11 @@ async def set_io_dim_with_metadata_key_endpoint(
     async with db.advisory_lock(fg_id, action_id="mutation"):
         await db.set_io_dim_with_metadata_key(ctx, request.metadata_key, request.type)
         await publish_homepage_state(db, ctx)
+
+    # Track analytics
+    await track_endpoint_with_user(
+        db, Endpoints.SET_IO_DIM_WITH_METADATA_KEY_ENDPOINT, ctx.user, fg_id
+    )
 
 
 class PostBaseFilterRequest(BaseModel):
@@ -476,6 +504,9 @@ async def post_base_filter(
         # Use the updated context
         await publish_homepage_state(db, new_ctx)
 
+        # Track analytics
+        await track_endpoint_with_user(db, Endpoints.POST_BASE_FILTER, ctx.user, fg_id)
+
         return request.filter.id if request.filter else None
 
 
@@ -494,6 +525,10 @@ async def copy_own_filter(
             sqla_filter = SQLAFilter.from_filter(new_filter, ctx)
             session.add(sqla_filter)
             logger.info(f"Added filter {new_filter.id} to view {ctx.view_id}")
+
+    # Track analytics
+    await track_endpoint_with_user(db, Endpoints.COPY_OWN_FILTER, ctx.user, ctx.fg_id)
+
     return {"filter_id": new_filter_id, "view_id": ctx.view_id}
 
 
@@ -532,6 +567,10 @@ async def apply_existing_filter(
             new_filter = existing_filter.model_copy(update={"id": str(uuid4())})
             new_ctx = await db.set_view_base_filter(new_ctx, new_filter)
     await publish_homepage_state(db, new_ctx)
+
+    # Track analytics
+    await track_endpoint_with_user(db, Endpoints.APPLY_EXISTING_FILTER, ctx.user, ctx.fg_id)
+
     return dim_id
 
 
@@ -551,6 +590,9 @@ async def get_existing_search_results(
             SearchResultWithCitations.from_search_result(result)
         )
 
+    # Track analytics
+    await track_endpoint_with_user(db, Endpoints.GET_EXISTING_SEARCH_RESULTS, ctx.user, ctx.fg_id)
+
     return StreamedSearchResult(
         data_dict=data_dict,
         num_agent_runs_done=len(data_dict.keys()),
@@ -558,12 +600,12 @@ async def get_existing_search_results(
     )
 
 
-@user_router.get("/{fg_id}/base_filter")
-async def get_base_filter_endpoint(
-    ctx: ViewContext = Depends(get_default_view_ctx),
-    _: None = Depends(require_view_permission(Permission.READ)),
-):
-    return ctx.base_filter
+# @user_router.get("/{fg_id}/base_filter")
+# async def get_base_filter_endpoint(
+#     ctx: ViewContext = Depends(get_default_view_ctx),
+#     _: None = Depends(require_view_permission(Permission.READ)),
+# ):
+#     return ctx.base_filter
 
 
 class GetRegexSnippetsRequest(BaseModel):
@@ -605,6 +647,10 @@ async def get_regex_snippets_endpoint(
         return {}
 
     agent_runs = await db.get_agent_runs(ctx, agent_run_ids=request.agent_run_ids)
+
+    # Track analytics
+    await track_endpoint_with_user(db, Endpoints.GET_REGEX_SNIPPETS_ENDPOINT, ctx.user, ctx.fg_id)
+
     return {
         d.id: [item for p in patterns for item in get_regex_snippets(d.text, p)] for d in agent_runs
     }
@@ -754,6 +800,9 @@ async def upsert_collaborator(
         permission=request.permission_level,
     )
 
+    # Track analytics
+    await track_endpoint_with_user(db, Endpoints.UPSERT_COLLABORATOR, user, fg_id)
+
     return collaborator
 
 
@@ -821,22 +870,22 @@ class ShareViewRequest(BaseModel):
     level: Literal["read"]
 
 
-@user_router.post("/{fg_id}/share_view")
-async def share_view(
-    fg_id: str,
-    request: ShareViewRequest,
-    db: DBService = Depends(get_db),
-    ctx: ViewContext = Depends(get_default_view_ctx),
-    _: None = Depends(require_fg_permission(Permission.READ)),
-):
-    await db.set_acl_permission(
-        subject_type=SubjectType(request.subject_type),
-        subject_id=request.subject_id,
-        resource_type=ResourceType.VIEW,
-        resource_id=ctx.view_id,
-        permission=Permission(request.level),
-    )
-    return {"status": "success"}
+# @user_router.post("/{fg_id}/share_view")
+# async def share_view(
+#     fg_id: str,
+#     request: ShareViewRequest,
+#     db: DBService = Depends(get_db),
+#     ctx: ViewContext = Depends(get_default_view_ctx),
+#     _: None = Depends(require_fg_permission(Permission.READ)),
+# ):
+#     await db.set_acl_permission(
+#         subject_type=SubjectType(request.subject_type),
+#         subject_id=request.subject_id,
+#         resource_type=ResourceType.VIEW,
+#         resource_id=ctx.view_id,
+#         permission=Permission(request.level),
+#     )
+#     return {"status": "success"}
 
 
 ##################################
@@ -859,6 +908,9 @@ async def post_dimension(
 
     await publish_dims(db, ctx)
     await publish_searches(db, ctx)
+
+    # Track analytics
+    await track_endpoint_with_user(db, Endpoints.POST_DIMENSION, ctx.user, ctx.fg_id)
 
     return request.dim.id
 
@@ -914,6 +966,9 @@ async def delete_filter(
         await publish_dims(db, ctx)
         await publish_marginals(db, ctx, dim_ids=[dim_id], ensure_fresh=True)
 
+    # Track analytics
+    await track_endpoint_with_user(db, Endpoints.DELETE_FILTER, ctx.user, fg_id)
+
 
 class PostFilterRequest(BaseModel):
     dim_id: str | None = None
@@ -953,7 +1008,10 @@ async def post_filter(
             await publish_dims(db, ctx)
             await publish_marginals(db, ctx, dim_ids=[request.dim_id], ensure_fresh=True)
 
-        return new_filter.id
+    # Track analytics
+    await track_endpoint_with_user(db, Endpoints.POST_FILTER, ctx.user, fg_id)
+
+    return new_filter.id
 
 
 ###################################
@@ -988,6 +1046,10 @@ async def start_compute_search(
     new, job_id = await db.add_search_job(query_id)
     if new:
         await enqueue_search_job(ctx, job_id)
+
+    # Track analytics
+    await track_endpoint_with_user(db, Endpoints.START_COMPUTE_SEARCH, ctx.user, fg_id)
+
     return job_id
 
 
@@ -1091,6 +1153,10 @@ async def resume_compute_search(
     ctx = await get_default_view_ctx(query.fg_id, db)
     if new:
         await enqueue_search_job(ctx, job_id)
+
+    # Track analytics
+    await track_endpoint_with_user(db, Endpoints.RESUME_COMPUTE_SEARCH, ctx.user, query.fg_id)
+
     return job_id
 
 
@@ -1102,6 +1168,9 @@ async def get_existing_clusters(
     _: None = Depends(require_view_permission(Permission.READ)),
 ):
     await publish_marginals(db, ctx, dim_ids=[dim_id], ensure_fresh=False)
+
+    # Track analytics
+    await track_endpoint_with_user(db, Endpoints.GET_EXISTING_CLUSTERS, ctx.user, ctx.fg_id)
 
     # await publish_dims(db, ctx)
     return
@@ -1137,6 +1206,11 @@ async def start_cluster_dimension(
             "feedback": request.feedback,
         },
     )
+
+    # Track analytics - we need to get the user from the context
+    ctx = await get_default_view_ctx(fg_id, db)
+    await track_endpoint_with_user(db, Endpoints.START_CLUSTER_DIMENSION, ctx.user, fg_id)
+
     return job_id
 
 
@@ -1428,6 +1502,8 @@ async def create_ta_session(
 async def get_ta_message(
     session_id: str,
     message: str,
+    db: DBService = Depends(get_db),
+    ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.READ)),
 ):
     session = TA_SESSIONS[session_id]
@@ -1487,6 +1563,9 @@ async def get_ta_message(
         # Close the stream
         await recv_stream.aclose()
 
+    # Track analytics
+    await track_endpoint_with_user(db, Endpoints.GET_TA_MESSAGE, ctx.user, ctx.fg_id)
+
     return StreamingResponse(
         sse_event_stream(_execute, recv_stream), media_type="text/event-stream"
     )
@@ -1527,6 +1606,10 @@ async def get_diffs_report(
 ):
     report = await db.get_diffs_report(diffs_report_id)
     print(report)
+
+    # Track analytics
+    await track_endpoint_with_user(db, Endpoints.GET_DIFFS_REPORT, ctx.user, ctx.fg_id)
+
     return report.to_pydantic().model_dump()
 
 
@@ -1578,6 +1661,10 @@ async def start_compute_diffs(
     )
 
     logger.info("New Diff Report", report.id)
+
+    # Track analytics
+    await track_endpoint_with_user(db, Endpoints.START_COMPUTE_DIFFS, ctx.user, fg_id)
+
     return {
         "job_id": job_id,
         "diffs_report_id": report.id,
@@ -1718,6 +1805,10 @@ async def compute_diff_clusters(
         ctx,
         claims,
     )
+
+    # Track analytics
+    await track_endpoint_with_user(db, Endpoints.COMPUTE_DIFF_CLUSTERS, ctx.user, fg_id)
+
     return clusters
 
 
@@ -1727,117 +1818,117 @@ class ComputeDiffSearchRequest(BaseModel):
     search_query: str
 
 
-@user_router.post("/{fg_id}/start_compute_diff_search")
-async def start_compute_diff_search(
-    fg_id: str,
-    request: ComputeDiffSearchRequest,
-    db: DBService = Depends(get_db),
-    ctx: ViewContext = Depends(get_default_view_ctx),
-):
-    job_id = await db.add_job(
-        "diff",
-        {
-            "type": "compute_diff_search",
-            "fg_id": fg_id,
-            "experiment_id_1": request.experiment_id_1,
-            "experiment_id_2": request.experiment_id_2,
-            "search_query": request.search_query,
-        },
-    )
-    return job_id
+# @user_router.post("/{fg_id}/start_compute_diff_search")
+# async def start_compute_diff_search(
+#     fg_id: str,
+#     request: ComputeDiffSearchRequest,
+#     db: DBService = Depends(get_db),
+#     ctx: ViewContext = Depends(get_default_view_ctx),
+# ):
+#     job_id = await db.add_job(
+#         "diff",
+#         {
+#             "type": "compute_diff_search",
+#             "fg_id": fg_id,
+#             "experiment_id_1": request.experiment_id_1,
+#             "experiment_id_2": request.experiment_id_2,
+#             "search_query": request.search_query,
+#         },
+#     )
+#     return job_id
 
 
-@user_router.get("/{fg_id}/listen_compute_diff_search")
-async def listen_compute_diff_search(
-    fg_id: str,
-    job_id: str,
-    db: DBService = Depends(get_db),
-    ctx: ViewContext = Depends(get_default_view_ctx),
-    _: None = Depends(require_fg_permission(Permission.WRITE)),
-):
-    # Retrieve job arguments
-    job = await db.get_job(job_id)
-    if job is None:
-        raise ValueError(f"Job {job_id} not found")
-    experiment_id_1, experiment_id_2, search_query = (
-        job.job_json["experiment_id_1"],
-        job.job_json["experiment_id_2"],
-        job.job_json["search_query"],
-    )
+# @user_router.get("/{fg_id}/listen_compute_diff_search")
+# async def listen_compute_diff_search(
+#     fg_id: str,
+#     job_id: str,
+#     db: DBService = Depends(get_db),
+#     ctx: ViewContext = Depends(get_default_view_ctx),
+#     _: None = Depends(require_fg_permission(Permission.WRITE)),
+# ):
+#     # Retrieve job arguments
+#     job = await db.get_job(job_id)
+#     if job is None:
+#         raise ValueError(f"Job {job_id} not found")
+#     experiment_id_1, experiment_id_2, search_query = (
+#         job.job_json["experiment_id_1"],
+#         job.job_json["experiment_id_2"],
+#         job.job_json["search_query"],
+#     )
 
-    datapoints = await db.get_agent_runs(ctx)
-    expid_by_datapoint = {d.id: d.metadata.get("experiment_id") for d in datapoints}
-    async with db.session() as session:
-        result = await session.execute(
-            select(SQLADiffAttribute)
-            .where(
-                SQLADiffAttribute.frame_grid_id == ctx.fg_id,
-            )
-            .order_by(SQLADiffAttribute.id)
-        )
-        existing_diffs = result.scalars().all()
-        num_total = sum(
-            1
-            for d in existing_diffs
-            if expid_by_datapoint.get(d.data_id_1) == experiment_id_1
-            and expid_by_datapoint.get(d.data_id_2) == experiment_id_2
-        )
+#     datapoints = await db.get_agent_runs(ctx)
+#     expid_by_datapoint = {d.id: d.metadata.get("experiment_id") for d in datapoints}
+#     async with db.session() as session:
+#         result = await session.execute(
+#             select(SQLADiffAttribute)
+#             .where(
+#                 SQLADiffAttribute.frame_grid_id == ctx.fg_id,
+#             )
+#             .order_by(SQLADiffAttribute.id)
+#         )
+#         existing_diffs = result.scalars().all()
+#         num_total = sum(
+#             1
+#             for d in existing_diffs
+#             if expid_by_datapoint.get(d.data_id_1) == experiment_id_1
+#             and expid_by_datapoint.get(d.data_id_2) == experiment_id_2
+#         )
 
-    # Create AnyIO queue that we can write intermediate results to
-    send_stream, recv_stream = anyio.create_memory_object_stream[StreamedDiffSearchResult](
-        max_buffer_size=100_000
-    )
+#     # Create AnyIO queue that we can write intermediate results to
+#     send_stream, recv_stream = anyio.create_memory_object_stream[StreamedDiffSearchResult](
+#         max_buffer_size=100_000
+#     )
 
-    # Track intermediate progress
-    progress_lock = anyio.Lock()
-    num_done = 0
+#     # Track intermediate progress
+#     progress_lock = anyio.Lock()
+#     num_done = 0
 
-    async def _diff_search_callback(search_result: tuple[str, int]) -> None:
-        nonlocal num_done
+#     async def _diff_search_callback(search_result: tuple[str, int]) -> None:
+#         nonlocal num_done
 
-        async with progress_lock:
-            num_done += 1
-            payload = StreamedDiffSearchResult(
-                claim=search_result[0],
-                alignment=search_result[1],
-                query=search_query,
-                num_results_done=num_done,
-                num_results_total=num_total,
-            )
+#         async with progress_lock:
+#             num_done += 1
+#             payload = StreamedDiffSearchResult(
+#                 claim=search_result[0],
+#                 alignment=search_result[1],
+#                 query=search_query,
+#                 num_results_done=num_done,
+#                 num_results_total=num_total,
+#             )
 
-        # Send to event_stream so it can be sent back to the client
-        await send_stream.send(payload)
+#         # Send to event_stream so it can be sent back to the client
+#         await send_stream.send(payload)
 
-        if num_done == num_total:
-            # Terminate the stream so the event_stream stops waiting
-            await asyncio.sleep(1)
-            await send_stream.aclose()
+#         if num_done == num_total:
+#             # Terminate the stream so the event_stream stops waiting
+#             await asyncio.sleep(1)
+#             await send_stream.aclose()
 
-    async def _execute():
-        nonlocal num_total
-        async with db.advisory_lock(fg_id, action_id="mutation"):
-            # Send initial 0% state message
-            init_data = StreamedDiffSearchResult(
-                claim=None,
-                alignment=0,
-                query=search_query,
-                num_results_done=0,
-                num_results_total=num_total,
-            )
-            await send_stream.send(init_data)
+#     async def _execute():
+#         nonlocal num_total
+#         async with db.advisory_lock(fg_id, action_id="mutation"):
+#             # Send initial 0% state message
+#             init_data = StreamedDiffSearchResult(
+#                 claim=None,
+#                 alignment=0,
+#                 query=search_query,
+#                 num_results_done=0,
+#                 num_results_total=num_total,
+#             )
+#             await send_stream.send(init_data)
 
-            # Get all diff search results
-            await db.compute_diff_search(
-                ctx,
-                experiment_id_1,
-                experiment_id_2,
-                search_query,
-                _diff_search_callback,
-            )
+#             # Get all diff search results
+#             await db.compute_diff_search(
+#                 ctx,
+#                 experiment_id_1,
+#                 experiment_id_2,
+#                 search_query,
+#                 _diff_search_callback,
+#             )
 
-    return StreamingResponse(
-        sse_event_stream(_execute, recv_stream), media_type="text/event-stream"
-    )
+#     return StreamingResponse(
+#         sse_event_stream(_execute, recv_stream), media_type="text/event-stream"
+#     )
 
 
 @user_router.get("/{fg_id}/transcript_diff")
@@ -1873,5 +1964,8 @@ async def get_transcript_diff(
 
     if not transcript_diff:
         return None
+
+    # Track analytics
+    await track_endpoint_with_user(db, Endpoints.GET_TRANSCRIPT_DIFF, ctx.user, ctx.fg_id)
 
     return transcript_diff.to_pydantic().model_dump()
