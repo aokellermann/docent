@@ -121,10 +121,7 @@ const CollaboratorRow = ({ collaborator }: CollaboratorRowProps) => {
         <Button
           variant="ghost"
           size="sm"
-          disabled={
-            !hasWritePermission ||
-            (collaborator.permission_level === 'admin' && !hasAdminPermission)
-          }
+          disabled={!hasAdminPermission}
           onClick={() =>
             removeCollaborator({
               subject_id: collaborator.subject_id,

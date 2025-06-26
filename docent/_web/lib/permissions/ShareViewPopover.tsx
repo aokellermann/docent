@@ -22,7 +22,10 @@ import { PermissionLevel } from './types';
 import PermissionDropdown from './PermissionDropdown';
 import { toast } from '@/hooks/use-toast';
 import { useRequireUserContext } from '@/app/contexts/UserContext';
-import { useHasFramegridWritePermission } from './hooks';
+import {
+  useHasFramegridAdminPermission,
+  useHasFramegridWritePermission,
+} from './hooks';
 
 const AddCollaborator = ({ framegridId }: { framegridId: string }) => {
   const { data: orgUsers, isLoading: isLoadingOrgUsers } =
@@ -162,17 +165,17 @@ const ShareViewPopover = ({ framegridId }: { framegridId: string }) => {
     },
     [framegridId, upsertCollaborator, removeCollaborator]
   );
-  const hasWritePermission = useHasFramegridWritePermission();
+  const hasAdminPermission = useHasFramegridAdminPermission();
 
   return (
     <Popover>
       <PopoverTrigger asChild>
-        {hasWritePermission && (
+        {hasAdminPermission && (
           <Button
             variant="outline"
             size="sm"
             className="gap-x-2 h-7 px-2"
-            disabled={!hasWritePermission}
+            disabled={!hasAdminPermission}
           >
             <Share2 size={14} /> Share view
           </Button>
@@ -199,7 +202,7 @@ const ShareViewPopover = ({ framegridId }: { framegridId: string }) => {
           <Switch
             id="public-access"
             checked={isPublicCollab}
-            disabled={!hasWritePermission}
+            disabled={!hasAdminPermission}
             onCheckedChange={handlePublicToggle}
           />
         </div>

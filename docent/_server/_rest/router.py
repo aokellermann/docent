@@ -782,16 +782,8 @@ async def upsert_collaborator(
     request: UpsertCollaboratorRequest,
     user: User = Depends(get_user_anonymous_ok),
     db: DBService = Depends(get_db),
-    _: None = Depends(require_fg_permission(Permission.WRITE)),
+    _: None = Depends(require_fg_permission(Permission.ADMIN)),
 ):
-    allowed = await db.has_permission(
-        user=user,
-        resource_type=ResourceType.FRAME_GRID,
-        resource_id=fg_id,
-        permission=request.permission_level,
-    )
-    if not allowed:
-        raise HTTPException(status_code=403, detail="Cannot set permissions higher than your own")
     collaborator = await db.set_acl_permission(
         subject_type=request.subject_type,
         subject_id=request.subject_id,
@@ -818,7 +810,7 @@ async def remove_collaborator(
     request: RemoveCollaboratorRequest,
     db: DBService = Depends(get_db),
     user: User = Depends(get_user_anonymous_ok),
-    _: None = Depends(require_fg_permission(Permission.WRITE)),
+    _: None = Depends(require_fg_permission(Permission.ADMIN)),
 ):
     async with db.session() as session:
         # Build the delete query with the provided filters
@@ -843,16 +835,6 @@ async def remove_collaborator(
         if acl_entry is None:
             raise HTTPException(
                 status_code=400, detail=f"Collaborator {request.subject_id} not found"
-            )
-        allowed = await db.has_permission(
-            user=user,
-            resource_type=ResourceType.FRAME_GRID,
-            resource_id=fg_id,
-            permission=Permission(acl_entry.permission),
-        )
-        if not allowed:
-            raise HTTPException(
-                status_code=403, detail="Cannot delete collaborator with higher permissions"
             )
 
     await db.clear_acl_permission(
@@ -1040,12 +1022,20 @@ async def start_compute_search(
     request: ComputeSearchRequest,
     db: DBService = Depends(get_db),
     ctx: ViewContext = Depends(get_default_view_ctx),
-    _: None = Depends(require_fg_permission(Permission.WRITE)),
+    user: User = Depends(get_user_anonymous_ok),
+    _: None = Depends(require_fg_permission(Permission.READ)),
 ):
     query_id = await db.add_search_query(ctx, request.search_query)
     new, job_id = await db.add_search_job(query_id)
     if new:
-        await enqueue_search_job(ctx, job_id)
+        # When we enqueue the job, check if the user has write perms
+        write_allowed = await db.has_permission(
+            user=user,
+            resource_type=ResourceType.FRAME_GRID,
+            resource_id=fg_id,
+            permission=Permission.WRITE,
+        )
+        await enqueue_search_job(ctx, job_id, write_allowed)
 
     # Track analytics
     await track_endpoint_with_user(db, Endpoints.START_COMPUTE_SEARCH, ctx.user, fg_id)
@@ -1059,7 +1049,7 @@ async def listen_compute_search(
     job_id: str,
     db: DBService = Depends(get_db),
     ctx: ViewContext = Depends(get_default_view_ctx),
-    _: None = Depends(require_view_permission(Permission.WRITE)),
+    _: None = Depends(require_view_permission(Permission.READ)),
 ):
     # Retrieve job arguments
     job = await db.get_job(job_id)
@@ -1147,12 +1137,21 @@ async def cancel_compute_search(job_id: str):
 async def resume_compute_search(
     query_id: str,
     db: DBService = Depends(get_db),
+    user: User = Depends(get_user_anonymous_ok),
+    _: None = Depends(require_fg_permission(Permission.READ)),
 ):
     new, job_id = await db.add_search_job(query_id)
     query = await db.get_search_query(query_id)
     ctx = await get_default_view_ctx(query.fg_id, db)
     if new:
-        await enqueue_search_job(ctx, job_id)
+        # When we enqueue the job, check if the user has write perms
+        write_allowed = await db.has_permission(
+            user=user,
+            resource_type=ResourceType.FRAME_GRID,
+            resource_id=query.fg_id,
+            permission=Permission.WRITE,
+        )
+        await enqueue_search_job(ctx, job_id, write_allowed)
 
     # Track analytics
     await track_endpoint_with_user(db, Endpoints.RESUME_COMPUTE_SEARCH, ctx.user, query.fg_id)

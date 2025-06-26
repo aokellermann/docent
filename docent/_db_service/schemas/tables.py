@@ -26,6 +26,7 @@ from docent._db_service.schemas.auth_models import Organization, Permission, Use
 from docent._db_service.schemas.base import SQLABase
 from docent.data_models.agent_run import AgentRun
 from docent.data_models.filters import FrameDimension, FrameFilter, Judgment, parse_filter_dict
+from docent.data_models.metadata import BaseAgentRunMetadata, BaseMetadata
 from docent.data_models.transcript import Transcript
 
 TABLE_FRAME_GRID = "frame_grids"
@@ -103,7 +104,7 @@ class SQLAAgentRun(SQLABase):
             id=self.id,
             name=self.name,
             description=self.description,
-            metadata=self.metadata_json,
+            metadata=BaseAgentRunMetadata.model_validate(self.metadata_json),
             transcripts=transcripts,
         )
 
@@ -150,7 +151,7 @@ class SQLATranscript(SQLABase):
 
     def to_dict_key_and_transcript(self) -> tuple[str, Transcript]:
         messages = json.loads(self.messages.decode("utf-8"))
-        metadata = json.loads(self.metadata_json.decode("utf-8"))
+        metadata = BaseMetadata.model_validate_json(self.metadata_json.decode("utf-8"))
         return (
             self.dict_key,
             Transcript(id=self.id, name=self.name, messages=messages, metadata=metadata),

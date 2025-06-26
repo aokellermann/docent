@@ -40,7 +40,9 @@ import BinEditor from './BinEditor';
 import { ProgressBar } from './ProgressBar';
 import { requestDiffs } from '../store/diffSlice';
 import { apiRestClient } from '../services/apiService';
-import { useHasFramegridWritePermission } from '@/lib/permissions/hooks';
+import {
+  useHasFramegridWritePermission,
+} from '@/lib/permissions/hooks';
 import { setGraphData } from '../store/experimentViewerSlice';
 import { copyToClipboard } from '@/lib/utils';
 
@@ -693,110 +695,112 @@ const SearchArea = () => {
                 </div>
 
                 {/* Search History Section - Updated with consistent colors */}
-                {searchesWithStats &&
-                  searchesWithStats.length > 0 &&
-                  hasWritePermission && (
-                    <div className="max-h-[20rem] overflow-y-auto pr-1">
-                      <div className="flex justify-between items-center mb-1">
-                        <div className="text-xs font-medium text-gray-500">
-                          Saved Searches
-                        </div>
+                {searchesWithStats && searchesWithStats.length > 0 && (
+                  <div className="max-h-[20rem] overflow-y-auto pr-1">
+                    <div className="flex justify-between items-center mb-1">
+                      <div className="text-xs font-medium text-gray-500">
+                        Saved Searches
                       </div>
-                      {searchesWithStats.map((search, index) => {
-                        const completionPercentage =
-                          search.num_total > 0
-                            ? Math.min(
-                                (search.num_judgments_computed /
-                                  search.num_total) *
-                                  100,
-                                100
-                              )
-                            : 0;
-                        const isComplete = completionPercentage === 100;
-                        // Extract first 8 characters of UUID for display
-                        const shortDimId = search.search_id.split('-')[0];
+                    </div>
+                    {searchesWithStats.map((search, index) => {
+                      const completionPercentage =
+                        search.num_total > 0
+                          ? Math.min(
+                              (search.num_judgments_computed /
+                                search.num_total) *
+                                100,
+                              100
+                            )
+                          : 0;
+                      const isComplete = completionPercentage === 100;
+                      // Extract first 8 characters of UUID for display
+                      const shortDimId = search.search_id.split('-')[0];
 
-                        return (
-                          <div
-                            key={index}
-                            className="group mb-1 border border-gray-100 rounded hover:border-indigo-300 hover:bg-indigo-50 transition-all"
-                          >
-                            <div className="flex items-center py-1.5 px-2 text-xs bg-white">
-                              <code
-                                className="px-1 bg-gray-50 border border-gray-100 rounded text-[10px] text-gray-500 mr-2 flex-shrink-0"
-                                title={search.search_id}
-                              >
-                                {shortDimId}
-                              </code>
-                              <div
-                                className="font-mono text-gray-800 truncate flex-1 cursor-pointer"
-                                title={search.search_query}
-                                onClick={() => {
-                                  handleSearch(search.search_query);
-                                }}
-                              >
-                                {search.search_query}
-                              </div>
-                              <div className="flex items-center ml-2 space-x-1.5 flex-shrink-0">
-                                <div className="flex items-center gap-1.5">
+                      return (
+                        <div
+                          key={index}
+                          className="group mb-1 border border-gray-100 rounded hover:border-indigo-300 hover:bg-indigo-50 transition-all"
+                        >
+                          <div className="flex items-center py-1.5 px-2 text-xs bg-white">
+                            <code
+                              className="px-1 bg-gray-50 border border-gray-100 rounded text-[10px] text-gray-500 mr-2 flex-shrink-0"
+                              title={search.search_id}
+                            >
+                              {shortDimId}
+                            </code>
+                            <div
+                              className="font-mono text-gray-800 truncate flex-1 cursor-pointer"
+                              title={search.search_query}
+                              onClick={() => {
+                                handleSearch(search.search_query);
+                              }}
+                            >
+                              {search.search_query}
+                            </div>
+                            <div className="flex items-center ml-2 space-x-1.5 flex-shrink-0">
+                              <div className="flex items-center gap-1.5">
+                                <div
+                                  className="relative w-12 h-1.5 bg-gray-100 rounded-full overflow-hidden flex-shrink-0"
+                                  title={`${search.num_judgments_computed} of ${search.num_total} processed`}
+                                >
                                   <div
-                                    className="relative w-12 h-1.5 bg-gray-100 rounded-full overflow-hidden flex-shrink-0"
-                                    title={`${search.num_judgments_computed} of ${search.num_total} processed`}
-                                  >
-                                    <div
-                                      className={`absolute top-0 left-0 h-full ${isComplete ? 'bg-indigo-500' : 'bg-blue-500'}`}
-                                      style={{
-                                        width: `${completionPercentage}%`,
-                                      }}
-                                    ></div>
-                                  </div>
-                                  <span className="text-[9px] text-gray-500 whitespace-nowrap">
-                                    {Math.round(completionPercentage)}% computed
-                                  </span>
+                                    className={`absolute top-0 left-0 h-full ${isComplete ? 'bg-indigo-500' : 'bg-blue-500'}`}
+                                    style={{
+                                      width: `${completionPercentage}%`,
+                                    }}
+                                  ></div>
                                 </div>
-                                <button
-                                  className="hover:bg-indigo-50 rounded p-0.5 text-indigo-400 hover:text-indigo-600 transition-colors"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    dispatch(
-                                      setSearchQueryTextboxValue(
-                                        search.search_query
-                                      )
-                                    );
-                                    dispatch(clearSearch());
-                                  }}
-                                  title="Edit this search query"
-                                >
-                                  <Pencil className="h-3 w-3" />
-                                </button>
-                                <button
-                                  className="hover:bg-red-50 rounded p-0.5 text-red-400 hover:text-red-600 transition-colors"
-                                  onClick={async (e) => {
-                                    e.stopPropagation();
-                                    await dispatch(
-                                      deleteSearch(search.search_id)
-                                    )
-                                      .unwrap()
-                                      .then(() => {
-                                        toast({
-                                          title: 'Deleted saved search',
-                                          description:
-                                            'Your saved search has been deleted successfully',
-                                          variant: 'default',
-                                        });
-                                      });
-                                  }}
-                                  title="Delete this saved search"
-                                >
-                                  <XOctagon className="h-3 w-3" />
-                                </button>
+                                <span className="text-[9px] text-gray-500 whitespace-nowrap">
+                                  {Math.round(completionPercentage)}% computed
+                                </span>
                               </div>
+                              {hasWritePermission && (
+                                <>
+                                  <button
+                                    className="hover:bg-indigo-50 rounded p-0.5 text-indigo-400 hover:text-indigo-600 transition-colors"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      dispatch(
+                                        setSearchQueryTextboxValue(
+                                          search.search_query
+                                        )
+                                      );
+                                      dispatch(clearSearch());
+                                    }}
+                                    title="Edit this search query"
+                                  >
+                                    <Pencil className="h-3 w-3" />
+                                  </button>
+                                  <button
+                                    className="hover:bg-red-50 rounded p-0.5 text-red-400 hover:text-red-600 transition-colors"
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      await dispatch(
+                                        deleteSearch(search.search_id)
+                                      )
+                                        .unwrap()
+                                        .then(() => {
+                                          toast({
+                                            title: 'Deleted saved search',
+                                            description:
+                                              'Your saved search has been deleted successfully',
+                                            variant: 'default',
+                                          });
+                                        });
+                                    }}
+                                    title="Delete this saved search"
+                                  >
+                                    <XOctagon className="h-3 w-3" />
+                                  </button>
+                                </>
+                              )}
                             </div>
                           </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </>
             )}
           </div>

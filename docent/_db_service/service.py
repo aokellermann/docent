@@ -1307,7 +1307,10 @@ class DBService:
         ctx: ViewContext,
         search_query: str,
         search_result_callback: SearchResultStreamingCallback | None = None,
+        write_allowed: bool = True,
     ):
+        """If not write_allowed, only return existing results."""
+
         # If the callback is set, the caller is expecting all results to be streamed back
         # So, retrieve them and send them
         if search_result_callback is not None:
@@ -1344,6 +1347,10 @@ class DBService:
 
                 logger.info(f"Pushed {len(to_upload)} attributes")
 
+        # Early exit if we're not allowed to write
+        if not write_allowed:
+            return
+        # Otherwise, compute the search results
         try:
             await execute_search(agent_runs, search_query, search_result_callback=_results_callback)
         except anyio.get_cancelled_exc_class():
