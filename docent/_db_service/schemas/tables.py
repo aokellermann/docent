@@ -47,6 +47,7 @@ TABLE_USER_ROLE = "user_roles"
 TABLE_ACCESS_CONTROL_ENTRY = "access_control_entries"
 TABLE_ORGANIZATION = "organizations"
 TABLE_USER_ORGANIZATION = "user_organizations"
+TABLE_ANALYTICS_EVENT = "analytics_events"
 
 
 def _sanitize_pg_text(text: str) -> str:
@@ -685,3 +686,70 @@ class SQLAAccessControlEntry(SQLABase):
             name="uq_access_control_entry_combination",
         ),
     )
+
+
+class Endpoints(enum.Enum):
+    """Enum for tracking which router endpoints are being called."""
+
+    SIGNUP = "signup"
+    CREATE_ANONYMOUS_SESSION = "create_anonymous_session"
+    CREATE_FG = "create_fg"
+    GET_AGENT_RUN = "get_agent_run"
+    POST_AGENT_RUNS = "post_agent_runs"
+    JOIN = "join"
+    SET_IO_DIMS_ENDPOINT = "set_io_dims_endpoint"
+    SET_IO_DIM_WITH_METADATA_KEY_ENDPOINT = "set_io_dim_with_metadata_key_endpoint"
+    POST_BASE_FILTER = "post_base_filter"
+    COPY_OWN_FILTER = "copy_own_filter"
+    APPLY_EXISTING_FILTER = "apply_existing_filter"
+    GET_EXISTING_SEARCH_RESULTS = "get_existing_search_results"
+    GET_REGEX_SNIPPETS_ENDPOINT = "get_regex_snippets_endpoint"
+    UPSERT_COLLABORATOR = "upsert_collaborator"
+    POST_DIMENSION = "post_dimension"
+    DELETE_FILTER = "delete_filter"
+    POST_FILTER = "post_filter"
+    START_COMPUTE_SEARCH = "start_compute_search"
+    RESUME_COMPUTE_SEARCH = "resume_compute_search"
+    GET_EXISTING_CLUSTERS = "get_existing_clusters"
+    START_CLUSTER_DIMENSION = "start_cluster_dimension"
+    GET_TA_MESSAGE = "get_ta_message"
+    GET_DIFFS_REPORT = "get_diffs_report"
+    START_COMPUTE_DIFFS = "start_compute_diffs"
+    COMPUTE_DIFF_CLUSTERS = "compute_diff_clusters"
+    GET_TRANSCRIPT_DIFF = "get_transcript_diff"
+
+
+class SQLAAnalyticsEvent(SQLABase):
+    __tablename__ = TABLE_ANALYTICS_EVENT
+
+    id = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+
+    # The framegrid ID (can be None for endpoints that don't operate on a specific framegrid)
+    fg_id = mapped_column(
+        String(36), ForeignKey(f"{TABLE_FRAME_GRID}.id"), nullable=True, index=True
+    )
+
+    # The user ID (can be None for anonymous users)
+    user_id = mapped_column(String(36), ForeignKey(f"{TABLE_USER}.id"), nullable=True, index=True)
+
+    # The endpoint that was called
+    endpoint = mapped_column(Enum(Endpoints), nullable=False, index=True)
+
+    # When the endpoint was called
+    called_at = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False, index=True
+    )
+
+    @classmethod
+    def create_event(
+        cls,
+        endpoint: Endpoints,
+        fg_id: str | None = None,
+        user_id: str | None = None,
+    ) -> "SQLAAnalyticsEvent":
+        """Create a new analytics event."""
+        return cls(
+            endpoint=endpoint,
+            fg_id=fg_id,
+            user_id=user_id,
+        )

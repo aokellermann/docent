@@ -402,6 +402,7 @@ export const sendTaMessage = createAsyncThunk(
   async (message: string, { dispatch, getState }) => {
     const state = getState() as RootState;
     const { taSessionId } = state.transcript;
+    const frameGridId = state.frame.frameGridId;
 
     if (!taSessionId) {
       dispatch(
@@ -431,7 +432,7 @@ export const sendTaMessage = createAsyncThunk(
 
       // Create SSE connection
       const { eventSource, onCancel } = sseService.createEventSource(
-        `/rest/ta_message?session_id=${taSessionId}&message=${encodeURIComponent(message)}`,
+        `/rest/${frameGridId}/ta_message?session_id=${taSessionId}&message=${encodeURIComponent(message)}`,
         (data) => {
           if (data.messages) {
             dispatch(setTaMessages(data.messages));
