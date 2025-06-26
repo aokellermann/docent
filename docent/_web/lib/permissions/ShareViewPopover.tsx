@@ -8,6 +8,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Share2, UserPlus } from 'lucide-react';
 import CollaboratorsList from './CollaboratorsList';
 import { useState, useCallback } from 'react';
@@ -134,37 +141,44 @@ const AddCollaborator = ({ framegridId }: { framegridId: string }) => {
 };
 
 const ShareViewPopover = ({ framegridId }: { framegridId: string }) => {
-  // Determine current public access state from collaborators
-  const { isPublicCollab } = useGetCollaboratorsQuery(framegridId, {
-    selectFromResult: (result) => ({
-      isPublicCollab:
-        result.data?.some((c) => c.subject_type === 'public') ?? false,
-    }),
+  // Get current public permission level from collaborators
+  const { publicPermissionLevel } = useGetCollaboratorsQuery(framegridId, {
+    selectFromResult: (result) => {
+      const publicCollab = result.data?.find(
+        (c) => c.subject_type === 'public'
+      );
+      return {
+        publicPermissionLevel: publicCollab?.permission_level || 'none',
+      };
+    },
   });
 
   const [upsertCollaborator] = useUpsertCollaboratorMutation();
   const [removeCollaborator] = useRemoveCollaboratorMutation();
 
-  // Toggle handler that also updates backend
-  const handlePublicToggle = useCallback(
-    (checked: boolean) => {
-      if (checked) {
-        upsertCollaborator({
-          subject_id: 'public',
-          subject_type: 'public',
-          framegrid_id: framegridId,
-          permission_level: 'read', // Public access is always read-only
-        });
-      } else {
+  // Handler for public permission level changes
+  const handlePublicPermissionChange = useCallback(
+    (newPermissionLevel: PermissionLevel) => {
+      if (newPermissionLevel === 'none') {
+        // Remove public access
         removeCollaborator({
           subject_id: 'public',
           subject_type: 'public',
           framegrid_id: framegridId,
         });
+      } else {
+        // Set or update public access
+        upsertCollaborator({
+          subject_id: 'public',
+          subject_type: 'public',
+          framegrid_id: framegridId,
+          permission_level: newPermissionLevel,
+        });
       }
     },
     [framegridId, upsertCollaborator, removeCollaborator]
   );
+
   const hasAdminPermission = useHasFramegridAdminPermission();
 
   return (
@@ -193,17 +207,16 @@ const ShareViewPopover = ({ framegridId }: { framegridId: string }) => {
         <div className="flex items-center justify-between">
           <div>
             <Label htmlFor="public-access" className="text-sm font-medium">
-              Make public
+              Public access
             </Label>
             <p className="text-xs text-muted-foreground">
-              Anyone with the link can view
+              Anyone with the link can access
             </p>
           </div>
-          <Switch
-            id="public-access"
-            checked={isPublicCollab}
+          <PublicPermissionDropdown
+            value={publicPermissionLevel}
+            onChange={handlePublicPermissionChange}
             disabled={!hasAdminPermission}
-            onCheckedChange={handlePublicToggle}
           />
         </div>
 
@@ -212,6 +225,79 @@ const ShareViewPopover = ({ framegridId }: { framegridId: string }) => {
         <CollaboratorsList framegridId={framegridId} />
       </PopoverContent>
     </Popover>
+  );
+};
+
+// New component for public permission dropdown
+interface PublicPermissionDropdownProps {
+  value: PermissionLevel;
+  onChange: (newPermission: PermissionLevel) => void;
+  disabled?: boolean;
+}
+
+const PublicPermissionDropdown = ({
+  value,
+  onChange,
+  disabled = false,
+}: PublicPermissionDropdownProps) => {
+  const publicPermissionLabels = {
+    none: 'No access',
+    read: 'Can view',
+    write: 'Can edit',
+  };
+
+  const publicPermissionDescriptions = {
+    none: 'Only invited people can access',
+    read: 'Anyone with the link can view',
+    write: 'Anyone with the link can edit',
+  };
+
+  return (
+    <Select
+      value={value}
+      onValueChange={(val) => onChange(val as PermissionLevel)}
+      disabled={disabled}
+    >
+      <SelectTrigger className="w-28 h-7 text-xs">
+        <SelectValue className="text-xs font-medium">
+          {publicPermissionLabels[
+            value as keyof typeof publicPermissionLabels
+          ] || publicPermissionLabels.none}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="none">
+          <div className="flex flex-col">
+            <span className="text-xs font-medium">
+              {publicPermissionLabels.none}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {publicPermissionDescriptions.none}
+            </span>
+          </div>
+        </SelectItem>
+        <SelectItem value="read">
+          <div className="flex flex-col">
+            <span className="text-xs font-medium">
+              {publicPermissionLabels.read}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {publicPermissionDescriptions.read}
+            </span>
+          </div>
+        </SelectItem>
+        <SelectItem value="write">
+          <div className="flex flex-col">
+            <span className="text-xs font-medium">
+              {publicPermissionLabels.write}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {publicPermissionDescriptions.write}
+            </span>
+          </div>
+        </SelectItem>
+      </SelectContent>
+    </Select>
   );
 };
 
