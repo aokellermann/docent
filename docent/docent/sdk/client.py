@@ -5,7 +5,6 @@ import requests
 
 from docent._log_util.logger import get_logger
 from docent.data_models.agent_run import AgentRun
-from docent_core._db_service.filters import FrameFilter
 
 logger = get_logger(__name__)
 
@@ -55,6 +54,13 @@ class Docent:
         response = self._session.post(
             login_url, json={"email": self._email, "password": self._password}
         )
+
+        if response.status_code == 401:
+            raise ValueError(
+                "Invalid username/password combination. "
+                f"If you don't already have an account, please sign up at {self._web_url}/signup"
+            )
+
         response.raise_for_status()
         logger.info(f"Successfully logged in as {self._email}")
 
@@ -180,53 +186,6 @@ class Docent:
 
         logger.info(f"Successfully added {total_runs} agent runs to FrameGrid '{fg_id}'")
         return {"status": "success", "total_runs_added": total_runs}
-
-    def get_base_filter(self, fg_id: str) -> dict[str, Any] | None:
-        """Retrieves the base filter for a FrameGrid.
-
-        The base filter defines default filtering applied to all views.
-
-        Args:
-            fg_id: ID of the FrameGrid.
-
-        Returns:
-            dict or None: Filter data if a filter exists, None otherwise.
-
-        Raises:
-            requests.exceptions.HTTPError: If the API request fails.
-        """
-        url = f"{self._server_url}/{fg_id}/base_filter"
-        response = self._session.get(url)
-        response.raise_for_status()
-        # The endpoint returns the filter model directly or null
-        filter_data = response.json()
-        return filter_data
-
-    def set_base_filter(self, fg_id: str, filter: FrameFilter | None) -> dict[str, Any]:
-        """Sets the base filter for a FrameGrid.
-
-        The base filter defines default filtering applied to all views.
-
-        Args:
-            fg_id: ID of the FrameGrid.
-            filter: FrameFilter object defining the filter, or None to clear the filter.
-
-        Returns:
-            dict: API response data.
-
-        Raises:
-            requests.exceptions.HTTPError: If the API request fails.
-        """
-        url = f"{self._server_url}/{fg_id}/base_filter"
-        payload = {
-            "filter": filter.model_dump() if filter else None,
-        }
-
-        response = self._session.post(url, json=payload)
-        response.raise_for_status()
-
-        logger.info(f"Successfully set base filter for FrameGrid '{fg_id}'")
-        return response.json()
 
     def list_framegrids(self) -> list[dict[str, Any]]:
         """Lists all available FrameGrids.

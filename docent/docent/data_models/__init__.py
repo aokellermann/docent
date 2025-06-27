@@ -3,22 +3,12 @@ from docent.data_models.citation import Citation
 from docent.data_models.metadata import BaseAgentRunMetadata, BaseMetadata, FrameDimension
 from docent.data_models.regex import RegexSnippet
 from docent.data_models.transcript import Transcript
-from docent_core._db_service.filters import (
-    AgentRunIdFilter,
-    BaseFrameFilter,
-    ComplexFilter,
-    SearchResultPredicateFilter,
-)
 
 __all__ = [
     "AgentRun",
     "Citation",
     "RegexSnippet",
-    "AgentRunIdFilter",
     "FrameDimension",
-    "BaseFrameFilter",
-    "SearchResultPredicateFilter",
-    "ComplexFilter",
     "BaseAgentRunMetadata",
     "BaseMetadata",
     "Transcript",
