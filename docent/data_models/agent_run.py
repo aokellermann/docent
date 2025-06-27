@@ -7,12 +7,13 @@ from pydantic import (
     BaseModel,
     Field,
     field_serializer,
+    field_validator,
     model_validator,
 )
 
 from docent._llm_util.util import get_token_count, group_messages_into_ranges
 from docent.data_models.metadata import BaseAgentRunMetadata
-from docent.data_models.transcript import Transcript
+from docent.data_models.transcript import Transcript, TranscriptWithoutMetadataValidator
 
 
 class FilterableField(TypedDict):
@@ -48,26 +49,14 @@ class AgentRun(BaseModel):
         """
         return metadata.model_dump(strip_internal_fields=False)
 
-    # @model_validator(mode="before")
-    # @classmethod
-    # def _validate_metadata_type(cls, data: dict[str, Any] | Any) -> dict[str, Any] | Any:
-    #     """Validates that metadata is an instance of BaseAgentRunMetadata, not a dict or other type.
-
-    #     This prevents issues with field descriptions being lost during dict conversion.
-
-    #     Raises:
-    #         ValueError: If metadata is not an instance of BaseAgentRunMetadata.
-
-    #     Returns:
-    #         dict[str, Any] | Any: The validated data.
-    #     """
-    #     if isinstance(data, dict) and "metadata" in data:
-    #         metadata_value = data["metadata"]
-    #         if metadata_value is not None and not isinstance(metadata_value, BaseAgentRunMetadata):
-    #             raise ValueError(
-    #                 f"metadata must be an instance of BaseAgentRunMetadata, got {type(metadata_value).__name__}"
-    #             )
-    #     return data
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def _validate_metadata_type(cls, v: Any) -> Any:
+        if v is not None and not isinstance(v, BaseAgentRunMetadata):
+            raise ValueError(
+                f"metadata must be an instance of BaseAgentRunMetadata, got {type(v).__name__}"
+            )
+        return v
 
     @model_validator(mode="after")
     def _validate_transcripts_not_empty(self):
@@ -222,3 +211,18 @@ class AgentRun(BaseModel):
         result.append({"name": "text", "type": "str"})
 
         return result
+
+
+class AgentRunWithoutMetadataValidator(AgentRun):
+    """
+    A version of AgentRun that doesn't have the model_validator on metadata.
+    Needed for sending/receiving agent runs via JSON, since they incorrectly trip the existing model_validator.
+    """
+
+    transcripts: dict[str, TranscriptWithoutMetadataValidator]  # type: ignore
+
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def _validate_metadata_type(cls, v: Any) -> Any:
+        # Bypass the model_validator
+        return v

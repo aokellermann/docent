@@ -66,7 +66,7 @@ from docent._server._rest.send_state import (
     publish_searches,
 )
 from docent._server.util import sse_event_stream
-from docent.data_models.agent_run import AgentRun
+from docent.data_models.agent_run import AgentRun, AgentRunWithoutMetadataValidator
 from docent.data_models.citation import (
     Citation,
     parse_citations_single_run,
@@ -397,7 +397,7 @@ async def get_agent_run_metadata(
 
 
 class PostAgentRunsRequest(BaseModel):
-    agent_runs: list[AgentRun]
+    agent_runs: list[AgentRunWithoutMetadataValidator]
 
 
 @user_router.post("/{fg_id}/agent_runs")

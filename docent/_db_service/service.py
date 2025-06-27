@@ -436,7 +436,7 @@ class DBService:
     # Agent Runs #
     ##############
 
-    async def add_agent_runs(self, ctx: ViewContext, agent_runs: list[AgentRun]):
+    async def add_agent_runs(self, ctx: ViewContext, agent_runs: Sequence[AgentRun]):
         # Convert AgentRun objects to SQLAlchemy objects using existing conversion functions
         agent_run_data: list[SQLAAgentRun] = []
         transcript_data: list[SQLATranscript] = []

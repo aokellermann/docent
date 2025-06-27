@@ -3,7 +3,7 @@ from typing import Any
 from uuid import uuid4
 
 import yaml
-from pydantic import BaseModel, Field, PrivateAttr, field_serializer
+from pydantic import BaseModel, Field, PrivateAttr, field_serializer, field_validator
 
 from docent._llm_util.util import (
     get_token_count,
@@ -94,26 +94,14 @@ class Transcript(BaseModel):
         """
         return metadata.model_dump(strip_internal_fields=False)
 
-    # @model_validator(mode="before")
-    # @classmethod
-    # def _validate_metadata_type(cls, data: dict[str, Any] | Any) -> dict[str, Any] | Any:
-    #     """Validates that metadata is an instance of BaseMetadata, not a dict or other type.
-
-    #     This prevents issues with field descriptions being lost during dict conversion.
-
-    #     Raises:
-    #         ValueError: If metadata is not an instance of BaseMetadata.
-
-    #     Returns:
-    #         dict[str, Any] | Any: The validated data.
-    #     """
-    #     if isinstance(data, dict) and "metadata" in data:
-    #         metadata_value = data["metadata"]
-    #         if metadata_value is not None and not isinstance(metadata_value, BaseMetadata):
-    #             raise ValueError(
-    #                 f"metadata must be an instance of BaseMetadata, got {type(metadata_value).__name__}"
-    #             )
-    #     return data
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def _validate_metadata_type(cls, v: Any) -> Any:
+        if v is not None and not isinstance(v, BaseMetadata):
+            raise ValueError(
+                f"metadata must be an instance of BaseMetadata, got {type(v).__name__}"
+            )
+        return v
 
     @property
     def units_of_action(self) -> list[list[int]]:
@@ -341,3 +329,16 @@ class Transcript(BaseModel):
                     results.append(f"<blocks>\n{result}\n</blocks>\n")
 
             return results
+
+
+class TranscriptWithoutMetadataValidator(Transcript):
+    """
+    A version of Transcript that doesn't have the model_validator on metadata.
+    Needed for sending/receiving transcripts via JSON, since they incorrectly trip the existing model_validator.
+    """
+
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def _validate_metadata_type(cls, v: Any) -> Any:
+        # Bypass the model_validator
+        return v
