@@ -164,8 +164,7 @@ async def execute_search(
     ids = [ar.id for ar in agent_runs]
     texts = [ar.text for ar in agent_runs]
 
-    # try to search over all short AgentRuns first, since we can stream those immediately
-
+    # Try to search over all short AgentRuns first, since we can stream those immediately
     short_indices = [i for i in range(len(texts)) if get_token_count(texts[i]) <= MAX_TOKENS]
     short_ids = [ids[i] for i in short_indices]
     short_texts = [texts[i] for i in short_indices]

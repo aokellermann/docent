@@ -1826,7 +1826,9 @@ class DBService:
 
         # Persist anonymous user to database
         async with self.session() as session:
-            sqla_user = SQLAUser(id=user_id, email=email, password_hash="asdf", is_anonymous=True)
+            sqla_user = SQLAUser(
+                id=user_id, email=email, password_hash="not necessary", is_anonymous=True
+            )
             session.add(sqla_user)
             # Call to_user() inside the session context
             user = sqla_user.to_user()
