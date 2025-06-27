@@ -172,7 +172,7 @@ export default function ClusterViewer({ searchQuery }: ClusterViewerProps) {
           <div key={cluster.id} className="space-y-2">
             <div className="text-xs p-1.5 bg-white rounded border border-gray-200 flex items-center gap-1.5">
               {/* Expand/collapse button on the left */}
-              {(hasResults || activeClusterTaskId) && (
+
                 <Button
                   size="icon"
                   variant="ghost"
@@ -185,9 +185,9 @@ export default function ClusterViewer({ searchQuery }: ClusterViewerProps) {
                     <ChevronRight className="h-3 w-3 text-gray-500" />
                   )}
                 </Button>
-              )}
+
               {/* Cluster count */}
-              {(hasResults || activeClusterTaskId) && (
+
                 <div className="flex-shrink-0 flex items-center">
                   <TooltipProvider>
                     <Tooltip>
@@ -215,7 +215,7 @@ export default function ClusterViewer({ searchQuery }: ClusterViewerProps) {
                     </Tooltip>
                   </TooltipProvider>
                 </div>
-              )}
+
               {/* Cluster centroid */}
               <div className="flex-1 text-xs text-gray-700 ml-1">
                 <div className="flex items-center gap-2">
