@@ -8,7 +8,6 @@ from backoff.types import Details
 
 # all errors: https://platform.openai.com/docs/guides/error-codes/api-errors#python-library-error-types
 from openai import (
-    APIConnectionError,
     AsyncAzureOpenAI,
     AsyncOpenAI,
     AuthenticationError,
@@ -38,8 +37,6 @@ from openai.types.chat.chat_completion_message_tool_call_param import (
 )
 from openai.types.shared_params.function_definition import FunctionDefinition
 
-from docent._log_util import get_logger
-from docent.data_models.chat import ChatMessage, Content, ToolCall, ToolInfo
 from docent_core._env_util import ENV
 from docent_core._llm_util.data_models.exceptions import (
     CompletionTooLongException,
@@ -56,6 +53,8 @@ from docent_core._llm_util.data_models.llm_output import (
     ToolCallPartial,
     finalize_llm_output_partial,
 )
+from docent._log_util import get_logger
+from docent.data_models.chat import ChatMessage, Content, ToolCall, ToolInfo
 
 logger = get_logger(__name__)
 DEFAULT_TIKTOKEN_ENCODING = "cl100k_base"
@@ -398,7 +397,7 @@ def get_openai_client_async() -> AsyncOpenAI:
     # Technically you don't have to run this, but just makes clear where the envvars are used
     _ = ENV
 
-    return AsyncOpenAI(api_key="")
+    return AsyncOpenAI()
 
 
 def get_azure_openai_client_async() -> AsyncAzureOpenAI:
@@ -452,8 +451,7 @@ def chunk_and_tokenize(
     or isinstance(e, AuthenticationError)
     or isinstance(e, PermissionDeniedError)
     or isinstance(e, NotFoundError)
-    or isinstance(e, UnprocessableEntityError)
-    or isinstance(e, APIConnectionError),
+    or isinstance(e, UnprocessableEntityError),
     max_tries=5,
     factor=3.0,
     on_backoff=_print_backoff_message,
