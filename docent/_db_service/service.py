@@ -68,6 +68,7 @@ from docent._db_service.schemas.tables import (
     JobStatus,
     SQLAAccessControlEntry,
     SQLAAgentRun,
+    SQLAAnalyticsEvent,
     SQLADiffAttribute,
     SQLAFrameGrid,
     SQLAJob,
@@ -343,7 +344,7 @@ class DBService:
             await session.execute(
                 update(SQLAView)
                 .where(SQLAView.fg_id == fg_id)
-                .values(outer_bin_key=None, inner_bin_key=None, base_filter_id=None)
+                .values(outer_bin_key=None, inner_bin_key=None, base_filter_dict=None)
             )
 
         # delete all search result clusters joining on search result id to get fg_id
@@ -371,6 +372,18 @@ class DBService:
         # Delete all attributes
         async with self.session() as session:
             await session.execute(delete(SQLASearchResult).where(SQLASearchResult.fg_id == fg_id))
+
+        # Delete all embeddings
+        async with self.session() as session:
+            await session.execute(
+                delete(SQLATranscriptEmbedding).where(SQLATranscriptEmbedding.fg_id == fg_id)
+            )
+
+        # Delete all analytics events
+        async with self.session() as session:
+            await session.execute(
+                delete(SQLAAnalyticsEvent).where(SQLAAnalyticsEvent.fg_id == fg_id)
+            )
 
         # Delete all transcripts
         async with self.session() as session:

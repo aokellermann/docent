@@ -458,7 +458,7 @@ async def set_io_bin_keys(
         await publish_homepage_state(db, ctx)
 
     # Track analytics
-    await track_endpoint_with_user(db, Endpoints.SET_IO_DIMS_ENDPOINT, ctx.user, fg_id)
+    await track_endpoint_with_user(db, Endpoints.SET_IO_BIN_KEYS, ctx.user, fg_id)
 
 
 class SetIODimWithMetadataKeyRequest(BaseModel):
@@ -479,9 +479,7 @@ async def set_io_bin_key_with_metadata_key_endpoint(
         await publish_homepage_state(db, ctx)
 
     # Track analytics
-    await track_endpoint_with_user(
-        db, Endpoints.SET_IO_DIM_WITH_METADATA_KEY_ENDPOINT, ctx.user, fg_id
-    )
+    await track_endpoint_with_user(db, Endpoints.SET_IO_BIN_KEY_WITH_METADATA_KEY, ctx.user, fg_id)
 
 
 class PostBaseFilterRequest(BaseModel):
@@ -520,7 +518,7 @@ async def clone_own_view(
     new_view_id = await db.clone_view_for_sharing(ctx)
 
     # Track analytics
-    await track_endpoint_with_user(db, Endpoints.COPY_OWN_FILTER, ctx.user, ctx.fg_id)
+    await track_endpoint_with_user(db, Endpoints.CLONE_OWN_VIEW, ctx.user, ctx.fg_id)
 
     return {"view_id": new_view_id}
 
@@ -543,7 +541,7 @@ async def apply_existing_view(
     await publish_homepage_state(db, ctx)
 
     # Track analytics
-    await track_endpoint_with_user(db, Endpoints.APPLY_EXISTING_FILTER, ctx.user, ctx.fg_id)
+    await track_endpoint_with_user(db, Endpoints.APPLY_EXISTING_VIEW, ctx.user, ctx.fg_id)
 
     # Get the existing search query; tells frontend whether to load clusters
     existing_search_query = await db.get_search_query_by_query(ctx.fg_id, request.search_query)
@@ -1194,7 +1192,7 @@ async def start_cluster_search_results(
     )
 
     # Track analytics - we need to get the user from the context
-    await track_endpoint_with_user(db, Endpoints.START_CLUSTER_DIMENSION, ctx.user, fg_id)
+    await track_endpoint_with_user(db, Endpoints.START_CLUSTER_SEARCH_RESULTS, ctx.user, fg_id)
 
     return job_id
 
