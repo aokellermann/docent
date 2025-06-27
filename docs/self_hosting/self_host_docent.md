@@ -105,24 +105,24 @@ Docker Compose is the easiest way to get started, but you may want a manual inst
 
     === "Prod"
         ```bash
-        docent server --port 8889 --workers 4
+        docent_core server --port 8889 --workers 4
         ```
 
     === "Dev (with autoreload)"
         ```bash
-        docent server --port 8889 --reload
+        docent_core server --port 8889 --reload
         ```
 
     to run the server, then
 
     === "Prod"
         ```bash
-        docent web --build --port 3001 --backend-url http://localhost:8889
+        docent_core web --build --port 3001 --backend-url http://localhost:8889
         ```
 
     === "Dev (with autoreload)"
         ```bash
-        docent web --port 3001 --backend-url http://localhost:8889
+        docent_core web --port 3001 --backend-url http://localhost:8889
         ```
 
     to run the frontend. You may need to [install Node.js](https://nodejs.org/en/download/) first.
@@ -131,13 +131,13 @@ Finally, try accessing the Docent UI at `http://$DOCENT_HOST:$DOCENT_WEB_PORT`.
 
 ### 3. Customize the Docent client
 
-When creating `DocentClient` objects, you'll need to specify custom server and frontend URLs:
+When creating `Docent` client objects, you'll need to specify custom server and frontend URLs:
 
 ```python
 import os
-from docent import DocentClient
+from docent import Docent
 
-client = DocentClient(
+client = Docent(
     server_url="http://localhost:8889",    # or your own server URL
     frontend_url="http://localhost:3001",  # or your own frontend URL
     email=os.getenv("DOCENT_EMAIL"),

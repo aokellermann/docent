@@ -35,8 +35,6 @@ nav:
           - concepts/data_models/chat_messages.md
           # - concepts/data_models/filters_and_dimensions.md
           - concepts/data_models/llm_output.md
-      - SDK:
-          - concepts/sdk/python_sdk.md
       # - Developers:
       #     - developers/development_tips.md
   - Hosting:

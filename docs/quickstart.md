@@ -4,15 +4,15 @@ Before starting, navigate to [docent.transluce.org](https://docent.transluce.org
 
 To ingest your own agent runs, install the Python SDK:
 ```bash
-pip install docent
+pip install docent-python
 ```
 
 Then create a new Python script that instantiates a client object:
 ```python
 import os
-from docent import DocentClient
+from docent import Docent
 
-client = DocentClient(
+client = Docent(
     email=os.getenv("DOCENT_EMAIL"),        # is default and can be omitted
     password=os.getenv("DOCENT_PASSWORD"),  # is default and can be omitted
 )
