@@ -1,6 +1,7 @@
 # Quickstart
 
-Before starting, navigate to [docent.transluce.org](https://docent.transluce.org) and sign up for an account. Feel free to explore some sample agent runs in the dashboard.
+Before starting, navigate to [docent.transluce.org](https://docent.transluce.org) and sign up for an account.
+<!-- Feel free to explore some sample agent runs in the dashboard. -->
 
 To ingest your own agent runs, install the Python SDK:
 ```bash
@@ -15,6 +16,10 @@ from docent import Docent
 client = Docent(
     email=os.getenv("DOCENT_EMAIL"),        # is default and can be omitted
     password=os.getenv("DOCENT_PASSWORD"),  # is default and can be omitted
+
+    # Uncomment and adjust these if you're self-hosting
+    # server_url="http://localhost:8889",
+    # web_url="http://localhost:3001",
 )
 ```
 

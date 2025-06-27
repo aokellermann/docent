@@ -1,3 +1,6 @@
+!!! note
+    Docent remains in alpha. The API is subject to change.
+
 # Docent Python SDK
 
 The official Python SDK for [Docent](https://github.com/TransluceAI/docent) - a platform for analyzing and visualizing AI agent execution traces.
