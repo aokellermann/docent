@@ -2,7 +2,7 @@ import re
 
 from pydantic import BaseModel
 
-from docent._log_util import get_logger
+from docent_sdk._log_util import get_logger
 
 logger = get_logger(__name__)
 

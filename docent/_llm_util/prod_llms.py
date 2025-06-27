@@ -29,8 +29,8 @@ from docent._llm_util.providers.registry import (
     SingleOutputGetter,
     SingleStreamingOutputGetter,
 )
-from docent._log_util import get_logger
-from docent.data_models.chat import ChatMessage, ToolInfo, parse_chat_message
+from docent_sdk._log_util import get_logger
+from docent_sdk.data_models.chat import ChatMessage, ToolInfo, parse_chat_message
 
 logger = get_logger(__name__)
 

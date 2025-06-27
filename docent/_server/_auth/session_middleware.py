@@ -11,7 +11,7 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from docent._db_service.service import DBService
-from docent._log_util import get_logger
+from docent_sdk._log_util import get_logger
 
 logger = get_logger(__name__)
 

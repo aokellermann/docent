@@ -3,7 +3,7 @@ from typing import Any, Callable, Coroutine
 
 from docent._ai_tools.clustering.cluster_assigner import LlmApiClusterAssigner
 from docent._ai_tools.clustering.cluster_generator import parse_cluster_output, propose_clusters
-from docent._log_util import get_logger
+from docent_sdk._log_util import get_logger
 
 logger = get_logger(__name__)
 

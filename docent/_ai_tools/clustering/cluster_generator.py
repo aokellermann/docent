@@ -6,7 +6,7 @@ import numpy as np
 
 from docent._llm_util.prod_llms import get_llm_completions_async
 from docent._llm_util.providers.preferences import PROVIDER_PREFERENCES
-from docent._llm_util.util import truncate_to_token_limit
+from docent_sdk.data_models._tiktoken_util import truncate_to_token_limit
 
 CLUSTER_PROMPT = """
 Here are some items:

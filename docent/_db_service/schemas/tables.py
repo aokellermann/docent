@@ -26,11 +26,11 @@ from sqlalchemy.schema import UniqueConstraint
 from docent._ai_tools.search import SearchResult
 from docent._db_service.schemas.auth_models import Organization, Permission, User
 from docent._db_service.schemas.base import SQLABase
-from docent._log_util import get_logger
-from docent.data_models.agent_run import AgentRun
-from docent.data_models.filters import ComplexFilter, parse_filter_dict
-from docent.data_models.metadata import BaseAgentRunMetadata, BaseMetadata
-from docent.data_models.transcript import Transcript
+from docent_sdk._log_util import get_logger
+from docent_sdk.data_models.agent_run import AgentRun
+from docent_sdk.data_models.filters import ComplexFilter, parse_filter_dict
+from docent_sdk.data_models.metadata import BaseAgentRunMetadata, BaseMetadata
+from docent_sdk.data_models.transcript import Transcript
 
 logger = get_logger(__name__)
 

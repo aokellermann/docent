@@ -5,17 +5,17 @@ from typing import Any
 from pydantic import Field
 from tqdm.auto import tqdm
 
-from docent._log_util import get_logger
-from docent.data_models.agent_run import AgentRun
-from docent.data_models.chat import (
+from docent_sdk._log_util import get_logger
+from docent_sdk.data_models.agent_run import AgentRun
+from docent_sdk.data_models.chat import (
     AssistantMessage,
     ChatMessage,
     ToolCall,
     ToolMessage,
     UserMessage,
 )
-from docent.data_models.metadata import BaseAgentRunMetadata
-from docent.data_models.transcript import Transcript
+from docent_sdk.data_models.metadata import BaseAgentRunMetadata
+from docent_sdk.data_models.transcript import Transcript
 
 logger = get_logger(__name__)
 

@@ -6,10 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from docent._env_util import ENV
-from docent._log_util import get_logger
 from docent._server._auth.session_middleware import SessionAuthMiddleware
 from docent._server._broker.router import broker_router
 from docent._server._rest.router import public_router, user_router
+from docent_sdk._log_util import get_logger
 
 logger = get_logger(__name__)
 

@@ -15,9 +15,9 @@ from docent._db_service.contexts import ViewContext
 from docent._db_service.schemas.tables import JobStatus
 from docent._db_service.service import DBService
 from docent._env_util import ENV
-from docent._log_util import get_logger
 from docent._server._broker.redis_client import publish_framegrid_update
 from docent._server._rest.send_state import publish_searches
+from docent_sdk._log_util import get_logger
 
 logger = get_logger(__name__)
 

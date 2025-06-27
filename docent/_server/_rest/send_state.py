@@ -6,12 +6,12 @@ from sqlalchemy.inspection import inspect as sqla_inspect
 from docent._db_service.contexts import ViewContext
 from docent._db_service.schemas.tables import SQLAAgentRun
 from docent._db_service.service import DBService
-from docent._log_util import get_logger
 from docent._server._broker.redis_client import (
     publish_to_broker,
     publish_view_update,
 )
-from docent.data_models.metadata import FrameDimension
+from docent_sdk._log_util import get_logger
+from docent_sdk.data_models.metadata import FrameDimension
 
 logger = get_logger(__name__)
 

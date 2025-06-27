@@ -7,7 +7,7 @@ import anyio
 from docent._llm_util.data_models.llm_output import LLMOutput
 from docent._llm_util.prod_llms import get_llm_completions_async
 from docent._llm_util.providers.preferences import PROVIDER_PREFERENCES, ModelOption
-from docent._log_util import get_logger
+from docent_sdk._log_util import get_logger
 
 # import torch
 # from tqdm.auto import tqdm

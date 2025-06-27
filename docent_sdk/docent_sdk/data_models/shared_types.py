@@ -1,6 +1,6 @@
 from typing import List, TypedDict
 
-from docent.data_models.citation import Citation
+from docent_sdk.data_models.citation import Citation
 
 
 class EvidenceWithCitation(TypedDict):

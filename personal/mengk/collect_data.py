@@ -93,7 +93,7 @@ import asyncio
 from tqdm.auto import tqdm
 
 from docent._llm_util.data_models.llm_output import LLMOutput
-from docent.data_models import AgentRun, Transcript
+from docent_sdk.data_models import AgentRun, Transcript
 
 all_results: list[list[LLMOutput]] = []
 all_prompts: list[list[list[dict[str, str]]]] = []

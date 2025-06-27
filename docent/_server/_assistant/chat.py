@@ -1,7 +1,7 @@
 import tiktoken
 
-from docent.data_models.agent_run import AgentRun
-from docent.data_models.transcript import SINGLE_RUN_CITE_INSTRUCTION
+from docent_sdk.data_models.agent_run import AgentRun
+from docent_sdk.data_models.transcript import SINGLE_RUN_CITE_INSTRUCTION
 
 MAX_TOKENS = 50_000
 GPT_MODEL = "gpt-4"  # Can be adjusted based on the model being used

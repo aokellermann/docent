@@ -5,8 +5,7 @@ import { useAppSelector } from '../store/hooks';
 import { AgentRunMetadata } from './AgentRunMetadata';
 import { SearchResultWithCitations } from '../types/frameTypes';
 import { renderTextWithCitations } from '@/lib/renderCitations';
-import { useMemo, useState } from 'react';
-import { RegexSnippet } from '../types/experimentViewerTypes';
+import { useMemo } from 'react';
 
 interface AgentRunCardProps {
   agentRunId: string;

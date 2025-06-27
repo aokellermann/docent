@@ -31,7 +31,6 @@ from docent._db_service.service import DBService
 from docent._llm_util.data_models.llm_output import LLMOutput
 from docent._llm_util.prod_llms import get_llm_completions_async
 from docent._llm_util.providers.preferences import PROVIDER_PREFERENCES
-from docent._log_util.logger import get_logger
 from docent._server._analytics.tracker import track_endpoint_with_user
 from docent._server._assistant.chat import make_single_tasst_system_prompt
 
@@ -66,12 +65,13 @@ from docent._server._rest.send_state import (
     publish_searches,
 )
 from docent._server.util import sse_event_stream
-from docent.data_models.agent_run import AgentRun, AgentRunWithoutMetadataValidator
-from docent.data_models.citation import (
+from docent_sdk._log_util.logger import get_logger
+from docent_sdk.data_models.agent_run import AgentRun, AgentRunWithoutMetadataValidator
+from docent_sdk.data_models.citation import (
     Citation,
     parse_citations_single_run,
 )
-from docent.data_models.filters import (
+from docent_sdk.data_models.filters import (
     ComplexFilter,
     parse_filter_dict,
 )

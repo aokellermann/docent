@@ -84,11 +84,11 @@ from docent._db_service.schemas.tables import (
 from docent._env_util import ENV
 from docent._llm_util.data_models.llm_output import AsyncEmbeddingStreamingCallback
 from docent._llm_util.providers.openai import get_chunked_openai_embeddings_async
-from docent._log_util import get_logger
 from docent._server._broker.redis_client import enqueue_embedding_job
-from docent.data_models.agent_run import AgentRun
-from docent.data_models.filters import ComplexFilter
-from docent.data_models.transcript import Transcript
+from docent_sdk._log_util import get_logger
+from docent_sdk.data_models.agent_run import AgentRun
+from docent_sdk.data_models.filters import ComplexFilter
+from docent_sdk.data_models.transcript import Transcript
 
 logger = get_logger(__name__)
 

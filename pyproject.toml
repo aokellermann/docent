@@ -6,6 +6,7 @@ description = "Docent"
 requires-python = ">=3.11"
 dependencies = [
     # Dev
+    "python-dotenv>=1.1.1",
     "pre-commit>=4.2.0",
     "pyright>=1.1.0",
     "pytest>=8.3.0",
@@ -36,7 +37,6 @@ dependencies = [
     "openai>=1.68.0",
     "anthropic>=0.47.0",
     "backoff>=2.2.1",
-    "tiktoken>=0.7.0",
     # Docs
     "mkdocs>=1.6.1",
     "mkdocs-material>=9.6.14",
@@ -44,6 +44,8 @@ dependencies = [
     # Uncategorized
     "arq>=0.26.3",
     "passlib[argon2]>=1.7.4",
+    # SDK
+    "docent_sdk",
 ]
 
 [project.scripts]
@@ -52,6 +54,9 @@ docent = "docent_cli.main:app"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv.sources]
+docent_sdk = { path = "docent_sdk", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["docent", "cli/docent_cli"]
@@ -71,7 +76,8 @@ known_first_party = "docent"
 [tool.pyright]
 include = [
     "docent",
-    "cli/docent_cli"
+    "cli/docent_cli",
+    "docent_sdk/docent_sdk"
 ]
 typeCheckingMode = "strict"
 reportMissingTypeStubs = false

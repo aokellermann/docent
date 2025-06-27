@@ -5,13 +5,13 @@ from uuid import uuid4
 import yaml
 from pydantic import BaseModel, Field, PrivateAttr, field_serializer, field_validator
 
-from docent._llm_util.util import (
+from docent_sdk.data_models._tiktoken_util import (
     get_token_count,
     group_messages_into_ranges,
     truncate_to_token_limit,
 )
-from docent.data_models.chat import AssistantMessage, ChatMessage, ContentReasoning
-from docent.data_models.metadata import BaseMetadata
+from docent_sdk.data_models.chat import AssistantMessage, ChatMessage, ContentReasoning
+from docent_sdk.data_models.metadata import BaseMetadata
 
 # Template for formatting individual transcript blocks
 TRANSCRIPT_BLOCK_TEMPLATE = """

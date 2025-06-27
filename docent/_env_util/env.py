@@ -3,7 +3,7 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
-from docent._log_util import get_logger
+from docent_sdk._log_util import get_logger
 
 logger = get_logger(__name__)
 

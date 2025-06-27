@@ -3,8 +3,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Discriminator
 
-from docent.data_models.chat.content import Content
-from docent.data_models.chat.tool import ToolCall
+from docent_sdk.data_models.chat.content import Content
+from docent_sdk.data_models.chat.tool import ToolCall
 
 logger = getLogger(__name__)
 

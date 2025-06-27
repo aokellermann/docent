@@ -1,10 +1,10 @@
 import json
 
 from docent._loader.load_inspect import InspectAgentRunMetadata
-from docent._log_util import get_logger
-from docent.data_models.agent_run import AgentRun
-from docent.data_models.chat import ChatMessage, parse_chat_message
-from docent.data_models.transcript import Transcript
+from docent_sdk._log_util import get_logger
+from docent_sdk.data_models.agent_run import AgentRun
+from docent_sdk.data_models.chat import ChatMessage, parse_chat_message
+from docent_sdk.data_models.transcript import Transcript
 
 logger = get_logger(__name__)
 

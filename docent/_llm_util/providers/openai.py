@@ -53,8 +53,8 @@ from docent._llm_util.data_models.llm_output import (
     ToolCallPartial,
     finalize_llm_output_partial,
 )
-from docent._log_util import get_logger
-from docent.data_models.chat import ChatMessage, Content, ToolCall, ToolInfo
+from docent_sdk._log_util import get_logger
+from docent_sdk.data_models.chat import ChatMessage, Content, ToolCall, ToolInfo
 
 logger = get_logger(__name__)
 DEFAULT_TIKTOKEN_ENCODING = "cl100k_base"

@@ -6,7 +6,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Discriminator, Field, field_validator
 from sqlalchemy import ColumnElement, and_, or_
 
-from docent._log_util import get_logger
+from docent_sdk._log_util import get_logger
 
 if TYPE_CHECKING:
     from docent._db_service.schemas.tables import SQLAAgentRun

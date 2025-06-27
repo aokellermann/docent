@@ -3,8 +3,8 @@ from typing import TYPE_CHECKING, Type
 from pydantic import BaseModel
 from sqlalchemy import ColumnElement, and_
 
-from docent._log_util import get_logger
-from docent.data_models.filters import ComplexFilter
+from docent_sdk._log_util import get_logger
+from docent_sdk.data_models.filters import ComplexFilter
 
 if TYPE_CHECKING:
     from docent._db_service.schemas.tables import SQLAAgentRun

@@ -6,8 +6,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from docent._db_service.contexts import ViewContext
 from docent._db_service.schemas.tables import TABLE_AGENT_RUN, TABLE_FRAME_GRID, SQLABase
-from docent.data_models.citation import parse_citations_multi_run
-from docent.data_models.shared_types import EvidenceWithCitation
+from docent_sdk.data_models.citation import parse_citations_multi_run
+from docent_sdk.data_models.shared_types import EvidenceWithCitation
 
 
 class MessageState:

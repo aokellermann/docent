@@ -106,7 +106,7 @@ await db.compute_paired_search(
 # %%%
 
 
-from docent.data_models.agent_run import AgentRun
+from docent_sdk.data_models.agent_run import AgentRun
 
 # runs_37 = [run for run in runs if run.metadata.get("model") == "anthropic/claude-3-7-sonnet-latest"]
 # runs_35 = [run for run in runs if run.metadata.get("model") == "anthropic/claude-3-5-sonnet-latest"]

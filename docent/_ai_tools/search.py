@@ -9,11 +9,11 @@ from pydantic import BaseModel, Field
 from docent._llm_util.data_models.llm_output import LLMOutput
 from docent._llm_util.prod_llms import get_llm_completions_async
 from docent._llm_util.providers.preferences import PROVIDER_PREFERENCES
-from docent._llm_util.util import MAX_TOKENS, get_token_count
-from docent._log_util import get_logger
-from docent.data_models.agent_run import AgentRun
-from docent.data_models.citation import Citation, parse_citations_single_run
-from docent.data_models.transcript import SINGLE_RUN_CITE_INSTRUCTION
+from docent_sdk._log_util import get_logger
+from docent_sdk.data_models._tiktoken_util import MAX_TOKENS, get_token_count
+from docent_sdk.data_models.agent_run import AgentRun
+from docent_sdk.data_models.citation import Citation, parse_citations_single_run
+from docent_sdk.data_models.transcript import SINGLE_RUN_CITE_INSTRUCTION
 
 logger = get_logger(__name__)
 
@@ -172,7 +172,7 @@ async def execute_search(
     short_ids = [ids[i] for i in short_indices]
     short_texts = [texts[i] for i in short_indices]
 
-    logger.critical("end tokenize, FIX THIS, maybe cache", perf_counter() - start_tokenize)
+    logger.critical(f"end tokenize, FIX THIS, maybe cache: {perf_counter() - start_tokenize}")
     llm_callback = (
         _get_llm_streaming_callback(search_query, short_ids, search_result_callback)
         if search_result_callback is not None

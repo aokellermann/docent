@@ -9,9 +9,9 @@ from docent._ai_tools.diffs.models import Claim, MessageState, TranscriptDiff
 from docent._llm_util.data_models.llm_output import LLMOutput
 from docent._llm_util.prod_llms import get_llm_completions_async
 from docent._llm_util.providers.preferences import PROVIDER_PREFERENCES
-from docent.data_models.agent_run import AgentRun
-from docent.data_models.citation import parse_citations_multi_run
-from docent.data_models.shared_types import EvidenceWithCitation
+from docent_sdk.data_models.agent_run import AgentRun
+from docent_sdk.data_models.citation import parse_citations_multi_run
+from docent_sdk.data_models.shared_types import EvidenceWithCitation
 
 """ Vincent's original implementation"""
 

@@ -1,4 +1,4 @@
-from docent.data_models.transcript import Transcript
+from docent_sdk.data_models.transcript import Transcript
 
 
 def load_custom() -> list[Transcript]:
