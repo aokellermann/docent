@@ -39,6 +39,10 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import selectinload
 
+from docent._log_util import get_logger
+from docent.data_models.agent_run import AgentRun
+from docent.data_models.filters import ComplexFilter
+from docent.data_models.transcript import Transcript
 from docent_core._ai_tools.clustering.cluster_assigner import DEFAULT_ASSIGNER, assign_with_backend
 from docent_core._ai_tools.clustering.cluster_diffs import cluster_diff_claims, search_over_diffs
 from docent_core._ai_tools.clustering.cluster_generator import ClusterFeedback, propose_clusters
@@ -86,10 +90,6 @@ from docent_core._env_util import ENV
 from docent_core._llm_util.data_models.llm_output import AsyncEmbeddingStreamingCallback
 from docent_core._llm_util.providers.openai import get_chunked_openai_embeddings_async
 from docent_core._server._broker.redis_client import enqueue_embedding_job
-from docent._log_util import get_logger
-from docent.data_models.agent_run import AgentRun
-from docent.data_models.filters import ComplexFilter
-from docent.data_models.transcript import Transcript
 
 logger = get_logger(__name__)
 
@@ -452,6 +452,14 @@ class DBService:
         # Convert AgentRun objects to SQLAlchemy objects using existing conversion functions
         agent_run_data: list[SQLAAgentRun] = []
         transcript_data: list[SQLATranscript] = []
+
+        # count the number of agent runs in the current framegrid
+        async with self.session() as session:
+            query = select(func.count()).where(SQLAAgentRun.fg_id == ctx.fg_id)
+            result = await session.execute(query)
+            num_agent_runs = result.scalar_one()
+        if num_agent_runs + len(agent_runs) > 100_000:
+            raise ValueError("Number of agent runs in the current framegrid is too large")
 
         # Process all agent runs and transcripts first
         for ar in agent_runs:
