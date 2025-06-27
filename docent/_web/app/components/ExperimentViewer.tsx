@@ -208,28 +208,20 @@ export default function ExperimentViewer() {
       </div>
 
       {/* Dimension scores table or graph - conditional based on chart type */}
-      {(() => {
-        if (chartType === 'table') {
-          return <TableArea />;
-        }
-        if (chartType === 'bar' || chartType === 'line') {
-          return <GraphArea />;
-        }
-        return null;
-      })()}
+      {chartType === 'table' ? (
+        <TableArea />
+      ) : chartType === 'bar' || chartType === 'line' ? (
+        <GraphArea />
+      ) : null}
 
       {/* Agent run list */}
       <div>
         <div className="text-sm font-semibold">Agent Run List</div>
         <div className="text-xs">
           {agentRunIds?.length || 0} agent runs matching the current view
-          {
-            curSearchQuery && (
-              <span>
-                , {currentSearchHitCount} hits for current query
-              </span>
-            )
-          }
+          {curSearchQuery && (
+            <span>, {currentSearchHitCount} hits for current query</span>
+          )}
         </div>
       </div>
       <TranscriptFilterControls />

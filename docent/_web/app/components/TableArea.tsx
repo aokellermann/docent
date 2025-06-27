@@ -76,12 +76,12 @@ export default function TableArea() {
     if (!outerBinKey || !rawBinStats) {
       return [];
     }
-    
+
     // Extract dimension values from the bin keys
     const values = new Set<string>();
-    Object.keys(rawBinStats).forEach(key => {
+    Object.keys(rawBinStats).forEach((key) => {
       const parts = key.split('|');
-      parts.forEach(part => {
+      parts.forEach((part) => {
         if (part.includes(',')) {
           const [dim, value] = part.split(',', 2);
           if (dim === outerBinKey) {
@@ -90,10 +90,10 @@ export default function TableArea() {
         }
       });
     });
-    
-    const result = Array.from(values).map(value => ({
+
+    const result = Array.from(values).map((value) => ({
       id: value,
-      value: value
+      value: value,
     }));
     return result.slice(0, MAX_DIMENSION_VALUES);
   }, [outerBinKey, rawBinStats]);
@@ -102,12 +102,12 @@ export default function TableArea() {
     if (!innerBinKey || !rawBinStats) {
       return [];
     }
-    
+
     // Extract dimension values from the bin keys
     const values = new Set<string>();
-    Object.keys(rawBinStats).forEach(key => {
+    Object.keys(rawBinStats).forEach((key) => {
       const parts = key.split('|');
-      parts.forEach(part => {
+      parts.forEach((part) => {
         if (part.includes(',')) {
           const [dim, value] = part.split(',', 2);
           if (dim === innerBinKey) {
@@ -116,10 +116,10 @@ export default function TableArea() {
         }
       });
     });
-    
-    const result = Array.from(values).map(value => ({
+
+    const result = Array.from(values).map((value) => ({
       id: value,
-      value: value
+      value: value,
     }));
     return result.slice(0, MAX_DIMENSION_VALUES);
   }, [innerBinKey, rawBinStats]);
@@ -128,9 +128,9 @@ export default function TableArea() {
   const totalOuterValues = useMemo(() => {
     if (!outerBinKey || !rawBinStats) return 0;
     const values = new Set<string>();
-    Object.keys(rawBinStats).forEach(key => {
+    Object.keys(rawBinStats).forEach((key) => {
       const parts = key.split('|');
-      parts.forEach(part => {
+      parts.forEach((part) => {
         if (part.includes(',')) {
           const [dim, value] = part.split(',', 2);
           if (dim === outerBinKey) {
@@ -145,9 +145,9 @@ export default function TableArea() {
   const totalInnerValues = useMemo(() => {
     if (!innerBinKey || !rawBinStats) return 0;
     const values = new Set<string>();
-    Object.keys(rawBinStats).forEach(key => {
+    Object.keys(rawBinStats).forEach((key) => {
       const parts = key.split('|');
-      parts.forEach(part => {
+      parts.forEach((part) => {
         if (part.includes(',')) {
           const [dim, value] = part.split(',', 2);
           if (dim === innerBinKey) {
@@ -234,7 +234,9 @@ export default function TableArea() {
     const availableValues = outerValuesWithIds.length
       ? outerValuesWithIds
       : innerValuesWithIds;
-    const availableDimId = outerValuesWithIds.length ? outerBinKey : innerBinKey;
+    const availableDimId = outerValuesWithIds.length
+      ? outerBinKey
+      : innerBinKey;
 
     const scores: Record<
       string,
@@ -272,7 +274,17 @@ export default function TableArea() {
   );
 
   if (!tableData || !rawBinStats) {
-    return null;
+    return (
+      <>
+        <div className="h-auto max-h-[40%] overflow-y-auto overflow-x-auto custom-scrollbar border rounded-sm">
+          <div className="w-full h-16 flex items-center justify-center">
+            <p className="text-xs text-gray-500">
+              Select an inner or outer bin key to view grouped stats
+            </p>
+          </div>
+        </div>
+      </>
+    );
   }
 
   return (
@@ -455,6 +467,3 @@ export default function TableArea() {
     </>
   );
 }
-
-
-
