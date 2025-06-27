@@ -63,6 +63,8 @@ from docent._db_service.schemas.auth_models import (
 )
 from docent._db_service.schemas.base import SQLABase
 from docent._db_service.schemas.tables import (
+    EMBEDDING_DIM,
+    TABLE_TRANSCRIPT_EMBEDDING,
     JobStatus,
     SQLAAccessControlEntry,
     SQLAAgentRun,
@@ -75,11 +77,15 @@ from docent._db_service.schemas.tables import (
     SQLASearchResultCluster,
     SQLASession,
     SQLATranscript,
+    SQLATranscriptEmbedding,
     SQLAUser,
     SQLAView,
 )
 from docent._env_util import ENV
+from docent._llm_util.data_models.llm_output import AsyncEmbeddingStreamingCallback
+from docent._llm_util.providers.openai import get_chunked_openai_embeddings_async
 from docent._log_util import get_logger
+from docent._server._broker.redis_client import enqueue_embedding_job
 from docent.data_models.agent_run import AgentRun
 from docent.data_models.filters import ComplexFilter
 from docent.data_models.transcript import Transcript
@@ -190,7 +196,7 @@ class DBService:
             )
 
             # Initialize database tables if they don't exist
-            await cls._ensure_tables_exist(engine)
+            await cls._setup_target_database(engine)
 
             # Cache and return the singleton instance
             cls._instance = cls(engine, Session)
@@ -234,11 +240,14 @@ class DBService:
             await temp_engine.dispose()
 
     @staticmethod
-    async def _ensure_tables_exist(engine: AsyncEngine) -> None:
+    async def _setup_target_database(engine: AsyncEngine) -> None:
         """Create all tables if they don't exist."""
         async with engine.begin() as conn:
+            # Enable pgvector extension
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            # Create tables
             await conn.run_sync(SQLABase.metadata.create_all)
-        logger.info("Database tables initialized successfully")
+        logger.info("pgvector and tables initialized successfully")
 
     async def drop_all_tables(self) -> None:
         """
@@ -426,7 +435,7 @@ class DBService:
     # Agent Runs #
     ##############
 
-    async def add_agent_runs(self, fg_id: str, agent_runs: list[AgentRun]):
+    async def add_agent_runs(self, ctx: ViewContext, agent_runs: list[AgentRun]):
         # Convert AgentRun objects to SQLAlchemy objects using existing conversion functions
         agent_run_data: list[SQLAAgentRun] = []
         transcript_data: list[SQLATranscript] = []
@@ -434,13 +443,13 @@ class DBService:
         # Process all agent runs and transcripts first
         for ar in agent_runs:
             # Use the existing from_agent_run method to get all fields properly
-            sqla_agent_run = SQLAAgentRun.from_agent_run(ar, fg_id)
+            sqla_agent_run = SQLAAgentRun.from_agent_run(ar, ctx.fg_id)
             agent_run_data.append(sqla_agent_run)
 
             # Process transcripts for this agent run
             for dk, t in ar.transcripts.items():
                 # Use the existing from_transcript method to get all fields properly
-                sqla_transcript = SQLATranscript.from_transcript(t, dk, fg_id, ar.id)
+                sqla_transcript = SQLATranscript.from_transcript(t, dk, ctx.fg_id, ar.id)
                 transcript_data.append(sqla_transcript)
 
         # Insert all agent runs
@@ -454,6 +463,23 @@ class DBService:
                 session.add(sqla_transcript)
 
         logger.info(f"Inserted {len(agent_runs)} agent runs and {len(transcript_data)} transcripts")
+
+    async def add_and_enqueue_embedding_job(self, ctx: ViewContext):
+        fg_id = ctx.fg_id
+        exists_pending_embedding_job = await self.has_pending_embedding_job(fg_id)
+
+        # Add jobs after we've inserted all runs
+        # We don't want to add a job if there's already one pending to prevent reindexing
+        if not exists_pending_embedding_job:
+            # Determine whether to index the new agent runs
+            total_runs = await self.count_base_agent_runs(ctx)
+            should_index = total_runs >= 5_000
+
+            # Enqueue a job in pg and start a redis worker
+            job_id = await self.add_embedding_job(fg_id, should_index)
+            await enqueue_embedding_job(ctx, job_id)  # type: ignore
+
+            logger.info(f"Enqueued embedding job {job_id} for frame grid {fg_id}")
 
     async def get_agent_run_ids(self, ctx: ViewContext) -> list[str]:
         """
@@ -482,17 +508,40 @@ class DBService:
         )
 
         async with self.session() as session:
-            # Get runs
-            query = select(SQLAAgentRun).where(ctx.get_base_where_clause(SQLAAgentRun))
-            if agent_run_ids is not None:
-                query = query.where(SQLAAgentRun.id.in_(agent_run_ids))
-            if _where_clause is not None:
-                query = query.where(_where_clause)
-            if _limit is not None:
-                query = query.limit(_limit)
+            if agent_run_ids is not None and len(agent_run_ids) > 10_000:
+                agent_runs_raw: list[SQLAAgentRun] = []
+                batch_size = 10_000
 
-            result = await session.execute(query)
-            agent_runs_raw = result.scalars().all()
+                for i in range(0, len(agent_run_ids), batch_size):
+                    batch_ids = agent_run_ids[i : i + batch_size]
+                    query = select(SQLAAgentRun).where(
+                        ctx.get_base_where_clause(SQLAAgentRun), SQLAAgentRun.id.in_(batch_ids)
+                    )
+                    if _where_clause is not None:
+                        query = query.where(_where_clause)
+                    if _limit is not None:
+                        # Apply limit to the entire result set, not per batch
+                        remaining_limit = _limit - len(agent_runs_raw)
+                        if remaining_limit <= 0:
+                            break
+                        query = query.limit(remaining_limit)
+
+                    result = await session.execute(query)
+                    batch_agent_runs = result.scalars().all()
+                    agent_runs_raw.extend(batch_agent_runs)
+
+            else:
+                query = select(SQLAAgentRun).where(ctx.get_base_where_clause(SQLAAgentRun))
+                if agent_run_ids is not None:
+                    query = query.where(SQLAAgentRun.id.in_(agent_run_ids))
+                if _where_clause is not None:
+                    query = query.where(_where_clause)
+                if _limit is not None:
+                    query = query.limit(_limit)
+
+                result = await session.execute(query)
+                agent_runs_raw = list(result.scalars().all())
+
             logger.info(f"get_agent_runs: Found {len(agent_runs_raw)} agent runs")
 
             # Get transcripts for those runs
@@ -500,7 +549,7 @@ class DBService:
             if agent_run_ids:
                 # Use batch processing to avoid PostgreSQL parameter limits
                 transcripts_raw: list[SQLATranscript] = []
-                batch_size = 10000
+                batch_size = 10_000
 
                 for i in range(0, len(agent_run_ids), batch_size):
                     batch_ids = agent_run_ids[i : i + batch_size]
@@ -964,6 +1013,8 @@ class DBService:
         else:
             logger.info(f"Computing results for {len(agent_runs)} agent runs")
 
+        agent_runs = await self._rerank_agent_runs_by_embeddings(ctx, agent_runs, search_query)
+
         async def _results_callback(search_results: list[SearchResult] | None):
             if search_result_callback:
                 await search_result_callback(search_results)
@@ -991,6 +1042,238 @@ class DBService:
             await execute_search(agent_runs, search_query, search_result_callback=_results_callback)
         except anyio.get_cancelled_exc_class():
             logger.info("Attribute computation cancelled")
+
+    ##############
+    # Embeddings #
+    ##############
+
+    async def _rerank_agent_runs_by_embeddings(
+        self,
+        ctx: ViewContext,
+        agent_runs: list[AgentRun],
+        search_query: str,
+    ) -> list[AgentRun]:
+        """
+        Rerank agent runs using pgvector cosine distance search if embeddings are available.
+        Returns the original agent runs if reranking fails or embeddings are loading.
+        """
+
+        try:
+            query_embeddings, _ = await get_chunked_openai_embeddings_async([search_query])
+        except Exception as e:
+            logger.warning(f"Failed to compute embeddings: {e}")
+            return agent_runs
+
+        if len(query_embeddings) != 1:
+            logger.warning("Expected single embedding for search query.")
+
+        query_embedding = query_embeddings[0]
+
+        async with self.session() as session:
+            query = (
+                select(
+                    SQLATranscriptEmbedding.agent_run_id,
+                )
+                .join(SQLAAgentRun, SQLATranscriptEmbedding.agent_run_id == SQLAAgentRun.id)
+                .where(
+                    SQLATranscriptEmbedding.fg_id == ctx.fg_id,
+                    ctx.get_base_where_clause(SQLAAgentRun),
+                    ~exists().where(
+                        SQLASearchResult.agent_run_id == SQLAAgentRun.id,
+                        SQLASearchResult.search_query == search_query,
+                    ),
+                )
+                .order_by(SQLATranscriptEmbedding.embedding.cosine_distance(query_embedding))
+                .limit(len(agent_runs))
+            )
+
+            # Execute the actual query
+            result = await session.execute(query)
+            ordered_results = result.all()
+            ordered_agent_run_ids = [row.agent_run_id for row in ordered_results]
+
+        # Create a mapping of ID to AgentRun for quick lookup
+        id_to_agent_run = {ar.id: ar for ar in agent_runs}
+
+        # Reorder the agent runs to match the vector similarity ordering
+        reranked_agent_runs: list[AgentRun] = []
+        for agent_run_id in ordered_agent_run_ids:
+            if agent_run_id in id_to_agent_run:
+                reranked_agent_runs.append(id_to_agent_run[agent_run_id])
+
+        # Embeddings are sharded, so we add back agent runs that weren't surfaced
+        # Passing max limit breaks indexing search
+        if len(reranked_agent_runs) != len(agent_runs):
+            reranked_ids_set = set(ordered_agent_run_ids)
+            remaining_agent_runs = [ar for ar in agent_runs if ar.id not in reranked_ids_set]
+            reranked_agent_runs.extend(remaining_agent_runs)
+
+        logger.info(f"Reranked to {len(reranked_agent_runs)} agent runs using embeddings")
+
+        return reranked_agent_runs
+
+    async def fg_has_embeddings(self, fg_id: str) -> bool:
+        """Check if all runs in the current context have embeddings."""
+        async with self.session() as session:
+            # Check if there exists any run without embeddings
+            subquery = select(1).where(
+                SQLAAgentRun.fg_id == fg_id,
+                ~exists().where(SQLATranscriptEmbedding.agent_run_id == SQLAAgentRun.id),
+            )
+
+            query = select(~exists(subquery))
+            result = await session.execute(query)
+            return result.scalar_one()
+
+    async def get_indexing_progress(self, fg_id: str) -> tuple[str | None, int | None]:
+        index_name = f"ivfflat_embedding_view_{fg_id.replace('-', '_')}"
+
+        # Filter for a specific index by name
+        query = text(
+            """
+            SELECT
+                pci.phase,
+                round(100.0 * pci.tuples_done / nullif(pci.tuples_total, 0), 1) AS percent
+            FROM pg_stat_progress_create_index pci
+            JOIN pg_class pc ON pci.index_relid = pc.oid
+            WHERE pc.relname = :index_name
+            """
+        )
+
+        async with self.session() as session:
+            result = await session.execute(query, {"index_name": index_name})
+            row = result.fetchone()
+
+        if row is None:
+            return None, None
+
+        # Handle case where percent is None (can happen when tuples_total is 0)
+        percent = row[1]
+        return row[0], int(percent) if percent is not None else None
+
+    async def compute_embeddings(
+        self, ctx: ViewContext, progress_callback: AsyncEmbeddingStreamingCallback
+    ):
+        async with self.session() as session:
+            # Get all agent runs that don't have embeddings in this framegrid
+            query = (
+                select(SQLAAgentRun.id)
+                .outerjoin(
+                    SQLATranscriptEmbedding,
+                    (SQLAAgentRun.id == SQLATranscriptEmbedding.agent_run_id)
+                    & (SQLATranscriptEmbedding.fg_id == ctx.fg_id),
+                )
+                .where(SQLATranscriptEmbedding.agent_run_id.is_(None))
+            )
+            result = await session.execute(query)
+            agent_run_ids_without_embeddings = result.scalars().all()
+
+        if len(agent_run_ids_without_embeddings) == 0:
+            logger.info("All agent runs already have embeddings")
+            return
+
+        # Use existing get_agent_runs method to fetch full AgentRun objects with transcripts
+        agent_runs = await self.get_agent_runs(
+            ctx, agent_run_ids=list(agent_run_ids_without_embeddings)
+        )
+
+        logger.info(f"Computing embeddings for {len(agent_runs)} agent runs")
+
+        text = [run.text for run in agent_runs]
+        try:
+            embeddings, chunk_to_doc = await get_chunked_openai_embeddings_async(
+                text, dimensions=EMBEDDING_DIM, callback=progress_callback
+            )
+        except Exception as e:
+            # Just skip
+            logger.warning(f"Failed to compute embeddings: {e}")
+            return
+        embedding_ids = [agent_runs[doc_idx].id for doc_idx in chunk_to_doc]
+
+        async with self.session() as session:
+            session.add_all(
+                [
+                    SQLATranscriptEmbedding(
+                        id=str(uuid4()), fg_id=ctx.fg_id, agent_run_id=id, embedding=embedding
+                    )
+                    for id, embedding in zip(embedding_ids, embeddings)
+                ]
+            )
+
+        logger.info(f"Pushed {len(embeddings)} embeddings")
+
+    async def compute_ivfflat_index(
+        self,
+        ctx: ViewContext,
+    ) -> str:
+        """Create an IVFFlat index for embeddings of agent runs in the given view context."""
+        # Check if embeddings exist for agent runs in this framegrid
+        async with self.session() as session:
+            count_query = (
+                select(func.count(SQLATranscriptEmbedding.id))
+                .join(SQLAAgentRun, SQLATranscriptEmbedding.agent_run_id == SQLAAgentRun.id)
+                .where(SQLAAgentRun.fg_id == ctx.fg_id)
+            )
+            result = await session.execute(count_query)
+            embedding_count = result.scalar_one()
+
+        if embedding_count == 0:
+            raise ValueError(f"No embeddings found for agent runs in view {ctx.view_id}.")
+
+        lists = min(max(100, int(embedding_count**0.5)), 1_000)
+
+        index_name = f"ivfflat_embedding_view_{ctx.fg_id.replace('-', '_')}"
+
+        # Drop existing index within a transaction
+        async with self.session() as session:
+            try:
+                await session.execute(text(f"DROP INDEX IF EXISTS {index_name}"))
+                logger.info(f"Dropped existing index {index_name}")
+            except Exception as e:
+                logger.warning(f"Failed to drop existing index {index_name}: {e}")
+
+        # Create index CONCURRENTLY outside of transaction using engine connection
+        # CONCURRENTLY cannot be run within a transaction block
+        async with self._engine.connect() as conn:
+            # Set autocommit mode for the connection
+            await conn.execution_options(isolation_level="AUTOCOMMIT")
+
+            # Create the IVFFlat index
+            # Using cosine distance operator for semantic similarity
+            create_index_query = text(
+                f"""
+                CREATE INDEX CONCURRENTLY {index_name} ON {TABLE_TRANSCRIPT_EMBEDDING}
+                USING ivfflat (embedding vector_cosine_ops)
+                WITH (lists = {lists})
+                WHERE fg_id = '{ctx.fg_id}'
+                """
+            )
+
+            logger.info(f"Creating IVFFlat index {index_name} with {lists} lists...")
+            await conn.execute(create_index_query)
+            logger.info(f"Successfully created IVFFlat index {index_name}")
+
+        return index_name
+
+    async def has_pending_embedding_job(self, fg_id: str) -> bool:
+        """
+        Check if there exists any pending embedding job for a framegrid.
+
+        Args:
+            fg_id: The frame grid ID
+
+        Returns:
+            True if there's at least one pending embedding job, False otherwise
+        """
+        async with self.session() as session:
+            result = await session.execute(
+                select(SQLAJob.id)
+                .filter(SQLAJob.type == "compute_embeddings")
+                .filter(SQLAJob.job_json["fg_id"].astext == fg_id)
+                .filter(SQLAJob.status == JobStatus.PENDING)
+                .limit(1)
+            )
+            return result.scalar() is not None
 
     #################
     # Paired search #
@@ -1379,6 +1662,29 @@ class DBService:
             session.add(SQLAJob(id=job_id, type=type, created_at=datetime.now(), job_json=job_json))
             logger.info(f"Added job with ID: {job_id}")
         return job_id
+
+    async def add_embedding_job(self, fg_id: str, should_index: bool) -> str:
+        """
+        Adds or finds an embedding job for the given frame grid.
+
+        Args:
+            should_index: Whether to index the new agent runs
+        """
+        async with self.session() as session:
+            job_id = str(uuid4())
+            session.add(
+                SQLAJob(
+                    id=job_id,
+                    type="compute_embeddings",
+                    job_json={
+                        "should_index": should_index,
+                        "fg_id": fg_id,
+                    },
+                )
+            )
+            logger.info(f"Added embedding job {job_id}")
+
+            return job_id
 
     async def add_search_job(self, query_id: str) -> tuple[bool, str]:
         """
@@ -1866,10 +2172,12 @@ class DBService:
         fg_hash = int(hashlib.md5(fg_id.encode()).hexdigest(), 16) % (2**31 - 1)
         action_hash = int(hashlib.sha1(action_id.encode()).hexdigest(), 16) % (2**31 - 1)
 
-        async with self.session() as session:
+        async with self._engine.connect() as conn:
+            await conn.execution_options(isolation_level="AUTOCOMMIT")
+
             try:
                 # Acquire the advisory lock
-                await session.execute(
+                await conn.execute(
                     text("SELECT pg_advisory_lock(:key1, :key2)"),
                     {"key1": fg_hash, "key2": action_hash},
                 )
@@ -1879,7 +2187,7 @@ class DBService:
                 yield
             finally:
                 # Always release the lock, even if an exception occurs
-                await session.execute(
+                await conn.execute(
                     text("SELECT pg_advisory_unlock(:key1, :key2)"),
                     {"key1": fg_hash, "key2": action_hash},
                 )

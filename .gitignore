@@ -180,3 +180,12 @@ cython_debug/
 # yarn
 **/.yarn/
 **/.pnp.*
+
+# data
+*.npy
+*.csv
+*.pkl
+*.eval
+
+# personal
+personal/caden/*

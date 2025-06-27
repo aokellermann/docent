@@ -8,6 +8,7 @@ import frameReducer from './frameSlice';
 import toastReducer from './toastSlice';
 import transcriptReducer from './transcriptSlice';
 import { diffReducer } from './diffSlice';
+import embedReducer from './embedSlice';
 import createWebSocketMiddleware from './webSocketMiddleware';
 import { collabApi } from '@/lib/permissions/collabSlice';
 
@@ -30,6 +31,7 @@ const store = configureStore({
   reducer: {
     experimentViewer: experimentViewerReducer,
     search: searchReducer,
+    embed: embedReducer,
     diff: diffReducer,
     frame: frameReducer,
     transcript: transcriptReducer,

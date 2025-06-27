@@ -248,3 +248,9 @@ class AsyncSingleLLMOutputStreamingCallback(Protocol):
         self,
         llm_output: LLMOutput,
     ) -> None: ...
+
+
+class AsyncEmbeddingStreamingCallback(Protocol):
+    """Protocol for sending progress updates for embedding generation."""
+
+    async def __call__(self, progress: int) -> None: ...

@@ -29,6 +29,7 @@ import {
   setTaMessages,
   setTaSessionId,
 } from './transcriptSlice';
+import { setEmbeddingProgress, setIsListening } from './embedSlice';
 
 export const createWebSocketMiddleware = (): Middleware => {
   return (store) => {
@@ -81,11 +82,14 @@ export const createWebSocketMiddleware = (): Middleware => {
           dispatch(setSearchesWithStats(data.payload));
           break;
         case 'search_results_updated':
-          dispatch(handleSearchUpdate({
-            data_dict: data.data_dict,
-            num_agent_runs_done: Object.keys(data.data_dict || {}).length,
-            num_agent_runs_total: Object.keys(data.data_dict || {}).length,
-          }));
+          dispatch(
+            handleSearchUpdate({
+              data_dict: data.data_dict,
+              num_agent_runs_done: Object.keys(data.data_dict || {}).length,
+              num_agent_runs_total: Object.keys(data.data_dict || {}).length,
+              num_search_hits: data.num_search_hits || 0,
+            })
+          );
           break;
         case 'io_dims_updated':
           dispatch(setInnerBinKey(data.payload.inner_bin_key));
@@ -114,6 +118,15 @@ export const createWebSocketMiddleware = (): Middleware => {
           break;
         case 'ta_message_complete':
           dispatch(setLoadingTaResponse(false));
+          break;
+
+        case 'embedding_progress':
+          dispatch(setEmbeddingProgress(data.payload));
+          dispatch(setIsListening(true));
+          break;
+        case 'embedding_complete':
+          dispatch(setEmbeddingProgress(undefined));
+          dispatch(setIsListening(false));
           break;
 
         default:

@@ -42,6 +42,7 @@ export default function ExperimentViewer() {
   const {
     loadingSearchQuery,
     curSearchQuery,
+    currentSearchHitCount,
     searchResultMap: attributeMap,
   } = useAppSelector((state) => state.search);
 
@@ -222,6 +223,13 @@ export default function ExperimentViewer() {
         <div className="text-sm font-semibold">Agent Run List</div>
         <div className="text-xs">
           {agentRunIds?.length || 0} agent runs matching the current view
+          {
+            curSearchQuery && (
+              <span>
+                , {currentSearchHitCount} hits for current query
+              </span>
+            )
+          }
         </div>
       </div>
       <TranscriptFilterControls />

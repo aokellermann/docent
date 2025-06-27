@@ -121,13 +121,13 @@ class DocentClient:
 
     def get_io_bin_keys(self, fg_id: str) -> tuple[str | None, str | None] | None:
         """Gets the current inner and outer bin keys for a FrameGrid.
-        
+
         Args:
             fg_id: ID of the FrameGrid.
-            
+
         Returns:
             tuple: (inner_bin_key | None, outer_bin_key | None)
-            
+
         Raises:
             requests.exceptions.HTTPError: If the API request fails.
         """
@@ -137,7 +137,6 @@ class DocentClient:
         data = response.json()
         return (data.get("inner_bin_key"), data.get("outer_bin_key"))
 
-    
     def add_agent_runs(self, fg_id: str, agent_runs: list[AgentRun]) -> dict[str, Any]:
         """Adds agent runs to a FrameGrid.
 
@@ -155,22 +154,26 @@ class DocentClient:
             requests.exceptions.HTTPError: If the API request fails.
         """
         from tqdm import tqdm
-        
+
         url = f"{self._server_url}/{fg_id}/agent_runs"
         batch_size = 1000
         total_runs = len(agent_runs)
-        
+
         # Process agent runs in batches
         with tqdm(total=total_runs, desc="Adding agent runs", unit="runs") as pbar:
             for i in range(0, total_runs, batch_size):
-                batch = agent_runs[i:i + batch_size]
+                batch = agent_runs[i : i + batch_size]
                 payload = {"agent_runs": [ar.model_dump(mode="json") for ar in batch]}
 
                 response = self._session.post(url, json=payload)
                 response.raise_for_status()
-                
+
                 pbar.update(len(batch))
-        
+
+        url = f"{self._server_url}/{fg_id}/compute_embeddings"
+        response = self._session.post(url)
+        response.raise_for_status()
+
         logger.info(f"Successfully added {total_runs} agent runs to FrameGrid '{fg_id}'")
         return {"status": "success", "total_runs_added": total_runs}
 
@@ -280,4 +283,3 @@ class DocentClient:
         response = self._session.get(url, params=params)
         response.raise_for_status()
         return response.json()
-

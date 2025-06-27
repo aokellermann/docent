@@ -75,10 +75,15 @@ async def publish_view_update(fg_id: str, view_id: str, payload: dict[str, Any])
     await REDIS.publish(channel, json.dumps(jsonable_encoder(payload)))  # type: ignore
 
 
-async def _enqueue_job(queue_name: str, func_name: str, *args: Any, **kwargs: Any):
+async def _enqueue_job(queue_name: str, func_name: str, *args: Any, **kwargs: Any) -> None:
     j = await REDIS.enqueue_job(func_name, *args, _queue_name=queue_name, **kwargs)
-    print("enqueued", queue_name, func_name, args, kwargs, j)
+    print(f"Enqueued job {j} to {queue_name} with func {func_name}")
 
 
-async def enqueue_search_job(view_ctx: ViewContext, job_id: str, read_only: bool):
-    await _enqueue_job("compute_search_queue", "compute_search", view_ctx, job_id, read_only)
+async def enqueue_search_job(view_ctx: ViewContext, job_id: str, read_only: bool) -> None:
+    await _enqueue_job("embedding_and_search_queue", "compute_search", view_ctx, job_id, read_only)
+
+
+async def enqueue_embedding_job(view_ctx: ViewContext, job_id: str) -> None:
+    """Enqueue an embedding computation job to the worker."""
+    await _enqueue_job("embedding_and_search_queue", "compute_embeddings", view_ctx, job_id)

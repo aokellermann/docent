@@ -28,6 +28,7 @@ export interface StreamedSearchResult {
   data_dict: Record<string, Record<string, SearchResultWithCitations[]>>;
   num_agent_runs_done: number;
   num_agent_runs_total: number;
+  num_search_hits: number;
 }
 
 export interface StreamedSearchResultClusterAssignment {

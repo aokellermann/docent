@@ -409,7 +409,7 @@ async def post_agent_runs(
     _: None = Depends(require_fg_permission(Permission.WRITE)),
 ):
     async with db.advisory_lock(fg_id, action_id="mutation"):
-        await db.add_agent_runs(fg_id, request.agent_runs)
+        await db.add_agent_runs(ctx, request.agent_runs)
 
         # Publish state of ALL views
         for ctx in await db.get_all_view_ctxs(fg_id):
@@ -569,10 +569,13 @@ async def get_existing_search_results(
     # Track analytics
     await track_endpoint_with_user(db, Endpoints.GET_EXISTING_SEARCH_RESULTS, ctx.user, ctx.fg_id)
 
+    num_search_hits = len([result for result in results if result.value is not None])
+
     return StreamedSearchResult(
         data_dict=data_dict,
         num_agent_runs_done=len(data_dict.keys()),
         num_agent_runs_total=len(data_dict.keys()),
+        num_search_hits=num_search_hits,
     )
 
 
@@ -962,6 +965,7 @@ class StreamedSearchResult(TypedDict):
     data_dict: dict[str, dict[str, list[SearchResultWithCitations]]]
     num_agent_runs_done: int
     num_agent_runs_total: int
+    num_search_hits: int
 
 
 class ComputeSearchRequest(BaseModel):
@@ -999,6 +1003,7 @@ async def start_compute_search(
 async def listen_compute_search(
     fg_id: str,
     job_id: str,
+    max_results: int | None = None,
     db: DBService = Depends(get_db),
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.READ)),
@@ -1016,6 +1021,7 @@ async def listen_compute_search(
 
     # Track intermediate progress
     num_errors = 0
+    num_results = 0
     num_done, num_total = 0, await db.count_base_agent_runs(ctx)
 
     async def _execute():
@@ -1024,9 +1030,10 @@ async def listen_compute_search(
             data_dict={},
             num_agent_runs_done=0,
             num_agent_runs_total=num_total,
+            num_search_hits=0,
         )
         await send_stream.send(init_data)
-        nonlocal num_done, num_errors
+        nonlocal num_done, num_errors, num_results
 
         try:
             last_id = 0
@@ -1048,6 +1055,8 @@ async def listen_compute_search(
                         continue
 
                     results = [SearchResult.model_validate(r) for r in results]
+                    # Only count results that have a hit
+                    num_results += len([result for result in results if result.value is not None])
 
                     # Construct a map from agent_run_id -> search query -> list of SearchResultWithCitations
                     data_dict: dict[str, dict[str, list[SearchResultWithCitations]]] = {}
@@ -1063,10 +1072,16 @@ async def listen_compute_search(
                         data_dict=data_dict,
                         num_agent_runs_done=num_done,
                         num_agent_runs_total=num_total,
+                        num_search_hits=num_results,
                     )
 
                     # Send to event_stream so it can be sent back to the client
                     await send_stream.send(payload)
+
+                    # Check if we've reached max_results
+                    if max_results is not None and num_results >= max_results:
+                        q = f"commands_{job_id}"
+                        await REDIS.rpush(q, "cancel")
 
                     if num_done + num_errors == num_total:
                         return
@@ -1111,7 +1126,23 @@ async def resume_compute_search(
     return job_id
 
 
-# await track_endpoint_with_user(db, Endpoints.GET_EXISTING_CLUSTERS, ctx.user, ctx.fg_id)
+@user_router.post("/{fg_id}/fg_has_embeddings")
+async def fg_has_embeddings(
+    fg_id: str,
+    db: DBService = Depends(get_db),
+    _: None = Depends(require_fg_permission(Permission.READ)),
+):
+    return await db.fg_has_embeddings(fg_id)
+
+
+@user_router.post("/{fg_id}/compute_embeddings")
+async def compute_embeddings(
+    fg_id: str,
+    db: DBService = Depends(get_db),
+    ctx: ViewContext = Depends(get_default_view_ctx),
+    _: None = Depends(require_fg_permission(Permission.WRITE)),
+):
+    await db.add_and_enqueue_embedding_job(ctx)
 
 
 @user_router.get("/search_jobs")
@@ -1189,7 +1220,7 @@ async def listen_cluster_search_results(
         job["fg_id"],
         job["search_query"],
         job.get("feedback"),
-        job.get("read_only"),
+        job["read_only"],
     )
 
     send_stream, recv_stream = anyio.create_memory_object_stream[list[dict[str, Any]]](
@@ -1220,6 +1251,7 @@ async def listen_cluster_search_results(
                     done = True
 
                 # Only compute new clusters if not read_only
+                logger.critical(f"read_only: {read_only}")
                 if not read_only:
                     tg.start_soon(_f)
                 else:

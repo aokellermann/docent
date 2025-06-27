@@ -151,7 +151,7 @@ export default function ClusterViewer({ searchQuery }: ClusterViewerProps) {
       <div className="space-y-2">
         <div className="text-xs text-gray-500 flex items-center gap-2">
           <div className="animate-spin rounded-full h-3 w-3 border-2 border-gray-300 border-t-gray-500" />
-          Clustering in progress...
+          Loading clusters...
         </div>
       </div>
     );

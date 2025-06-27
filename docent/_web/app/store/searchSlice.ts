@@ -40,6 +40,8 @@ export interface SearchState {
   searchResultMap?: Record<string, Record<string, SearchResultWithCitations[]>>;
   // Current search query
   curSearchQuery?: string;
+  // Search hit count for current query
+  currentSearchHitCount?: number;
   // Clustering
   activeClusterTaskId?: string;
   clusteredSearchResults?: Record<
@@ -50,6 +52,8 @@ export interface SearchState {
   loadingProgress?: [number, number]; // [num_done, num_total]
   loadingSearchQuery?: string;
   activeSearchTaskId?: string;
+  // Pause state for max results
+  paused?: boolean;
   // // Feedback
   // voteState?: Record<string, Record<string, 'up' | 'down'>>; // agent_run_id -> attribute -> vote
   // Searches with completion status
@@ -102,7 +106,13 @@ export const requestRegexSnippetsIfExist = createAsyncThunk(
 
 export const computeSearch = createAsyncThunk(
   'experimentViewer/computeSearch',
-  async ({ searchQuery }: { searchQuery: string }, { dispatch, getState }) => {
+  async (
+    {
+      searchQuery,
+      maxResults,
+    }: { searchQuery: string; maxResults: number | null },
+    { dispatch, getState }
+  ) => {
     try {
       const state = getState() as RootState;
 
@@ -116,6 +126,8 @@ export const computeSearch = createAsyncThunk(
       dispatch(setLoadingProgress([0, 0]));
       dispatch(setLoadingSearchQuery(searchQuery));
       dispatch(setSearchQuery(searchQuery));
+      dispatch(setCurrentSearchHitCount(0));
+      dispatch(setPaused(false));
 
       // Send the request via REST API
       const frameGridId = state.frame.frameGridId;
@@ -138,9 +150,13 @@ export const computeSearch = createAsyncThunk(
 
       // Set up event source to listen for streaming updates using sseService
       const { onCancel } = sseService.createEventSource(
-        `/rest/${frameGridId}/listen_compute_search?job_id=${jobId}`,
+        `/rest/${frameGridId}/listen_compute_search?job_id=${jobId}${maxResults !== null ? `&max_results=${maxResults}` : ''}`,
         (data: StreamedSearchResult) => {
           dispatch(handleSearchUpdate(data));
+
+          if (maxResults !== null && data.num_search_hits >= maxResults) {
+            dispatch(setPaused(true));
+          }
         },
         () => {
           dispatch(setLoadingSearchQuery(undefined));
@@ -260,10 +276,12 @@ export const requestClusters = createAsyncThunk(
 export const clearSearch = createAsyncThunk(
   'experimentViewer/clearSearch',
   async (_, { dispatch }) => {
+    console.log('clearing');
     dispatch(setSearchQuery(undefined));
     dispatch(cancelCurrentSearch());
     dispatch(clearSearchResultMap());
     dispatch(clearClusteredSearchResults());
+    dispatch(setPaused(false));
   }
 );
 
@@ -588,11 +606,18 @@ export const searchSlice = createSlice({
       state,
       action: PayloadAction<StreamedSearchResult>
     ) => {
-      const { data_dict, num_agent_runs_done, num_agent_runs_total } =
-        action.payload;
+      const {
+        data_dict,
+        num_agent_runs_done,
+        num_agent_runs_total,
+        num_search_hits,
+      } = action.payload;
 
       // Update the progress counters
       state.loadingProgress = [num_agent_runs_done, num_agent_runs_total];
+
+      // Update the search hit count
+      state.currentSearchHitCount = num_search_hits;
 
       // Update the search map
       if (!state.searchResultMap) {
@@ -665,6 +690,9 @@ export const searchSlice = createSlice({
     setSearchQuery: (state, action: PayloadAction<string | undefined>) => {
       state.curSearchQuery = action.payload;
     },
+    setCurrentSearchHitCount: (state, action: PayloadAction<number>) => {
+      state.currentSearchHitCount = action.payload;
+    },
     setLoadingProgress: (
       state,
       action: PayloadAction<[number, number] | undefined>
@@ -686,6 +714,9 @@ export const searchSlice = createSlice({
       state.searchesWithStats = action.payload;
     },
     resetSearchSlice: () => initialState,
+    setPaused: (state, action: PayloadAction<boolean>) => {
+      state.paused = action.payload;
+    },
   },
 });
 
@@ -701,9 +732,11 @@ export const {
   // clearVoteState,
   setSearchQueryTextboxValue,
   setSearchQuery,
+  setCurrentSearchHitCount,
   setLoadingProgress,
   setSearchesWithStats,
   resetSearchSlice,
+  setPaused,
 } = searchSlice.actions;
 
 export default searchSlice.reducer;

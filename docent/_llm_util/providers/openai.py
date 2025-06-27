@@ -12,11 +12,11 @@ from openai import (
     AsyncOpenAI,
     AuthenticationError,
     BadRequestError,
+    NotFoundError,
     OpenAI,
     PermissionDeniedError,
-    NotFoundError,
-    UnprocessableEntityError,
     RateLimitError,
+    UnprocessableEntityError,
 )
 from openai._types import NOT_GIVEN
 from openai.types.chat import (
@@ -43,6 +43,7 @@ from docent._llm_util.data_models.exceptions import (
     RateLimitException,
 )
 from docent._llm_util.data_models.llm_output import (
+    AsyncEmbeddingStreamingCallback,
     AsyncSingleLLMOutputStreamingCallback,
     FinishReasonType,
     LLMCompletion,
@@ -407,29 +408,127 @@ def get_azure_openai_client_async() -> AsyncAzureOpenAI:
     return AsyncAzureOpenAI()
 
 
+def chunk_and_tokenize(
+    text: list[str],
+    window_size: int = 8191,
+    overlap: int = 128,
+) -> tuple[list[list[int]], list[int]]:
+    """Encode a list of text into a list of token ids."""
+
+    def _chunk_tokens(tokens: list[int], window_size: int, overlap: int) -> list[list[int]]:
+        """Compute list chunks with overlap."""
+        if overlap >= window_size:
+            raise ValueError("overlap must be smaller than window_size")
+
+        stride = window_size - overlap
+        chunks: list[list[int]] = []
+        for i in range(0, len(tokens), stride):
+            chunks.append(tokens[i : i + window_size])
+        return chunks
+
+    encoding = tiktoken.get_encoding(DEFAULT_TIKTOKEN_ENCODING)
+
+    all_chunks: list[list[int]] = []
+    chunk_to_doc: list[int] = []
+
+    for i, item in enumerate(text):
+        tokens = encoding.encode(item)
+        if len(tokens) <= window_size:
+            chunks = [tokens]
+        else:
+            chunks = _chunk_tokens(tokens, window_size, overlap)
+
+        all_chunks.extend(chunks)
+        chunk_to_doc.extend([i] * len(chunks))
+
+    return all_chunks, chunk_to_doc
+
+
 @backoff.on_exception(
     backoff.expo,
-    exception=(Exception),
-    max_tries=10,
-    factor=2.0,
+    exception=(Exception,),
+    giveup=lambda e: isinstance(e, BadRequestError)
+    or isinstance(e, AuthenticationError)
+    or isinstance(e, PermissionDeniedError)
+    or isinstance(e, NotFoundError)
+    or isinstance(e, UnprocessableEntityError),
+    max_tries=5,
+    factor=3.0,
     on_backoff=_print_backoff_message,
 )
 async def _get_openai_embeddings_async_one_batch(
-    client: AsyncOpenAI, texts_batch: list[str], model_name: str, dimensions: int | None
+    client: AsyncOpenAI, batch: list[str] | list[list[int]], model_name: str, dimensions: int | None
 ):
-    response = await client.embeddings.create(
-        model=model_name,
-        input=texts_batch,
-        dimensions=dimensions if dimensions is not None else NOT_GIVEN,
-    )
-    return [data.embedding for data in response.data]
+    try:
+        response = await client.embeddings.create(
+            model=model_name,
+            input=batch,
+            dimensions=dimensions if dimensions is not None else NOT_GIVEN,
+        )
+        return [data.embedding for data in response.data]
+    except RateLimitError as e:
+        raise RateLimitException(e) from e
+
+
+async def get_chunked_openai_embeddings_async(
+    texts: list[str],
+    model_name: str = "text-embedding-3-small",
+    dimensions: int | None = 512,
+    window_size: int = MAX_EMBEDDING_TOKENS,
+    overlap: int = 128,
+    max_concurrency: int = 100,
+    callback: AsyncEmbeddingStreamingCallback | None = None,
+) -> tuple[list[list[float]], list[int]]:
+    """
+    Asynchronously get embeddings for a list of texts using OpenAI's embedding model.
+    This function uses tiktoken for tokenization, truncates at 8000 tokens, and prints a warning if truncation occurs.
+    Concurrency is limited using a semaphore.
+    """
+
+    if model_name != "text-embedding-3-large" and model_name != "text-embedding-3-small":
+        assert dimensions is None, f"{model_name} does not have a variable dimension size"
+
+    all_chunks, chunk_to_doc = chunk_and_tokenize(texts, window_size=window_size, overlap=overlap)
+
+    # Create batches of 25 texts. Embedding endpoint has a token limit.
+    batches = [all_chunks[i : i + 25] for i in range(0, len(all_chunks), 25)]
+
+    client = get_openai_client_async()
+    semaphore = asyncio.Semaphore(max_concurrency)
+
+    batches_done = 0
+    batches_total = len(batches)
+
+    async def limited_task(batch: list[list[int]]):
+        nonlocal batches_done
+
+        async with semaphore:
+            embeddings = await _get_openai_embeddings_async_one_batch(
+                client, batch, model_name, dimensions
+            )
+            batches_done += 1
+
+            if callback:
+                progress = int(batches_done / batches_total * 100)
+                await callback(progress)
+
+            return embeddings
+
+    # Run tasks concurrently
+    tasks = [limited_task(batch) for batch in batches]
+    results = await asyncio.gather(*tasks)
+
+    # Flatten the results
+    embeddings = [embedding for batch_result in results for embedding in batch_result]
+
+    return embeddings, chunk_to_doc
 
 
 async def get_openai_embeddings_async(
     client: AsyncOpenAI,
     texts: list[str],
     model_name: str = "text-embedding-3-large",
-    dimensions: int | None = 1536,
+    dimensions: int | None = 3072,
     max_concurrency: int = 100,
 ) -> list[list[float] | None]:
     """

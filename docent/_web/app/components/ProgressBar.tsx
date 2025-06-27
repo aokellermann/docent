@@ -3,15 +3,18 @@ import { Loader2 } from 'lucide-react';
 interface ProgressBarProps {
   current: number;
   total: number;
+  paused?: boolean;
 }
 
-export const ProgressBar = ({ current, total }: ProgressBarProps) => {
+export const ProgressBar = ({ current, total, paused = false }: ProgressBarProps) => {
   return (
     <div className="mt-2 mb-2 space-y-1">
       <div className="flex justify-between text-xs text-gray-600">
         <span className="flex items-center">
           Processing datapoints
+          {!paused &&
           <Loader2 className="h-3 w-3 ml-1.5 animate-spin text-gray-500" />
+          }
         </span>
         <span>
           {current} / {total}

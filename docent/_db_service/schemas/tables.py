@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import uuid4
 
+from pgvector.sqlalchemy import Vector
 from pydantic_core import to_jsonable_python
 from sqlalchemy import (
     Boolean,
@@ -35,6 +36,8 @@ logger = get_logger(__name__)
 
 TABLE_FRAME_GRID = "frame_grids"
 TABLE_AGENT_RUN = "agent_runs"
+TABLE_TRANSCRIPT_EMBEDDING = "transcript_embeddings"
+EMBEDDING_DIM = 512
 TABLE_SEARCH_RESULTS = "search_results"
 TABLE_SEARCH_QUERIES = "search_queries"
 TABLE_FRAME_DIMENSION = "frame_dimensions"
@@ -166,6 +169,19 @@ class SQLATranscript(SQLABase):
             self.dict_key,
             Transcript(id=self.id, name=self.name, messages=messages, metadata=metadata),
         )
+
+
+class SQLATranscriptEmbedding(SQLABase):
+    __tablename__ = TABLE_TRANSCRIPT_EMBEDDING
+
+    id = mapped_column(String(36), primary_key=True)
+    fg_id = mapped_column(
+        String(36), ForeignKey(f"{TABLE_FRAME_GRID}.id"), nullable=False, index=True
+    )
+    agent_run_id = mapped_column(
+        String(36), ForeignKey(f"{TABLE_AGENT_RUN}.id"), nullable=False, index=True
+    )
+    embedding = mapped_column(Vector(EMBEDDING_DIM), nullable=False)
 
 
 class SQLAFrameGrid(SQLABase):
