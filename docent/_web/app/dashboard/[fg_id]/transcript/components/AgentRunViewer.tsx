@@ -313,7 +313,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
             </div>
             <div className="flex flex-1 min-h-0 w-full space-x-2 overflow-hidden relative">
               {/* Transcript List Sidebar */}
-              {transcriptKeys.length > 1 && (
+              {transcriptKeys.length >= 1 && (
                 <>
                   <div className="w-24 flex-shrink-0">
                     <div className="text-xs font-medium text-gray-600 mb-2">
@@ -339,32 +339,34 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                             {transcriptKey}
                           </button>
                           <div className="pr-1">
-                            <MetadataDialog
-                              metadata={
-                                agentRun?.transcripts[transcriptKey]
-                                  ?.metadata || {}
-                              }
-                              title={`Transcript Metadata - ${transcriptKey}`}
-                              trigger={
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <button
-                                      className={`p-0.5 rounded transition-colors ${
-                                        selectedTranscriptKey === transcriptKey
-                                          ? 'hover:bg-blue-200 text-blue-600'
-                                          : 'hover:bg-gray-200 text-gray-500'
-                                      }`}
-                                      onClick={(e) => e.stopPropagation()}
-                                    >
-                                      <FileText className="h-3 w-3" />
-                                    </button>
-                                  </TooltipTrigger>
-                                  <TooltipContent side="left" align="center">
-                                    <p>View transcript metadata</p>
-                                  </TooltipContent>
-                                </Tooltip>
-                              }
-                            />
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div>
+                                  <MetadataDialog
+                                    metadata={
+                                      agentRun?.transcripts[transcriptKey]
+                                        ?.metadata || {}
+                                    }
+                                    title={`Transcript Metadata - ${transcriptKey}`}
+                                    trigger={
+                                      <button
+                                        className={`p-0.5 rounded transition-colors ${
+                                          selectedTranscriptKey ===
+                                          transcriptKey
+                                            ? 'hover:bg-blue-200 text-blue-600'
+                                            : 'hover:bg-gray-200 text-gray-500'
+                                        }`}
+                                      >
+                                        <FileText className="h-3 w-3" />
+                                      </button>
+                                    }
+                                  />
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent side="left" align="center">
+                                <p>View transcript metadata</p>
+                              </TooltipContent>
+                            </Tooltip>
                           </div>
                         </div>
                       ))}
