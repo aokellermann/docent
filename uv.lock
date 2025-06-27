@@ -640,27 +640,6 @@ wheels = [
 ]
 
 [[package]]
-name = "docent"
-version = "0.0.1"
-source = { editable = "docent" }
-dependencies = [
-    { name = "logging" },
-    { name = "pydantic" },
-    { name = "pyyaml" },
-    { name = "sqlalchemy" },
-    { name = "tiktoken" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "logging", specifier = ">=0.4.9.6" },
-    { name = "pydantic", specifier = ">=2.11.7" },
-    { name = "pyyaml", specifier = ">=6.0.2" },
-    { name = "sqlalchemy", specifier = ">=2.0.41" },
-    { name = "tiktoken", specifier = ">=0.7.0" },
-]
-
-[[package]]
 name = "docent-core"
 version = "0.0.1"
 source = { editable = "." }
@@ -669,7 +648,7 @@ dependencies = [
     { name = "arq" },
     { name = "asyncpg" },
     { name = "backoff" },
-    { name = "docent" },
+    { name = "docent-python" },
     { name = "fastapi" },
     { name = "greenlet" },
     { name = "inspect-ai" },
@@ -705,7 +684,7 @@ requires-dist = [
     { name = "arq", specifier = ">=0.26.3" },
     { name = "asyncpg", specifier = ">=0.30.0" },
     { name = "backoff", specifier = ">=2.2.1" },
-    { name = "docent", editable = "docent" },
+    { name = "docent-python", editable = "docent" },
     { name = "fastapi", specifier = ">=0.114.1" },
     { name = "greenlet", specifier = ">=3.2.1" },
     { name = "inspect-ai", specifier = ">=0.3.93" },
@@ -733,6 +712,27 @@ requires-dist = [
     { name = "typer", specifier = ">=0.16.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.23.1" },
     { name = "watchdog", specifier = ">=6.0.0" },
+]
+
+[[package]]
+name = "docent-python"
+version = "0.1.0a1"
+source = { editable = "docent" }
+dependencies = [
+    { name = "logging" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "sqlalchemy" },
+    { name = "tiktoken" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "logging", specifier = ">=0.4.9.6" },
+    { name = "pydantic", specifier = ">=2.11.7" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
+    { name = "sqlalchemy", specifier = ">=2.0.41" },
+    { name = "tiktoken", specifier = ">=0.7.0" },
 ]
 
 [[package]]
