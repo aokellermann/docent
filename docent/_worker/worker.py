@@ -52,7 +52,7 @@ async def compute_search(_: dict[Any, Any], view_ctx: ViewContext, job_id: str, 
 
     canceled = False
 
-    async def run():
+    async def run(tg: TaskGroup):
         nonlocal canceled
         try:
             async with db.advisory_lock(
@@ -64,6 +64,7 @@ async def compute_search(_: dict[Any, Any], view_ctx: ViewContext, job_id: str, 
                     _search_result_callback,
                     read_only,
                 )
+                tg.cancel_scope.cancel()
         except:
             canceled = True
             raise
@@ -96,7 +97,7 @@ async def compute_search(_: dict[Any, Any], view_ctx: ViewContext, job_id: str, 
                     tg.cancel_scope.cancel()
 
     async with anyio.create_task_group() as tg:
-        tg.start_soon(run)
+        tg.start_soon(run, tg)
         tg.start_soon(await_commands, tg)
 
 
