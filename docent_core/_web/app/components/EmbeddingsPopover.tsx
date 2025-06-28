@@ -32,7 +32,8 @@ const EmbeddingsPopover: React.FC = () => {
 
   // Derived states for cleaner logic
   const isEmbeddingInProgress = embeddingProgress && isListeningToEmbeddings;
-  const canComputeEmbeddings = hasWritePermission &&
+  const canComputeEmbeddings =
+    hasWritePermission &&
     !isLoading &&
     !isEmbeddingInProgress &&
     !isQueued &&
@@ -45,14 +46,18 @@ const EmbeddingsPopover: React.FC = () => {
     try {
       const [embeddingsResponse, queuedResponse] = await Promise.all([
         apiRestClient.post(`/${frameGridId}/fg_has_embeddings`),
-        apiRestClient.post(`/${frameGridId}/has_embedding_job`)
+        apiRestClient.post(`/${frameGridId}/has_embedding_job`),
       ]);
 
       setHasEmbeddings(embeddingsResponse.data);
       setIsQueued(queuedResponse.data);
 
       // Clear loading state if nothing is in progress
-      if (!embeddingsResponse.data && !queuedResponse.data && !isEmbeddingInProgress) {
+      if (
+        !embeddingsResponse.data &&
+        !queuedResponse.data &&
+        !isEmbeddingInProgress
+      ) {
         setIsLoading(false);
       }
     } catch (error) {
@@ -200,6 +205,10 @@ const EmbeddingsPopover: React.FC = () => {
     );
   };
 
+  if (!hasWritePermission) {
+    return null;
+  }
+
   return (
     <Popover open={isOpen} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
@@ -211,10 +220,15 @@ const EmbeddingsPopover: React.FC = () => {
             isEmbeddingInProgress &&
               'text-blue-700 hover:bg-blue-100 bg-blue-50 border-blue-200'
           )}
-          title={!hasEmbeddings ? 'Embeddings missing - click to manage' : 'Manage embeddings'}
+          title={
+            !hasEmbeddings
+              ? 'Embeddings missing - click to manage'
+              : 'Manage embeddings'
+          }
         >
           <Database className="h-4 w-4" />
-          Index{isEmbeddingInProgress && ` ${embeddingProgress.embedding_progress}%`}
+          Index
+          {isEmbeddingInProgress && ` ${embeddingProgress.embedding_progress}%`}
           {isEmbeddingInProgress && (
             <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
           )}
