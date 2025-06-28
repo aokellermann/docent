@@ -11,6 +11,16 @@ from pydantic import BaseModel
 from sqlalchemy import and_, select
 from sqlalchemy.inspection import inspect as sqla_inspect
 
+from docent._log_util.logger import get_logger
+from docent.data_models.agent_run import AgentRun, AgentRunWithoutMetadataValidator
+from docent.data_models.citation import (
+    Citation,
+    parse_citations_single_run,
+)
+from docent.data_models.filters import (
+    ComplexFilter,
+    parse_filter_dict,
+)
 from docent_core._ai_tools.search import SearchResult, SearchResultWithCitations
 from docent_core._db_service.contexts import ViewContext
 from docent_core._db_service.schemas.auth_models import (
@@ -21,7 +31,7 @@ from docent_core._db_service.schemas.auth_models import (
 )
 from docent_core._db_service.schemas.collab_models import FramegridCollaborator
 from docent_core._db_service.schemas.tables import (
-    Endpoints,
+    EndpointType,
     SQLAAccessControlEntry,
     SQLASearchCluster,
     SQLASearchResult,
@@ -65,16 +75,6 @@ from docent_core._server._rest.send_state import (
     publish_searches,
 )
 from docent_core._server.util import sse_event_stream
-from docent._log_util.logger import get_logger
-from docent.data_models.agent_run import AgentRun, AgentRunWithoutMetadataValidator
-from docent.data_models.citation import (
-    Citation,
-    parse_citations_single_run,
-)
-from docent.data_models.filters import (
-    ComplexFilter,
-    parse_filter_dict,
-)
 
 logger = get_logger(__name__)
 
@@ -134,7 +134,7 @@ async def signup(request: UserCreateRequest, response: Response, db: DBService =
     await create_user_session(user.id, response)
 
     # Track analytics
-    await track_endpoint_with_user(db, Endpoints.SIGNUP, user)
+    await track_endpoint_with_user(db, EndpointType.SIGNUP, user)
 
     return user
 
@@ -187,7 +187,7 @@ async def create_anonymous_session(response: Response, db: DBService = Depends(g
     await create_user_session(anonymous_user.id, response)
 
     # Track analytics
-    await track_endpoint_with_user(db, Endpoints.CREATE_ANONYMOUS_SESSION, anonymous_user)
+    await track_endpoint_with_user(db, EndpointType.CREATE_ANONYMOUS_SESSION, anonymous_user)
 
     return anonymous_user
 
@@ -302,7 +302,7 @@ async def create_fg(
     await publish_framegrids(db)
 
     # Track analytics
-    await track_endpoint_with_user(db, Endpoints.CREATE_FG, user, fg_id)
+    await track_endpoint_with_user(db, EndpointType.CREATE_FG, user, fg_id)
 
     return {"fg_id": fg_id}
 
@@ -376,7 +376,7 @@ async def get_agent_run(
     _: None = Depends(require_view_permission(Permission.READ)),
 ):
     # Track analytics
-    await track_endpoint_with_user(db, Endpoints.GET_AGENT_RUN, ctx.user, ctx.fg_id)
+    await track_endpoint_with_user(db, EndpointType.GET_AGENT_RUN, ctx.user, ctx.fg_id)
 
     return await db.get_agent_run(ctx, agent_run_id)
 
@@ -416,7 +416,7 @@ async def post_agent_runs(
             await publish_homepage_state(db, ctx)
 
     # Track analytics - we need to get the user from the context
-    await track_endpoint_with_user(db, Endpoints.POST_AGENT_RUNS, ctx.user, fg_id)
+    await track_endpoint_with_user(db, EndpointType.POST_AGENT_RUNS, ctx.user, fg_id)
 
 
 ########
@@ -435,7 +435,7 @@ async def join(
         raise HTTPException(status_code=404, detail=f"Frame grid with ID {fg_id} not found")
 
     # Track analytics
-    await track_endpoint_with_user(db, Endpoints.JOIN, ctx.user, fg_id)
+    await track_endpoint_with_user(db, EndpointType.JOIN, ctx.user, fg_id)
 
     return {"fg_id": fg_id, "view_id": ctx.view_id}
 
@@ -458,7 +458,7 @@ async def set_io_bin_keys(
         await publish_homepage_state(db, ctx)
 
     # Track analytics
-    await track_endpoint_with_user(db, Endpoints.SET_IO_BIN_KEYS, ctx.user, fg_id)
+    await track_endpoint_with_user(db, EndpointType.SET_IO_BIN_KEYS, ctx.user, fg_id)
 
 
 class SetIODimWithMetadataKeyRequest(BaseModel):
@@ -479,7 +479,9 @@ async def set_io_bin_key_with_metadata_key_endpoint(
         await publish_homepage_state(db, ctx)
 
     # Track analytics
-    await track_endpoint_with_user(db, Endpoints.SET_IO_BIN_KEY_WITH_METADATA_KEY, ctx.user, fg_id)
+    await track_endpoint_with_user(
+        db, EndpointType.SET_IO_BIN_KEY_WITH_METADATA_KEY, ctx.user, fg_id
+    )
 
 
 class PostBaseFilterRequest(BaseModel):
@@ -504,7 +506,7 @@ async def post_base_filter(
         await publish_homepage_state(db, new_ctx)
 
     # Track analytics
-    await track_endpoint_with_user(db, Endpoints.POST_BASE_FILTER, ctx.user, fg_id)
+    await track_endpoint_with_user(db, EndpointType.POST_BASE_FILTER, ctx.user, fg_id)
 
     return {"status": "ok"}
 
@@ -518,7 +520,7 @@ async def clone_own_view(
     new_view_id = await db.clone_view_for_sharing(ctx)
 
     # Track analytics
-    await track_endpoint_with_user(db, Endpoints.CLONE_OWN_VIEW, ctx.user, ctx.fg_id)
+    await track_endpoint_with_user(db, EndpointType.CLONE_OWN_VIEW, ctx.user, ctx.fg_id)
 
     return {"view_id": new_view_id}
 
@@ -541,7 +543,7 @@ async def apply_existing_view(
     await publish_homepage_state(db, ctx)
 
     # Track analytics
-    await track_endpoint_with_user(db, Endpoints.APPLY_EXISTING_VIEW, ctx.user, ctx.fg_id)
+    await track_endpoint_with_user(db, EndpointType.APPLY_EXISTING_VIEW, ctx.user, ctx.fg_id)
 
     # Get the existing search query; tells frontend whether to load clusters
     existing_search_query = await db.get_search_query_by_query(ctx.fg_id, request.search_query)
@@ -565,7 +567,9 @@ async def get_existing_search_results(
         )
 
     # Track analytics
-    await track_endpoint_with_user(db, Endpoints.GET_EXISTING_SEARCH_RESULTS, ctx.user, ctx.fg_id)
+    await track_endpoint_with_user(
+        db, EndpointType.GET_EXISTING_SEARCH_RESULTS, ctx.user, ctx.fg_id
+    )
 
     num_search_hits = len([result for result in results if result.value is not None])
 
@@ -618,7 +622,7 @@ async def get_existing_search_results(
 #     agent_runs = await db.get_agent_runs(ctx, agent_run_ids=request.agent_run_ids)
 
 #     # Track analytics
-#     await track_endpoint_with_user(db, Endpoints.GET_REGEX_SNIPPETS_ENDPOINT, ctx.user, ctx.fg_id)
+#     await track_endpoint_with_user(db, EndpointType.GET_REGEX_SNIPPETS_ENDPOINT, ctx.user, ctx.fg_id)
 
 #     return {
 #         d.id: [item for p in patterns for item in get_regex_snippets(d.text, p)] for d in agent_runs
@@ -760,7 +764,7 @@ async def upsert_collaborator(
     )
 
     # Track analytics
-    await track_endpoint_with_user(db, Endpoints.UPSERT_COLLABORATOR, user, fg_id)
+    await track_endpoint_with_user(db, EndpointType.UPSERT_COLLABORATOR, user, fg_id)
 
     return collaborator
 
@@ -858,7 +862,7 @@ class ShareViewRequest(BaseModel):
 #     await publish_searches(db, ctx)
 
 #     # Track analytics
-#     await track_endpoint_with_user(db, Endpoints.POST_DIMENSION, ctx.user, ctx.fg_id)
+#     await track_endpoint_with_user(db, EndpointType.POST_DIMENSION, ctx.user, ctx.fg_id)
 
 #     return request.dim
 
@@ -913,7 +917,7 @@ class ShareViewRequest(BaseModel):
 #         await db.delete_filter(filter_id)
 
 #     # Track analytics
-#     await track_endpoint_with_user(db, Endpoints.DELETE_FILTER, ctx.user, fg_id)
+#     await track_endpoint_with_user(db, EndpointType.DELETE_FILTER, ctx.user, fg_id)
 
 
 # class PostFilterRequest(BaseModel):
@@ -944,7 +948,7 @@ class ShareViewRequest(BaseModel):
 #             raise ValueError("dim_ids are not supported")
 
 #     # Track analytics
-#     await track_endpoint_with_user(db, Endpoints.POST_FILTER, ctx.user, fg_id)
+#     await track_endpoint_with_user(db, EndpointType.POST_FILTER, ctx.user, fg_id)
 
 #     return new_filter.id
 
@@ -992,7 +996,7 @@ async def start_compute_search(
         await enqueue_search_job(ctx, job_id, read_only=not write_allowed)
 
     # Track analytics
-    await track_endpoint_with_user(db, Endpoints.START_COMPUTE_SEARCH, ctx.user, fg_id)
+    await track_endpoint_with_user(db, EndpointType.START_COMPUTE_SEARCH, ctx.user, fg_id)
 
     return job_id
 
@@ -1119,7 +1123,7 @@ async def resume_compute_search(
         await enqueue_search_job(ctx, job_id, read_only=not write_allowed)
 
     # Track analytics
-    await track_endpoint_with_user(db, Endpoints.RESUME_COMPUTE_SEARCH, ctx.user, query.fg_id)
+    await track_endpoint_with_user(db, EndpointType.RESUME_COMPUTE_SEARCH, ctx.user, query.fg_id)
 
     return job_id
 
@@ -1192,7 +1196,7 @@ async def start_cluster_search_results(
     )
 
     # Track analytics - we need to get the user from the context
-    await track_endpoint_with_user(db, Endpoints.START_CLUSTER_SEARCH_RESULTS, ctx.user, fg_id)
+    await track_endpoint_with_user(db, EndpointType.START_CLUSTER_SEARCH_RESULTS, ctx.user, fg_id)
 
     return job_id
 
@@ -1581,7 +1585,7 @@ async def get_ta_message(
         await recv_stream.aclose()
 
     # Track analytics
-    await track_endpoint_with_user(db, Endpoints.GET_TA_MESSAGE, ctx.user, ctx.fg_id)
+    await track_endpoint_with_user(db, EndpointType.GET_TA_MESSAGE, ctx.user, ctx.fg_id)
 
     return StreamingResponse(
         sse_event_stream(_execute, recv_stream), media_type="text/event-stream"
@@ -1624,7 +1628,7 @@ async def get_diffs_report(
     report = await db.get_diffs_report(diffs_report_id)
 
     # Track analytics
-    await track_endpoint_with_user(db, Endpoints.GET_DIFFS_REPORT, ctx.user, ctx.fg_id)
+    await track_endpoint_with_user(db, EndpointType.GET_DIFFS_REPORT, ctx.user, ctx.fg_id)
 
     return report.to_pydantic().model_dump()
 
@@ -1677,7 +1681,7 @@ async def start_compute_diffs(
     )
 
     # Track analytics
-    await track_endpoint_with_user(db, Endpoints.START_COMPUTE_DIFFS, ctx.user, fg_id)
+    await track_endpoint_with_user(db, EndpointType.START_COMPUTE_DIFFS, ctx.user, fg_id)
 
     return {
         "job_id": job_id,
@@ -1819,7 +1823,7 @@ async def compute_diff_clusters(
     )
 
     # Track analytics
-    await track_endpoint_with_user(db, Endpoints.COMPUTE_DIFF_CLUSTERS, ctx.user, fg_id)
+    await track_endpoint_with_user(db, EndpointType.COMPUTE_DIFF_CLUSTERS, ctx.user, fg_id)
 
     return clusters
 
@@ -1978,6 +1982,6 @@ async def get_transcript_diff(
         return None
 
     # Track analytics
-    await track_endpoint_with_user(db, Endpoints.GET_TRANSCRIPT_DIFF, ctx.user, ctx.fg_id)
+    await track_endpoint_with_user(db, EndpointType.GET_TRANSCRIPT_DIFF, ctx.user, ctx.fg_id)
 
     return transcript_diff.to_pydantic().model_dump()

@@ -3,7 +3,7 @@
 from typing import Optional
 
 from docent_core._db_service.schemas.auth_models import User
-from docent_core._db_service.schemas.tables import Endpoints, SQLAAnalyticsEvent
+from docent_core._db_service.schemas.tables import EndpointType, SQLAAnalyticsEvent
 from docent_core._db_service.service import DBService
 
 
@@ -14,7 +14,7 @@ def extract_user_id(user: Optional[User]) -> Optional[str]:
 
 async def track_endpoint_usage(
     db: DBService,
-    endpoint: Endpoints,
+    endpoint: EndpointType,
     fg_id: Optional[str] = None,
     user_id: Optional[str] = None,
 ) -> None:
@@ -51,7 +51,7 @@ async def track_endpoint_usage(
 
 async def track_endpoint_with_user(
     db: DBService,
-    endpoint: Endpoints,
+    endpoint: EndpointType,
     user: Optional[User] = None,
     fg_id: Optional[str] = None,
 ) -> None:
