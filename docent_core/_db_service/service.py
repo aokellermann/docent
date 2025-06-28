@@ -41,7 +41,6 @@ from sqlalchemy.orm import selectinload
 
 from docent._log_util import get_logger
 from docent.data_models.agent_run import AgentRun
-from docent.data_models.filters import ComplexFilter
 from docent.data_models.transcript import Transcript
 from docent_core._ai_tools.clustering.cluster_assigner import DEFAULT_ASSIGNER, assign_with_backend
 from docent_core._ai_tools.clustering.cluster_diffs import cluster_diff_claims, search_over_diffs
@@ -58,6 +57,7 @@ from docent_core._ai_tools.search_paired import (
     execute_search_paired,
 )
 from docent_core._db_service.contexts import ViewContext
+from docent_core._db_service.filters import ComplexFilter
 from docent_core._db_service.schemas.auth_models import (
     PERMISSION_LEVELS,
     Permission,

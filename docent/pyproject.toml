@@ -1,7 +1,7 @@
 [project]
 name = "docent-python"
 description = "Docent SDK"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.5"
 authors = [
   { name="Transluce", email="info@transluce.org" },
 ]
@@ -10,10 +10,8 @@ license-files = ["LICENSE.md"]
 
 requires-python = ">=3.11"
 dependencies = [
-    "logging>=0.4.9.6",
     "pydantic>=2.11.7",
     "pyyaml>=6.0.2",
-    "sqlalchemy>=2.0.41",
     "tiktoken>=0.7.0",
 ]
 

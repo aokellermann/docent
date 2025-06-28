@@ -4,23 +4,23 @@ Docent uses a unified interface to call and aggregate results from different LLM
 
 ### Provider registry
 
-Each LLM provider is specified through a [`ProviderConfig`][docent._llm_util.providers.registry.ProviderConfig] object, which requires three functions:
+Each LLM provider is specified through a [`ProviderConfig`][docent_core._llm_util.providers.registry.ProviderConfig] object, which requires three functions:
 
 - `async_client_getter`: Returns an async client for the provider
-- `single_output_getter`: Gets a single completion from the provider, compatible with the [`AsyncSingleOutputGetter`][docent._llm_util.providers.registry.SingleOutputGetter] protocol
-- `single_streaming_output_getter`: Gets a streaming completion from the provider, compatible with the [`AsyncSingleStreamingOutputGetter`][docent._llm_util.providers.registry.SingleStreamingOutputGetter] protocol
+- `single_output_getter`: Gets a single completion from the provider, compatible with the [`AsyncSingleOutputGetter`][docent_core._llm_util.providers.registry.SingleOutputGetter] protocol
+- `single_streaming_output_getter`: Gets a streaming completion from the provider, compatible with the [`AsyncSingleStreamingOutputGetter`][docent_core._llm_util.providers.registry.SingleStreamingOutputGetter] protocol
 
 We currently support `anthropic`, `openai`, and `azure_openai`.
 
 #### Adding a new provider
 
-1. Create a new module in `docent/_llm_util/providers/` (e.g., `my_provider.py`)
+1. Create a new module in `docent_core/_llm_util/providers/` (e.g., `my_provider.py`)
 2. Implement the functions required by `ProviderConfig`
-3. Add the provider to the [`PROVIDERS`][docent._llm_util.providers.registry.PROVIDERS] dictionary in `registry.py`
+3. Add the provider to the [`PROVIDERS`][docent_core._llm_util.providers.registry.PROVIDERS] dictionary in `registry.py`
 
 ### Selecting models for Docent functions
 
-Docent uses a preference system to determine which LLM models to use for different functions. [`ProviderPreferences`][docent._llm_util.providers.preferences.ProviderPreferences] manages the mapping between Docent functions and their ordered preference of [`ModelOption`][docent._llm_util.providers.preferences.ModelOption] objects:
+Docent uses a preference system to determine which LLM models to use for different functions. [`ProviderPreferences`][docent_core._llm_util.providers.preferences.ProviderPreferences] manages the mapping between Docent functions and their ordered preference of [`ModelOption`][docent_core._llm_util.providers.preferences.ModelOption] objects:
 
 ```python
 @cached_property
@@ -50,11 +50,11 @@ Any function that calls an LLM API must have a corresponding function in `Provid
 
 To customize which models are used for a specific function:
 
-1. Locate `docent/_llm_util/providers/preferences.py`
+1. Locate `docent_core/_llm_util/providers/preferences.py`
 2. Find or modify the cached property for the function you want to customize
-3. Specify the [`ModelOption`][docent._llm_util.providers.preferences.ModelOption] objects in the returned list
+3. Specify the [`ModelOption`][docent_core._llm_util.providers.preferences.ModelOption] objects in the returned list
 
 
 
-::: docent._llm_util.providers.registry
-::: docent._llm_util.providers.preferences
+::: docent_core._llm_util.providers.registry
+::: docent_core._llm_util.providers.preferences
