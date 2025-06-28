@@ -113,10 +113,6 @@ const SearchArea = () => {
     return loadingSearchQuery !== undefined;
   }, [loadingSearchQuery]);
 
-  const shouldDisableClusterButton = useMemo(() => {
-    return isProcessingClusters || isLoadingSearch;
-  }, [isProcessingClusters, isLoadingSearch]);
-
   useEffect(() => {
     if (activeSearchQuery && activeClusterTaskId == null) {
       dispatch(
@@ -308,6 +304,10 @@ const SearchArea = () => {
       });
     }
   };
+
+  const shouldDisableClusterButton = useMemo(() => {
+    return !hasWritePermission || isProcessingClusters || isLoadingSearch;
+  }, [hasWritePermission, isProcessingClusters, isLoadingSearch]);
 
   return (
     <Card className="h-full flex overflow-y-auto flex-col flex-1 p-3 custom-scrollbar space-y-3">
@@ -525,7 +525,9 @@ const SearchArea = () => {
                       size="sm"
                       className="gap-1 h-8 text-xs"
                       onClick={() => handleSearch(searchQueryTextboxValue)}
-                      disabled={!searchQueryTextboxValue?.trim()}
+                      disabled={
+                        !hasWritePermission || !searchQueryTextboxValue?.trim()
+                      }
                     >
                       Search
                       <CornerDownLeft className="size-3" />
