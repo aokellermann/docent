@@ -92,8 +92,8 @@ import asyncio
 
 from tqdm.auto import tqdm
 
-from docent_core._llm_util.data_models.llm_output import LLMOutput
 from docent.data_models import AgentRun, Transcript
+from docent_core._llm_util.data_models.llm_output import LLMOutput
 
 all_results: list[list[LLMOutput]] = []
 all_prompts: list[list[list[dict[str, str]]]] = []
@@ -150,7 +150,6 @@ for i, (prompts, results) in enumerate(zip(all_prompts, all_results)):
             metadata={
                 "run_id": str(uuid4()),
                 "scores": {},
-                "default_score_key": None,
                 **configs[i],
                 "system_prompt_variant": str(i),
                 "experiment_id": str(i),

@@ -85,7 +85,6 @@ export interface BaseMetadata {
 export interface BaseAgentRunMetadata extends BaseMetadata {
   run_id?: string;
   scores: { [key: string]: number | boolean };
-  default_score_key?: string;
 }
 
 export function getMetadataValue<T>(

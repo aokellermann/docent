@@ -108,10 +108,6 @@ const AgentMetadataSummary = ({
     (state) => state.frame.agentRunMetadata
   );
   const meta = agentRunMetadata?.[agentRunId];
-  let isCorrect: boolean | undefined = undefined;
-  if (meta && meta.scores && typeof meta.default_score_key === 'string') {
-    isCorrect = meta.scores[meta.default_score_key] as boolean | undefined;
-  }
   const [showDetails, setShowDetails] = useState(false);
 
   const toggle = () => {
@@ -122,18 +118,6 @@ const AgentMetadataSummary = ({
     <div className="flex flex-col gap-0.5">
       <div className="flex items-center gap-0.5 text-xs py-1">
         {agentBadge(agentLabel)}
-        {isCorrect !== undefined && (
-          <span
-            className={cn(
-              'text-xs px-1 py-0.5 font-semibold rounded',
-              isCorrect
-                ? 'text-green-500 dark:text-green-400'
-                : 'text-red-500 dark:text-red-400'
-            )}
-          >
-            {isCorrect ? '✓ Correct' : '✗ Incorrect'}
-          </span>
-        )}
         <button
           onClick={toggle}
           className="ml-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 focus:outline-none"

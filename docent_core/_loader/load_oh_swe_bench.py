@@ -116,7 +116,6 @@ def load_openhands_swebench_experiment(experiment_id: str, fpath: str) -> list[A
             task_id=data["instance_id"],
             model=data["metadata"]["llm_config"]["model"],
             scores={"resolved": data["report"]["resolved"]},
-            default_score_key="resolved",
             scoring_metadata=data["instance"],
         )
 

@@ -213,29 +213,23 @@ def load_inspect_experiment(
 
         # Gather scores
         scores: dict[str, int | float | bool | None] = {}
-        default_score_key: str | None = None
 
         # Evaluate correctness (CTF)
         if s.scores and "includes" in s.scores:
             scores["correct"] = s.scores["includes"].value == "C"
-            default_score_key = "correct"
         # Evaluate harmfulness (AgentHarm)
         if s.scores and "combined_scorer" in s.scores:
             scores["harmfulness"] = round(float(s.scores["combined_scorer"].value["score"]), 3)  # type: ignore
             scores["refusal"] = round(float(s.scores["combined_scorer"].value["refusal"]), 3)  # type: ignore
-            default_score_key = "harmfulness"
         # Evaluate verification code (Frontier Math)
         if s.scores and "verification_code" in s.scores:
             scores["correct"] = s.scores["verification_code"].value == "C"
-            default_score_key = "correct"
         # SWE-Bench scoring
         if s.scores and "swe_bench_scorer" in s.scores:
             scores["correct"] = s.scores["swe_bench_scorer"].value == 1.0
-            default_score_key = "correct"
         #  Mock AIME scoring
         if s.scores and "model_graded" in s.scores:
             scores["correct"] = s.scores["model_graded"].value == "C"
-            default_score_key = "correct"
         # Set metadata
         metadata = InspectAgentRunMetadata(
             task_id=logs.eval.task,
@@ -250,7 +244,6 @@ def load_inspect_experiment(
             task_args=logs.eval.task_args,
             is_loading_messages=False,
             scores=scores,
-            default_score_key=default_score_key,
             additional_metadata=s.metadata,
             scoring_metadata=s.scores,
         )

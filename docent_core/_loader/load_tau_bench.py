@@ -93,7 +93,6 @@ def load_tau_bench_experiment(experiment_id: str, fpath: str) -> list[AgentRun]:
         task_id = info["task"]["user_id"]
         sample_id = sample_idx
         scores = {"reward": round(sample["reward"], 3)}
-        default_score_key = "reward"
 
         # Build metadata
         metadata = TauBenchMetadata(
@@ -101,7 +100,6 @@ def load_tau_bench_experiment(experiment_id: str, fpath: str) -> list[AgentRun]:
             task_id=str(sample_id),
             model="sonnet-35-new",  # Default model name TODO(kevin): this is a hack.
             scores=scores,
-            default_score_key=default_score_key,
             additional_metadata=info,
             scoring_metadata=info["reward_info"],
         )

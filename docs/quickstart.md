@@ -115,7 +115,6 @@ Now we're ready to ingest some logs!
                 model=m["model"],
                 agent_scaffold=m["agent_scaffold"],
                 scores={"hallucinated": m["hallucinated"]},
-                default_score_key="hallucinated",
             )
         )
         for t, m in zip(parsed_transcripts, metadata)
@@ -138,7 +137,7 @@ Now we're ready to ingest some logs!
     print(tb_log)
     ```
 
-    First, we need to define a metadata class. In addition to the [required `run_id`, `scores`, and `default_score_key` fields](../concepts/data_models/metadata.md), we'll add a few additional fields:
+    First, we need to define a metadata class. In addition to the [required `scores` field](../concepts/data_models/metadata.md), we'll add a few additional fields:
 
     ```python
     from typing import Any
@@ -208,7 +207,6 @@ Now we're ready to ingest some logs!
         # Extract metadata from the sample
         task_id = info["task"]["user_id"]
         scores = {"reward": round(reward, 3)}
-        default_score_key = "reward"
 
         # Build metadata
         metadata = TauBenchMetadata(
@@ -216,7 +214,6 @@ Now we're ready to ingest some logs!
             task_id=task_id,
             model="sonnet-35-new",
             scores=scores,
-            default_score_key=default_score_key,
             additional_metadata=info,
             scoring_metadata=info["reward_info"],
         )
@@ -315,12 +312,10 @@ Now we're ready to ingest some logs!
 
             # Gather scores
             scores: dict[str, int | float | bool] = {}
-            default_score_key: str | None = None
 
             # Evaluate correctness (for this CTF benchmark)
             if s.scores and "includes" in s.scores:
                 scores["correct"] = s.scores["includes"].value == "C"
-                default_score_key = "correct"
 
             # Set metadata
             metadata = InspectAgentRunMetadata(
@@ -329,7 +324,6 @@ Now we're ready to ingest some logs!
                 epoch_id=epoch_id,
                 model=log.eval.model,
                 scores=scores,
-                default_score_key=default_score_key,
                 additional_metadata=s.metadata,
                 scoring_metadata=s.scores,
             )

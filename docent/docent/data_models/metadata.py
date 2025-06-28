@@ -184,26 +184,11 @@ class BaseAgentRunMetadata(BaseMetadata):
 
     Attributes:
         scores: Dictionary of evaluation metrics.
-        default_score_key: The primary evaluation metric key.
     """
 
     scores: dict[str, int | float | bool | None] = Field(
         description="A dict of score_key -> score_value. Use one key for each metric you're tracking."
     )
-    default_score_key: str | None = Field(
-        description="The default score key for the transcript; one top-line metric"
-    )
-
-    def get_default_score(self) -> int | float | bool | None:
-        """Gets the default evaluation score.
-
-        Returns:
-            int, float, bool, or None: The value of the default score if a default score key is set,
-                otherwise None.
-        """
-        if self.default_score_key is None:
-            return None
-        return self.scores.get(self.default_score_key)
 
 
 class FrameDimension(BaseModel):
