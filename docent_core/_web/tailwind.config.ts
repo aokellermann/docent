@@ -11,11 +11,10 @@ const config: Config = {
   theme: {
     'break-anywhere': 'overflow-wrap: break-anywhere',
     extend: {
-
       width: {
-        'sm': '400px',
-        'md': '600px',
-        'lg': '800px',
+        sm: '400px',
+        md: '600px',
+        lg: '800px',
       },
       fontFamily: {
         sans: ['var(--font-open-sans)'],
@@ -90,8 +89,17 @@ const config: Config = {
         xxs: ['0.625rem', { lineHeight: '0.875rem' }], // This is equivalent to 10px with a line-height of 14px
         // xs: ['0.825rem', { lineHeight: '1.1rem' }], // Custom text-sm definition (changed from default 0.875rem)
       },
+      transitionDuration: {
+        '1500': '1500ms',
+      },
     },
   },
   plugins: [require('tailwindcss-animate'), require('@tailwindcss/typography')],
+  safelist: [
+    // These colors are dynamically generated in AgentRunViewer.tsx, so we have to tell tailwind to include them
+    {
+      pattern: /(bg|border)-(blue|gray|green|orange)-(50|200)/,
+    },
+  ],
 };
 export default config;

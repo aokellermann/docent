@@ -74,6 +74,7 @@ from docent_core._db_service.schemas.tables import (
     SQLAAccessControlEntry,
     SQLAAgentRun,
     SQLAAnalyticsEvent,
+    SQLAChatSession,
     SQLADiffAttribute,
     SQLAFrameGrid,
     SQLAJob,
@@ -1814,6 +1815,25 @@ class DBService:
             return None
         job, query = row
         return job.job_json, query
+
+    async def cleanup_old_chat_sessions(self, days_old: int = 7) -> int:
+        """
+        Delete chat sessions that haven't been updated in the specified number of days.
+
+        Args:
+            days_old: Number of days after which sessions are considered old (default: 7)
+
+        Returns:
+            Number of sessions deleted
+        """
+        cutoff_date = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days_old)
+
+        async with self.session() as session:
+            result = await session.execute(
+                delete(SQLAChatSession).where(SQLAChatSession.updated_at < cutoff_date)
+            )
+            deleted_count = result.rowcount or 0
+            return deleted_count
 
     #########
     # Users #

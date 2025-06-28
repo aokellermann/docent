@@ -1,6 +1,8 @@
 import time
+from contextlib import asynccontextmanager
 from typing import Any, Awaitable, Callable
 
+import anyio
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -119,15 +121,32 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         return response
 
 
-# def lifespan(app: FastAPI):
-#     import subprocess
+async def periodic_cleanup_task():
+    """Background task that periodically cleans up old chat sessions."""
+    from docent_core._db_service.service import DBService
 
-#     worker_process = subprocess.Popen(["python", "-m", "docent_core._worker.worker"])
+    while True:
+        await anyio.sleep(24 * 3600)  # once a day
 
-#     yield
-#     logger.info("Shutting down...")
+        try:
+            db = await DBService.init()
+            deleted_count = await db.cleanup_old_chat_sessions()
+            logger.info(f"Periodic cleanup: deleted {deleted_count} old chat sessions")
 
-#     worker_process.terminate()
+        except Exception as e:
+            logger.error(f"Error in periodic cleanup task: {e}")
+            await anyio.sleep(3600)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(periodic_cleanup_task)
+
+        yield
+
+        logger.info("Shutting down...")
+        tg.cancel_scope.cancel()
 
 
 asgi_app = FastAPI()  # type: ignore

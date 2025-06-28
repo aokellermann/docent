@@ -58,6 +58,7 @@ TABLE_USER_ORGANIZATION = "user_organizations"
 TABLE_SEARCH_CLUSTER = "search_clusters"
 TABLE_SEARCH_RESULT_CLUSTER = "search_result_clusters"
 TABLE_ANALYTICS_EVENT = "analytics_events"
+TABLE_CHAT_SESSION = "chat_sessions"
 
 
 def _sanitize_pg_text(text: str) -> str:
@@ -648,6 +649,25 @@ class EndpointType(enum.Enum):
     START_COMPUTE_DIFFS = "start_compute_diffs"
     COMPUTE_DIFF_CLUSTERS = "compute_diff_clusters"
     GET_TRANSCRIPT_DIFF = "get_transcript_diff"
+
+
+class SQLAChatSession(SQLABase):
+    __tablename__ = TABLE_CHAT_SESSION
+
+    id = mapped_column(String(36), primary_key=True)
+    user_id = mapped_column(String(36), ForeignKey(f"{TABLE_USER}.id"), nullable=False, index=True)
+
+    # JSON field to store all messages
+    messages = mapped_column(JSONB, nullable=False, default=list)
+
+    # Associated agent run IDs for context
+    agent_run_ids = mapped_column(JSONB, nullable=False, default=list)
+
+    updated_at = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False, index=True
+    )
+
+    user: Mapped["SQLAUser"] = relationship("SQLAUser", lazy="select")
 
 
 class SQLAAnalyticsEvent(SQLABase):

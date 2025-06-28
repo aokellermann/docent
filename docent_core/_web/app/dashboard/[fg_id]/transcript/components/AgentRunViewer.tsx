@@ -28,7 +28,7 @@ import { useDebounce } from '@/hooks/use-debounce';
 import { toast } from '@/hooks/use-toast';
 
 import MetadataDialog from './MetadataDialog';
-import { copyToClipboard } from '@/lib/utils';
+import { copyToClipboard, cn } from '@/lib/utils';
 
 // Export interface for use in other components
 export interface AgentRunViewerHandle {
@@ -95,6 +95,10 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
     const debouncedScrollPosition = useDebounce(scrollPosition, 100);
     const [scrollNode, setScrollNode] = useState<HTMLDivElement | null>(null);
     const [currentBlockIndex, setCurrentBlockIndex] = useState<number | null>(
+      null
+    );
+
+    const [highlightedBlock, setHighlightedBlock] = useState<string | null>(
       null
     );
 
@@ -202,9 +206,8 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
         }
 
         const tryScrolling = (attempts = 0, maxAttempts = 3) => {
-          const blockElement = document.getElementById(
-            `r-${toAgentRunIdx}_t-${toTranscriptIdx}_b-${toBlockIdx}`
-          );
+          const blockId = `r-${toAgentRunIdx}_t-${toTranscriptIdx}_b-${toBlockIdx}`;
+          const blockElement = document.getElementById(blockId);
           if (blockElement && scrollNode) {
             const containerRect = scrollNode.getBoundingClientRect();
             const elementRect = blockElement.getBoundingClientRect();
@@ -218,6 +221,15 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
 
             // Update current block index
             setCurrentBlockIndex(toBlockIdx);
+
+            // Add highlighting effect
+            setHighlightedBlock(blockId);
+
+            // Remove highlight after animation duration
+            setTimeout(() => {
+              setHighlightedBlock(null);
+            }, 0);
+
             return true;
           }
 
@@ -383,17 +395,21 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                     className="space-y-2 overflow-y-auto custom-scrollbar flex-1"
                     ref={scrollContainerRef}
                   >
-                    {transcript.messages.map((message, index) => (
-                      <MessageBox
-                        key={index}
-                        message={message}
-                        index={index}
-                        id={`r-${secondary ? 1 : 0}_t-${transcriptIdx}_b-${index}`}
-                        agentRun={agentRun}
-                        scrollToBlock={scrollToBlock}
-                        transcriptIdx={transcriptIdx}
-                      />
-                    ))}
+                    {transcript.messages.map((message, index) => {
+                      const blockId = `r-${secondary ? 1 : 0}_t-${transcriptIdx}_b-${index}`;
+                      return (
+                        <MessageBox
+                          key={index}
+                          message={message}
+                          index={index}
+                          id={blockId}
+                          agentRun={agentRun}
+                          scrollToBlock={scrollToBlock}
+                          transcriptIdx={transcriptIdx}
+                          isHighlighted={highlightedBlock === blockId}
+                        />
+                      );
+                    })}
                   </div>
 
                   {/* Navigation buttons inside the ScrollArea (relative to parent container) */}
@@ -606,6 +622,13 @@ const AttributeDisplay: React.FC<{
   );
 };
 
+const roleColorMap: Record<string, string> = {
+  assistant: 'blue',
+  user: 'gray',
+  system: 'orange',
+  tool: 'green',
+};
+
 const MessageBox: React.FC<{
   message: ChatMessage;
   index: number;
@@ -613,22 +636,24 @@ const MessageBox: React.FC<{
   agentRun: AgentRun;
   scrollToBlock: (blockIndex: number, transcriptIdx?: number) => void;
   transcriptIdx: number;
-}> = ({ message, index, id, agentRun, scrollToBlock, transcriptIdx }) => {
+  isHighlighted: boolean;
+}> = ({
+  message,
+  index,
+  id,
+  agentRun,
+  scrollToBlock,
+  transcriptIdx,
+  isHighlighted,
+}) => {
   const agentRunId = agentRun.id;
 
-  const getRoleStyle = () => {
-    switch (message.role) {
-      case 'assistant':
-        return 'bg-blue-50 border-l-4 border-blue-500';
-      case 'user':
-        return 'bg-gray-50 border-l-4 border-gray-500';
-      case 'system':
-        return 'bg-orange-50 border-l-4 border-orange-500';
-      case 'tool':
-        return 'bg-green-50 border-l-4 border-green-500';
-      default:
-        return 'bg-gray-50 border-l-4 border-gray-500';
+  const getRoleStyle = (role: string, isHighlighted: boolean) => {
+    const color = roleColorMap[role] || 'gray';
+    if (isHighlighted) {
+      return `bg-${color}-200 border-l-4 border-${color}-500`;
     }
+    return `bg-${color}-50 border-l-4 border-${color}-500`;
   };
 
   const getMessageContent = (content: string | Content[]): string => {
@@ -713,7 +738,14 @@ const MessageBox: React.FC<{
 
   return (
     <div className="mb-1">
-      <div id={id} className={`p-2 rounded-md text-sm ${getRoleStyle()}`}>
+      <div
+        id={id}
+        className={cn(
+          'p-2 rounded-md text-sm',
+          !isHighlighted && 'transition-all duration-1500',
+          getRoleStyle(message.role, isHighlighted)
+        )}
+      >
         <div className="text-[10px] text-gray-600 flex justify-between mb-1">
           <span>
             Block {index} |{' '}

@@ -21,6 +21,10 @@ import { setToastNotification } from './toastSlice';
 // Map to store cancel functions for active SSE connections
 const cancelFunctionsMap: Record<string, () => void> = {};
 
+// Utility functions for TA session localStorage keys
+export const getTaSessionStorageKey = (agentRunId: string) =>
+  `ta-session-${agentRunId}`;
+
 export interface TranscriptState {
   curAgentRun?: AgentRun;
   altAgentRun?: AgentRun;
@@ -372,10 +376,7 @@ export const createTaSession = createAsyncThunk(
 
       // Create a new TA session via REST API
       const response = await apiRestClient.post(`/${frameGridId}/ta_session`, {
-        base_filter: {
-          type: 'agent_run_id',
-          value: agentRunId,
-        },
+        agent_run_id: agentRunId,
       });
 
       // Set the session ID and datapoint ID
@@ -433,15 +434,28 @@ export const sendTaMessage = createAsyncThunk(
       // Create SSE connection
       const { eventSource, onCancel } = sseService.createEventSource(
         `/rest/${frameGridId}/ta_message?session_id=${taSessionId}&message=${encodeURIComponent(message)}`,
+        // onMessage
         (data) => {
           if (data.messages) {
             dispatch(setTaMessages(data.messages));
+
+            // Save session ID to localStorage after first successful message
+            const state = getState() as RootState;
+            const { taAgentRunId, taSessionId } = state.transcript;
+            if (taAgentRunId && taSessionId) {
+              const storageKey = getTaSessionStorageKey(taAgentRunId);
+              if (!localStorage.getItem(storageKey)) {
+                localStorage.setItem(storageKey, taSessionId);
+              }
+            }
           }
         },
+        // onFinish
         () => {
           dispatch(setLoadingTaResponse(false));
           dispatch(setTaMessageTaskId(undefined));
         },
+        // onToast
         (title, description, variant) => {
           dispatch(
             setToastNotification({
@@ -466,6 +480,52 @@ export const sendTaMessage = createAsyncThunk(
       dispatch(setLoadingTaResponse(false));
       dispatch(setTaMessageTaskId(undefined));
       throw error;
+    }
+  }
+);
+
+export const loadTaSession = createAsyncThunk(
+  'transcript/loadTaSession',
+  async (
+    { agentRunId, sessionId }: { agentRunId: string; sessionId: string },
+    { dispatch, getState }
+  ) => {
+    const state = getState() as RootState;
+    const frameGridId = state.frame.frameGridId;
+
+    if (!frameGridId) {
+      dispatch(
+        setToastNotification({
+          title: 'Configuration error',
+          description: 'No frame grid ID available',
+          variant: 'destructive',
+        })
+      );
+      throw new Error('No frame grid ID available');
+    }
+
+    try {
+      // Load session messages from server
+      const response = await apiRestClient.get(
+        `/ta_session_messages/${sessionId}`
+      );
+
+      // Set the session state
+      dispatch(setTaSessionId(sessionId));
+      dispatch(setTaAgentRunId(agentRunId));
+      dispatch(setTaMessages(response.data.messages || []));
+
+      console.log('Loaded chat session', sessionId);
+
+      return response.data;
+    } catch (error) {
+      // If session doesn't exist on server, remove from localStorage and create new session
+      localStorage.removeItem(getTaSessionStorageKey(agentRunId));
+
+      console.warn('Chat session expired, starting fresh');
+
+      // Create a new session instead
+      dispatch(createTaSession(agentRunId));
     }
   }
 );

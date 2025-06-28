@@ -105,6 +105,12 @@ def _parse_chat_messages(messages: list[ChatMessage]) -> tuple[str | None, list[
                         type="tool_use",
                     )
                 )
+            result.append(
+                MessageParam(
+                    role="assistant",
+                    content=all_content,
+                )
+            )
         elif message.role == "tool":
             result.append(
                 MessageParam(

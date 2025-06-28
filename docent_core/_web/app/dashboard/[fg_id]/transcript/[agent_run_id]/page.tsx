@@ -15,8 +15,6 @@ import AgentRunViewer, {
   AgentRunViewerHandle,
 } from '../components/AgentRunViewer';
 
-const SCROLL_DELAY = 250;
-
 export default function AgentRunPage() {
   const dispatch = useAppDispatch();
 
@@ -94,14 +92,8 @@ export default function AgentRunPage() {
       dispatch(getCurAgentRun(agentRunId));
     }
 
-    if (blockIdx) {
-      setTimeout(() => {
-        agentRunViewerRef.current?.scrollToBlock(
-          blockIdx,
-          transcriptIdx || 0,
-          0
-        );
-      }, SCROLL_DELAY); // Small delay to allow the transcript to load before scrolling
+    if (blockIdx !== undefined) {
+      agentRunViewerRef.current?.scrollToBlock(blockIdx, transcriptIdx || 0, 0);
     }
   };
 
@@ -136,7 +128,7 @@ export default function AgentRunPage() {
               </ScrollArea>
             </TabsContent> */}
 
-            <TabsContent value="chat" className="flex-1 mt-0">
+            <TabsContent value="chat" className="flex-1 mt-0 overflow-hidden">
               <div className="h-full px-1 py-2">
                 <TaPanel onShowAgentRun={onShowAgentRun} />
               </div>

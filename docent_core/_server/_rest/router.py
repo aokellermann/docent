@@ -1,5 +1,6 @@
 import hashlib
 import json
+from datetime import UTC, datetime
 from functools import partial
 from typing import Any, Literal, TypedDict, cast
 from uuid import uuid4
@@ -8,7 +9,7 @@ import anyio
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.inspection import inspect as sqla_inspect
 
 from docent._log_util.logger import get_logger
@@ -21,7 +22,6 @@ from docent_core._ai_tools.search import SearchResult, SearchResultWithCitations
 from docent_core._db_service.contexts import ViewContext
 from docent_core._db_service.filters import (
     ComplexFilter,
-    parse_filter_dict,
 )
 from docent_core._db_service.schemas.auth_models import (
     Permission,
@@ -35,6 +35,7 @@ from docent_core._db_service.schemas.tables import (
     JobStatus,
     SQLAAccessControlEntry,
     SQLAJob,
+    SQLAChatSession,
     SQLASearchCluster,
     SQLASearchResult,
     SQLASearchResultCluster,
@@ -1473,7 +1474,7 @@ async def get_actions_summary(
 
 
 class CreateTASessionRequest(BaseModel):
-    base_filter: dict[str, Any] | None
+    agent_run_id: str
 
 
 class TaChatMessage(TypedDict):
@@ -1486,9 +1487,42 @@ class TASession(BaseModel):
     id: str
     messages: list[TaChatMessage]
     agent_run_ids: list[str]
+    user_id: str
 
 
-TA_SESSIONS: dict[str, TASession] = {}  # session_id -> TASession
+@user_router.get("/ta_session_messages/{session_id}")
+async def get_ta_session_messages(
+    session_id: str,
+    user: User = Depends(get_user_anonymous_ok),
+    db: DBService = Depends(get_db),
+):
+    """
+    Get the message history for an existing TA session.
+    """
+    async with db.session() as session:
+        result = await session.execute(
+            select(SQLAChatSession).where(SQLAChatSession.id == session_id)
+        )
+        chat_session = result.scalar_one_or_none()
+
+    if not chat_session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Ensure the current user owns this session
+    if chat_session.user_id != user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: You don't have permission to access this session",
+        )
+
+    # Exclude system messages from the response
+    messages = [msg for msg in chat_session.messages if msg["role"] != "system"]
+
+    return {
+        "messages": messages,
+        "session_id": session_id,
+        "agent_run_ids": chat_session.agent_run_ids,
+    }
 
 
 @user_router.post("/{fg_id}/ta_session")
@@ -1496,37 +1530,34 @@ async def create_ta_session(
     request: CreateTASessionRequest,
     db: DBService = Depends(get_db),
     ctx: ViewContext = Depends(get_default_view_ctx),
+    user: User = Depends(get_user_anonymous_ok),
     _: None = Depends(require_view_permission(Permission.READ)),
 ):
-    base_filter_raw = request.base_filter
-    base_filter = parse_filter_dict(base_filter_raw) if base_filter_raw else None
+    agent_run_id = request.agent_run_id
 
-    agent_runs = await db.get_agent_runs(ctx)
-    if not agent_runs:
-        raise ValueError("No matching agent runs found")
-
-    if base_filter:
-        judgments = await base_filter.apply(agent_runs=agent_runs, return_all=False)
-        if len(judgments) > 1:
-            raise ValueError("Multiple agent runs found for TA session")
-        elif len(judgments) == 0:
-            raise ValueError("No agent runs found for TA session")
-        agent_runs = [d for d in agent_runs if d.id == judgments[0].agent_run_id]
+    agent_run = await db.get_agent_run(ctx, agent_run_id)
+    if not agent_run:
+        raise ValueError("Agent run not found")
 
     # Create system prompt with all matching transcripts
-    system_prompt = make_single_tasst_system_prompt(agent_runs[0])
+    system_prompt = make_single_tasst_system_prompt(agent_run)
 
-    # Generate session ID and store session
+    # Generate session ID and store session in database
     session_id = str(uuid4())
-    TA_SESSIONS[session_id] = TASession(
+    chat_session = SQLAChatSession(
         id=session_id,
+        user_id=user.id,
         messages=[{"role": "system", "content": system_prompt, "citations": []}],
-        agent_run_ids=[agent_run.id for agent_run in agent_runs],
+        agent_run_ids=[agent_run.id],
     )
+
+    async with db.session() as session:
+        session.add(chat_session)
+        await session.commit()
 
     return {
         "session_id": session_id,
-        "num_transcripts": len(agent_runs),
+        "num_transcripts": 1,
     }
 
 
@@ -1536,13 +1567,28 @@ async def get_ta_message(
     message: str,
     db: DBService = Depends(get_db),
     ctx: ViewContext = Depends(get_default_view_ctx),
+    user: User = Depends(get_user_anonymous_ok),
     _: None = Depends(require_view_permission(Permission.READ)),
 ):
-    session = TA_SESSIONS[session_id]
-    # api_keys = cm.get_api_keys(fg_id)
+    # Get session from database
+    async with db.session() as session:
+        result = await session.execute(
+            select(SQLAChatSession).where(SQLAChatSession.id == session_id)
+        )
+        chat_session = result.scalar_one_or_none()
+
+    if not chat_session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Ensure the current user owns this session
+    if chat_session.user_id != user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: You don't have permission to access this session",
+        )
 
     # Add user message to session
-    prompt_msgs = session.messages + [{"role": "user", "content": message, "citations": []}]
+    prompt_msgs = chat_session.messages + [{"role": "user", "content": message, "citations": []}]
     continuation_text = ""
 
     # AnyIO queue that we can write intermediate results to
@@ -1550,21 +1596,24 @@ async def get_ta_message(
         max_buffer_size=100_000
     )
 
-    def _get_complete_message_list():
+    def _get_complete_message_list(include_system: bool = True):
         nonlocal continuation_text
         current_assistant_message: TaChatMessage = {
             "role": "assistant",
             "content": continuation_text,
             "citations": parse_citations_single_run(continuation_text),
         }
-        return prompt_msgs + [current_assistant_message]
+        if include_system:
+            return prompt_msgs + [current_assistant_message]
+        else:
+            return prompt_msgs[1:] + [current_assistant_message]
 
     async def _send_state():
         nonlocal prompt_msgs, continuation_text
         await send_stream.send(
             {
                 "text": continuation_text,
-                "messages": _get_complete_message_list(),
+                "messages": _get_complete_message_list(include_system=False),
             }
         )
 
@@ -1590,10 +1639,21 @@ async def get_ta_message(
         )
 
         # After generation completes, update the session with the new messages
-        session.messages = _get_complete_message_list()
+        updated_messages = _get_complete_message_list()
+
+        # Update the database with the new messages
+        async with db.session() as db_session:
+            await db_session.execute(
+                update(SQLAChatSession)
+                .where(SQLAChatSession.id == session_id)
+                .values(
+                    messages=updated_messages, updated_at=datetime.now(UTC).replace(tzinfo=None)
+                )
+            )
+            await db_session.commit()
 
         # Close the stream
-        await recv_stream.aclose()
+        await send_stream.aclose()
 
     # Track analytics
     await track_endpoint_with_user(db, EndpointType.GET_TA_MESSAGE, ctx.user, ctx.fg_id)
