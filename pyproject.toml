@@ -81,7 +81,6 @@ known_first_party = [
 [tool.pyright]
 include = [
     "docent_core",
-    "cli/docent_cli",
     "docent/docent"
 ]
 typeCheckingMode = "strict"

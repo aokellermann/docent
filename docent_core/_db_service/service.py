@@ -27,7 +27,6 @@ from sqlalchemy import (
     exists,
     func,
     select,
-    or_,
     text,
     update,
 )
@@ -489,8 +488,12 @@ class DBService:
 
     async def add_and_enqueue_embedding_job(self, ctx: ViewContext):
         fg_id = ctx.fg_id
-        pending_count = await self.get_embedding_job_count(fg_id, SQLAJob.status == JobStatus.PENDING)
-        running_count = await self.get_embedding_job_count(fg_id, SQLAJob.status == JobStatus.RUNNING)
+        pending_count = await self.get_embedding_job_count(
+            fg_id, SQLAJob.status == JobStatus.PENDING
+        )
+        running_count = await self.get_embedding_job_count(
+            fg_id, SQLAJob.status == JobStatus.RUNNING
+        )
 
         # Only start if there's at most one running job and no pending jobs
         if running_count <= 1 and pending_count == 0:

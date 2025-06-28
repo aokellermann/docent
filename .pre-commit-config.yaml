@@ -51,5 +51,5 @@ repos:
     rev: v1.1.396
     hooks:
       - id: pyright
-        files: ^(docent/|cli/docent_cli/).*\.py$
+        files: ^(docent/|docent_core/).*\.py$
         args: ["--pythonpath", ".venv/bin/python"]
