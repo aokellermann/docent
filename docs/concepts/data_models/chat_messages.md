@@ -7,10 +7,8 @@ We support 4 types of message objects:
 - [`AssistantMessage`][docent.data_models.chat.message.AssistantMessage]: Responses from the AI assistant, potentially including tool calls
 - [`ToolMessage`][docent.data_models.chat.message.ToolMessage]: Results from tools invoked during the conversation
 
-Notes on the construction of messages:
+Each message has a `content` field, which can either be a `str` or a list of [`Content`][docent.data_models.chat.content] objects with [text][docent.data_models.chat.content.ContentText] and/or [reasoning][docent.data_models.chat.content.ContentReasoning]. We don't support audio/image/video content yet.
 
-- Each message has a `content` field, which can either be a `str` or a list of [`Content`][docent.data_models.chat.content] objects with [text][docent.data_models.chat.content.ContentText] and/or [reasoning][docent.data_models.chat.content.ContentReasoning]. We don't support audio/image/video content yet.
-- [`AssistantMessage`][docent.data_models.chat.message.AssistantMessage] objects also have a `tool_calls` field, which supports a list of [`ToolCall`][docent.data_models.chat.tool.ToolCall] objects.
 
 ### Usage
 
@@ -55,6 +53,17 @@ messages = [
     ToolMessage(content="8", tool_call_id="call_123", function="calculator"),
 ]
 ```
+
+### Note on tool calls
+
+There are two parts to a tool call:
+
+- On the `AssistantMessage` itself, the `tool_calls` field contains a list of `ToolCall` objects. These represent calls to various tools the agent has access to.
+- The `ToolMessage` object is the output of the tool, e.g. a list of files after calling `ls`.
+
+![Tool Call Agent Run Example](../../images/tool_call.png){: style="max-width: 600px; margin: 0 auto; display: block"}
+
+For an example of parsing tool calls, check out the $\tau$-Bench tab in [quickstart](../../quickstart.md).
 
 ::: docent.data_models.chat.message
 ::: docent.data_models.chat.content

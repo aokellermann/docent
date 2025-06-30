@@ -34,7 +34,7 @@ class BaseMetadata(BaseModel):
     """
 
     model_config = ConfigDict(extra="allow")
-    allow_fields_without_descriptions: bool = False
+    allow_fields_without_descriptions: bool = True
 
     # Private attribute to store field descriptions
     _field_descriptions: dict[str, str | None] | None = PrivateAttr(default=None)
