@@ -1,5 +1,7 @@
 'use client';
 
+import { ModeToggle } from '@/components/ui/theme-toggle';
+
 import { Suspense, useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
@@ -71,13 +73,16 @@ function LoginPageContent() {
   return (
     <ScrollArea className="h-screen">
       <div className="container mx-auto py-8 px-4 max-w-md">
+        <div className="absolute top-4 right-4">
+          <ModeToggle />
+        </div>
         <div className="space-y-6">
           {/* Header */}
           <div className="text-center space-y-2">
             <h1 className="text-2xl font-bold tracking-tight">
               Sign in to Docent
             </h1>
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-muted-foreground">
               Enter your email and password to sign in
             </p>
           </div>

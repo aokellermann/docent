@@ -96,23 +96,23 @@ const DiffPanel: React.FC<DiffPanelProps> = ({
   return (
     <Card className="h-full flex-1 p-3 flex flex-col space-y-2 min-h-0 min-w-0">
       <div className="flex items-center space-x-2">
-        <span className="text-sm font-semibold text-gray-700">
+        <span className="text-sm font-semibold text-foreground">
           <div className="flex flex-col">
-            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Transcript Differences for Task
             </span>
-            <span className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+            <span className="text-lg font-semibold text-foreground">
               {transcriptDiff?.title}
             </span>
           </div>
         </span>
       </div>
-      <p className="text-xs text-gray-500 dark:text-gray-400">
+      <p className="text-xs text-muted-foreground">
         We found {claims.length} differences in behavior by examining the
         transcripts of the two agents.
       </p>
       {claims.length === 0 ? (
-        <div className="flex items-center justify-center h-full text-gray-500 text-sm">
+        <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
           No diffs found for this pair
         </div>
       ) : (
@@ -123,14 +123,14 @@ const DiffPanel: React.FC<DiffPanelProps> = ({
                 key={idx}
                 id={`claim-${diff.id}`}
                 className={cn(
-                  'group bg-purple-50/30 dark:bg-purple-950/30 rounded-md p-3 text-xs text-purple-900 dark:text-purple-100 leading-relaxed',
-                  'hover:bg-purple-100/30 dark:hover:bg-purple-900/30 transition-colors border border-transparent hover:border-purple-200 dark:hover:border-purple-700',
+                  'group bg-purple-bg rounded-md p-3 text-xs text-purple-text leading-relaxed',
+                  'hover:bg-purple-bg transition-colors border border-transparent hover:border-purple-border',
                   'transition-all duration-600'
                 )}
               >
                 <div className="mb-2">
                   {/* <span className="font-semibold text-purple-800 dark:text-purple-200">Claim:</span> */}
-                  <div className="mt-1 font-semibold text-gray-900 dark:text-gray-100">
+                  <div className="mt-1 font-semibold text-foreground">
                     {interpolateAgentBadges(diff.claim)}
                   </div>
                 </div>
@@ -138,7 +138,7 @@ const DiffPanel: React.FC<DiffPanelProps> = ({
                 {diff.shared_context && (
                   <div
                     className={cn(
-                      'text-xs text-gray-500 dark:text-gray-400 italic mb-2'
+                      'text-xs text-muted-foreground italic mb-2'
                     )}
                   >
                     {diff.shared_context}
@@ -148,14 +148,14 @@ const DiffPanel: React.FC<DiffPanelProps> = ({
                 <div
                   className={cn(
                     'flex flex-col sm:flex-row gap-2 sm:gap-4',
-                    'divide-y sm:divide-y-0 sm:divide-x divide-gray-200 dark:divide-gray-700 mb-2'
+                    'divide-y sm:divide-y-0 sm:divide-x divide-border mb-2'
                   )}
                 >
                   <div className="flex-1 py-2 sm:py-0 sm:pr-4">
                     <div className="text-xs font-medium mb-1">
                       {agentBadge('Agent 1')}
                     </div>
-                    <div className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-line">
+                    <div className="text-sm text-foreground whitespace-pre-line">
                       {diff.action1}
                     </div>
                   </div>
@@ -163,7 +163,7 @@ const DiffPanel: React.FC<DiffPanelProps> = ({
                     <div className="text-xs font-medium mb-1">
                       {agentBadge('Agent 2')}
                     </div>
-                    <div className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-line">
+                    <div className="text-sm text-foreground whitespace-pre-line">
                       {diff.action2}
                     </div>
                   </div>
@@ -171,10 +171,10 @@ const DiffPanel: React.FC<DiffPanelProps> = ({
                 {/* Evidence */}
                 {diff.evidence && (
                   <div>
-                    <span className="font-semibold text-gray-800 dark:text-gray-200">
+                    <span className="font-semibold text-foreground">
                       Evidence:
                     </span>
-                    <div className="mt-1 text-gray-900 dark:text-gray-100">
+                    <div className="mt-1 text-foreground">
                       <CitationRenderer
                         text={diff.evidence.evidence}
                         citations={diff.evidence.citations || []}

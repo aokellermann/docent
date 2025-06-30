@@ -74,12 +74,12 @@ export function NewDiffsReport({
       <div
         className={cn(
           'border rounded-md p-2 space-y-2',
-          'bg-gray-50 dark:bg-gray-900/60'
+          'bg-secondary'
         )}
       >
         <div className="grid grid-cols-2 gap-2">
           <div className="space-y-1">
-            <div className="text-xs text-gray-600 dark:text-gray-400">
+            <div className="text-xs text-muted-foreground">
               Experiment 1
             </div>
             <Input
@@ -87,15 +87,15 @@ export function NewDiffsReport({
               defaultValue={experimentId1}
               placeholder="e.g. experiment-1"
               className={cn(
-                'h-8 text-xs font-mono',
-                'bg-white dark:bg-gray-800',
-                'text-gray-600 dark:text-gray-300'
+                'h-7 text-xs font-mono',
+                'bg-background',
+                'text-muted-foreground'
               )}
               disabled={loading}
             />
           </div>
           <div className="space-y-1">
-            <div className="text-xs text-gray-600 dark:text-gray-400">
+            <div className="text-xs text-muted-foreground">
               Experiment 2
             </div>
             <Input
@@ -103,9 +103,9 @@ export function NewDiffsReport({
               defaultValue={experimentId2}
               placeholder="e.g. experiment-2"
               className={cn(
-                'h-8 text-xs font-mono',
-                'bg-white dark:bg-gray-800',
-                'text-gray-600 dark:text-gray-300'
+                'h-7 text-xs font-mono',
+                'bg-background',
+                'text-muted-foreground'
               )}
               disabled={loading}
             />

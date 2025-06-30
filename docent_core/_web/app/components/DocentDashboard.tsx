@@ -113,7 +113,7 @@ export default function DocentDashboard() {
               <div className="text-lg font-semibold tracking-tight">
                 Docent Dashboard
               </div>
-              <div className="text-xs text-gray-500">
+              <div className="text-xs text-muted-foreground">
                 Welcome {user.email}! {user.is_anonymous ? 'Make an account to create new FrameGrids.' : 'Create a new FrameGrid for each benchmark or set of experiments.'}
               </div>
             </div>

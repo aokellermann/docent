@@ -86,7 +86,7 @@ const CollaboratorRow = ({ collaborator }: CollaboratorRowProps) => {
   return (
     <div className={cn('flex items-center justify-between')}>
       <div className="flex items-center gap-3 flex-1 min-w-0">
-        <Avatar className="h-8 w-8">
+        <Avatar className="h-7 w-8">
           <AvatarFallback className="text-xs">
             {getInitials(displayName)}
           </AvatarFallback>
@@ -163,7 +163,7 @@ const CollaboratorsList = ({ framegridId }: CollaboratorsListProps) => {
   if (!userCollaborators?.length && !orgCollaborators?.length) {
     return (
       <div className="text-center py-6 text-muted-foreground">
-        <User className="mx-auto h-8 w-8 mb-2 opacity-50" />
+        <User className="mx-auto h-7 w-8 mb-2 opacity-50" />
         <p className="text-xs">No collaborators yet</p>
       </div>
     );

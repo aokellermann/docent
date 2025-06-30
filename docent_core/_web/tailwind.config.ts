@@ -21,11 +21,11 @@ const config: Config = {
         mono: ['var(--font-jetbrains-mono)'],
       },
       backgroundColor: {
-        'field-wrapper': '#F9FAFB',
-        'light-green': '#d6ebe3ff',
-        'mid-green': '#c5e3d7',
-        'navbar-btn': '#C7C7C7',
-        pill: '#EBFDF2',
+        'field-wrapper': 'hsl(var(--secondary))',
+        'light-green': 'hsl(var(--accent))',
+        'mid-green': 'hsl(var(--accent-foreground))',
+        'navbar-btn': 'hsl(var(--muted))',
+        pill: 'hsl(var(--primary-foreground))',
       },
       backgroundImage: {
         'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
@@ -38,10 +38,10 @@ const config: Config = {
         sm: 'calc(var(--radius) - 4px)',
       },
       colors: {
-        navbar: '#555',
-        normal: '#161616',
-        'card-border': '#e5e7eb',
-        'sample-expanded': '#87AFFF',
+        navbar: 'hsl(var(--secondary))',
+        normal: 'hsl(var(--foreground))',
+        'card-border': 'hsl(var(--border))',
+        'sample-expanded': 'hsl(var(--accent))',
         background: 'hsl(var(--background))',
         foreground: 'hsl(var(--foreground))',
         card: {
@@ -82,6 +82,39 @@ const config: Config = {
           '4': 'hsl(var(--chart-4))',
           '5': 'hsl(var(--chart-5))',
         },
+        'blue-bg': 'hsl(var(--blue))',
+        'blue-border': 'hsl(var(--blue-border))',
+        'blue-text': 'hsl(var(--blue-text))',
+        'blue-muted': 'hsl(var(--blue-muted))',
+
+        'orange-bg': 'hsl(var(--orange))',
+        'orange-border': 'hsl(var(--orange-border))',
+        'orange-text': 'hsl(var(--orange-text))',
+
+        'green-bg': 'hsl(var(--green))',
+        'green-border': 'hsl(var(--green-border))',
+        'green-text': 'hsl(var(--green-text))',
+        'green-muted': 'hsl(var(--green-muted))',
+
+        'yellow-bg': 'hsl(var(--yellow))',
+        'yellow-border': 'hsl(var(--yellow-border))',
+        'yellow-text': 'hsl(var(--yellow-text))',
+        'yellow-muted': 'hsl(var(--yellow-muted))',
+
+        'red-bg': 'hsl(var(--red))',
+        'red-border': 'hsl(var(--red-border))',
+        'red-text': 'hsl(var(--red-text))',
+        'red-muted': 'hsl(var(--red-muted))',
+
+        'indigo-bg': 'hsl(var(--indigo))',
+        'indigo-border': 'hsl(var(--indigo-border))',
+        'indigo-text': 'hsl(var(--indigo-text))',
+        'indigo-muted': 'hsl(var(--indigo-muted))',
+
+        'purple-bg': 'hsl(var(--purple))',
+        'purple-border': 'hsl(var(--purple-border))',
+        'purple-text': 'hsl(var(--purple-text))',
+
       },
       fontSize: {
         '3xs': '0.5rem',
@@ -98,7 +131,7 @@ const config: Config = {
   safelist: [
     // These colors are dynamically generated in AgentRunViewer.tsx, so we have to tell tailwind to include them
     {
-      pattern: /(bg|border)-(blue|gray|green|orange)-(50|200)/,
+      pattern: /(bg|border)-(blue|gray|green|orange)-(bg|border|text)/,
     },
   ],
 };

@@ -1,4 +1,4 @@
-import { ArrowLeftRight } from 'lucide-react';
+import { ArrowLeftRight, RotateCcw } from 'lucide-react';
 import React, { useMemo } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 
 import {
   setIODims,
@@ -71,15 +76,20 @@ export default function DimensionSelector({
     }
   };
 
-  const showSwapButton =
-    innerDim &&
-    outerDim &&
-    outerDim !== 'None';
+  const handleClearDimensions = () => {
+    dispatch(setIODims({ innerBinKey: undefined, outerBinKey: undefined }));
+  };
+
+  const showSwapButton = innerDim && outerDim && outerDim !== 'None';
+
+  const showClearButton =
+    (innerDim && innerDim !== 'None') || (outerDim && outerDim !== 'None');
 
   const filteredAgentRunMetadataFields = useMemo(() => {
-    return agentRunMetadataFields
-      .filter((field) => field.name.startsWith('metadata.')) // FIXME(mengk): FIX THIS HACK!!!
-      // .filter((field) => !field.name.includes('run_id')) // Filter out run_id because too high cardinality
+    return agentRunMetadataFields.filter((field) =>
+      field.name.startsWith('metadata.')
+    ); // FIXME(mengk): FIX THIS HACK!!!
+    // .filter((field) => !field.name.includes('run_id')) // Filter out run_id because too high cardinality
   }, [agentRunMetadataFields]);
 
   return (
@@ -88,67 +98,81 @@ export default function DimensionSelector({
     >
       <div className="flex items-center space-x-1">
         <div className="flex items-center space-x-1">
-          <span className="text-xs text-gray-500">Outer:</span>
+          <span className="text-xs text-muted-foreground">Outer:</span>
           <Select
             value={outerDim || 'None'}
             onValueChange={handleOuterDimChange}
           >
-            <SelectTrigger className="h-6 max-w-24 text-xs border-gray-200 bg-transparent hover:bg-gray-50 px-2 font-normal">
+            <SelectTrigger className="h-6 max-w-24 w-24 text-xs border-border bg-transparent hover:bg-secondary px-2 font-normal">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="None" className="text-xs">
                 None
               </SelectItem>
-              {filteredAgentRunMetadataFields
-                .map((field) => (
-                  <SelectItem
-                    key={field.name}
-                    value={field.name.replace('metadata.', '')} // FIXME(mengk): FIX THIS HACK!!!
-                    className="text-xs"
-                  >
-                    {field.name.replace('metadata.', '')}
-                  </SelectItem>
-                ))}
+              {filteredAgentRunMetadataFields.map((field) => (
+                <SelectItem
+                  key={field.name}
+                  value={field.name.replace('metadata.', '')} // FIXME(mengk): FIX THIS HACK!!!
+                  className="text-xs"
+                >
+                  {field.name.replace('metadata.', '')}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
 
-          {showSwapButton && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 px-1 rounded-xl bg-gray-100 hover:bg-gray-200 transition-all duration-200 text-gray-500 hover:text-gray-800"
-              onClick={handleSwapDimensions}
-              title="Swap dimensions"
-            >
-              <ArrowLeftRight size={14} className="stroke-[1.5]" />
-            </Button>
-          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 px-1 w-6 hover:bg-accent transition-all duration-200 text-muted-foreground hover:text-primary"
+            onClick={handleSwapDimensions}
+            title="Swap dimensions"
+            disabled={!showSwapButton}
+          >
+            <ArrowLeftRight size={14} className="stroke-[1.5]" />
+          </Button>
 
-          <span className="text-xs text-gray-500">Inner:</span>
+          <span className="text-xs text-muted-foreground">Inner:</span>
           <Select
             value={innerDim || 'None'}
             onValueChange={handleInnerDimChange}
           >
-            <SelectTrigger className="h-6 max-w-24 text-xs border-gray-200 bg-transparent hover:bg-gray-50 px-2 font-normal">
+            <SelectTrigger className="h-6 max-w-24 text-xs w-24 border-border bg-transparent hover:bg-secondary px-2 font-normal">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="None" className="text-xs">
                 None
               </SelectItem>
-              {filteredAgentRunMetadataFields
-                .map((field) => (
-                  <SelectItem
-                    key={field.name}
-                    value={field.name.replace('metadata.', '')} // FIXME(mengk): FIX THIS HACK!!!
-                    className="text-xs"
-                  >
-                    {field.name.replace('metadata.', '')}
-                  </SelectItem>
-                ))}
+              {filteredAgentRunMetadataFields.map((field) => (
+                <SelectItem
+                  key={field.name}
+                  value={field.name.replace('metadata.', '')} // FIXME(mengk): FIX THIS HACK!!!
+                  className="text-xs"
+                >
+                  {field.name.replace('metadata.', '')}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 px-1 w-6 hover:bg-accent transition-all duration-200 text-muted-foreground hover:text-primary"
+                onClick={handleClearDimensions}
+                disabled={!showClearButton}
+              >
+                <RotateCcw size={14} className="stroke-[1.5]" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              <p>Clear selected keys</p>
+            </TooltipContent>
+          </Tooltip>
         </div>
       </div>
     </div>

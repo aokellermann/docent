@@ -106,13 +106,15 @@ export const TranscriptFilterControls = () => {
   };
 
   return (
-    <div className="border rounded-sm bg-gray-50 p-1.5 space-y-1.5">
+    <div className="border rounded-sm bg-secondary p-1.5 space-y-1.5">
       {/* Input form */}
       <div className="grid grid-cols-[1fr_auto_1fr_auto] gap-1.5">
         <div>
-          <div className="text-xs text-gray-600 font-mono mb-1">Filter by</div>
+          <div className="text-xs text-muted-foreground font-mono ml-1 mb-1">
+            Filter by
+          </div>
           <Select value={metadataKey} onValueChange={handleFieldChange}>
-            <SelectTrigger className="h-7 text-xs bg-white font-mono text-gray-600">
+            <SelectTrigger className="h-7 text-xs bg-background font-mono text-muted-foreground">
               <SelectValue placeholder="Select field" />
             </SelectTrigger>
             <SelectContent>
@@ -120,7 +122,7 @@ export const TranscriptFilterControls = () => {
                 <SelectItem
                   key={field.name}
                   value={field.name}
-                  className="font-mono text-gray-600 text-xs"
+                  className="font-mono text-muted-foreground text-xs"
                 >
                   {field.name}
                 </SelectItem>
@@ -130,9 +132,11 @@ export const TranscriptFilterControls = () => {
         </div>
         {metadataType === 'int' || metadataType === 'float' ? (
           <div>
-            <div className="text-xs text-gray-600 font-mono mb-1">Operator</div>
+            <div className="text-xs text-muted-foreground font-mono mr-1 mb-1">
+              Operator
+            </div>
             <Select value={metadataOp} onValueChange={setMetadataOp}>
-              <SelectTrigger className="h-7 text-xs bg-white font-mono text-gray-600 w-16">
+              <SelectTrigger className="h-7 text-xs bg-background font-mono text-muted-foreground w-16">
                 <SelectValue placeholder="==" />
               </SelectTrigger>
               <SelectContent>
@@ -159,9 +163,11 @@ export const TranscriptFilterControls = () => {
           </div>
         ) : (
           <div>
-            <div className="text-xs text-gray-600 font-mono mb-1">Operator</div>
+            <div className="text-xs text-muted-foreground font-mono mr-1 mb-1">
+              Operator
+            </div>
             <Select value={metadataOp} onValueChange={setMetadataOp}>
-              <SelectTrigger className="h-7 text-xs bg-white font-mono text-gray-600 w-16">
+              <SelectTrigger className="h-7 text-xs bg-background font-mono text-muted-foreground w-16">
                 <SelectValue placeholder="==" />
               </SelectTrigger>
               <SelectContent>
@@ -181,7 +187,7 @@ export const TranscriptFilterControls = () => {
           </div>
         )}
         <div>
-          <div className="text-xs text-gray-600 font-mono mb-1">
+          <div className="text-xs text-muted-foreground font-mono ml-1 mb-1">
             Value{metadataType ? ` (${metadataType})` : ''}
           </div>
           {metadataType === 'bool' ? (
@@ -189,7 +195,7 @@ export const TranscriptFilterControls = () => {
               value={metadataValue}
               onValueChange={onUpdateMetadataFilter}
             >
-              <SelectTrigger className="h-7 text-xs bg-white font-mono text-gray-600">
+              <SelectTrigger className="h-7 text-xs bg-background font-mono text-muted-foreground">
                 <SelectValue placeholder="Select value" />
               </SelectTrigger>
               <SelectContent>
@@ -207,7 +213,7 @@ export const TranscriptFilterControls = () => {
               onChange={(e) => setMetadataValue(e.target.value)}
               placeholder={metadataType === 'int' ? 'e.g. 42' : 'e.g. value'}
               type={metadataType === 'int' ? 'number' : 'text'}
-              className="h-7 text-xs bg-white font-mono text-gray-600"
+              className="h-7 text-xs bg-background font-mono text-muted-foreground"
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
@@ -218,7 +224,7 @@ export const TranscriptFilterControls = () => {
           )}
         </div>
         <div>
-          <div className="text-xs text-gray-600 mb-1">&nbsp;</div>
+          <div className="text-xs text-muted-foreground mb-1">&nbsp;</div>
           <Button
             onClick={() => onUpdateMetadataFilter(metadataValue)}
             disabled={
@@ -241,7 +247,7 @@ export const TranscriptFilterControls = () => {
           {baseFilter.filters.map((subFilter: FrameFilter) => (
             <div
               key={subFilter.id}
-              className="inline-flex items-center gap-x-1 text-[11px] bg-indigo-50 text-indigo-800 border border-indigo-100 pl-1.5 pr-1 py-0.5 rounded-md"
+              className="inline-flex items-center gap-x-1 text-[11px] bg-indigo-bg text-primary border border-indigo-border pl-1.5 pr-1 py-0 rounded-md"
             >
               {(() => {
                 if (subFilter.type === 'primitive') {
@@ -265,18 +271,18 @@ export const TranscriptFilterControls = () => {
               })()}
               <button
                 onClick={() => dispatch(removeBaseFilter(subFilter.id))}
-                className="ml-0.5 hover:bg-indigo-100 rounded-full p-0.5 text-indigo-400 hover:text-indigo-600 transition-colors"
+                className="p-0.5 text-primary hover:text-primary/50 transition-colors"
               >
-                <CircleX size={12} />
+                <CircleX size={10} />
               </button>
             </div>
           ))}
           <button
             onClick={() => dispatch(clearBaseFilters())}
-            className="inline-flex items-center gap-x-1 text-[11px] bg-red-50 text-red-500 border border-red-100 px-1.5 py-0.5 rounded-md hover:bg-red-100 transition-colors"
+            className="inline-flex items-center gap-x-1 text-[11px] bg-red-bg text-primary border border-red-border px-1.5 py-0.5 rounded-md hover:bg-red-bg/50 transition-colors"
           >
-            <RefreshCw className="h-3 w-3 mr" />
             Clear
+            <RefreshCw size={10} />
           </button>
         </div>
       )}

@@ -1,5 +1,6 @@
 import { toast } from '@/hooks/use-toast';
 import { copyToClipboard } from '@/lib/utils';
+import { Copy } from 'lucide-react';
 
 export default function UuidPill({ uuid }: { uuid?: string }) {
   if (!uuid) return null;
@@ -24,10 +25,11 @@ export default function UuidPill({ uuid }: { uuid?: string }) {
 
   return (
     <span
-      className="inline-flex items-center h-6 px-0.5 py-0.5 rounded-md text-xs font-mono text-gray-500 bg-gray-100 border border-gray-200 cursor-pointer hover:bg-gray-200 transition-colors"
+      className="inline-flex items-center h-7 gap-x-1 pl-1 pr-0.5 py-0.5 rounded-md text-xs font-mono text-muted-foreground bg-muted border border-border cursor-pointer hover:bg-accent transition-colors"
       onClick={onClick}
       title="Click to copy full UUID"
     >
+      <Copy className="h-3 w-3" />
       {shortUuid}
     </span>
   );

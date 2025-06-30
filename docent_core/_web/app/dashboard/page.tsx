@@ -1,4 +1,5 @@
 'use client';
+import { ModeToggle } from '@/components/ui/theme-toggle';
 
 import { Loader2, PlusIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -112,7 +113,7 @@ export default function HomePage() {
               <div className="text-lg font-semibold tracking-tight">
                 Docent Dashboard
               </div>
-              <div className="text-xs text-gray-500">
+              <div className="text-xs text-muted-foreground">
                 Welcome {user.email}!{' '}
                 {user.is_anonymous
                   ? 'Make an account to create new FrameGrids.'
@@ -140,6 +141,7 @@ export default function HomePage() {
                   )}
                 </Tooltip>
               </TooltipProvider>
+              <ModeToggle />
               <UserProfile />
             </div>
           </div>

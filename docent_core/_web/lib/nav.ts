@@ -12,7 +12,7 @@ export const getAgentRunUrl = (
 ) => {
   const prefix =
     `${BASE_DOCENT_PATH}/${fgId}/` +
-    (paired ? 'paired_transcript' : 'transcript') +
+    (paired ? 'paired_transcript' : 'agent_run') +
     `/${agentRunId}`;
   const params = new URLSearchParams();
 

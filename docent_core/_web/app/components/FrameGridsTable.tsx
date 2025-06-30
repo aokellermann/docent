@@ -58,7 +58,7 @@ export function FrameGridsTable({
   if (isLoading || !frameGrids) {
     return (
       <div className="flex-1 flex items-center justify-center h-full min-h-[200px]">
-        <Loader2 className="h-5 w-5 animate-spin text-gray-500" />
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -66,13 +66,13 @@ export function FrameGridsTable({
   if (frameGrids.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-8 px-3 text-center">
-        <div className="bg-gray-50 p-3 rounded-full mb-3">
-          <Layers className="h-6 w-6 text-gray-400" />
+        <div className="bg-secondary p-3 rounded-full mb-3">
+          <Layers className="h-7 w-7 text-secondary" />
         </div>
-        <h3 className="text-sm font-medium text-gray-900 mb-1">
+        <h3 className="text-sm font-medium text-primary mb-1">
           No frame grids available
         </h3>
-        <p className="text-xs text-gray-500 max-w-md">
+        <p className="text-xs text-muted-foreground max-w-md">
           No frame grids have been created yet. Create a new frame grid to get
           started.
         </p>
@@ -83,21 +83,21 @@ export function FrameGridsTable({
   return (
     <>
       <Table>
-        <TableHeader className="bg-gray-50 sticky top-0">
+        <TableHeader className="bg-secondary sticky top-0">
           <TableRow>
-            <TableHead className="w-[15%] py-2.5 font-medium text-xs text-gray-500">
+            <TableHead className="w-[15%] py-2.5 font-medium text-xs text-muted-foreground">
               ID
             </TableHead>
-            <TableHead className="w-[25%] py-2.5 font-medium text-xs text-gray-500">
+            <TableHead className="w-[25%] py-2.5 font-medium text-xs text-muted-foreground">
               Name
             </TableHead>
-            <TableHead className="w-[35%] py-2.5 font-medium text-xs text-gray-500">
+            <TableHead className="w-[35%] py-2.5 font-medium text-xs text-muted-foreground">
               Description
             </TableHead>
-            <TableHead className="w-[15%] py-2.5 font-medium text-xs text-gray-500">
+            <TableHead className="w-[15%] py-2.5 font-medium text-xs text-muted-foreground">
               Created
             </TableHead>
-            <TableHead className="w-[10%] py-2.5 font-medium text-xs text-gray-500 text-right">
+            <TableHead className="w-[10%] py-2.5 font-medium text-xs text-muted-foreground text-right">
               Actions
             </TableHead>
           </TableRow>
@@ -125,14 +125,14 @@ export function FrameGridsTable({
           </DialogHeader>
           <div className="py-4">
             {deletingGrid && (
-              <div className="flex flex-col space-y-2 bg-gray-50 p-3 rounded-md">
+              <div className="flex flex-col space-y-2 bg-secondary p-3 rounded-md">
                 <div className="text-sm font-medium">
                   {deletingGrid.name || 'Unnamed Grid'}
                 </div>
-                <div className="text-xs text-gray-500">
+                <div className="text-xs text-muted-foreground">
                   {deletingGrid.description || 'No description'}
                 </div>
-                <div className="text-xs font-mono text-gray-400">
+                <div className="text-xs font-mono text-secondary">
                   ID: {deletingGrid.id}
                 </div>
               </div>

@@ -86,10 +86,10 @@ const DebugReduxState: React.FC<DebugReduxStateProps> = ({
     key = ''
   ): React.ReactNode => {
     if (value === null)
-      return <span className="text-gray-400 dark:text-gray-500">null</span>;
+      return <span className="text-muted-foreground">null</span>;
     if (value === undefined)
       return (
-        <span className="text-gray-400 dark:text-gray-500">undefined</span>
+        <span className="text-muted-foreground">undefined</span>
       );
 
     const valueKey = `${key}-value`;
@@ -100,14 +100,14 @@ const DebugReduxState: React.FC<DebugReduxStateProps> = ({
         return (
           <span
             className={cn(
-              'text-green-600 dark:text-green-400 cursor-pointer hover:opacity-80',
+              'text-green-text cursor-pointer hover:opacity-80',
               isCopied && 'opacity-50'
             )}
             onClick={() => copyToClipboard(value, valueKey)}
           >
             {value}
             {isCopied && (
-              <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">
+              <span className="ml-1 text-xs text-muted-foreground">
                 (copied!)
               </span>
             )}
@@ -117,14 +117,14 @@ const DebugReduxState: React.FC<DebugReduxStateProps> = ({
         return (
           <span
             className={cn(
-              'text-blue-600 dark:text-blue-400 cursor-pointer hover:opacity-80',
+              'text-foreground cursor-pointer hover:opacity-80',
               isCopied && 'opacity-50'
             )}
             onClick={() => copyToClipboard(value, valueKey)}
           >
             {value}
             {isCopied && (
-              <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">
+              <span className="ml-1 text-xs text-muted-foreground">
                 (copied!)
               </span>
             )}
@@ -134,14 +134,14 @@ const DebugReduxState: React.FC<DebugReduxStateProps> = ({
         return (
           <span
             className={cn(
-              'text-purple-600 dark:text-purple-400 cursor-pointer hover:opacity-80',
+              'text-purple-text cursor-pointer hover:opacity-80',
               isCopied && 'opacity-50'
             )}
             onClick={() => copyToClipboard(value, valueKey)}
           >
             {value.toString()}
             {isCopied && (
-              <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">
+              <span className="ml-1 text-xs text-muted-foreground">
                 (copied!)
               </span>
             )}
@@ -149,7 +149,7 @@ const DebugReduxState: React.FC<DebugReduxStateProps> = ({
         );
       case 'function':
         return (
-          <span className="text-gray-500 dark:text-gray-400">Function</span>
+          <span className="text-muted-foreground">Function</span>
         );
       case 'object': {
         const objectKey = key || `root-${depth}`;
@@ -157,13 +157,13 @@ const DebugReduxState: React.FC<DebugReduxStateProps> = ({
 
         if (Array.isArray(value)) {
           if (value.length === 0)
-            return <span className="text-gray-500 dark:text-gray-400">[]</span>;
+            return <span className="text-muted-foreground">[]</span>;
 
           return (
             <span>
               <button
                 onClick={() => toggleExpand(objectKey)}
-                className="mr-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                className="mr-1 text-muted-foreground hover:text-foreground"
               >
                 {isExpanded ? '  ▼' : '  ▶'}
               </button>
@@ -186,14 +186,14 @@ const DebugReduxState: React.FC<DebugReduxStateProps> = ({
               ) : (
                 <span
                   className={cn(
-                    'text-gray-500 dark:text-gray-400 cursor-pointer hover:opacity-80',
+                    'text-muted-foreground cursor-pointer hover:opacity-80',
                     isCopied && 'opacity-50'
                   )}
                   onClick={() => copyToClipboard(value, valueKey)}
                 >
                   [...]
                   {isCopied && (
-                    <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">
+                    <span className="ml-1 text-xs text-muted-foreground">
                       (copied!)
                     </span>
                   )}
@@ -207,14 +207,14 @@ const DebugReduxState: React.FC<DebugReduxStateProps> = ({
         const entries = Object.entries(value);
         if (entries.length === 0)
           return (
-            <span className="text-gray-500 dark:text-gray-400">{'{}'}</span>
+            <span className="text-muted-foreground">{'{}'}</span>
           );
 
         return (
           <span>
             <button
               onClick={() => toggleExpand(objectKey)}
-              className="mr-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              className="mr-1 text-muted-foreground hover:text-foreground"
             >
               {isExpanded ? '  ▼' : '  ▶'}
             </button>
@@ -223,7 +223,7 @@ const DebugReduxState: React.FC<DebugReduxStateProps> = ({
                 {'{'}
                 {entries.map(([k, v], i) => (
                   <span key={k} className="ml-1 block">
-                    <span className="text-yellow-600 dark:text-yellow-400">
+                    <span className="text-yellow-text">
                       {k}
                     </span>
                     : {formatValue(v, depth + 1, maxDepth, `${objectKey}-${k}`)}
@@ -235,14 +235,14 @@ const DebugReduxState: React.FC<DebugReduxStateProps> = ({
             ) : (
               <span
                 className={cn(
-                  'text-gray-500 dark:text-gray-400 cursor-pointer hover:opacity-80',
+                  'text-muted-foreground cursor-pointer hover:opacity-80',
                   isCopied && 'opacity-50'
                 )}
                 onClick={() => copyToClipboard(value, valueKey)}
               >
                 {'{...}'}
                 {isCopied && (
-                  <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">
+                  <span className="ml-1 text-xs text-muted-foreground">
                     (copied!)
                   </span>
                 )}

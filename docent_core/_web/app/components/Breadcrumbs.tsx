@@ -1,3 +1,4 @@
+import { ModeToggle } from '@/components/ui/theme-toggle';
 import { BookText, ChevronRight, Layers } from 'lucide-react';
 import Link from 'next/link';
 import {
@@ -70,7 +71,7 @@ const Breadcrumbs: React.FC = () => {
               className="h-7 text-xs whitespace-nowrap px-2 py-0 flex items-center gap-x-1"
               onClick={() => router.push('/dashboard')}
             >
-              <Layers size={16} />
+              <Layers size={12} />
             </Button>
           </TooltipTrigger>
           <TooltipContent>
@@ -84,19 +85,19 @@ const Breadcrumbs: React.FC = () => {
           {fgId && (agentRunId || sampleId || isDiffPage || isForestPage) ? (
             <Link
               href={`${BASE_DOCENT_PATH}/${fgId}`}
-              className="text-blue-600 hover:underline"
+              className="text-blue-text hover:underline"
             >
               All agent runs
             </Link>
           ) : (
-            <span className="text-gray-700">All agent runs</span>
+            <span className="text-muted-foreground">All agent runs</span>
           )}
 
           {/* Transcript page */}
           {agentRunId && (
             <>
               <ChevronRight size={18} />
-              <span className="text-gray-700">Agent run {agentRunId}</span>
+              <span className="text-muted-foreground">Agent run {agentRunId}</span>
             </>
           )}
 
@@ -104,7 +105,7 @@ const Breadcrumbs: React.FC = () => {
           {isForestPage && sampleId && (
             <>
               <ChevronRight size={18} />
-              <span className="text-gray-700">Sample {sampleId} tree</span>
+              <span className="text-muted-foreground">Sample {sampleId} tree</span>
             </>
           )}
 
@@ -112,7 +113,7 @@ const Breadcrumbs: React.FC = () => {
           {isDiffPage && datapoint1 && datapoint2 && (
             <>
               <ChevronRight size={18} />
-              <span className="text-gray-700">
+              <span className="text-muted-foreground">
                 Compare: {datapoint1} vs {datapoint2}
               </span>
             </>
@@ -131,7 +132,7 @@ const Breadcrumbs: React.FC = () => {
             target="_blank"
             className="flex items-center gap-x-2"
           >
-            <BookText size={16} />
+            <BookText size={12} />
             Docs
           </Link>
         </Button>
@@ -146,14 +147,14 @@ const Breadcrumbs: React.FC = () => {
         <Button
           variant="outline"
           size="sm"
-          className="gap-x-2 h-7 cursor-default px-2"
+          className="gap-x-2 h-7 cursor-default px-2 pointer-events-none"
         >
           <div
-            className={`w-2.5 h-2.5 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}
+            className={`w-2.5 h-2.5 rounded-full ${isConnected ? 'bg-green-text' : 'bg-red-text'}`}
           />
           {isConnected ? 'Connected' : 'Disconnected'}
         </Button>
-
+        <ModeToggle />
         <UserProfile />
       </div>
     </div>

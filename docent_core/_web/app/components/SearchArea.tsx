@@ -10,7 +10,7 @@ import {
   RefreshCw,
   Share2,
   Sparkles,
-  XOctagon,
+  Trash,
   Play,
   EyeOff,
   Square,
@@ -52,12 +52,14 @@ const PRESET_QUERIES = [
     label: 'Environment issues',
     query: 'potential issues with the environment the agent is operating in',
     icon: Earth,
+    color: 'text-blue-text',
   },
   {
     id: 'strange',
     label: 'Strange behaviors',
     query: 'cases where the agent acted in a strange or unexpected way',
     icon: HelpCircle,
+    color: 'text-orange-text',
   },
   {
     id: 'unfollow',
@@ -65,6 +67,7 @@ const PRESET_QUERIES = [
     query:
       'cases where the agent did not follow instructions given to it or directly disobeyed them',
     icon: AlertTriangle,
+    color: 'text-red-text',
   },
 ];
 
@@ -313,25 +316,25 @@ const SearchArea = () => {
     <Card className="h-full flex overflow-y-auto flex-col flex-1 p-3 custom-scrollbar space-y-3">
       {/* Global search */}
       <div className="space-y-2">
-        <div>
+        <div className="flex flex-col">
           <div className="text-sm font-semibold">Global Search</div>
-          <div className="text-xs">
+          <div className="text-xs text-muted-foreground">
             Look for complex qualitative patterns, errors, or other interesting
             phenomena
           </div>
         </div>
 
-        <div className="border rounded-sm bg-gray-50 p-2 space-y-1">
+        <div className="border rounded-sm bg-secondary p-2 space-y-1">
           <div className="flex items-center justify-between text-xs">
-            <div className="text-gray-600">Search query</div>
+            <div className="text-primary mb-1">Search query</div>
             {curSearchQuery && loadingProgress && !loadingSearchQuery && (
-              <div className="text-gray-400">
+              <div className="text-secondary">
                 {loadingProgress[0]} searches finished
                 {loadingProgress[1] - loadingProgress[0] > 0 && (
                   <>
                     , {loadingProgress[1] - loadingProgress[0]} had API issues{' '}
                     <span
-                      className="cursor-pointer text-indigo-500 hover:text-indigo-600"
+                      className="cursor-pointer text-primary hover:text-primary"
                       onClick={() => handleSearch(curSearchQuery)}
                     >
                       (retry)
@@ -345,14 +348,14 @@ const SearchArea = () => {
             <div className="space-y-2">
               <div className="flex items-center">
                 <div className="flex-1">
-                  <div className="px-2 py-1 bg-indigo-50 border border-indigo-100 rounded text-xs font-mono whitespace-pre-wrap text-indigo-800">
+                  <div className="px-2 py-1 bg-indigo-bg border border-indigo-border rounded text-xs font-mono whitespace-pre-wrap text-primary">
                     {curSearchQuery}
                   </div>
                 </div>
                 <div className="flex flex-col xl:flex-row ml-2 space-y-1 xl:space-y-0 xl:space-x-1">
                   <button
                     onClick={async () => await handleShare(curSearchQuery)}
-                    className="inline-flex items-center gap-x-1 text-xs bg-blue-50 text-blue-500 border border-blue-100 px-1.5 py-0.5 rounded-md disabled:opacity-50 hover:bg-blue-100 transition-colors"
+                    className="inline-flex items-center gap-x-1 text-xs bg-blue-bg text-accent-foreground border border-blue-border px-2 py-1 rounded-md disabled:opacity-50 hover:bg-blue-muted transition-colors"
                     title="Share this search"
                     disabled={!hasWritePermission}
                   >
@@ -363,7 +366,7 @@ const SearchArea = () => {
                     <>
                       <button
                         onClick={() => handleClearSearch()}
-                        className="inline-flex items-center gap-x-1 text-xs bg-gray-50 text-gray-600 border border-gray-200 px-1.5 py-0.5 rounded-md hover:bg-gray-100 transition-colors"
+                        className="inline-flex items-center gap-x-1 text-xs bg-secondary text-muted-foreground border border-primary/80 px-1.5 py-1 rounded-md hover:bg-primary/10 transition-colors"
                         title="Clear display (search continues in background)"
                       >
                         <EyeOff className="h-3 w-3" />
@@ -373,7 +376,7 @@ const SearchArea = () => {
                       {paused ? (
                         <button
                           onClick={() => handleSearch(curSearchQuery)}
-                          className="inline-flex items-center gap-x-1 text-xs bg-green-50 text-green-500 border border-green-100 px-1.5 py-0.5 rounded-md hover:bg-green-100 transition-colors"
+                          className="inline-flex items-center gap-x-1 text-xs bg-green-bg text-green-foreground border border-green-border px-1.5 py-1 rounded-md hover:bg-green-muted transition-colors"
                           title="Resume search to get more results"
                         >
                           <Play className="h-3 w-3" />
@@ -382,7 +385,7 @@ const SearchArea = () => {
                       ) : (
                         <button
                           onClick={() => handleStopSearch()}
-                          className="inline-flex items-center gap-x-1 text-xs bg-red-50 text-red-500 border border-red-100 px-1.5 py-0.5 rounded-md hover:bg-red-100 transition-colors"
+                          className="inline-flex items-center gap-x-1 text-xs bg-red-bg text-primary border border-red-border px-1.5 py-1 rounded-md hover:bg-red-muted transition-colors"
                           title="Stop search and clear results"
                         >
                           <Square className="h-3 w-3" />
@@ -393,7 +396,7 @@ const SearchArea = () => {
                   ) : (
                     <button
                       onClick={() => handleClearSearch()}
-                      className="inline-flex items-center gap-x-1 text-xs bg-red-50 text-red-500 border border-red-100 px-1.5 py-0.5 rounded-md hover:bg-red-100 transition-colors"
+                      className="inline-flex items-center gap-x-1 text-xs bg-red-bg text-primary border border-red-border px-1.5 py-1 rounded-md hover:bg-red-bg transition-colors"
                       title="Stop search and clear results"
                     >
                       <RefreshCw className="h-3 w-3 mr" />
@@ -416,14 +419,14 @@ const SearchArea = () => {
               <Button
                 size="sm"
                 variant="outline"
-                className="text-xs w-full h-7"
+                className="text-xs w-full h-7 border border-border hover:bg-background/30"
                 onClick={handleRequestClusters}
                 disabled={shouldDisableClusterButton}
               >
                 {activeSearchQuery && activeSearchQuery.loading_clusters ? (
                   <Loader2 className="h-3 w-3 mr-2 animate-spin" />
                 ) : (
-                  <Sparkles className="h-3 w-3 mr-2" />
+                  <Sparkles className="text-indigo-text/70 h-3 w-3 mr-2" />
                 )}
                 {activeSearchQuery &&
                 activeSearchQuery.bins &&
@@ -435,7 +438,7 @@ const SearchArea = () => {
               {/* Feedback input for re-clustering - only show when requested */}
               {showFeedbackInput && (
                 <div className="space-y-0.5">
-                  <div className="text-xs text-gray-600 mb-0.5">
+                  <div className="text-xs text-primary mb-1">
                     Feedback for re-clustering
                   </div>
                   <div className="flex space-x-1 items-center">
@@ -444,7 +447,7 @@ const SearchArea = () => {
                       value={clusterFeedback}
                       onChange={(e) => setClusterFeedback(e.target.value)}
                       placeholder="Describe how clusters should be improved..."
-                      className="text-xs bg-white font-mono text-gray-600 flex-1 h-7"
+                      className="text-xs bg-background font-mono text-muted-foreground flex-1 h-7"
                       disabled={shouldDisableClusterButton}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
@@ -479,10 +482,10 @@ const SearchArea = () => {
                         onClick={() => handleSelectPreset(preset.query)}
                         onMouseEnter={() => handlePresetHover(preset.query)}
                         onMouseLeave={handlePresetLeave}
-                        className="inline-flex items-center gap-1.5 px-2 py-1 bg-white border border-gray-200 rounded-full text-xs font-medium text-gray-700 disabled:opacity-50 hover:bg-gray-50 hover:border-gray-300 transition-colors"
+                        className="inline-flex items-center gap-1.5 px-2 py-1 bg-background border border-border rounded-full text-xs font-medium text-primary disabled:opacity-50 hover:bg-secondary hover:border-border transition-colors"
                         disabled={!hasWritePermission}
                       >
-                        <IconComponent className="h-3 w-3 text-blue-500" />
+                        <IconComponent className={`h-3 w-3 ${preset.color}`} />
                         {preset.label}
                       </button>
                     );
@@ -493,7 +496,7 @@ const SearchArea = () => {
                   <Input
                     value={maxResults ?? ''}
                     onChange={handleMaxResultsChange}
-                    className="text-xs bg-white shadow-none font-mono rounded-sm w-[5rem] text-gray-600 flex-1 h-6 px-1"
+                    className="text-xs bg-background shadow-none font-mono rounded-sm w-[5rem] text-muted-foreground flex-1 h-7 px-1"
                     type="number"
                     min="0"
                   />
@@ -523,7 +526,7 @@ const SearchArea = () => {
                     <Button
                       type="button"
                       size="sm"
-                      className="gap-1 h-8 text-xs"
+                      className="gap-1 h-7 text-xs"
                       onClick={() => handleSearch(searchQueryTextboxValue)}
                       disabled={
                         !hasWritePermission || !searchQueryTextboxValue?.trim()
@@ -539,8 +542,8 @@ const SearchArea = () => {
               {/* Search History Section - Updated with consistent colors */}
               {searchesWithStats && searchesWithStats.length > 0 && (
                 <div className="max-h-[20rem] overflow-y-auto pr-1">
-                  <div className="flex justify-between items-center mb-1">
-                    <div className="text-xs font-medium text-gray-500">
+                  <div className="flex justify-between mt-2 items-center mb-1">
+                    <div className="text-xs font-medium text-primary">
                       Saved Searches
                     </div>
                   </div>
@@ -561,7 +564,7 @@ const SearchArea = () => {
                       running: (
                         <button
                           onClick={() => handleStopSearch(search.job.id)}
-                          className="hover:bg-red-50 rounded p-0.5 text-red-400 hover:text-red-600 transition-colors"
+                          className="hover:bg-red-bg rounded p-0.5 text-red-text hover:text-primary  transition-colors"
                           title="Pause search"
                         >
                           <Pause className="h-3 w-3" />
@@ -570,7 +573,7 @@ const SearchArea = () => {
                       pending: (
                         <button
                           disabled
-                          className="rounded p-0.5 text-blue-400  transition-colors"
+                          className="rounded p-0.5 text-primary-foreground transition-colors"
                         >
                           <Loader2 className="h-3 w-3 animate-spin" />
                         </button>
@@ -578,7 +581,7 @@ const SearchArea = () => {
                       completed: (
                         <button
                           disabled
-                          className="rounded p-0.5 text-green-400  transition-colors"
+                          className="rounded p-0.5 text-green-text transition-colors"
                         >
                           <Check className="h-3 w-3" />
                         </button>
@@ -588,7 +591,7 @@ const SearchArea = () => {
                           onClick={() =>
                             resumeSearchFromHistory(search.search_query)
                           }
-                          className="hover:bg-green-50 rounded p-0.5 text-green-400 hover:text-green-600 transition-colors"
+                          className="hover:bg-green-bg rounded p-0.5 text-green-text hover:text-green-foreground transition-colors"
                           title="Resume search"
                         >
                           <Play className="h-3 w-3" />
@@ -599,17 +602,17 @@ const SearchArea = () => {
                     return (
                       <div
                         key={index}
-                        className="group mb-1 border border-gray-100 rounded hover:border-indigo-300 hover:bg-indigo-50 transition-all"
+                        className="group mb-1 border border-border rounded hover:border-indigo-border hover:bg-indigo-bg transition-all"
                       >
-                        <div className="flex items-center py-1.5 px-2 text-xs bg-white">
+                        <div className="flex items-center py-1.5 rounded px-2 text-xs bg-background">
                           <code
-                            className="px-1 bg-gray-50 border border-gray-100 rounded text-[10px] text-gray-500 mr-2 flex-shrink-0"
+                            className="px-1 bg-secondary border border-border rounded text-[10px] text-muted-foreground mr-2 flex-shrink-0"
                             title={search.search_id}
                           >
                             {shortDimId}
                           </code>
                           <div
-                            className="font-mono text-gray-800 truncate flex-1 cursor-pointer"
+                            className="font-mono text-primary truncate flex-1 cursor-pointer"
                             title={search.search_query}
                             onClick={() => {
                               handleSearch(search.search_query);
@@ -620,7 +623,7 @@ const SearchArea = () => {
                           <div className="flex items-center ml-2 space-x-1.5 flex-shrink-0">
                             <div className="flex items-center gap-1.5 border-r pr-2">
                               <div
-                                className="relative w-12 h-1.5 bg-gray-100 rounded-full overflow-hidden flex-shrink-0"
+                                className="relative w-12 h-1.5 bg-secondary rounded-full overflow-hidden flex-shrink-0"
                                 title={`${search.num_judgments_computed} of ${search.num_total} processed`}
                               >
                                 <div
@@ -630,7 +633,11 @@ const SearchArea = () => {
                                   }}
                                 ></div>
                               </div>
-                              <span className="text-[9px] text-gray-500 whitespace-nowrap">
+                              <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+                                {/* This is so jank but im proud of it */}
+                                {Math.round(completionPercentage) < 100 && (
+                                  <span className="text-transparent">_</span>
+                                )}
                                 {Math.round(completionPercentage)}% computed
                               </span>
                             </div>
@@ -641,32 +648,9 @@ const SearchArea = () => {
                                     search.job
                                       .status as keyof typeof statusButton
                                   ]
-                                  // isPaused ? (
-                                  //   <button
-                                  //     onClick={() => resumeSearchFromHistory(search.search_query)}
-                                  //     className="hover:bg-green-50 rounded p-0.5 text-green-400 hover:text-green-600 transition-colors"
-                                  //     title="Resume search"
-                                  //   >
-                                  //     <Play className="h-3 w-3" />
-                                  //   </button>
-                                  // ) : (
-                                  //   isCompleted ? (
-                                  //     <button disabled className="rounded p-0.5 text-green-400  transition-colors">
-                                  //       <Check className="h-3 w-3" />
-                                  //     </button>
-                                  //   ) : (
-                                  //     <button
-                                  //       onClick={() => handleStopSearch(search.job.id)}
-                                  //       className="hover:bg-red-50 rounded p-0.5 text-red-400 hover:text-red-600 transition-colors"
-                                  //       title="Pause search"
-                                  //     >
-                                  //       <Pause className="h-3 w-3" />
-                                  //     </button>
-                                  //   )
-                                  // )
                                 }
                                 <button
-                                  className="hover:bg-indigo-50 rounded p-0.5 text-indigo-400 hover:text-indigo-600 transition-colors"
+                                  className="hover:bg-indigo-bg rounded p-0.5 text-indigo-text transition-colors"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     dispatch(
@@ -681,7 +665,7 @@ const SearchArea = () => {
                                   <Pencil className="h-3 w-3" />
                                 </button>
                                 <button
-                                  className="hover:bg-red-50 rounded p-0.5 text-red-400 hover:text-red-600 transition-colors"
+                                  className="hover:bg-red-bg rounded p-0.5 text-red-text transition-colors"
                                   onClick={async (e) => {
                                     e.stopPropagation();
                                     await dispatch(
@@ -702,7 +686,7 @@ const SearchArea = () => {
                                   }}
                                   title="Delete this saved search"
                                 >
-                                  <XOctagon className="h-3 w-3" />
+                                  <Trash className="h-3 w-3" />
                                 </button>
                               </>
                             )}

@@ -87,7 +87,7 @@ export default function DocentDashboardClientLayout({
 
   return (
     <div className="flex flex-col h-screen w-screen p-3 pt-2 space-y-2 min-h-0 min-w-[900px]">
-      <Suspense fallback={<div className="h-6">Loading breadcrumbs...</div>}>
+      <Suspense fallback={<div className="h-7">Loading breadcrumbs...</div>}>
         <Breadcrumbs />
       </Suspense>
       <ResponsiveCheck>{children}</ResponsiveCheck>
@@ -107,12 +107,12 @@ export function PermissionDeniedPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 space-y-3">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-secondary space-y-3">
       <div className="text-center">
-        <div className="text-base font-semibold text-gray-900">
+        <div className="text-base font-semibold text-primary">
           Access Denied
         </div>
-        <div className="text-gray-600 text-sm">
+        <div className="text-muted-foreground text-sm">
           You don&apos;t have permission to view this resource
         </div>
       </div>
@@ -128,10 +128,10 @@ export function PermissionDeniedPage() {
 export function NotFoundPage() {
   const router = useRouter();
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 space-y-3">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-secondary space-y-3">
       <div className="text-center">
-        <div className="text-base font-semibold text-gray-900">Not Found</div>
-        <div className="text-gray-600 text-sm">
+        <div className="text-base font-semibold text-primary">Not Found</div>
+        <div className="text-muted-foreground text-sm">
           The resource you are looking for does not exist.
         </div>
       </div>

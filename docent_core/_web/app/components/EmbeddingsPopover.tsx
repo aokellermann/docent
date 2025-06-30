@@ -138,12 +138,12 @@ const EmbeddingsPopover: React.FC = () => {
   const renderStatusContent = () => {
     if (isEmbeddingInProgress || isQueued || isLoading) {
       return (
-        <div className="border rounded-sm bg-blue-50 border-blue-200 p-3 space-y-2">
+        <div className="border rounded-sm bg-blue-bg border-blue-border p-3 space-y-2">
           <div className="flex items-center justify-between">
-            <div className="text-xs font-medium text-blue-800">
+            <div className="text-xs font-medium text-primary">
               Computing Embeddings
             </div>
-            <div className="text-xs text-blue-700">
+            <div className="text-xs text-primary">
               {embeddingProgress?.indexing_phase || 'Queued'}
             </div>
           </div>
@@ -151,7 +151,7 @@ const EmbeddingsPopover: React.FC = () => {
           {embeddingProgress && (
             <>
               <div className="space-y-1">
-                <div className="flex items-center justify-between text-xs text-blue-700">
+                <div className="flex items-center justify-between text-xs text-primary">
                   <span>Embedding Progress</span>
                   <span>{embeddingProgress.embedding_progress}%</span>
                 </div>
@@ -163,7 +163,7 @@ const EmbeddingsPopover: React.FC = () => {
 
               {embeddingProgress.indexing_progress > 0 && (
                 <div className="space-y-1">
-                  <div className="flex items-center justify-between text-xs text-blue-700">
+                  <div className="flex items-center justify-between text-xs text-primary">
                     <span>Indexing Progress</span>
                     <span>{embeddingProgress.indexing_progress}%</span>
                   </div>
@@ -181,11 +181,11 @@ const EmbeddingsPopover: React.FC = () => {
 
     if (!hasEmbeddings) {
       return (
-        <div className="border rounded-sm bg-red-50 border-red-200 p-3">
-          <div className="text-xs font-medium text-red-800 mb-1">
+        <div className="border rounded-sm bg-red-bg border-red-border p-3">
+          <div className="text-xs font-medium text-primary mb-1">
             Embeddings Missing
           </div>
-          <div className="text-xs text-red-700">
+          <div className="text-xs text-primary">
             Some runs are missing embeddings. If new agent runs are being added,
             embeddings will be computed automatically.
           </div>
@@ -194,11 +194,11 @@ const EmbeddingsPopover: React.FC = () => {
     }
 
     return (
-      <div className="border rounded-sm bg-green-50 border-green-200 p-2">
-        <div className="text-xs font-medium text-green-800 mb-1">
+      <div className="border rounded-sm bg-green-bg border-green-border p-2">
+        <div className="text-xs font-medium text-primary mb-1">
           Embeddings Available
         </div>
-        <div className="text-xs text-green-700">
+        <div className="text-xs text-primary">
           Embeddings are available for all runs.
         </div>
       </div>
@@ -216,9 +216,9 @@ const EmbeddingsPopover: React.FC = () => {
           variant="outline"
           size="sm"
           className={cn(
-            'gap-2 px-2 h-7 text-gray-700 hover:bg-gray-50',
+            'gap-2 px-2 h-7 text-primary hover:bg-secondary',
             isEmbeddingInProgress &&
-              'text-blue-700 hover:bg-blue-100 bg-blue-50 border-blue-200'
+              'text-primary hover:bg-blue-bg bg-blue-bg border-blue-border'
           )}
           title={
             !hasEmbeddings
@@ -229,9 +229,6 @@ const EmbeddingsPopover: React.FC = () => {
           <Database className="h-4 w-4" />
           Index
           {isEmbeddingInProgress && ` ${embeddingProgress.embedding_progress}%`}
-          {isEmbeddingInProgress && (
-            <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
-          )}
         </Button>
       </PopoverTrigger>
 

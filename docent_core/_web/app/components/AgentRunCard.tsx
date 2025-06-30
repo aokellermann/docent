@@ -25,8 +25,7 @@ export default function AgentRunCard({ agentRunId }: AgentRunCardProps) {
     (state) => state.search.searchResultMap
   );
 
-  // Experiment viewer slice
-  const { regexSnippets } = useAppSelector((state) => state.experimentViewer);
+
 
   // Get search results
   const searchResults = useMemo(() => {
@@ -39,7 +38,7 @@ export default function AgentRunCard({ agentRunId }: AgentRunCardProps) {
   }, [curSearchQuery, searchResultMap, agentRunId]);
 
   return (
-    <div className="flex flex-col p-1 border rounded text-xs bg-white/80 hover:bg-gray-50 min-w-0 overflow-x-hidden">
+    <div className="flex flex-col p-1 border rounded text-xs bg-secondary/30 hover:bg-secondary min-w-0 overflow-x-hidden">
       <div
         className="cursor-pointer"
         onMouseDown={(e) =>
@@ -54,13 +53,13 @@ export default function AgentRunCard({ agentRunId }: AgentRunCardProps) {
           )
         }
       >
-        <div className="flex justify-between items-center">
-          <span className="text-gray-600">
+        <div className="flex justify-between pb-0.5 items-center">
+          <span className="text-primary">
             Agent Run <span className="font-mono">{agentRunId}</span>
           </span>
           <div className="flex gap-2">
             <span
-              className="text-blue-600 font-medium hover:text-blue-700"
+              className="text-blue-text font-medium hover:text-blue-text/80"
               onMouseDown={(e) => {
                 navToAgentRun(
                   e,
@@ -78,10 +77,12 @@ export default function AgentRunCard({ agentRunId }: AgentRunCardProps) {
             </span>
           </div>
         </div>
-        {/* Display metadata if available */}
-        {agentRunMetadata && agentRunMetadata[agentRunId] && (
-          <AgentRunMetadata agentRunId={agentRunId} />
-        )}
+        <div>
+          {/* Display metadata if available */}
+          {agentRunMetadata && agentRunMetadata[agentRunId] && (
+            <AgentRunMetadata agentRunId={agentRunId} />
+          )}
+        </div>
       </div>
 
       {/* <RegexSnippetsSection regexSnippets={regexSnippets?.[agentRunId]} /> */}
@@ -108,7 +109,7 @@ export default function AgentRunCard({ agentRunId }: AgentRunCardProps) {
 //     <div className="border-indigo-100 border-t pt-1 mt-1 space-y-1">
 //       <div className="flex items-center">
 //         <div className="h-2 w-2 rounded-full bg-indigo-500 mr-1.5"></div>
-//         <span className="text-xs font-medium text-indigo-700">
+//         <span className="text-xs font-medium text-primary">
 //           Regex matches
 //         </span>
 //       </div>
@@ -128,7 +129,7 @@ export default function AgentRunCard({ agentRunId }: AgentRunCardProps) {
 //     // Defensive coding to handle missing or malformed data
 //     if (!snippetData || typeof snippetData !== 'object') {
 //       return (
-//         <p className="text-xs text-red-600">Error: Invalid snippet data</p>
+//         <p className="text-xs text-destructive">Error: Invalid snippet data</p>
 //       );
 //     }
 
@@ -141,7 +142,7 @@ export default function AgentRunCard({ agentRunId }: AgentRunCardProps) {
 //       typeof match_end !== 'number'
 //     ) {
 //       return (
-//         <p className="text-xs text-red-600">Error: Invalid snippet format</p>
+//         <p className="text-xs text-destructive">Error: Invalid snippet format</p>
 //       );
 //     }
 
@@ -172,7 +173,7 @@ export default function AgentRunCard({ agentRunId }: AgentRunCardProps) {
 //         >
 //           <span className="text-xs text-indigo-900 break-words whitespace-pre-wrap">
 //             {before}
-//             <span className="px-0.5 py-0.25 bg-indigo-200 text-indigo-800 rounded">
+//             <span className="px-0.5 py-0.25 bg-indigo-200 text-primary rounded">
 //               {matched}
 //             </span>
 //             {after}
@@ -181,7 +182,7 @@ export default function AgentRunCard({ agentRunId }: AgentRunCardProps) {
 //       </div>
 //     );
 //   } catch (error) {
-//     return <p className="text-xs text-red-600">Error rendering snippet</p>;
+//     return <p className="text-xs text-destructive">Error rendering snippet</p>;
 //   }
 // };
 
@@ -199,10 +200,10 @@ export const SearchResultsSection: React.FC<SearchResultsSectionProps> = ({
   }
 
   return (
-    <div className="pt-1 mt-1 border-t border-indigo-100 text-xs space-y-1">
+    <div className="pt-1 mt-1 border-t border-border text-xs space-y-1">
       <div className="flex items-center mb-1">
         <div className="h-2 w-2 rounded-full bg-indigo-500 mr-1.5"></div>
-        <span className="text-xs font-medium text-indigo-700">
+        <span className="text-xs font-medium text-primary">
           Search results
         </span>
       </div>
@@ -236,7 +237,7 @@ export const SearchResultCard: React.FC<{
 
   return (
     <div
-      className="group bg-indigo-50 rounded-md p-1 text-xs text-indigo-900 leading-snug mt-1 hover:bg-indigo-100 transition-colors cursor-pointer border border-transparent hover:border-indigo-200"
+      className="group bg-indigo-bg rounded-md p-1 text-xs text-primary leading-snug mt-1 hover:border-indigo-border transition-colors cursor-pointer border border-transparent"
       onMouseDown={(e) => {
         const firstCitation = citations.length > 0 ? citations[0] : null;
         navToAgentRun(
@@ -265,7 +266,7 @@ export const SearchResultCard: React.FC<{
             )}
           </p>
         </div>
-        <div className="flex items-center gap-1 text-[10px] text-indigo-600 mt-1">
+        <div className="flex items-center gap-1 text-[10px] text-primary mt-1">
           <span className="opacity-70">{curSearchQuery}</span>
         </div>
       </div>

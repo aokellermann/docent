@@ -123,7 +123,7 @@ export function AutoComplete<
               {isLoading && (
                 <CommandPrimitive.Loading>
                   <div className="p-1">
-                    <Skeleton className="h-6 w-full" />
+                    <Skeleton className="h-7 w-full" />
                   </div>
                 </CommandPrimitive.Loading>
               )}

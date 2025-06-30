@@ -65,10 +65,10 @@ export default function ResponsiveCheck({
         <div className="flex justify-center mt-4">
           {isPortraitMobile ? (
             <div className="animate-[spin_2s_ease-in-out_infinite]">
-              <RotateCcw className="h-10 w-10 text-blue-400" />
+              <RotateCcw className="h-10 w-10 text-primary-foreground" />
             </div>
           ) : (
-            <ZoomOut className="h-8 w-8 text-blue-400" />
+            <ZoomOut className="h-7 w-8 text-primary-foreground" />
           )}
         </div>
       </div>

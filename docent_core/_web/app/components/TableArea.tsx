@@ -36,16 +36,18 @@ const getScoreFromStats = (stats: TaskStats) => {
 const getScoreDisplay = (score: number | undefined, ci?: number) => {
   if (typeof score !== 'number') return '';
   let display = score.toFixed(2);
-  if (ci && ci > 0) display += ` ±${ci.toFixed(3)}`;
+  if (ci && ci > 0) display += ` ± ${ci.toFixed(3)}`;
   return display;
 };
 
 const getScoreClass = (score: number | undefined, n: number | undefined) => {
   if (typeof score !== 'number' || n === undefined || n === 0)
-    return 'bg-gray-50 hover:bg-gray-100';
-  if (score >= HIGH_SCORE_THRESHOLD) return 'bg-green-50 hover:bg-green-100';
-  if (score > LOW_SCORE_THRESHOLD) return 'bg-yellow-50 hover:bg-yellow-100';
-  return 'bg-red-50 hover:bg-red-100';
+    return 'bg-secondary hover:bg-muted';
+  if (score >= HIGH_SCORE_THRESHOLD)
+    return 'bg-green-bg hover:bg-green-text/30';
+  if (score > LOW_SCORE_THRESHOLD)
+    return 'bg-yellow-bg hover:bg-yellow-text/30';
+  return 'bg-red-bg hover:bg-red-text/35';
 };
 
 const getFilterTitle = (
@@ -278,7 +280,7 @@ export default function TableArea() {
       <>
         <div className="h-auto max-h-[35%] overflow-y-auto overflow-x-auto custom-scrollbar border rounded-sm">
           <div className="w-full h-16 flex items-center justify-center">
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-muted-foreground">
               Select an inner or outer bin key to view grouped stats
             </p>
           </div>
@@ -291,15 +293,15 @@ export default function TableArea() {
     <>
       <div className="h-auto max-h-[35%] overflow-y-auto overflow-x-auto custom-scrollbar border rounded-sm">
         <table className="w-full border-collapse text-xs">
-          <thead className="sticky top-0 bg-white z-10">
+          <thead className="sticky top-0 bg-background z-10">
             <tr>
-              <th className="border-r border-b border-gray-200 px-2 py-1 sticky left-0" />
+              <th className="border-r border-b border-border px-2 py-1 sticky left-0" />
               {tableData.cols.map(({ id: colId, value: colValue }, colIdx) => (
                 <th
                   key={colId}
                   className={cn(
                     colIdx !== tableData.cols.length - 1 && 'border-r',
-                    'border-b border-gray-200 px-2 py-1 text-center font-normal text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors relative max-w-[200px]'
+                    'border-b border-border px-2 py-1 text-center font-normal text-primary cursor-pointer hover:bg-muted transition-colors relative max-w-[200px]'
                   )}
                   title={
                     tableData.colDimId
@@ -314,7 +316,7 @@ export default function TableArea() {
                   }}
                 >
                   <span className="block truncate overflow-hidden text-ellipsis whitespace-nowrap">
-                    <span className="font-light text-[11px]">
+                    <span className="font-mono font-bold">
                       {tableData.colName}:{' '}
                     </span>
                     <span className="font-mono">{colValue}</span>
@@ -325,9 +327,9 @@ export default function TableArea() {
           </thead>
           <tbody>
             {tableData.rows.map(({ id: rowId, value: rowValue }) => (
-              <tr key={rowId} className="hover:bg-gray-50/50">
+              <tr key={rowId} className="hover:bg-secondary/50">
                 <td
-                  className="border-r border-gray-200 px-2 py-1 text-gray-700 sticky left-0 bg-white cursor-pointer hover:bg-gray-100 transition-colors relative z-[9] max-w-[200px]"
+                  className="border-r border-border px-2 py-1 text-primary sticky left-0 bg-background cursor-pointer hover:bg-muted transition-colors relative z-[9] max-w-[200px]"
                   title={`Filter to ${tableData.rowName}: ${rowValue}`}
                   onClick={() => {
                     if (tableData.rowDimId && dimensionsMap) {
@@ -337,7 +339,7 @@ export default function TableArea() {
                   }}
                 >
                   <span className="block truncate pr-3 overflow-hidden text-ellipsis whitespace-nowrap">
-                    <span className="font-light text-[11px]">
+                    <span className="font-mono font-bold">
                       {tableData.rowName}:{' '}
                     </span>
                     <span className="font-mono">{rowValue}</span>
@@ -393,7 +395,7 @@ export default function TableArea() {
                         key={colId}
                         className={cn(
                           colIdx !== tableData.cols.length - 1 && 'border-r',
-                          'border-gray-200 px-2 py-1 cursor-pointer transition-colors relative text-center',
+                          'border-border px-2 py-1 cursor-pointer transition-colors relative text-center',
                           getScoreClass(score, n)
                         )}
                         title={getFilterTitle(
@@ -427,19 +429,16 @@ export default function TableArea() {
                         }}
                       >
                         {n !== undefined && n > 0 && (
-                          <div>
+                          <div className="flex flex-row gap-3 items-center justify-between text-[11px]">
                             {scoreKey && (
-                              <span className="font-light text-[11px] text-gray-600">
+                              <div className="font-mono text-muted-foreground">
                                 {scoreKey}:{' '}
-                              </span>
+                              </div>
                             )}
-                            <span className="font-mono">
+                            <div className="font-mono">
                               {getScoreDisplay(score, ci)}
-                            </span>
-                            <span className="text-[11px] text-gray-500">
-                              {' '}
-                              n={n}
-                            </span>
+                            </div>
+                            <div className="text-muted-foreground"> n={n}</div>
                           </div>
                         )}
                       </td>

@@ -42,14 +42,14 @@ export function GraphAreaWithTabs() {
   return (
     <div className="h-1/2 flex flex-col">
       {/* Tab Bar */}
-      <div className="flex items-end border-b border-gray-200">
+      <div className="flex items-end border-b border-border">
         {tabs.map((tab) => (
           <div
             key={tab.id}
             className={`group relative flex items-center px-2 py-1 text-xs font-medium cursor-pointer transition-colors rounded-t-md border-t border-l border-r mr-1 ${
               activeTabId === tab.id
-                ? 'bg-white border-gray-200 text-gray-800 -mb-px border-b border-b-white'
-                : 'bg-gray-50/80 border-gray-200 text-gray-600 hover:bg-gray-100 hover:text-gray-800'
+                ? 'bg-background border-border text-primary -mb-px border-b'
+                : 'bg-secondary/80 border-border text-muted-foreground hover:bg-muted hover:text-primary'
             }`}
             onClick={() => setActiveTabId(tab.id)}
           >
@@ -58,8 +58,8 @@ export function GraphAreaWithTabs() {
               <button
                 className={`ml-1 -mr-1 p-0.5 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity ${
                   activeTabId === tab.id
-                    ? 'hover:bg-gray-100'
-                    : 'hover:bg-gray-200'
+                    ? 'hover:bg-muted'
+                    : 'hover:bg-accent'
                 }`}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -74,7 +74,7 @@ export function GraphAreaWithTabs() {
 
         {/* Add Tab Button */}
         <button
-          className="flex items-center justify-center p-1 ml-0 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors self-center"
+          className="flex items-center justify-center p-1 ml-0 text-secondary hover:text-muted-foreground hover:bg-muted rounded transition-colors self-center"
           onClick={addTab}
         >
           <Plus className="h-3 w-3" />
@@ -82,7 +82,7 @@ export function GraphAreaWithTabs() {
       </div>
 
       {/* Tab Content */}
-      <div className="flex-1 bg-white border-l border-r border-b border-gray-200 rounded-b-md">
+      <div className="flex-1 bg-background border-l border-r border-b border-border rounded-b-md">
         {tabs.map((tab) => (
           <div
             key={tab.id}
@@ -93,7 +93,7 @@ export function GraphAreaWithTabs() {
             )}
             {/* Empty divs for other tabs - you can fill these in later */}
             {activeTabId === tab.id && tab.id !== '1' && (
-              <div className="h-full flex items-center justify-center text-xs text-gray-500">
+              <div className="h-full flex items-center justify-center text-xs text-muted-foreground">
                 Content for {tab.label} - to be implemented
               </div>
             )}

@@ -73,7 +73,7 @@ function SignupPageContent() {
             <h1 className="text-2xl font-bold tracking-tight">
               Create your Docent account
             </h1>
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-muted-foreground">
               Enter your email and password to get started
             </p>
           </div>

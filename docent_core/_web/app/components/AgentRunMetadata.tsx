@@ -22,7 +22,7 @@ export function AgentRunMetadata({ agentRunId }: Props) {
 
   const entries = Object.entries(metadata);
   return (
-    <div className="pt-1 border-t border-gray-100 flex items-center gap-1.5 group text-[10px] text-gray-500 flex-1 truncate">
+    <div className="pt-1 border-t border-border flex items-center gap-1.5 group text-[10px] text-muted-foreground flex-1 truncate">
       {entries.map(([key, value], index) => (
         <span key={key}>
           <span className="font-medium">{key}: </span>

@@ -149,8 +149,8 @@ export default function ClusterViewer({ searchQuery }: ClusterViewerProps) {
   if (activeClusterTaskId && clusters.length === 0) {
     return (
       <div className="space-y-2">
-        <div className="text-xs text-gray-500 flex items-center gap-2">
-          <div className="animate-spin rounded-full h-3 w-3 border-2 border-gray-300 border-t-gray-500" />
+        <div className="text-xs text-muted-foreground flex items-center gap-2">
+          <div className="animate-spin rounded-full h-3 w-3 border-2 border-border border-t-gray-500" />
           Loading clusters...
         </div>
       </div>
@@ -170,7 +170,7 @@ export default function ClusterViewer({ searchQuery }: ClusterViewerProps) {
 
         return (
           <div key={cluster.id} className="space-y-2">
-            <div className="text-xs p-1.5 bg-white rounded border border-gray-200 flex items-center gap-1.5">
+            <div className="text-xs p-1.5 bg-background rounded border border-border flex items-center gap-1.5">
               {/* Expand/collapse button on the left */}
 
                 <Button
@@ -180,9 +180,9 @@ export default function ClusterViewer({ searchQuery }: ClusterViewerProps) {
                   onClick={() => toggleClusterExpansion(cluster.id)}
                 >
                   {isExpanded ? (
-                    <ChevronDown className="h-3 w-3 text-gray-500" />
+                    <ChevronDown className="h-3 w-3 text-muted-foreground" />
                   ) : (
-                    <ChevronRight className="h-3 w-3 text-gray-500" />
+                    <ChevronRight className="h-3 w-3 text-muted-foreground" />
                   )}
                 </Button>
 
@@ -192,15 +192,15 @@ export default function ClusterViewer({ searchQuery }: ClusterViewerProps) {
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <span className="text-xs px-1.5 py-0.5 rounded-sm bg-gray-100 text-gray-600 cursor-default flex items-center min-w-[2rem] justify-center">
+                        <span className="text-xs px-1.5 py-0.5 rounded-sm bg-muted text-muted-foreground cursor-default flex items-center min-w-[2rem] justify-center">
                           {activeClusterTaskId &&
                           clusterSearchResults.length === 0 ? (
-                            <div className="animate-spin rounded-full h-3 w-3 border-2 border-gray-300 border-t-gray-500" />
+                            <div className="animate-spin rounded-full h-3 w-3 border-2 border-border border-t-gray-500" />
                           ) : (
                             <>
                               {clusterSearchResults.length}
                               {activeClusterTaskId && (
-                                <div className="animate-spin ml-1 rounded-full h-2 w-2 border-[1.5px] border-gray-300 border-t-gray-500 inline-block" />
+                                <div className="animate-spin ml-1 rounded-full h-2 w-2 border-[1.5px] border-border border-t-gray-500 inline-block" />
                               )}
                             </>
                           )}
@@ -217,7 +217,7 @@ export default function ClusterViewer({ searchQuery }: ClusterViewerProps) {
                 </div>
 
               {/* Cluster centroid */}
-              <div className="flex-1 text-xs text-gray-700 ml-1">
+              <div className="flex-1 text-xs text-primary ml-1">
                 <div className="flex items-center gap-2">
                   {cluster.centroid}
                 </div>

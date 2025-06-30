@@ -38,7 +38,7 @@ export const renderTextWithCitations = (
     parts.push(
       <button
         key={`citation-${i}`}
-        className="px-0.5 py-0.25 bg-indigo-200 text-indigo-800 rounded hover:bg-indigo-400 hover:text-white transition-colors font-medium"
+        className="px-0.5 py-0.25 bg-indigo-muted text-primary rounded hover:bg-indigo-muted/50 transition-colors font-medium"
         onMouseDown={(e) => {
           navToAgentRun(
             e,

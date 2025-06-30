@@ -161,7 +161,7 @@ export default function ExperimentViewer() {
     return (
       <Card className="h-full flex-1 p-3">
         <div className="flex-1 flex flex-col items-center justify-center space-y-2 h-full">
-          <Loader2 className="h-5 w-5 animate-spin text-gray-500" />
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
         </div>
       </Card>
     );
@@ -171,9 +171,9 @@ export default function ExperimentViewer() {
     <Card className="flex-1 p-3 flex flex-col min-w-0 space-y-3">
       {/* Header with organization dropdown - always visible */}
       <div className="flex justify-between items-center shrink-0">
-        <div>
+        <div className="flex flex-col">
           <div className="text-sm font-semibold">Grouped Visualization</div>
-          <div className="text-xs">
+          <div className="text-xs text-muted-foreground">
             Select fields to group by, and click to filter
           </div>
         </div>
@@ -181,14 +181,14 @@ export default function ExperimentViewer() {
         <div className="flex items-center gap-4">
           <DimensionSelector />
           {/* <div className="flex items-center space-x-1">
-            <span className="text-xs text-gray-500">Chart:</span>
+            <span className="text-xs text-muted-foreground">Chart:</span>
             <Select
               value={chartType || 'table'}
               onValueChange={(value: 'bar' | 'line' | 'table') =>
                 dispatch(setChartType(value))
               }
             >
-              <SelectTrigger className="h-6 w-16 text-xs border-gray-200 bg-transparent hover:bg-gray-50 px-2 font-normal">
+              <SelectTrigger className="h-7 w-16 text-xs border-border bg-transparent hover:bg-secondary px-2 font-normal">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -215,9 +215,9 @@ export default function ExperimentViewer() {
       ) : null}
 
       {/* Agent run list */}
-      <div>
+      <div className="flex flex-col">
         <div className="text-sm font-semibold">Agent Run List</div>
-        <div className="text-xs">
+        <div className="text-xs text-muted-foreground">
           {agentRunIds?.length || 0} agent runs matching the current view
           {curSearchQuery && (
             <span>, {currentSearchHitCount} hits for current query</span>
@@ -233,11 +233,11 @@ export default function ExperimentViewer() {
           <AgentRunCard key={agentRunId} agentRunId={agentRunId} />
         ))}
         {(agentRunIds?.length || 0) === 0 && (
-          <div className="text-xs text-gray-500 min-h-[24px]">
+          <div className="text-xs text-muted-foreground min-h-[24px]">
             {loadingSearchQuery ? (
               <div className="flex items-center space-x-2">
                 <span>Loading results...</span>
-                <Loader2 className="h-3 w-3 animate-spin text-gray-500" />
+                <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
               </div>
             ) : (
               'No results found'
@@ -252,14 +252,14 @@ export default function ExperimentViewer() {
           <button
             onClick={() => goToPage(1)}
             disabled={currentPage === 1}
-            className="p-0.5 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="p-0.5 rounded hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <ChevronFirst className="h-3.5 w-3.5" />
           </button>
           <button
             onClick={() => goToPage(currentPage - 1)}
             disabled={currentPage === 1}
-            className="p-0.5 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="p-0.5 rounded hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <ChevronLeft className="h-3.5 w-3.5" />
           </button>
@@ -269,19 +269,19 @@ export default function ExperimentViewer() {
           <button
             onClick={() => goToPage(currentPage + 1)}
             disabled={currentPage === totalPages}
-            className="p-0.5 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="p-0.5 rounded hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <ChevronRight className="h-3.5 w-3.5" />
           </button>
           <button
             onClick={() => goToPage(totalPages)}
             disabled={currentPage === totalPages}
-            className="p-0.5 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="p-0.5 rounded hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <ChevronLast className="h-3.5 w-3.5" />
           </button>
         </div>
-        <div className="text-[11px] text-gray-500">
+        <div className="text-[11px] text-muted-foreground">
           {startIndex + 1}-{endIndex} of {agentRunIds?.length || 0}
         </div>
       </div>

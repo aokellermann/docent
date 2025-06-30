@@ -1,3 +1,4 @@
+import { ThemeProvider } from "@/components/theme-provider";
 import type { Metadata } from 'next';
 import { Open_Sans, JetBrains_Mono } from 'next/font/google';
 import { cn } from '@/lib/utils';
@@ -38,23 +39,30 @@ export default async function RootLayout({
   const user = await getUser();
 
   return (
-    <html lang="en" className="h-full">
+    <html lang="en" className="h-full" suppressHydrationWarning>
       <body
         className={`h-full ${cn(openSans.className, jetbrainsMono.variable)}`}
       >
-        <CSPostHogProvider>
-          <ReduxProvider>
-            <WebsocketProvider>
-              <UserProvider user={user}>
-                <TooltipProvider>
-                  {children}
-                  <Toaster />
-                  <ReduxToastHandler />
-                </TooltipProvider>
-              </UserProvider>
-            </WebsocketProvider>
-          </ReduxProvider>
-        </CSPostHogProvider>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          <CSPostHogProvider>
+            <ReduxProvider>
+              <WebsocketProvider>
+                <UserProvider user={user}>
+                  <TooltipProvider>
+                    {children}
+                    <Toaster />
+                    <ReduxToastHandler />
+                  </TooltipProvider>
+                </UserProvider>
+              </WebsocketProvider>
+            </ReduxProvider>
+          </CSPostHogProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

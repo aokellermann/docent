@@ -15,24 +15,24 @@ const DiffsClusters = () => {
   return (
     <aside
       className={cn(
-        'w-64 min-h-full p-4 border-r bg-gray-50 dark:bg-gray-900/60',
+        'w-74 min-h-full p-4 border-r bg-secondary',
         'flex flex-col space-y-4'
       )}
     >
       <DiffReportConfig />
       {clusters && (
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+          <p className="text-xs text-muted-foreground mt-2">
             {' '}
-            We looked at all the observed differences bewteen the paired
+            We looked at all the observed differences between the paired
             transcripts and found the following themes.{' '}
           </p>
         )}
       <div className="flex items-center justify-between mb-4">
-        {clusters && <h3 className="font-bold text-gray-700 dark:text-gray-200">Themes</h3>}
+        {clusters && <h3 className="font-bold text-foreground">Themes</h3>}
         {selectedCluster && (
           <button
             className={cn(
-              'text-xs px-2 py-1 rounded bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-700 transition-colors'
+              'text-xs px-2 py-1 rounded bg-accent text-foreground hover:bg-muted transition-colors'
             )}
             onClick={() => dispatch(focusCluster(null))}
           >
@@ -49,10 +49,10 @@ const DiffsClusters = () => {
               key={cluster.name}
               className={cn(
                 'cursor-pointer py-2 px-3 rounded transition-colors text-sm',
-                'text-gray-700 dark:text-gray-200',
+                'text-foreground',
                 selectedCluster === cluster
-                  ? 'bg-blue-100 dark:bg-blue-900 font-semibold'
-                  : 'hover:bg-gray-200 dark:hover:bg-gray-800'
+                  ? 'bg-blue-bg font-semibold'
+                  : 'hover:bg-accent'
               )}
               onClick={() => onClusterClick(cluster)}
             >

@@ -98,7 +98,7 @@ export const TranscriptDiffExplorer = () => {
         <h2
           className={cn(
             'text-xs font-semibold uppercase tracking-wide',
-            'text-gray-500 dark:text-gray-400'
+            'text-muted-foreground'
           )}
         >
           Transcript Diffs Report
@@ -106,13 +106,13 @@ export const TranscriptDiffExplorer = () => {
         <h1
           className={cn(
             'text-2xl font-bold mb-4',
-            'text-gray-900 dark:text-gray-100'
+            'text-foreground'
           )}
         >
           {diffsReport.name}
         </h1>
       </div>
-      <div className="flex w-full min-h-screen bg-gray-50 dark:bg-gray-900/60">
+      <div className="flex w-full min-h-screen bg-secondary">
         <div className="$SidePanel sticky top-0 self-start h-[100vh]">
           <DiffsClusters />
         </div>
@@ -122,15 +122,15 @@ export const TranscriptDiffExplorer = () => {
             className={cn(
               '$FilterBubble sticky top-0 z-20',
               'p-4',
-              'bg-gray-100 dark:bg-gray-800/60',
-              'border border-gray-200 dark:border-gray-700',
-              'text-gray-900 dark:text-gray-100',
+              'bg-muted',
+              'border border-border',
+              'text-foreground',
               'space-y-3'
             )}
           >
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600 dark:text-gray-300">
+                <p className="text-sm text-muted-foreground">
                   {selectedCluster ? (
                     <>
                       Showing{' '}
@@ -142,7 +142,7 @@ export const TranscriptDiffExplorer = () => {
                         {counts.filteredDiffs} tasks{' '}
                       </span>{' '}
                       related to theme{' '}
-                      <span className="font-semibold text-blue-800 dark:text-blue-200">
+                      <span className="font-semibold text-blue-text">
                         {selectedCluster.name}
                       </span>
                     </>
@@ -166,21 +166,21 @@ export const TranscriptDiffExplorer = () => {
             {selectedCluster && (
               <div
                 className={cn(
-                  'bg-blue-50 dark:bg-blue-900/30',
-                  'border border-blue-200 dark:border-blue-800',
-                  'text-blue-900 dark:text-blue-100',
+                  'bg-blue-bg',
+                  'border border-blue-border',
+                  'text-blue-text',
                   'p-2 rounded-sm'
                 )}
               >
                 <p className="text-sm mb-1">
                   Theme Details: {selectedCluster.name}
                 </p>
-                <p className="text-xxs text-blue-800 dark:text-blue-200">
+                <p className="text-xxs text-blue-text">
                   {selectedCluster.description}
                 </p>
               </div>
             )}
-            <div className="text-xs text-gray-500 dark:text-gray-400">
+            <div className="text-xs text-muted-foreground">
               {' '}
               Comparing {interpolateAgentBadges('Agent 1')} and{' '}
               {interpolateAgentBadges('Agent 2')}.

@@ -130,15 +130,15 @@ export default function FrameGridRow({
       key={framegrid.id}
       onClick={openFrameGrid}
       className={cn(
-        'group transition-colors cursor-pointer hover:bg-gray-50',
+        'group transition-colors cursor-pointer hover:bg-secondary/50',
         isEditing && 'bg-blue-50 cursor-default'
       )}
     >
       {/* ID */}
       <TableCell className="font-medium py-3">
         <div className="flex items-center">
-          <Layers className="h-3.5 w-3.5 text-gray-400 mr-1.5" />
-          <span className="font-mono text-gray-600 text-xs">
+          <Layers className="h-3.5 w-3.5 text-muted-foreground mr-1.5" />
+          <span className="font-mono text-primary text-xs">
             {framegrid.id.split('-')[0]}
           </span>
           <Button
@@ -148,7 +148,7 @@ export default function FrameGridRow({
             onClick={copyId}
             title="Copy full ID"
           >
-            <ClipboardCopyIcon className="h-3 w-3 text-gray-400 group-hover:text-blue-500" />
+            <ClipboardCopyIcon className="h-3 w-3 text-muted-foreground group-hover:text-blue-text" />
           </Button>
         </div>
       </TableCell>
@@ -164,9 +164,9 @@ export default function FrameGridRow({
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <span className="text-gray-900 text-xs">
+          <span className="text-primary text-xs">
             {framegrid.name || (
-              <span className="italic text-gray-400">Unnamed Grid</span>
+              <span className="italic text-secondary">Unnamed Grid</span>
             )}
           </span>
         )}
@@ -183,9 +183,9 @@ export default function FrameGridRow({
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-muted-foreground">
             {framegrid.description || (
-              <span className="italic text-gray-400">
+              <span className="italic text-muted-foreground">
                 No description provided
               </span>
             )}
@@ -195,8 +195,8 @@ export default function FrameGridRow({
 
       {/* Created At */}
       <TableCell className="text-xs py-2">
-        <div className="flex items-center text-gray-500">
-          <CalendarIcon className="h-3 w-3 mr-1 text-gray-400" />
+        <div className="flex items-center text-muted-foreground">
+          <CalendarIcon className="h-3 w-3 mr-1 text-muted-foreground" />
           {formatDate(framegrid.created_at)}
         </div>
       </TableCell>
@@ -208,7 +208,7 @@ export default function FrameGridRow({
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-green-500"
+              className="h-7 w-7 text-green-foreground"
               onClick={saveChanges}
               title="Save changes"
             >
@@ -217,7 +217,7 @@ export default function FrameGridRow({
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-gray-500"
+              className="h-7 w-7 text-muted-foreground"
               onClick={cancelEditing}
               title="Cancel editing"
             >
@@ -229,7 +229,7 @@ export default function FrameGridRow({
             {/* <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-gray-400 group-hover:text-blue-500"
+              className="h-7 w-7 text-secondary group-hover:text-accent-foreground"
               onClick={(e) => {
                 e.stopPropagation();
                 openFrameGrid();
@@ -243,7 +243,7 @@ export default function FrameGridRow({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-auto w-auto text-gray-400 group-hover:text-blue-500 p-0"
+                  className="h-auto w-auto text-muted-foreground group-hover:text-blue-text p-0"
                   onClick={startEditing}
                   disabled={!hasWritePermission}
                   title="Edit frame grid"
@@ -253,7 +253,7 @@ export default function FrameGridRow({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-auto w-auto text-gray-400 group-hover:text-red-500 p-0"
+                  className="h-auto w-auto text-muted-foreground group-hover:text-red-text p-0"
                   disabled={!hasAdminPermission}
                   onClick={triggerDelete}
                   title="Delete frame grid"
@@ -262,7 +262,7 @@ export default function FrameGridRow({
                 </Button>
               </div>
             ) : (
-              <div className="text-gray-400 text-xs">Read only</div>
+              <div className="text-muted-foreground text-xs">Read only</div>
             )}
           </div>
         )}

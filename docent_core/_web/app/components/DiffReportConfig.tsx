@@ -42,7 +42,7 @@ export function DiffReportConfig() {
       <div
         className={cn(
           'border rounded-md p-2',
-          'bg-gray-50 dark:bg-gray-900/60'
+          'bg-secondary'
         )}
       >
         <Button

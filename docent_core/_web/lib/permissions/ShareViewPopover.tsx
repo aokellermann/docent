@@ -190,7 +190,7 @@ const ShareViewPopover = ({ framegridId }: { framegridId: string }) => {
             className="gap-x-2 h-7 px-2"
             disabled={!hasAdminPermission}
           >
-            <Share2 size={14} /> Share view
+            <Share2 size={10} /> Share View
           </Button>
         )}
       </PopoverTrigger>

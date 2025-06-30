@@ -47,11 +47,11 @@ export const UserProfile = () => {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <div className="bg-gray-100 hover:bg-gray-200 border-gray-300 h-7 w-7 border rounded-full flex items-center justify-center cursor-pointer ">
+        <div className="bg-muted hover:bg-accent border-border h-7 w-7 border rounded-full flex items-center justify-center cursor-pointer ">
           {user.is_anonymous ? (
-            <UserRoundIcon className="text-black h-4 w-4" />
+            <UserRoundIcon className="text-primary h-4 w-4" />
           ) : (
-            <span className="text-xs font-medium text-gray-700">
+            <span className="text-xs font-medium text-primary">
               {getInitials(user.email)}
             </span>
           )}
