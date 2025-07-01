@@ -1,6 +1,5 @@
 import { getUser } from '@/app/services/dal';
 import { redirect } from 'next/navigation';
-import { headers } from 'next/headers';
 
 export default async function SettingsLayout({
   children,
