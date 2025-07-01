@@ -9,7 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useRouter } from 'next/navigation';
+// import { useRouter } from 'next/navigation';
 
 import { logout } from '../../services/authService';
 import {
@@ -22,7 +22,7 @@ export const UserProfile = () => {
   // User is guaranteed to be present since this component is only used in authenticated areas
   const { user } = useRequireUserContext();
 
-  const router = useRouter();
+  // const router = useRouter();
 
   // Use base useUser for logout to access setUser that accepts null
   const { setUser } = useUserContext();
@@ -31,7 +31,8 @@ export const UserProfile = () => {
     try {
       await logout(); // Pure API call
       setUser(null); // Clear client state
-      router.push('/login'); // Handle redirect
+      // router.push('/login'); // Handle redirect
+      window.location.href = '/login'; // Handle redirect
     } catch (error) {
       console.error('Logout failed:', error);
       toast({
@@ -71,7 +72,7 @@ export const UserProfile = () => {
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem
-          onClick={() => router.push('/settings/api_keys')}
+          onClick={() => window.location.href = '/settings/api_keys'}
           className="text-sm"
         >
           API Keys
