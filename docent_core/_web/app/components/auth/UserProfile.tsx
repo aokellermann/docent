@@ -9,6 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { useRouter } from 'next/navigation';
 
 import { logout } from '../../services/authService';
 import {
@@ -21,6 +22,8 @@ export const UserProfile = () => {
   // User is guaranteed to be present since this component is only used in authenticated areas
   const { user } = useRequireUserContext();
 
+  const router = useRouter();
+
   // Use base useUser for logout to access setUser that accepts null
   const { setUser } = useUserContext();
 
@@ -28,7 +31,7 @@ export const UserProfile = () => {
     try {
       await logout(); // Pure API call
       setUser(null); // Clear client state
-      window.location.href = '/login'; // Handle redirect
+      router.push('/login'); // Handle redirect
     } catch (error) {
       console.error('Logout failed:', error);
       toast({
@@ -58,16 +61,24 @@ export const UserProfile = () => {
         </div>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="w-56" align="end" forceMount>
-        <DropdownMenuLabel className="font-normal">
+        <DropdownMenuLabel className="font-normal text-xs">
           <div className="flex flex-col space-y-1">
             <p className="text-sm font-medium leading-none">Account</p>
-            <p className="text-xs leading-none text-muted-foreground">
+            <p className="text-[11px] leading-none text-muted-foreground">
               {user.email}
             </p>
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={handleLogout}>Log out</DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => router.push('/settings/api_keys')}
+          className="text-sm"
+        >
+          API Keys
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={handleLogout} className="text-sm">
+          Log out
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

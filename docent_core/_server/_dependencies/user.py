@@ -14,7 +14,7 @@ async def _get_user_from_request(request: Request, db: DBService):
     auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
         api_key = auth_header[7:]  # Remove "Bearer " prefix
-        user = await db.get_user_by_email(api_key)
+        user = await db.get_user_by_api_key(api_key)
         if user:
             return user
 

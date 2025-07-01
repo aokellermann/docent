@@ -39,7 +39,8 @@ export function CollectionsTable({
 
   // Delete dialog state – kept here so multiple rows can reuse shared dialog
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [deletingCollection, setDeletingCollection] = useState<Collection | null>(null);
+  const [deletingCollection, setDeletingCollection] =
+    useState<Collection | null>(null);
 
   const openDeleteDialog = (collection: Collection) => {
     setDeletingCollection(collection);
@@ -73,8 +74,7 @@ export function CollectionsTable({
           No collections available
         </h3>
         <p className="text-xs text-muted-foreground max-w-md">
-          No collections have been created yet. Create a new collection to get
-          started.
+          Create a new collection to get started.
         </p>
       </div>
     );

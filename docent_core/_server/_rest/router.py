@@ -1163,6 +1163,97 @@ async def has_embedding_job(
     return count > 0
 
 
+####################
+# API Key endpoints #
+####################
+
+
+class CreateApiKeyRequest(BaseModel):
+    name: str
+
+
+class ApiKeyResponse(BaseModel):
+    id: str
+    name: str
+    created_at: datetime
+    disabled_at: datetime | None
+    last_used_at: datetime | None
+    is_active: bool
+
+
+class CreateApiKeyResponse(BaseModel):
+    id: str
+    name: str
+    api_key: str
+    created_at: datetime
+
+
+@user_router.get("/api-keys/test")
+async def test_api_key(user: User = Depends(get_authenticated_user)):
+    """
+    Test endpoint to verify API key authentication.
+    Returns user info if authenticated, 401 if not.
+    """
+    return {
+        "message": "API key authentication successful",
+        "user_id": user.id,
+        "is_anonymous": user.is_anonymous,
+    }
+
+
+@user_router.post("/api-keys", response_model=CreateApiKeyResponse)
+async def create_api_key(
+    request: CreateApiKeyRequest,
+    user: User = Depends(get_authenticated_user),
+    db: DBService = Depends(get_db),
+):
+    """Create a new API key for the authenticated user."""
+    api_key_id, raw_api_key = await db.create_api_key(user.id, request.name)
+
+    api_keys = await db.get_user_api_keys(user.id)
+    created_key = next(k for k in api_keys if k.id == api_key_id)
+
+    return CreateApiKeyResponse(
+        id=created_key.id,
+        name=created_key.name,
+        api_key=raw_api_key,
+        created_at=created_key.created_at,
+    )
+
+
+@user_router.get("/api-keys", response_model=list[ApiKeyResponse])
+async def list_api_keys(
+    user: User = Depends(get_authenticated_user),
+    db: DBService = Depends(get_db),
+):
+    """List all API keys for the authenticated user."""
+    api_keys = await db.get_user_api_keys(user.id)
+    return [
+        ApiKeyResponse(
+            id=key.id,
+            name=key.name,
+            created_at=key.created_at,
+            disabled_at=key.disabled_at,
+            last_used_at=key.last_used_at,
+            is_active=key.is_active,
+        )
+        for key in api_keys
+    ]
+
+
+@user_router.delete("/api-keys/{api_key_id}")
+async def disable_api_key(
+    api_key_id: str,
+    user: User = Depends(get_authenticated_user),
+    db: DBService = Depends(get_db),
+):
+    """Disable an API key."""
+    success = await db.disable_api_key(api_key_id, user.id)
+    if not success:
+        raise HTTPException(status_code=404, detail="API key not found")
+    return {"message": "API key disabled successfully"}
+
+
 @user_router.post("/{collection_id}/fg_has_embeddings")
 async def fg_has_embeddings(
     collection_id: str,

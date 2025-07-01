@@ -58,6 +58,7 @@ TABLE_SEARCH_CLUSTER = "search_clusters"
 TABLE_SEARCH_RESULT_CLUSTER = "search_result_clusters"
 TABLE_ANALYTICS_EVENT = "analytics_events"
 TABLE_CHAT_SESSION = "chat_sessions"
+TABLE_API_KEY = "api_keys"
 
 
 def sanitize_pg_text(text: str) -> str:
@@ -705,3 +706,23 @@ class SQLAAnalyticsEvent(SQLABase):
             collection_id=collection_id,
             user_id=user_id,
         )
+
+
+class SQLAApiKey(SQLABase):
+    __tablename__ = TABLE_API_KEY
+
+    id = mapped_column(String(36), primary_key=True)
+    user_id = mapped_column(String(36), ForeignKey(f"{TABLE_USER}.id"), nullable=False, index=True)
+    name = mapped_column(Text, nullable=False)
+    key_hash = mapped_column(Text, nullable=False, unique=True, index=True)
+    created_at = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False
+    )
+    disabled_at = mapped_column(DateTime, nullable=True, index=True)
+    last_used_at = mapped_column(DateTime, nullable=True, index=True)
+
+    user: Mapped["SQLAUser"] = relationship("SQLAUser", backref="api_keys")
+
+    @property
+    def is_active(self) -> bool:
+        return self.disabled_at is None

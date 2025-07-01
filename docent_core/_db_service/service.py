@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import secrets
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import (
@@ -73,6 +74,7 @@ from docent_core._db_service.schemas.tables import (
     SQLAAccessControlEntry,
     SQLAAgentRun,
     SQLAAnalyticsEvent,
+    SQLAApiKey,
     SQLAChatSession,
     SQLACollection,
     SQLADiffAttribute,
@@ -2367,3 +2369,75 @@ class DBService:
             f"Added new search query {search_query} with id {new_id} to collection_id {ctx.collection_id}"
         )
         return new_id
+
+    async def create_api_key(self, user_id: str, name: str) -> tuple[str, str]:
+        """
+        Create a new API key for a user.
+
+
+        Returns:
+            tuple: (api_key_id, raw_api_key) - raw key should be shown to user once
+        """
+
+        raw_api_key = f"dk_{secrets.token_urlsafe(32)}"
+        key_hash = pwd_context.hash(raw_api_key)
+        api_key_id = str(uuid4())
+
+        async with self.session() as session:
+            api_key = SQLAApiKey(
+                id=api_key_id,
+                user_id=user_id,
+                name=name,
+                key_hash=key_hash,
+            )
+            session.add(api_key)
+
+        logger.info(f"Created API key {api_key_id} for user {user_id}")
+        return api_key_id, raw_api_key
+
+    async def get_user_api_keys(self, user_id: str) -> list[SQLAApiKey]:
+        """Get all API keys for a user."""
+        async with self.session() as session:
+            result = await session.execute(
+                select(SQLAApiKey)
+                .where(SQLAApiKey.user_id == user_id)
+                .order_by(SQLAApiKey.created_at.desc())
+            )
+            return list(result.scalars().all())
+
+    async def disable_api_key(self, api_key_id: str, user_id: str) -> bool:
+        """Disable an API key. Returns True if key was found and disabled."""
+        async with self.session() as session:
+            result = await session.execute(
+                update(SQLAApiKey)
+                .where(SQLAApiKey.id == api_key_id, SQLAApiKey.user_id == user_id)
+                .values(disabled_at=datetime.now(UTC).replace(tzinfo=None))
+            )
+            return result.rowcount > 0
+
+    async def get_user_by_api_key(self, raw_api_key: str) -> User | None:
+        """
+        Validate an API key and return the associated user.
+        Updates last_used_at timestamp if key is valid.
+        """
+        if not raw_api_key.startswith("dk_"):
+            return None
+
+        async with self.session() as session:
+            result = await session.execute(
+                select(SQLAApiKey)
+                .join(SQLAUser, SQLAApiKey.user_id == SQLAUser.id)
+                .where(SQLAApiKey.disabled_at.is_(None))  # type: ignore
+                .options(selectinload(SQLAApiKey.user))
+            )
+
+            for api_key in result.scalars().all():
+                if pwd_context.verify(raw_api_key, api_key.key_hash):
+                    await session.execute(
+                        update(SQLAApiKey)
+                        .where(SQLAApiKey.id == api_key.id)
+                        .values(last_used_at=datetime.now(UTC).replace(tzinfo=None))
+                    )
+                    return api_key.user.to_user()
+
+            return None

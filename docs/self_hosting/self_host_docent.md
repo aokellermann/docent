@@ -140,8 +140,7 @@ from docent import Docent
 client = Docent(
     server_url="http://localhost:8889",    # or your own server URL
     frontend_url="http://localhost:3001",  # or your own frontend URL
-    email=os.getenv("DOCENT_EMAIL"),
-    password=os.getenv("DOCENT_PASSWORD"),
+    api_key=os.getenv("DOCENT_API_KEY"),
 )
 ```
 

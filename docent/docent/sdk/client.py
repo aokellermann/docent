@@ -26,43 +26,34 @@ class Docent:
         self,
         server_url: str = "https://aws-docent-backend.transluce.org",
         web_url: str = "https://docent-alpha.transluce.org",
-        email: str | None = None,
-        password: str | None = None,
+        api_key: str | None = None,
     ):
         self._server_url = server_url.rstrip("/") + "/rest"
         self._web_url = web_url.rstrip("/")
 
-        self._email = email or os.getenv("DOCENT_EMAIL")
-        if self._email is None:
-            raise ValueError(
-                "Email address must be provided through keyword argument or DOCENT_EMAIL environment variable"
-            )
-
-        self._password = password or os.getenv("DOCENT_PASSWORD")
-        if self._password is None:
-            raise ValueError(
-                "Password must be provided through keyword argument or DOCENT_PASSWORD environment variable"
-            )
-
         # Use requests.Session for connection pooling and persistent headers
         self._session = requests.Session()
-        self._login()
 
-    def _login(self):
-        """Login with email/password to establish session."""
-        login_url = f"{self._server_url}/login"
-        response = self._session.post(
-            login_url, json={"email": self._email, "password": self._password}
-        )
+        api_key = api_key or os.getenv("DOCENT_API_KEY")
 
-        if response.status_code == 401:
+        if api_key is None:
             raise ValueError(
-                "Invalid username/password combination. "
-                f"If you don't already have an account, please sign up at {self._web_url}/signup"
+                "api_key is required. Please provide an "
+                "api_key or set the DOCENT_API_KEY environment variable."
             )
 
+        self._login(api_key)
+
+    def _login(self, api_key: str):
+        """Login with email/password to establish session."""
+        self._session.headers.update({"Authorization": f"Bearer {api_key}"})
+
+        url = f"{self._server_url}/api-keys/test"
+        response = self._session.get(url)
         response.raise_for_status()
-        logger.info(f"Successfully logged in as {self._email}")
+
+        logger.info("Logged in with API key")
+        return
 
     def create_collection(
         self,

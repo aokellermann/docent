@@ -1,0 +1,16 @@
+import { getUser } from '@/app/services/dal';
+import { redirect } from 'next/navigation';
+
+export default async function SettingsLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const user = await getUser();
+
+  // If user is either not authenticated or anonymous, redirect to login
+  if (!user || user.is_anonymous) {
+    redirect('/login');
+  }
+  return <div>{children}</div>;
+}

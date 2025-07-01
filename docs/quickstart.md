@@ -8,14 +8,14 @@ To ingest your own agent runs, install the Python SDK:
 pip install docent-python
 ```
 
-Then create a new Python script that instantiates a client object:
+You'll need an API key to connect to the Docent interface. Navigate to the [API keys page](https://docent-alpha.transluce.org/settings/api_keys) while logged in and create a token. Then create a new Python script that instantiates a client object:
+
 ```python
 import os
 from docent import Docent
 
 client = Docent(
-    email=os.getenv("DOCENT_EMAIL"),        # is default and can be omitted
-    password=os.getenv("DOCENT_PASSWORD"),  # is default and can be omitted
+    api_key=os.getenv("DOCENT_API_KEY"),  # is default and can be omitted
 
     # Uncomment and adjust these if you're self-hosting
     # server_url="http://localhost:8889",
