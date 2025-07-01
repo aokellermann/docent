@@ -37,6 +37,8 @@ nav:
           - concepts/data_models/llm_output.md
       # - Developers:
       #     - developers/development_tips.md
+  # - Integrations:
+  #     - integrations/inspect.md
   - Hosting:
       - self_hosting/self_host_docent.md
       - Configuration:
