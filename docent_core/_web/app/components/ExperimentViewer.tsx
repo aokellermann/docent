@@ -267,31 +267,6 @@ export default function ExperimentViewer() {
           )}
         </div>
       )}
-      {/* <div
-        className="flex-1 space-y-1 custom-scrollbar min-w-0 overflow-y-auto"
-        ref={containerRef}
-      >
-        {currentPageItems.map((agentRunId) => (
-          <AgentRunCard key={agentRunId} agentRunId={agentRunId} />
-        ))}
-        {(agentRunIds?.length || 0) === 0 && (
-          <div className="text-xs text-muted-foreground min-h-[24px]">
-            {loadingSearchQuery ? (
-              <div className="flex items-center space-x-2">
-                <span>Loading results...</span>
-                <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-              </div>
-            ) : curSearchQuery ? (
-              'No results found'
-            ) : (
-              <div className="w-full h-full bg-red-500">
-                <span>No agent runs found</span>
-                shit
-              </div>
-            )}
-          </div>
-        )}
-      </div> */}
 
       {/* Pagination controls */}
       <div className="flex items-center justify-between shrink-0">
