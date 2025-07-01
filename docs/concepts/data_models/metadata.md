@@ -57,4 +57,8 @@ metadata = RLTrainingMetadata(
 )
 ```
 
+
+If you're using Inspect, `docent.data_models` also contains an `InspectAgentRunMetadata` class which extends BaseAgentRunMetadata with fields specific to Inspect runs.
+
+
 ::: docent.data_models.metadata
