@@ -1,12 +1,13 @@
 # Search and clustering
 
-Use search to find behaviors that you specify in natural language.
+Docent allows you to search for specific behaviors in agent runs. Your queries can be arbitrarily complex, since we use frontier-level language models to evaluate them.
 
 ### Example walkthrough
 
-Suppose we're curious if there are any issues with the agent scaffolding that are causing failures.
+Let's check for issues with the agent scaffolding that might have caused spurious failures.
 
-We can start by filtering to runs where the agent failed and searching for `potential issues with the environment the agent is operating in`:
+First, we filter to runs where the agent failed, then search for `potential issues with the environment the agent is operating in`:
+
 
 <video controls autoplay loop width="100%">
   <source src="https://transluce-videos.s3.us-east-1.amazonaws.com/docent-docs/search-compressed.mp4" type="video/mp4">
