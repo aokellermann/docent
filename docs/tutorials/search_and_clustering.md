@@ -2,7 +2,7 @@
 
 Docent allows you to search for specific behaviors in agent runs. Your queries can be arbitrarily complex, since we use frontier-level language models to evaluate them.
 
-### Example walkthrough
+### Walkthrough
 
 Let's check for issues with the agent scaffolding that might have caused spurious failures.
 
