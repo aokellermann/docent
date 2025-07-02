@@ -27,7 +27,7 @@ import AgentRunCard from './AgentRunCard';
 import UploadRunsButton from './UploadRunsButton';
 import UploadRunsDialog from './UploadRunsDialog';
 
-import { getAgentRunMetadata } from '../store/collectionSlice';
+import { getAgentRunMetadata, getAgentRunMetadataFields } from '../store/collectionSlice';
 import { TranscriptFilterControls } from './TranscriptFilterControls';
 
 import { setExperimentViewerScrollPosition } from '../store/experimentViewerSlice';
@@ -95,6 +95,19 @@ export default function ExperimentViewer() {
     setUploadDialogOpen(false);
     setDraggedFile(null);
   }, []);
+
+  const handleUploadSuccess = useCallback((result: {
+    status: string;
+    message: string;
+    num_runs_imported: number;
+    filename: string;
+    task_id?: string;
+    model?: string;
+  }) => {
+    dispatch(getAgentRunMetadataFields());
+
+    fetchedAgentRunIdsRef.current.clear();
+  }, [dispatch]);
 
   // Use debouncing to prevent too many updates
   useEffect(() => {
@@ -257,7 +270,7 @@ export default function ExperimentViewer() {
           </div>
         </div>
 
-        <UploadRunsButton />
+        <UploadRunsButton onImportSuccess={handleUploadSuccess} />
       </div>
       <TranscriptFilterControls />
 
@@ -372,6 +385,7 @@ export default function ExperimentViewer() {
         isOpen={uploadDialogOpen}
         onClose={handleUploadDialogClose}
         file={draggedFile}
+        onImportSuccess={handleUploadSuccess}
       />
     </Card>
   );

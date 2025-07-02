@@ -137,7 +137,7 @@ export default function UploadRunsDialog({
       const formData = new FormData();
       formData.append('file', file);
 
-      await apiRestClient.post(
+      const response = await apiRestClient.post(
         `/${collection_id}/import_runs_from_file`,
         formData,
         {
@@ -158,6 +158,17 @@ export default function UploadRunsDialog({
         toast({
           title: 'Runs Imported',
           description: `${previewResult?.would_import.num_agent_runs ?? 0} runs have been imported successfully. Embeddings computation failed to start - you can manually trigger it later.`,
+        });
+      }
+
+      if (onImportSuccess) {
+        onImportSuccess({
+          status: response.data.status || 'success',
+          message: response.data.message || 'Import completed successfully',
+          num_runs_imported: response.data.num_runs_imported || previewResult?.would_import.num_agent_runs || 0,
+          filename: response.data.filename || file.name,
+          task_id: response.data.task_id,
+          model: response.data.model,
         });
       }
 
