@@ -16,6 +16,7 @@ import React, {
 
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 
@@ -23,12 +24,15 @@ import DimensionSelector from './DimensionSelector';
 import GraphArea from './GraphArea';
 import TableArea from './TableArea';
 import AgentRunCard from './AgentRunCard';
+import UploadRunsButton from './UploadRunsButton';
+import UploadRunsDialog from './UploadRunsDialog';
 
 import { getAgentRunMetadata } from '../store/collectionSlice';
 import { TranscriptFilterControls } from './TranscriptFilterControls';
 
 import { setExperimentViewerScrollPosition } from '../store/experimentViewerSlice';
 import { useDebounce } from '@/hooks/use-debounce';
+import { useDragAndDrop } from '@/hooks/use-drag-drop';
 
 // Constants for magic numbers
 const PAGINATION_LIMIT = 100;
@@ -73,6 +77,24 @@ export default function ExperimentViewer() {
 
   // Track which agent run IDs have already been fetched to prevent duplicate calls
   const fetchedAgentRunIdsRef = useRef<Set<string>>(new Set());
+
+  // Upload state
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [draggedFile, setDraggedFile] = useState<File | null>(null);
+
+  // Drag and drop functionality
+  const handleFileDropped = useCallback((file: File) => {
+    setDraggedFile(file);
+    setUploadDialogOpen(true);
+  }, []);
+
+  const { isDragActive, isOverDropZone, dropZoneHandlers } =
+    useDragAndDrop(handleFileDropped);
+
+  const handleUploadDialogClose = useCallback(() => {
+    setUploadDialogOpen(false);
+    setDraggedFile(null);
+  }, []);
 
   // Use debouncing to prevent too many updates
   useEffect(() => {
@@ -224,49 +246,87 @@ export default function ExperimentViewer() {
       ) : null}
 
       {/* Agent run list */}
-      <div className="flex flex-col">
-        <div className="text-sm font-semibold">Agent Run List</div>
-        <div className="text-xs text-muted-foreground">
-          {agentRunIds?.length || 0} agent runs matching the current view
-          {curSearchQuery && (
-            <span>, {currentSearchHitCount} hits for current query</span>
-          )}
+      <div className="flex flex-row items-center justify-between">
+        <div className="flex flex-col">
+          <div className="text-sm font-semibold">Agent Run List</div>
+          <div className="text-xs text-muted-foreground">
+            {agentRunIds?.length || 0} agent runs matching the current view
+            {curSearchQuery && (
+              <span>, {currentSearchHitCount} hits for current query</span>
+            )}
+          </div>
         </div>
+
+        <UploadRunsButton />
       </div>
       <TranscriptFilterControls />
 
-      {(agentRunIds?.length || 0) > 0 ? (
+      <div className="flex-1 custom-scrollbar min-w-0 overflow-y-auto relative">
         <div
-          className="flex-1 space-y-1 custom-scrollbar min-w-0 overflow-y-auto"
           ref={containerRef}
+          className="h-full space-y-1"
+          {...dropZoneHandlers}
         >
-          {currentPageItems.map((agentRunId) => (
-            <AgentRunCard key={agentRunId} agentRunId={agentRunId} />
-          ))}
-        </div>
-      ) : (
-        <div className="flex-1 space-y-1 custom-scrollbar min-w-0 text-xs text-muted-foreground flex">
-          {curSearchQuery || baseFilter ? (
-            'No results found'
-          ) : (
-            <div className="flex-1 flex items-center justify-center text-center">
-              <div className="flex flex-col items-center space-y-3">
-                <Upload className="h-12 w-12 text-muted-foreground" />
-                <div className="text-muted-foreground">No agent runs found</div>
-                <Button asChild variant="outline" size="sm">
-                  <a
-                    href="https://docs.transluce.org/en/latest/quickstart/"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    See quickstart guide
-                  </a>
-                </Button>
+          {isDragActive && (
+            <div
+              className={cn(
+                'absolute inset-0 flex flex-col items-center justify-center z-50 transition-all duration-200 border-2 rounded',
+                isOverDropZone
+                  ? 'bg-blue-100 bg-opacity-95 border-blue-text border-solid'
+                  : 'bg-blue-100 bg-opacity-80 border-blue-text border-dashed'
+              )}
+              style={{
+                pointerEvents: 'none',
+              }}
+            >
+              <Upload className="h-8 w-8 text-blue-text" />
+              <div
+                className={cn(
+                  'mt-2 text-sm font-medium transition-all duration-200 text-blue-text',
+                  isOverDropZone ? 'scale-105' : ''
+                )}
+              >
+                Drop Inspect logs to upload
               </div>
             </div>
           )}
+
+          {(agentRunIds?.length || 0) > 0 ? (
+            currentPageItems.map((agentRunId) => (
+              <AgentRunCard key={agentRunId} agentRunId={agentRunId} />
+            ))
+          ) : (
+            <div className="h-full flex items-center justify-center text-center min-h-[200px] text-xs">
+              {loadingSearchQuery ? (
+                <div className="flex items-center gap-1">
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  <span className="text-muted-foreground">
+                    Loading results...
+                  </span>
+                </div>
+              ) : curSearchQuery || baseFilter ? (
+                <div className="text-muted-foreground">No results found</div>
+              ) : (
+                <div className="flex flex-col items-center space-y-3">
+                  <Upload className="h-12 w-12 text-muted-foreground" />
+                  <div className="text-muted-foreground">
+                    No agent runs found
+                  </div>
+                  <Button asChild variant="outline" size="sm">
+                    <a
+                      href="https://docs.transluce.org/en/latest/quickstart/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      See quickstart guide
+                    </a>
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
-      )}
+      </div>
 
       {/* Pagination controls */}
       <div className="flex items-center justify-between shrink-0">
@@ -307,6 +367,12 @@ export default function ExperimentViewer() {
           {startIndex + 1}-{endIndex} of {agentRunIds?.length || 0}
         </div>
       </div>
+
+      <UploadRunsDialog
+        isOpen={uploadDialogOpen}
+        onClose={handleUploadDialogClose}
+        file={draggedFile}
+      />
     </Card>
   );
 }

@@ -218,7 +218,7 @@ class InspectAgentRunMetadata(BaseAgentRunMetadata):
     # Parameters for the run
     model: str = Field(description="The model that was used to generate the transcript")
 
-    # Outcome
+    # Scoring
     scoring_metadata: dict[str, Any] | None = Field(
         description="Additional metadata about the scoring process"
     )

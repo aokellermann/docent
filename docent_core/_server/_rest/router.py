@@ -1,14 +1,26 @@
 import hashlib
 import json
+import os
+import tempfile
 from datetime import UTC, datetime
 from functools import partial
 from typing import Any, Literal, TypedDict, cast
 from uuid import uuid4
 
 import anyio
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.responses import StreamingResponse
+from inspect_ai.log import read_eval_log_async
 from pydantic import BaseModel
+from pydantic_core import ValidationError
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.inspection import inspect as sqla_inspect
 
@@ -18,6 +30,7 @@ from docent.data_models.citation import (
     Citation,
     parse_citations_single_run,
 )
+from docent.loaders.load_inspect import load_inspect_log
 from docent_core._ai_tools.search import SearchResult, SearchResultWithCitations
 from docent_core._db_service.contexts import ViewContext
 from docent_core._db_service.filters import (
@@ -54,7 +67,10 @@ from docent_core._server._assistant.summarizer import (
     interesting_agent_observations,
     summarize_agent_actions,
 )
-from docent_core._server._auth.session import create_user_session, invalidate_user_session
+from docent_core._server._auth.session import (
+    create_user_session,
+    invalidate_user_session,
+)
 from docent_core._server._broker.redis_client import (
     REDIS,
     enqueue_search_job,
@@ -354,6 +370,189 @@ async def delete_collection(
 ##############
 # Agent runs #
 ##############
+
+
+async def _process_inspect_file(file: UploadFile) -> tuple[list[AgentRun], dict[str, Any]]:
+    """
+    Helper function to process an Inspect log file and extract agent runs.
+
+    Args:
+        file: Uploaded file containing Inspect evaluation log
+
+    Returns:
+        tuple: (agent_runs, file_info) where file_info contains metadata about the file
+
+    Raises:
+        HTTPException: If file processing fails
+    """
+    # Validate file extension
+    if not file.filename or not (
+        file.filename.endswith(".eval") or file.filename.endswith(".json")
+    ):
+        raise HTTPException(status_code=400, detail="File must be an .eval or .json file")
+
+    temp_file_path = None
+    try:
+        # Read file content
+        file_content = await file.read()
+
+        # Preserve the original file extension for the temporary file
+        file_suffix = ".json" if file.filename.endswith(".json") else ".eval"
+
+        # Create temporary file to write the content
+        with tempfile.NamedTemporaryFile(mode="wb", suffix=file_suffix, delete=False) as temp_file:
+            temp_file.write(file_content)
+            temp_file_path = temp_file.name
+
+        # Load the inspect log using the async interface to avoid uvloop conflicts
+        eval_log = await read_eval_log_async(temp_file_path)
+
+        # Convert to agent runs using the existing load_inspect_log function
+        agent_runs = load_inspect_log(eval_log)
+
+        # Extract file metadata
+        file_info = {
+            "filename": file.filename,
+            "task": eval_log.eval.task if eval_log.eval else None,
+            "model": eval_log.eval.model if eval_log.eval else None,
+            "total_samples": len(eval_log.samples) if eval_log.samples else 0,
+        }
+
+        return agent_runs, file_info
+
+    except ValidationError as e:
+        errors = e.errors()
+        if not errors:
+            message = "Unknown error"
+        else:
+            message = ""
+            for error in errors:
+                message += f"{error['msg']} at {error['loc']}\n"
+                print(message)
+        raise HTTPException(status_code=400, detail=message)
+    except Exception as e:
+        logger.error(f"Failed to process file {file.filename}: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Failed to process file: {str(e)}")
+    finally:
+        # Clean up temporary file
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.unlink(temp_file_path)
+
+
+@user_router.post("/{collection_id}/preview_import_runs_from_file")
+async def preview_import_runs_from_file(
+    collection_id: str,
+    file: UploadFile = File(...),
+    db: DBService = Depends(get_db),
+    ctx: ViewContext = Depends(get_default_view_ctx),
+    _: None = Depends(require_collection_permission(Permission.READ)),
+) -> dict[str, Any]:
+    """
+    Preview what would be imported from an Inspect log file without modifying the database.
+
+    Args:
+        collection_id: Collection ID (for permission checking)
+        file: Uploaded file containing Inspect evaluation log
+        db: Database service dependency
+        ctx: View context dependency
+
+    Returns:
+        dict: Preview of what would be imported
+
+    Raises:
+        HTTPException: If file processing fails
+    """
+    agent_runs, file_info = await _process_inspect_file(file)
+
+    # Gather statistics about what would be imported
+    scores_keys: set[str] = set()
+    models: set[str] = set()
+    task_ids: set[str] = set()
+
+    for run in agent_runs:
+        # Use getattr with defaults to safely access attributes
+        model = getattr(run.metadata, "model", None)
+        if model is not None:
+            models.add(str(model))
+
+        task_id = getattr(run.metadata, "task_id", None)
+        if task_id is not None:
+            task_ids.add(str(task_id))
+
+        if run.metadata.scores:
+            scores_keys.update(run.metadata.scores.keys())
+
+    return {
+        "status": "preview",
+        "would_import": {
+            "num_agent_runs": len(agent_runs),
+            "models": sorted(list(models)),
+            "task_ids": sorted(list(task_ids)),
+            "score_types": sorted(list(scores_keys)),
+        },
+        "file_info": file_info,
+        "sample_preview": [
+            {
+                "metadata": run.metadata.model_dump(strip_internal_fields=True),
+                "num_messages": sum(
+                    len(transcript.messages) for transcript in run.transcripts.values()
+                ),
+            }
+            for run in agent_runs[:10]  # Show first 10 as preview
+        ],
+    }
+
+
+@user_router.post("/{collection_id}/import_runs_from_file")
+async def import_runs_from_file(
+    collection_id: str,
+    file: UploadFile = File(...),
+    db: DBService = Depends(get_db),
+    ctx: ViewContext = Depends(get_default_view_ctx),
+    _: None = Depends(require_collection_permission(Permission.WRITE)),
+):
+    """
+    Import agent runs from an Inspect AI log file.
+
+    Args:
+        collection_id: Collection ID to import runs into
+        file: Uploaded file containing Inspect AI evaluation log
+        db: Database service dependency
+        ctx: View context dependency
+
+    Returns:
+        dict: Summary of the import operation
+
+    Raises:
+        HTTPException: If file processing or import fails
+    """
+    agent_runs, file_info = await _process_inspect_file(file)
+
+    if not agent_runs:
+        return {
+            "status": "success",
+            "message": "No agent runs found in the provided file",
+            "num_runs_imported": 0,
+            **file_info,
+        }
+
+    # Add agent runs to the database (similar to post_agent_runs)
+    async with db.advisory_lock(collection_id, action_id="mutation"):
+        await db.add_agent_runs(ctx, agent_runs)
+
+        # Publish state of ALL views
+        for view_ctx in await db.get_all_view_ctxs(collection_id):
+            await publish_homepage_state(db, view_ctx)
+
+    # Track analytics
+    await track_endpoint_with_user(db, EndpointType.POST_AGENT_RUNS, ctx.user, collection_id)
+
+    return {
+        "status": "success",
+        "message": f"Successfully imported {len(agent_runs)} agent runs from {file_info['filename']}",
+        "num_runs_imported": len(agent_runs),
+        **file_info,
+    }
 
 
 @user_router.get("/{collection_id}/agent_run_metadata_fields")

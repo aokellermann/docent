@@ -49,6 +49,7 @@ dependencies = [
     # Uncategorized
     "arq>=0.26.3",
     "passlib[argon2]>=1.7.4",
+    "python-multipart>=0.0.20",
 ]
 
 [project.scripts]
