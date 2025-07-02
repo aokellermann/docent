@@ -1,6 +1,13 @@
 import { Button } from '@/components/ui/button';
-import { PlusIcon } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { PlusIcon, Upload, BookOpen } from 'lucide-react';
 import { useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import UploadRunsDialog from './UploadRunsDialog';
 
 interface UploadRunsButtonProps {
@@ -20,6 +27,7 @@ export default function UploadRunsButton({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const router = useRouter();
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -38,6 +46,15 @@ export default function UploadRunsButton({
     setSelectedFile(null);
   };
 
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleUseSDKClick = () => {
+    // Navigate to docs page - adjust the URL as needed for your docs
+    window.open('https://docs.transluce.org/en/latest/quickstart/', '_blank');
+  };
+
   return (
     <div>
       <input
@@ -47,14 +64,25 @@ export default function UploadRunsButton({
         onChange={handleFileSelect}
         style={{ display: 'none' }}
       />
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => fileInputRef.current?.click()}
-      >
-        <PlusIcon size={16} className="mr-1" />
-        Upload Inspect Log
-      </Button>
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size="sm" className="pr-2 pl-1.5">
+            <PlusIcon size={14} className="mr-1" />
+            Add Data
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={handleUploadClick}>
+            <Upload className="mr-2 h-4 w-4" />
+            Upload Inspect Log
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={handleUseSDKClick}>
+            <BookOpen className="mr-2 h-4 w-4" />
+            Use SDK
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       <UploadRunsDialog
         isOpen={dialogOpen}
