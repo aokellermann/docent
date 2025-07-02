@@ -36,7 +36,7 @@ async def track_endpoint_usage(
         )
 
         # Save to database
-        async with db.session() as session:
+        async with db.db.session() as session:
             session.add(event)
             await session.commit()
 

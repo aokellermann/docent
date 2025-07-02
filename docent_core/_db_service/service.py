@@ -21,7 +21,6 @@ from uuid import uuid4
 import anyio
 from passlib.context import CryptContext
 from sqlalchemy import (
-    URL,
     ColumnElement,
     delete,
     distinct,
@@ -30,13 +29,6 @@ from sqlalchemy import (
     select,
     text,
     update,
-)
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
 )
 from sqlalchemy.orm import selectinload
 
@@ -58,6 +50,7 @@ from docent_core._ai_tools.search_paired import (
     execute_search_paired,
 )
 from docent_core._db_service.contexts import ViewContext
+from docent_core._db_service.db import DocentDB
 from docent_core._db_service.filters import ComplexFilter
 from docent_core._db_service.schemas.auth_models import (
     PERMISSION_LEVELS,
@@ -66,7 +59,6 @@ from docent_core._db_service.schemas.auth_models import (
     SubjectType,
     User,
 )
-from docent_core._db_service.schemas.base import SQLABase
 from docent_core._db_service.schemas.tables import (
     EMBEDDING_DIM,
     TABLE_TRANSCRIPT_EMBEDDING,
@@ -89,7 +81,6 @@ from docent_core._db_service.schemas.tables import (
     SQLAUser,
     SQLAView,
 )
-from docent_core._env_util import ENV
 from docent_core._llm_util.data_models.llm_output import AsyncEmbeddingStreamingCallback
 from docent_core._llm_util.providers.openai import get_chunked_openai_embeddings_async
 from docent_core._server._broker.redis_client import enqueue_embedding_job
@@ -112,172 +103,13 @@ NOT_GIVEN = _NotGiven()
 
 
 class DBService:
-    """PostgreSQL database service for Collections."""
-
-    # Singleton instance and async lock for thread‑safe initialization
-    _instance: "DBService | None" = None
-    _lock: asyncio.Lock = asyncio.Lock()
-
-    def __init__(
-        self,
-        engine: AsyncEngine,
-        Session: async_sessionmaker[AsyncSession],
-    ):
-        self._engine = engine
-        self._Session = Session
+    def __init__(self, db: DocentDB):
+        self.db = db
 
     @classmethod
     async def init(cls):
-        """Get or create a singleton instance of ``DBService``.
-
-        Uses an :py:class:`asyncio.Lock` to guard the first‑time creation so that
-        concurrent callers do not race to create multiple instances.
-        """
-
-        async with cls._lock:
-            if cls._instance is not None:
-                return cls._instance
-
-            pg_host, pg_port, pg_user, pg_password, pg_database = (
-                ENV.get("DOCENT_PG_HOST"),
-                ENV.get("DOCENT_PG_PORT"),
-                ENV.get("DOCENT_PG_USER"),
-                ENV.get("DOCENT_PG_PASSWORD"),
-                ENV.get("DOCENT_PG_DATABASE"),
-            )
-
-            # Check each database connection parameter individually
-            if not pg_host:
-                raise ValueError("Database host missing. Please ensure DOCENT_PG_HOST is set.")
-            if not pg_port:
-                raise ValueError("Database port missing. Please ensure DOCENT_PG_PORT is set.")
-            if not pg_user:
-                raise ValueError("Database user missing. Please ensure DOCENT_PG_USER is set.")
-            if not pg_password:
-                raise ValueError(
-                    "Database password missing. Please ensure DOCENT_PG_PASSWORD is set."
-                )
-            if not pg_database:
-                pg_database = "docent"
-                logger.info("No database name provided; using `docent` as default")
-
-            # Check that the target database is not 'postgres'
-            if (target_database := pg_database) == "postgres":
-                raise ValueError("Cannot use 'postgres' as a target database")
-
-            # First create a connection to the default 'postgres' database
-            url = URL.create(
-                drivername="postgresql+asyncpg",
-                username=pg_user,
-                password=pg_password,
-                host=pg_host,
-                port=int(pg_port),
-                database="postgres",  # Connect to default postgres database first
-            )
-
-            # Create the target database if it doesn't exist
-            await cls._ensure_database_exists(url, target_database)
-
-            # Now create the connection string for the target database
-            connection_url = url.set(database=target_database)
-            logger.info(f"Using database connection: {connection_url}")
-
-            # Initialize engine with connection pooling
-            engine = create_async_engine(
-                connection_url,
-                pool_size=25,
-                max_overflow=25,
-                pool_timeout=30,
-                pool_recycle=1800,  # Recycle connections after 30 minutes
-                pool_pre_ping=True,  # Check connection validity before use
-            )
-
-            # Create session factory
-            Session = async_sessionmaker(
-                bind=engine,
-                autoflush=False,
-                expire_on_commit=False,
-            )
-
-            # Initialize database tables if they don't exist
-            await cls._setup_target_database(engine)
-
-            # Cache and return the singleton instance
-            cls._instance = cls(engine, Session)
-            return cls._instance
-
-    @staticmethod
-    async def _ensure_database_exists(url: URL, database_name: str) -> None:
-        """
-        Check if the requested database exists and create it if it doesn't.
-
-        Args:
-            url: Connection string to the default postgres database
-            database_name: Name of the database to check/create
-        """
-        # Create a temporary engine connected to the default postgres database
-        temp_engine = create_async_engine(url)
-
-        try:
-            # Check if the database exists
-            async with temp_engine.connect() as conn:
-                result = await conn.execute(
-                    text(f"SELECT 1 FROM pg_database WHERE datname = '{database_name}'")
-                )
-                exists = result.scalar() is not None
-
-            # If database doesn't exist, create it
-            if not exists:
-                logger.info(f"Database '{database_name}' not found. Creating...")
-                # Create a new connection with AUTOCOMMIT isolation level for database creation
-                # Database creation needs to be outside a transaction
-                conn = await temp_engine.connect()
-                conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
-                try:
-                    await conn.execute(text(f"CREATE DATABASE {database_name}"))
-                    logger.info(f"Database '{database_name}' created successfully")
-                finally:
-                    await conn.close()
-            else:
-                logger.info(f"Database '{database_name}' already exists")
-        finally:
-            await temp_engine.dispose()
-
-    @staticmethod
-    async def _setup_target_database(engine: AsyncEngine) -> None:
-        """Create all tables if they don't exist."""
-        async with engine.begin() as conn:
-            # Enable pgvector extension
-            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            # Create tables
-            await conn.run_sync(SQLABase.metadata.create_all)
-        logger.info("pgvector and tables initialized successfully")
-
-    async def drop_all_tables(self) -> None:
-        """
-        Drop all tables in the database.
-        WARNING: This will permanently delete all data.
-        """
-        # Safety check to prevent dropping tables from the postgres system database
-        if self._engine.url.database == "postgres":
-            raise ValueError("Refusing to drop tables from the 'postgres' system database")
-
-        async with self._engine.begin() as conn:
-            await conn.run_sync(SQLABase.metadata.drop_all)
-
-    @asynccontextmanager
-    async def session(self) -> AsyncIterator[AsyncSession]:
-        """Provide a transactional scope around a series of operations."""
-        session = self._Session()
-        try:
-            yield session
-            await session.commit()
-        except SQLAlchemyError:
-            await session.rollback()
-            logger.error("Rolled back database transaction")
-            raise
-        finally:
-            await session.close()
+        db = await DocentDB.init()
+        return cls(db)
 
     #############
     # Collection #
@@ -292,7 +124,7 @@ class DBService:
     ):
         # Create FG
         collection_id = collection_id or str(uuid4())
-        async with self.session() as session:
+        async with self.db.session() as session:
             session.add(
                 SQLACollection(
                     id=collection_id, name=name, description=description, created_by=user.id
@@ -332,7 +164,7 @@ class DBService:
             logger.info(f"No values provided to update Collection {collection_id}")
             return
 
-        async with self.session() as session:
+        async with self.db.session() as session:
             await session.execute(
                 update(SQLACollection)
                 .where(SQLACollection.id == collection_id)
@@ -341,7 +173,7 @@ class DBService:
         logger.info(f"Updated Collection {collection_id} with values: {values_to_update}")
 
     async def fg_exists(self, collection_id: str) -> bool:
-        async with self.session() as session:
+        async with self.db.session() as session:
             result = await session.execute(
                 select(exists().where(SQLACollection.id == collection_id))
             )
@@ -349,7 +181,7 @@ class DBService:
 
     async def delete_collection(self, collection_id: str) -> None:
         # Remove all references from views to other dimensions and filters
-        async with self.session() as session:
+        async with self.db.session() as session:
             await session.execute(
                 update(SQLAView)
                 .where(SQLAView.collection_id == collection_id)
@@ -357,7 +189,7 @@ class DBService:
             )
 
         # delete all search result clusters joining on search result id to get collection_id
-        async with self.session() as session:
+        async with self.db.session() as session:
             await session.execute(
                 delete(SQLASearchResultCluster).where(
                     SQLASearchResultCluster.cluster_id.in_(
@@ -369,31 +201,31 @@ class DBService:
             )
 
         # delete all search results
-        async with self.session() as session:
+        async with self.db.session() as session:
             await session.execute(
                 delete(SQLASearchResult).where(SQLASearchResult.collection_id == collection_id)
             )
 
         # delete all search clusters
-        async with self.session() as session:
+        async with self.db.session() as session:
             await session.execute(
                 delete(SQLASearchCluster).where(SQLASearchCluster.collection_id == collection_id)
             )
 
         # delete all search queries
-        async with self.session() as session:
+        async with self.db.session() as session:
             await session.execute(
                 delete(SQLASearchQuery).where(SQLASearchQuery.collection_id == collection_id)
             )
 
         # Delete all attributes
-        async with self.session() as session:
+        async with self.db.session() as session:
             await session.execute(
                 delete(SQLASearchResult).where(SQLASearchResult.collection_id == collection_id)
             )
 
         # Delete all embeddings
-        async with self.session() as session:
+        async with self.db.session() as session:
             await session.execute(
                 delete(SQLATranscriptEmbedding).where(
                     SQLATranscriptEmbedding.collection_id == collection_id
@@ -401,25 +233,25 @@ class DBService:
             )
 
         # Delete all analytics events
-        async with self.session() as session:
+        async with self.db.session() as session:
             await session.execute(
                 delete(SQLAAnalyticsEvent).where(SQLAAnalyticsEvent.collection_id == collection_id)
             )
 
         # Delete all transcripts
-        async with self.session() as session:
+        async with self.db.session() as session:
             await session.execute(
                 delete(SQLATranscript).where(SQLATranscript.collection_id == collection_id)
             )
 
         # Delete all agent runs
-        async with self.session() as session:
+        async with self.db.session() as session:
             await session.execute(
                 delete(SQLAAgentRun).where(SQLAAgentRun.collection_id == collection_id)
             )
 
         # Delete all Access Control Entries
-        async with self.session() as session:
+        async with self.db.session() as session:
             view_ids = await session.execute(
                 select(SQLAView.id).where(SQLAView.collection_id == collection_id)
             )
@@ -434,11 +266,11 @@ class DBService:
             )
 
         # Delete views
-        async with self.session() as session:
+        async with self.db.session() as session:
             await session.execute(delete(SQLAView).where(SQLAView.collection_id == collection_id))
 
         # Finally delete the collection
-        async with self.session() as session:
+        async with self.db.session() as session:
             await session.execute(delete(SQLACollection).where(SQLACollection.id == collection_id))
             logger.info(f"Deleted collection {collection_id}")
 
@@ -447,7 +279,7 @@ class DBService:
         List Collections that the user has access to.
         If no user provided, returns all collections (for backward compatibility).
         """
-        async with self.session() as session:
+        async with self.db.session() as session:
             query = select(SQLACollection).order_by(SQLACollection.created_at.desc())
 
             if user is not None:
@@ -484,7 +316,7 @@ class DBService:
         transcript_data: list[SQLATranscript] = []
 
         # count the number of agent runs in the current collection
-        async with self.session() as session:
+        async with self.db.session() as session:
             query = select(func.count()).where(SQLAAgentRun.collection_id == ctx.collection_id)
             result = await session.execute(query)
             num_agent_runs = result.scalar_one()
@@ -504,12 +336,12 @@ class DBService:
                 transcript_data.append(sqla_transcript)
 
         # Insert all agent runs
-        async with self.session() as session:
+        async with self.db.session() as session:
             for sqla_agent_run in agent_run_data:
                 session.add(sqla_agent_run)
 
         # Insert all transcripts
-        async with self.session() as session:
+        async with self.db.session() as session:
             for sqla_transcript in transcript_data:
                 session.add(sqla_transcript)
 
@@ -541,7 +373,7 @@ class DBService:
         Get agent run IDs for a given Collection ID without fetching transcripts.
         This is more efficient than get_agent_runs when you only need the IDs.
         """
-        async with self.session() as session:
+        async with self.db.session() as session:
             query = select(SQLAAgentRun.id).where(ctx.get_base_where_clause(SQLAAgentRun))
             result = await session.execute(query)
             agent_run_ids = result.scalars().all()
@@ -562,7 +394,7 @@ class DBService:
             f"get_agent_runs called with ctx.collection_id={ctx.collection_id}, agent_run_ids={len(agent_run_ids) if agent_run_ids else None}, _limit={_limit}"
         )
 
-        async with self.session() as session:
+        async with self.db.session() as session:
             if agent_run_ids is not None and len(agent_run_ids) > 10_000:
                 agent_runs_raw: list[SQLAAgentRun] = []
                 batch_size = 10_000
@@ -657,7 +489,7 @@ class DBService:
 
     async def count_base_agent_runs(self, ctx: ViewContext) -> int:
 
-        async with self.session() as session:
+        async with self.db.session() as session:
             query = (
                 select(func.count())
                 .select_from(SQLAAgentRun)
@@ -673,7 +505,7 @@ class DBService:
     #########
 
     async def get_all_view_ctxs(self, collection_id: str) -> list[ViewContext]:
-        async with self.session() as session:
+        async with self.db.session() as session:
             result = await session.execute(
                 select(SQLAView.id).where(SQLAView.collection_id == collection_id)
             )
@@ -681,7 +513,7 @@ class DBService:
             return [await self.get_view_ctx(view_id) for view_id in view_ids]
 
     async def get_view_ctx(self, view_id: str) -> ViewContext:
-        async with self.session() as session:
+        async with self.db.session() as session:
             # Get the view
             result = await session.execute(
                 select(SQLAView).options(selectinload(SQLAView.user)).where(SQLAView.id == view_id)
@@ -704,7 +536,7 @@ class DBService:
             )
 
     async def clone_view_for_sharing(self, ctx: ViewContext):
-        async with self.session() as session:
+        async with self.db.session() as session:
             result = await session.execute(select(SQLAView).where(SQLAView.id == ctx.view_id))
             view = result.scalar_one()
             new_view = SQLAView(
@@ -721,7 +553,7 @@ class DBService:
         return new_view.id
 
     async def get_view(self, view_id: str) -> SQLAView:
-        async with self.session() as session:
+        async with self.db.session() as session:
             result = await session.execute(select(SQLAView).where(SQLAView.id == view_id))
             return result.scalar_one()
 
@@ -729,7 +561,7 @@ class DBService:
         # TODO(mengk): assert that collection_id exists
 
         # Check if a default view exists for this fg
-        async with self.session() as session:
+        async with self.db.session() as session:
             result = await session.execute(
                 select(SQLAView).where(
                     SQLAView.collection_id == collection_id,
@@ -742,14 +574,14 @@ class DBService:
         # If not, create a new view that clones the FG creator's default view
         if view is None:
             # Who is the creator of the FG?
-            async with self.session() as session:
+            async with self.db.session() as session:
                 result = await session.execute(
                     select(SQLACollection.created_by).where(SQLACollection.id == collection_id)
                 )
                 creator_id = result.scalar_one()
 
             # Get the creator's default view
-            async with self.session() as session:
+            async with self.db.session() as session:
                 result = await session.execute(
                     select(SQLAView).where(
                         SQLAView.collection_id == collection_id,
@@ -775,7 +607,7 @@ class DBService:
                     collection_id=collection_id,
                     user_id=user.id,
                 )
-            async with self.session() as session:
+            async with self.db.session() as session:
                 session.add(view)
 
             # Create ACL entry for the user
@@ -802,7 +634,7 @@ class DBService:
 
         # Add the new filter
         if filter is not None:
-            async with self.session() as session:
+            async with self.db.session() as session:
                 await session.execute(
                     update(SQLAView)
                     .where(SQLAView.id == ctx.view_id)
@@ -817,7 +649,7 @@ class DBService:
     async def clear_view_base_filter(self, ctx: ViewContext):
         if ctx.base_filter is not None:
             # Unset the base filter
-            async with self.session() as session:
+            async with self.db.session() as session:
                 await session.execute(
                     update(SQLAView).where(SQLAView.id == ctx.view_id).values(base_filter_dict=None)
                 )
@@ -835,7 +667,7 @@ class DBService:
         This is now much simpler - we just store the metadata key as the bin key.
         """
         # Update the view with the metadata key as the bin key
-        async with self.session() as session:
+        async with self.db.session() as session:
             await session.execute(
                 update(SQLAView)
                 .where(SQLAView.id == ctx.view_id)
@@ -863,7 +695,7 @@ class DBService:
                     f"Invalid outer_bin_key '{outer_bin_key}'. Available metadata keys: {metadata_keys}"
                 )
 
-        async with self.session() as session:
+        async with self.db.session() as session:
             await session.execute(
                 update(SQLAView)
                 .where(SQLAView.id == ctx.view_id)
@@ -876,7 +708,7 @@ class DBService:
         Returns metadata keys as bin keys.
         """
 
-        async with self.session() as session:
+        async with self.db.session() as session:
             result = await session.execute(
                 select(SQLAView.inner_bin_key, SQLAView.outer_bin_key).where(
                     SQLAView.id == ctx.view_id
@@ -894,7 +726,7 @@ class DBService:
     async def get_binnable_keys(self, ctx: ViewContext, include_bins: bool = True) -> list[str]:
         """Get the available bin keys used for this view."""
 
-        async with self.session() as session:
+        async with self.db.session() as session:
             # Use SQL to extract all unique metadata keys directly
             query = text(
                 """
@@ -919,7 +751,7 @@ class DBService:
     async def get_search_query_by_query(
         self, collection_id: str, search_query: str
     ) -> SQLASearchQuery | None:
-        async with self.session() as session:
+        async with self.db.session() as session:
             result = await session.execute(
                 select(SQLASearchQuery).where(
                     SQLASearchQuery.collection_id == collection_id,
@@ -929,7 +761,7 @@ class DBService:
             return result.scalar_one_or_none()
 
     async def get_search_query(self, query_id: str) -> SQLASearchQuery:
-        async with self.session() as session:
+        async with self.db.session() as session:
             # Check if the search query already exists for this collection
             result = await session.execute(
                 select(SQLASearchQuery).where(SQLASearchQuery.id == query_id)
@@ -947,7 +779,7 @@ class DBService:
             True if the search query was found and deleted, False otherwise
         """
         # Delete search
-        async with self.session() as session:
+        async with self.db.session() as session:
             # TODO(mengk): this is a hack!!!!!!
             # Remove this once we do the FK relationship
 
@@ -988,7 +820,7 @@ class DBService:
 
     async def get_searches_with_result_counts(self, ctx: ViewContext) -> list[dict[str, Any]]:
         # Get search result queries
-        async with self.session() as session:
+        async with self.db.session() as session:
             query = select(SQLASearchQuery.id, SQLASearchQuery.search_query).where(
                 SQLASearchQuery.collection_id == ctx.collection_id
             )
@@ -1001,7 +833,7 @@ class DBService:
         search_queries = list(set(cast(str, query) for _, query in search_ids_and_queries))
 
         # Get counts of agent runs that these search queries have been run against
-        async with self.session() as session:
+        async with self.db.session() as session:
             query = (
                 select(
                     SQLASearchResult.search_query,
@@ -1067,7 +899,7 @@ class DBService:
                 search_result_callback=search_result_callback,
             )
 
-        async with self.session() as session:
+        async with self.db.session() as session:
             query = (
                 select(SQLASearchResult)
                 .where(SQLASearchResult.search_query == search_query)
@@ -1121,7 +953,7 @@ class DBService:
                     )
                     for attr in search_results
                 ]
-                async with self.session() as session:
+                async with self.db.session() as session:
                     session.add_all(to_upload)
 
                 logger.info(f"Pushed {len(to_upload)} attributes")
@@ -1154,7 +986,7 @@ class DBService:
             return agent_runs
 
         query_embedding = query_embeddings[0]
-        async with self.session() as session:
+        async with self.db.session() as session:
             count_query = (
                 select(func.count(SQLATranscriptEmbedding.id))
                 .join(SQLAAgentRun, SQLATranscriptEmbedding.agent_run_id == SQLAAgentRun.id)
@@ -1210,7 +1042,7 @@ class DBService:
 
     async def fg_has_embeddings(self, collection_id: str) -> bool:
         """Check if all runs in the current context have embeddings."""
-        async with self.session() as session:
+        async with self.db.session() as session:
             # Check if there exists any run without embeddings
             subquery = select(1).where(
                 SQLAAgentRun.collection_id == collection_id,
@@ -1236,7 +1068,7 @@ class DBService:
             """
         )
 
-        async with self.session() as session:
+        async with self.db.session() as session:
             result = await session.execute(query, {"index_name": index_name})
             row = result.fetchone()
 
@@ -1250,7 +1082,7 @@ class DBService:
     async def compute_embeddings(
         self, ctx: ViewContext, progress_callback: AsyncEmbeddingStreamingCallback
     ):
-        async with self.session() as session:
+        async with self.db.session() as session:
             # Get all agent runs that don't have embeddings in this collection
             query = (
                 select(SQLAAgentRun.id)
@@ -1286,7 +1118,7 @@ class DBService:
             return False
         embedding_ids = [agent_runs[doc_idx].id for doc_idx in chunk_to_doc]
 
-        async with self.session() as session:
+        async with self.db.session() as session:
             session.add_all(
                 [
                     SQLATranscriptEmbedding(
@@ -1309,7 +1141,7 @@ class DBService:
     ) -> str:
         """Create an IVFFlat index for embeddings of agent runs in the given view context."""
         # Check if embeddings exist for agent runs in this collection
-        async with self.session() as session:
+        async with self.db.session() as session:
             count_query = (
                 select(func.count(SQLATranscriptEmbedding.id))
                 .join(SQLAAgentRun, SQLATranscriptEmbedding.agent_run_id == SQLAAgentRun.id)
@@ -1326,7 +1158,7 @@ class DBService:
         index_name = f"ivfflat_embedding_view_{ctx.collection_id.replace('-', '_')}"
 
         # Drop existing index within a transaction
-        async with self.session() as session:
+        async with self.db.session() as session:
             try:
                 await session.execute(text(f"DROP INDEX IF EXISTS {index_name}"))
                 logger.info(f"Dropped existing index {index_name}")
@@ -1335,7 +1167,7 @@ class DBService:
 
         # Create index CONCURRENTLY outside of transaction using engine connection
         # CONCURRENTLY cannot be run within a transaction block
-        async with self._engine.connect() as conn:
+        async with self.db.engine.connect() as conn:
             # Set autocommit mode for the connection
             await conn.execution_options(isolation_level="AUTOCOMMIT")
 
@@ -1369,7 +1201,7 @@ class DBService:
         Returns:
             The number of embedding jobs matching the criteria
         """
-        async with self.session() as session:
+        async with self.db.session() as session:
             query = (
                 select(func.count(SQLAJob.id))
                 .filter(SQLAJob.type == "compute_embeddings")
@@ -1434,7 +1266,7 @@ class DBService:
     #########
 
     async def get_diffs_report(self, diffs_report_id: str) -> SQLADiffsReport:
-        async with self.session() as session:
+        async with self.db.session() as session:
             result = await session.execute(
                 select(SQLADiffsReport).where(SQLADiffsReport.id == diffs_report_id)
             )
@@ -1457,7 +1289,7 @@ class DBService:
         agent_runs = await self.get_agent_runs(ctx)
         from docent_core._ai_tools.diffs.models import SQLADiffsReport
 
-        async with self.session() as session:
+        async with self.db.session() as session:
             result = await session.execute(
                 select(SQLADiffsReport).where(SQLADiffsReport.id == diffs_report_id)
             )
@@ -1485,7 +1317,7 @@ class DBService:
 
         if should_include_existing_diffs:
             # Get existing diff results from database
-            async with self.session() as session:
+            async with self.db.session() as session:
                 result = await session.execute(
                     select(SQLATranscriptDiff).where(
                         SQLATranscriptDiff.collection_id == ctx.collection_id,
@@ -1539,7 +1371,7 @@ class DBService:
             for transcript_diff in transcript_diffs_models:
                 transcript_diff.diffs_report_id = diffs_report.id
 
-            async with self.session() as session:
+            async with self.db.session() as session:
                 session.add_all(transcript_diffs_models)
                 session.add(diffs_report)
 
@@ -1593,7 +1425,7 @@ class DBService:
 
         # store clusters in the database
         centroid_to_id: dict[str, str] = {}
-        async with self.session() as session:
+        async with self.db.session() as session:
             for centroid in centroids:
                 centroid_id = str(uuid4())
                 cluster = SQLASearchCluster(
@@ -1617,7 +1449,7 @@ class DBService:
             if assignment is None:
                 return
 
-            async with self.session() as session:
+            async with self.db.session() as session:
                 search_result = results_to_record[batch_index]
                 centroid = clusters_to_assign[batch_index]
                 decision = assignment[0]
@@ -1645,7 +1477,7 @@ class DBService:
         self, ctx: ViewContext, search_query: str
     ) -> list[dict[str, Any]]:
         """Get existing clusters for a search query."""
-        async with self.session() as session:
+        async with self.db.session() as session:
             result = await session.execute(
                 select(SQLASearchCluster.centroid, SQLASearchCluster.id).where(
                     SQLASearchCluster.collection_id == ctx.collection_id,
@@ -1656,7 +1488,7 @@ class DBService:
             return [{"centroid": c.centroid, "id": c.id} for c in clusters]
 
     async def get_cluster_matches(self, centroid: str) -> list[dict[str, Any]]:
-        async with self.session() as session:
+        async with self.db.session() as session:
             result = await session.execute(
                 select(SQLASearchResultCluster)
                 .options(selectinload(SQLASearchResultCluster.search_result))
@@ -1667,7 +1499,7 @@ class DBService:
 
     async def clear_search_result_clusters(self, ctx: ViewContext, search_query: str):
         """Clear cluster assignments for search results."""
-        async with self.session() as session:
+        async with self.db.session() as session:
             # Delete all cluster assignments for the clusters associated with this search query
             await session.execute(
                 delete(SQLASearchResultCluster).where(
@@ -1699,7 +1531,7 @@ class DBService:
     ):
         # datapoints = await self.get_agent_runs(ctx)
         # expid_by_datapoint = {d.id: d.metadata.get("experiment_id") for d in datapoints}
-        # async with self.session() as session:
+        # async with self.db.session() as session:
         #     result = await session.execute(
         #         select(SQLADiffAttribute)
         #         .where(
@@ -1733,7 +1565,7 @@ class DBService:
     ) -> list[tuple[str, int]]:
         datapoints = await self.get_agent_runs(ctx)
         expid_by_datapoint = {d.id: d.metadata.get("experiment_id") for d in datapoints}
-        async with self.session() as session:
+        async with self.db.session() as session:
             result = await session.execute(
                 select(SQLADiffAttribute)
                 .where(
@@ -1774,7 +1606,7 @@ class DBService:
             The job ID.
         """
         job_id = job_id or str(uuid4())
-        async with self.session() as session:
+        async with self.db.session() as session:
             session.add(SQLAJob(id=job_id, type=type, created_at=datetime.now(), job_json=job_json))
             logger.info(f"Added job with ID: {job_id}")
         return job_id
@@ -1786,7 +1618,7 @@ class DBService:
         Args:
             should_index: Whether to index the new agent runs
         """
-        async with self.session() as session:
+        async with self.db.session() as session:
             job_id = str(uuid4())
             session.add(
                 SQLAJob(
@@ -1807,7 +1639,7 @@ class DBService:
         Adds or finds a search job for the given query. The first return value is whether this
         call added a new job.
         """
-        async with self.session() as session:
+        async with self.db.session() as session:
             # Check if an equivalent job already exists
             result = await session.execute(
                 select(SQLAJob)
@@ -1837,12 +1669,12 @@ class DBService:
         Returns:
             The job specification as a dictionary, or None if not found.
         """
-        async with self.session() as session:
+        async with self.db.session() as session:
             result = await session.execute(select(SQLAJob).where(SQLAJob.id == job_id))
             return result.scalar_one_or_none()
 
     async def list_search_queries(self, collection_id: str) -> list[SQLASearchQuery]:
-        async with self.session() as session:
+        async with self.db.session() as session:
             result = await session.execute(
                 select(SQLASearchQuery).where(SQLASearchQuery.collection_id == collection_id)
             )
@@ -1850,7 +1682,7 @@ class DBService:
             return list(result.scalars().all())
 
     async def list_search_jobs_and_queries(self):
-        async with self.session() as session:
+        async with self.db.session() as session:
             # Find the latest job creation time corresponding to each query ID.
             sub_q = (
                 select(
@@ -1874,7 +1706,7 @@ class DBService:
         return result.all()
 
     async def set_job_status(self, job_id: str, status: JobStatus):
-        async with self.session() as session:
+        async with self.db.session() as session:
             await session.execute(
                 update(SQLAJob).filter(SQLAJob.id == job_id).values(status=status)
             )
@@ -1882,7 +1714,7 @@ class DBService:
     async def get_search_job_and_query(
         self, job_id: str
     ) -> tuple[dict[Any, Any], SQLASearchQuery] | None:
-        async with self.session() as session:
+        async with self.db.session() as session:
             result = await session.execute(
                 select(SQLAJob, SQLASearchQuery)
                 .filter(SQLAJob.id == job_id)
@@ -1908,7 +1740,7 @@ class DBService:
         """
         cutoff_date = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days_old)
 
-        async with self.session() as session:
+        async with self.db.session() as session:
             result = await session.execute(
                 delete(SQLAChatSession).where(SQLAChatSession.updated_at < cutoff_date)
             )
@@ -1920,7 +1752,7 @@ class DBService:
     #########
 
     async def get_users(self) -> list[User]:
-        async with self.session() as session:
+        async with self.db.session() as session:
             # Get all users
             users_result = await session.execute(select(SQLAUser))
             sqla_users = users_result.scalars().all()
@@ -1949,7 +1781,7 @@ class DBService:
 
         sqla_user.password_hash = pwd_context.hash(password)
 
-        async with self.session() as session:
+        async with self.db.session() as session:
             session.add(sqla_user)
             # Call to_user() inside the session context
             user = sqla_user.to_user()
@@ -1968,7 +1800,7 @@ class DBService:
         email = f"anonymous_{user_id}"
 
         # Persist anonymous user to database
-        async with self.session() as session:
+        async with self.db.session() as session:
             sqla_user = SQLAUser(
                 id=user_id, email=email, password_hash="not necessary", is_anonymous=True
             )
@@ -1989,7 +1821,7 @@ class DBService:
         Returns:
             The User object if found, None otherwise
         """
-        async with self.session() as session:
+        async with self.db.session() as session:
             # Get the user
             result = await session.execute(select(SQLAUser).where(SQLAUser.email == email))
             sqla_user = result.scalar_one_or_none()
@@ -2009,7 +1841,7 @@ class DBService:
         Returns:
             The User object if password is correct, None otherwise
         """
-        async with self.session() as session:
+        async with self.db.session() as session:
             # Get the user with password fields
             result = await session.execute(select(SQLAUser).where(SQLAUser.email == email))
             sqla_user = result.scalar_one_or_none()
@@ -2036,7 +1868,7 @@ class DBService:
         session_id = str(uuid4())
         expires_at = datetime.now(UTC).replace(tzinfo=None) + timedelta(days=expires_in_days)
 
-        async with self.session() as session:
+        async with self.db.session() as session:
             session.add(
                 SQLASession(
                     id=session_id,
@@ -2058,7 +1890,7 @@ class DBService:
         Returns:
             The User object if the session is valid and active, None otherwise
         """
-        async with self.session() as session:
+        async with self.db.session() as session:
             # Join session and user tables, check if session is active and not expired
             result = await session.execute(
                 select(SQLAUser)
@@ -2085,7 +1917,7 @@ class DBService:
         Returns:
             True if the session was found and invalidated, False otherwise
         """
-        async with self.session() as session:
+        async with self.db.session() as session:
             result = await session.execute(
                 update(SQLASession).where(SQLASession.id == session_id).values(is_active=False)
             )
@@ -2118,7 +1950,7 @@ class DBService:
             resource_filter = SQLAAccessControlEntry.view_id == resource_id
         else:
             raise ValueError(f"Unsupported resource type: {resource_type}")
-        async with self.session() as session:
+        async with self.db.session() as session:
             result = await session.execute(
                 select(SQLAAccessControlEntry)
                 .options(selectinload(SQLAAccessControlEntry.user))
@@ -2145,7 +1977,7 @@ class DBService:
 
         all_perm_strs: list[str] = []
 
-        async with self.session() as session:
+        async with self.db.session() as session:
             # Check public permissions
             public_permission_result = await session.execute(
                 select(SQLAAccessControlEntry.permission).where(
@@ -2187,7 +2019,7 @@ class DBService:
         resource_id: str,
         permission: Permission,
     ):
-        async with self.session() as session:
+        async with self.db.session() as session:
             # Build the resource filter based on ResourceType
             if resource_type == ResourceType.COLLECTION:
                 resource_filter = SQLAAccessControlEntry.collection_id == resource_id
@@ -2254,7 +2086,7 @@ class DBService:
         resource_type: ResourceType,
         resource_id: str,
     ) -> int:
-        async with self.session() as session:
+        async with self.db.session() as session:
             # Build the delete query with the provided filters
             query = delete(SQLAAccessControlEntry)
 
@@ -2317,7 +2149,7 @@ class DBService:
         fg_hash = int(hashlib.md5(collection_id.encode()).hexdigest(), 16) % (2**31 - 1)
         action_hash = int(hashlib.sha1(action_id.encode()).hexdigest(), 16) % (2**31 - 1)
 
-        async with self._engine.connect() as conn:
+        async with self.db.engine.connect() as conn:
             await conn.execution_options(isolation_level="AUTOCOMMIT")
 
             try:
@@ -2343,7 +2175,7 @@ class DBService:
         Add a search query to the SQLASearchQuery table if it does not already exist.
         Returns the id of the search query.
         """
-        async with self.session() as session:
+        async with self.db.session() as session:
             # Check if the search query already exists for this collection
             result = await session.execute(
                 select(SQLASearchQuery).where(
@@ -2356,7 +2188,7 @@ class DBService:
                 return existing.id
 
         # Otherwise, create a new search query
-        async with self.session() as session:
+        async with self.db.session() as session:
             new_id = str(uuid4())
             sq = SQLASearchQuery(
                 id=new_id,
@@ -2383,7 +2215,7 @@ class DBService:
         key_hash = pwd_context.hash(raw_api_key)
         api_key_id = str(uuid4())
 
-        async with self.session() as session:
+        async with self.db.session() as session:
             api_key = SQLAApiKey(
                 id=api_key_id,
                 user_id=user_id,
@@ -2397,7 +2229,7 @@ class DBService:
 
     async def get_user_api_keys(self, user_id: str) -> list[SQLAApiKey]:
         """Get all API keys for a user."""
-        async with self.session() as session:
+        async with self.db.session() as session:
             result = await session.execute(
                 select(SQLAApiKey)
                 .where(SQLAApiKey.user_id == user_id)
@@ -2407,7 +2239,7 @@ class DBService:
 
     async def disable_api_key(self, api_key_id: str, user_id: str) -> bool:
         """Disable an API key. Returns True if key was found and disabled."""
-        async with self.session() as session:
+        async with self.db.session() as session:
             result = await session.execute(
                 update(SQLAApiKey)
                 .where(SQLAApiKey.id == api_key_id, SQLAApiKey.user_id == user_id)
@@ -2423,7 +2255,7 @@ class DBService:
         if not raw_api_key.startswith("dk_"):
             return None
 
-        async with self.session() as session:
+        async with self.db.session() as session:
             result = await session.execute(
                 select(SQLAApiKey)
                 .join(SQLAUser, SQLAApiKey.user_id == SQLAUser.id)

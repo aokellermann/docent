@@ -148,7 +148,7 @@ async def publish_bin_stats_and_agent_runs(
     where_clause = str(compiled_where)
 
     # Build the SQL query to compute statistics directly
-    async with db.session() as session:
+    async with db.db.session() as session:
         # Build the GROUP BY clause based on the number of bins
         if len(bin_keys) == 1:
             # 1D case: group by single dimension

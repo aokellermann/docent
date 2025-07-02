@@ -990,7 +990,7 @@ async def remove_collaborator(
     user: User = Depends(get_user_anonymous_ok),
     _: None = Depends(require_collection_permission(Permission.ADMIN)),
 ):
-    async with db.session() as session:
+    async with db.db.session() as session:
         # Build the delete query with the provided filters
         query = select(SQLAAccessControlEntry).where(
             SQLAAccessControlEntry.collection_id == collection_id
@@ -1622,7 +1622,7 @@ async def listen_cluster_search_results(
                 already_sent_search_result_assignments: set[str] = set()
                 while True:
                     # Read search results from the DB that have not been sent yet
-                    async with db.session() as session:
+                    async with db.db.session() as session:
                         result = await session.execute(
                             select(SQLASearchResultCluster, SQLASearchResult, SQLASearchCluster)
                             .join(
@@ -1847,7 +1847,7 @@ async def get_ta_session_messages(
     """
     Get the message history for an existing TA session.
     """
-    async with db.session() as session:
+    async with db.db.session() as session:
         result = await session.execute(
             select(SQLAChatSession).where(SQLAChatSession.id == session_id)
         )
@@ -1899,7 +1899,7 @@ async def create_ta_session(
         agent_run_ids=[agent_run.id],
     )
 
-    async with db.session() as session:
+    async with db.db.session() as session:
         session.add(chat_session)
         await session.commit()
 
@@ -1919,7 +1919,7 @@ async def get_ta_message(
     _: None = Depends(require_view_permission(Permission.READ)),
 ):
     # Get session from database
-    async with db.session() as session:
+    async with db.db.session() as session:
         result = await session.execute(
             select(SQLAChatSession).where(SQLAChatSession.id == session_id)
         )
@@ -1990,7 +1990,7 @@ async def get_ta_message(
         updated_messages = _get_complete_message_list()
 
         # Update the database with the new messages
-        async with db.session() as db_session:
+        async with db.db.session() as db_session:
             await db_session.execute(
                 update(SQLAChatSession)
                 .where(SQLAChatSession.id == session_id)
@@ -2063,7 +2063,7 @@ async def start_compute_diffs(
 
     # Check if a report already exists for these experiment IDs
     # FIXME(mengk): SQL should not be in the router
-    async with db.session() as session:
+    async with db.db.session() as session:
         existing_report = (
             await session.execute(
                 select(SQLADiffsReport).where(
@@ -2089,7 +2089,7 @@ async def start_compute_diffs(
         experiment_id_1=request.experiment_id_1,
         experiment_id_2=request.experiment_id_2,
     )
-    async with db.session() as session:
+    async with db.db.session() as session:
         session.add(report)
     job_id = await db.add_job(
         "compute_diffs",
@@ -2125,7 +2125,7 @@ async def listen_compute_diffs(
         raise ValueError(f"Job {job_id} not found")
     diffs_report_id = job.job_json["diffs_report_id"]
 
-    async with db.session() as session:
+    async with db.db.session() as session:
         diffs_report = (
             await session.execute(
                 select(SQLADiffsReport).where(SQLADiffsReport.id == diffs_report_id)
@@ -2380,7 +2380,7 @@ async def get_transcript_diff(
     from docent_core._ai_tools.diffs.models import SQLATranscriptDiff
 
     # Query for transcript diff in either direction
-    async with db.session() as session:
+    async with db.db.session() as session:
         result = await session.execute(
             select(SQLATranscriptDiff).where(
                 or_(
