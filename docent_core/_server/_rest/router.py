@@ -2037,184 +2037,184 @@ class StreamedDiffSearchResult(TypedDict):
     num_results_total: int
 
 
-@user_router.get("/{collection_id}/diffs_reports/{diffs_report_id}")
-async def get_diffs_report(
-    diffs_report_id: str,
-    db: DBService = Depends(get_db),
-    ctx: ViewContext = Depends(get_default_view_ctx),
-    _: None = Depends(require_view_permission(Permission.READ)),
-):
-    report = await db.get_diffs_report(diffs_report_id)
+# @user_router.get("/{collection_id}/diffs_reports/{diffs_report_id}")
+# async def get_diffs_report(
+#     diffs_report_id: str,
+#     db: DBService = Depends(get_db),
+#     ctx: ViewContext = Depends(get_default_view_ctx),
+#     _: None = Depends(require_view_permission(Permission.READ)),
+# ):
+#     report = await db.get_diffs_report(diffs_report_id)
 
-    # Track analytics
-    await track_endpoint_with_user(db, EndpointType.GET_DIFFS_REPORT, ctx.user, ctx.collection_id)
+#     # Track analytics
+#     await track_endpoint_with_user(db, EndpointType.GET_DIFFS_REPORT, ctx.user, ctx.collection_id)
 
-    return report.to_pydantic().model_dump()
-
-
-@user_router.post("/{collection_id}/start_compute_diffs")
-async def start_compute_diffs(
-    collection_id: str,
-    request: ComputeDiffRequest,
-    db: DBService = Depends(get_db),
-    ctx: ViewContext = Depends(get_default_view_ctx),
-):
-    from docent_core._ai_tools.diffs.models import SQLADiffsReport
-
-    # Check if a report already exists for these experiment IDs
-    # FIXME(mengk): SQL should not be in the router
-    async with db.db.session() as session:
-        existing_report = (
-            await session.execute(
-                select(SQLADiffsReport).where(
-                    SQLADiffsReport.experiment_id_1 == request.experiment_id_1,
-                    SQLADiffsReport.experiment_id_2 == request.experiment_id_2,
-                    SQLADiffsReport.collection_id == collection_id,
-                )
-            )
-        ).scalar_one_or_none()
-
-    existing_report = None  # FIXME(kevin): remove this
-
-    if existing_report:
-        return {
-            "job_id": None,
-            "diffs_report_id": existing_report.id,
-        }
-
-    report = SQLADiffsReport(
-        id=str(uuid4()),
-        collection_id=collection_id,
-        name=f"{request.experiment_id_1} vs {request.experiment_id_2}",
-        experiment_id_1=request.experiment_id_1,
-        experiment_id_2=request.experiment_id_2,
-    )
-    async with db.db.session() as session:
-        session.add(report)
-    job_id = await db.add_job(
-        "compute_diffs",
-        {
-            "collection_id": collection_id,
-            "diffs_report_id": report.id,
-        },
-    )
-
-    # Track analytics
-    await track_endpoint_with_user(db, EndpointType.START_COMPUTE_DIFFS, ctx.user, collection_id)
-
-    return {
-        "job_id": job_id,
-        "diffs_report_id": report.id,
-    }
+#     return report.to_pydantic().model_dump()
 
 
-@user_router.get("/{collection_id}/listen_compute_diffs")
-async def listen_compute_diffs(
-    collection_id: str,
-    job_id: str,
-    db: DBService = Depends(get_db),
-    ctx: ViewContext = Depends(get_default_view_ctx),
-):
-    from sqlalchemy import select
+# @user_router.post("/{collection_id}/start_compute_diffs")
+# async def start_compute_diffs(
+#     collection_id: str,
+#     request: ComputeDiffRequest,
+#     db: DBService = Depends(get_db),
+#     ctx: ViewContext = Depends(get_default_view_ctx),
+# ):
+#     from docent_core._ai_tools.diffs.models import SQLADiffsReport
 
-    from docent_core._ai_tools.diffs.models import SQLADiffsReport
+#     # Check if a report already exists for these experiment IDs
+#     # FIXME(mengk): SQL should not be in the router
+#     async with db.db.session() as session:
+#         existing_report = (
+#             await session.execute(
+#                 select(SQLADiffsReport).where(
+#                     SQLADiffsReport.experiment_id_1 == request.experiment_id_1,
+#                     SQLADiffsReport.experiment_id_2 == request.experiment_id_2,
+#                     SQLADiffsReport.collection_id == collection_id,
+#                 )
+#             )
+#         ).scalar_one_or_none()
 
-    # Retrieve job arguments
-    job = await db.get_job(job_id)
-    if job is None:
-        raise ValueError(f"Job {job_id} not found")
-    diffs_report_id = job.job_json["diffs_report_id"]
+#     existing_report = None  # FIXME(kevin): remove this
 
-    async with db.db.session() as session:
-        diffs_report = (
-            await session.execute(
-                select(SQLADiffsReport).where(SQLADiffsReport.id == diffs_report_id)
-            )
-        ).scalar_one()
+#     if existing_report:
+#         return {
+#             "job_id": None,
+#             "diffs_report_id": existing_report.id,
+#         }
 
-    experiment_id_1, experiment_id_2 = diffs_report.experiment_id_1, diffs_report.experiment_id_2
+#     report = SQLADiffsReport(
+#         id=str(uuid4()),
+#         collection_id=collection_id,
+#         name=f"{request.experiment_id_1} vs {request.experiment_id_2}",
+#         experiment_id_1=request.experiment_id_1,
+#         experiment_id_2=request.experiment_id_2,
+#     )
+#     async with db.db.session() as session:
+#         session.add(report)
+#     job_id = await db.add_job(
+#         "compute_diffs",
+#         {
+#             "collection_id": collection_id,
+#             "diffs_report_id": report.id,
+#         },
+#     )
 
-    # Create AnyIO queue that we can write intermediate results to
-    send_stream, recv_stream = anyio.create_memory_object_stream[StreamedDiffs](
-        max_buffer_size=100_000
-    )
+#     # Track analytics
+#     await track_endpoint_with_user(db, EndpointType.START_COMPUTE_DIFFS, ctx.user, collection_id)
 
-    # Track intermediate progress
-    progress_lock = anyio.Lock()
-    num_done, num_total = 0, 0  # Will be set after getting datapoints
+#     return {
+#         "job_id": job_id,
+#         "diffs_report_id": report.id,
+#     }
 
-    from docent_core._ai_tools.diffs.models import TranscriptDiff
 
-    async def _ws_diff_streaming_callback(
-        transcript_diff: TranscriptDiff | None,
-    ) -> None:
-        nonlocal num_done
+# @user_router.get("/{collection_id}/listen_compute_diffs")
+# async def listen_compute_diffs(
+#     collection_id: str,
+#     job_id: str,
+#     db: DBService = Depends(get_db),
+#     ctx: ViewContext = Depends(get_default_view_ctx),
+# ):
+#     from sqlalchemy import select
 
-        async with progress_lock:
-            num_done += 1
-            payload: StreamedDiffs = {
-                "num_pairs_done": num_done,
-                "num_pairs_total": num_total,
-                "transcript_diff": transcript_diff.model_dump() if transcript_diff else None,
-            }
+#     from docent_core._ai_tools.diffs.models import SQLADiffsReport
 
-        # Send to event_stream so it can be sent back to the client
-        await send_stream.send(payload)
+#     # Retrieve job arguments
+#     job = await db.get_job(job_id)
+#     if job is None:
+#         raise ValueError(f"Job {job_id} not found")
+#     diffs_report_id = job.job_json["diffs_report_id"]
 
-        if num_done == num_total:
-            # Terminate the stream so the event_stream stops waiting
-            await send_stream.aclose()
+#     async with db.db.session() as session:
+#         diffs_report = (
+#             await session.execute(
+#                 select(SQLADiffsReport).where(SQLADiffsReport.id == diffs_report_id)
+#             )
+#         ).scalar_one()
 
-    async def _execute():
-        async with db.advisory_lock(collection_id, action_id="mutation"):
-            # Get total number of pairs to compute
-            datapoints = await db.get_agent_runs(ctx)
+#     experiment_id_1, experiment_id_2 = diffs_report.experiment_id_1, diffs_report.experiment_id_2
 
-            # group by sample_id, task_id, epoch_id
-            datapoints_by_sample_task_epoch: dict[tuple[str, str, str], list[AgentRun]] = {}
-            for dp in datapoints:
-                key = (
-                    str(dp.metadata.get("sample_id")),
-                    str(dp.metadata.get("task_id")),
-                    str(dp.metadata.get("epoch_id")),
-                )
-                if key not in datapoints_by_sample_task_epoch:
-                    datapoints_by_sample_task_epoch[key] = []
-                datapoints_by_sample_task_epoch[key].append(dp)
+#     # Create AnyIO queue that we can write intermediate results to
+#     send_stream, recv_stream = anyio.create_memory_object_stream[StreamedDiffs](
+#         max_buffer_size=100_000
+#     )
 
-            # Count total pairs to compute
-            nonlocal num_total
-            for datapoint_lists in datapoints_by_sample_task_epoch.values():
-                first_pair_candidates = [
-                    dp
-                    for dp in datapoint_lists
-                    if dp.metadata.get("experiment_id") == experiment_id_1
-                ]
-                second_pair_candidates = [
-                    dp
-                    for dp in datapoint_lists
-                    if dp.metadata.get("experiment_id") == experiment_id_2
-                ]
-                if len(first_pair_candidates) > 0 and len(second_pair_candidates) > 0:
-                    num_total += 1
+#     # Track intermediate progress
+#     progress_lock = anyio.Lock()
+#     num_done, num_total = 0, 0  # Will be set after getting datapoints
 
-            # Send initial 0% state message
-            init_data = StreamedDiffs(
-                num_pairs_done=0,
-                num_pairs_total=num_total,
-                transcript_diff=None,
-            )
-            await send_stream.send(init_data)
+#     from docent_core._ai_tools.diffs.models import TranscriptDiff
 
-            # Compute diffs
-            await db.compute_diffs(ctx, diffs_report.id, _ws_diff_streaming_callback)
+#     async def _ws_diff_streaming_callback(
+#         transcript_diff: TranscriptDiff | None,
+#     ) -> None:
+#         nonlocal num_done
 
-            # Final refresh of state
-            await publish_homepage_state(db, ctx)
+#         async with progress_lock:
+#             num_done += 1
+#             payload: StreamedDiffs = {
+#                 "num_pairs_done": num_done,
+#                 "num_pairs_total": num_total,
+#                 "transcript_diff": transcript_diff.model_dump() if transcript_diff else None,
+#             }
 
-    return StreamingResponse(
-        sse_event_stream(_execute, recv_stream), media_type="text/event-stream"
-    )
+#         # Send to event_stream so it can be sent back to the client
+#         await send_stream.send(payload)
+
+#         if num_done == num_total:
+#             # Terminate the stream so the event_stream stops waiting
+#             await send_stream.aclose()
+
+#     async def _execute():
+#         async with db.advisory_lock(collection_id, action_id="mutation"):
+#             # Get total number of pairs to compute
+#             datapoints = await db.get_agent_runs(ctx)
+
+#             # group by sample_id, task_id, epoch_id
+#             datapoints_by_sample_task_epoch: dict[tuple[str, str, str], list[AgentRun]] = {}
+#             for dp in datapoints:
+#                 key = (
+#                     str(dp.metadata.get("sample_id")),
+#                     str(dp.metadata.get("task_id")),
+#                     str(dp.metadata.get("epoch_id")),
+#                 )
+#                 if key not in datapoints_by_sample_task_epoch:
+#                     datapoints_by_sample_task_epoch[key] = []
+#                 datapoints_by_sample_task_epoch[key].append(dp)
+
+#             # Count total pairs to compute
+#             nonlocal num_total
+#             for datapoint_lists in datapoints_by_sample_task_epoch.values():
+#                 first_pair_candidates = [
+#                     dp
+#                     for dp in datapoint_lists
+#                     if dp.metadata.get("experiment_id") == experiment_id_1
+#                 ]
+#                 second_pair_candidates = [
+#                     dp
+#                     for dp in datapoint_lists
+#                     if dp.metadata.get("experiment_id") == experiment_id_2
+#                 ]
+#                 if len(first_pair_candidates) > 0 and len(second_pair_candidates) > 0:
+#                     num_total += 1
+
+#             # Send initial 0% state message
+#             init_data = StreamedDiffs(
+#                 num_pairs_done=0,
+#                 num_pairs_total=num_total,
+#                 transcript_diff=None,
+#             )
+#             await send_stream.send(init_data)
+
+#             # Compute diffs
+#             await db.compute_diffs(ctx, diffs_report.id, _ws_diff_streaming_callback)
+
+#             # Final refresh of state
+#             await publish_homepage_state(db, ctx)
+
+#     return StreamingResponse(
+#         sse_event_stream(_execute, recv_stream), media_type="text/event-stream"
+#     )
 
 
 ########################
@@ -2222,29 +2222,29 @@ async def listen_compute_diffs(
 ########################
 
 
-class ComputeClusteringDiffsRequest(BaseModel):
-    diffs_report_id: str
+# class ComputeClusteringDiffsRequest(BaseModel):
+#     diffs_report_id: str
 
 
-@user_router.post("/{collection_id}/compute_diff_clusters")
-async def compute_diff_clusters(
-    collection_id: str,
-    request: ComputeClusteringDiffsRequest,
-    db: DBService = Depends(get_db),
-    ctx: ViewContext = Depends(get_default_view_ctx),
-    _: None = Depends(require_collection_permission(Permission.WRITE)),
-):
-    diffs_report = await db.get_diffs_report(request.diffs_report_id)
-    claims = [c.to_pydantic() for diff in diffs_report.diffs for c in diff.claims]
-    clusters = await db.compute_diff_clusters(
-        ctx,
-        claims,
-    )
+# @user_router.post("/{collection_id}/compute_diff_clusters")
+# async def compute_diff_clusters(
+#     collection_id: str,
+#     request: ComputeClusteringDiffsRequest,
+#     db: DBService = Depends(get_db),
+#     ctx: ViewContext = Depends(get_default_view_ctx),
+#     _: None = Depends(require_collection_permission(Permission.WRITE)),
+# ):
+#     diffs_report = await db.get_diffs_report(request.diffs_report_id)
+#     claims = [c.to_pydantic() for diff in diffs_report.diffs for c in diff.claims]
+#     clusters = await db.compute_diff_clusters(
+#         ctx,
+#         claims,
+#     )
 
-    # Track analytics
-    await track_endpoint_with_user(db, EndpointType.COMPUTE_DIFF_CLUSTERS, ctx.user, collection_id)
+#     # Track analytics
+#     await track_endpoint_with_user(db, EndpointType.COMPUTE_DIFF_CLUSTERS, ctx.user, collection_id)
 
-    return clusters
+#     return clusters
 
 
 class ComputeDiffSearchRequest(BaseModel):
