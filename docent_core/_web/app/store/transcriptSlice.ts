@@ -256,7 +256,7 @@ export const getCurAgentRun = createAsyncThunk(
 
     try {
       const response = await apiRestClient.get(
-        `/${collectionId}/agent_run?agent_run_id=${agentRunId}`
+        `/${collectionId}/agent_run?agent_run_id=${agentRunId}&apply_base_where_clause=false`
       );
       dispatch(setCurAgentRun(response.data));
     } catch (error) {
@@ -297,7 +297,7 @@ export const getAltAgentRun = createAsyncThunk(
 
     try {
       const response = await await apiRestClient.get(
-        `/${collectionId}/agent_run?agent_run_id=${agentRunId}`
+        `/${collectionId}/agent_run?agent_run_id=${agentRunId}&apply_base_where_clause=false`
       );
       console.log('response', response);
       dispatch(setAltAgentRun(response.data));
