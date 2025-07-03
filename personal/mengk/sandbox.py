@@ -11,6 +11,25 @@ IPython.get_ipython().run_line_magic("autoreload", "2")
 
 # %%
 
+
+async def setup():
+    from docent_core._db_service.db import DocentDB
+    from docent_core._db_service.service import DBService
+    from docent_core.services.setup import SetupService
+
+    db = await DocentDB.init()
+    service = await DBService.init()
+    async with db.session() as s:
+        ds = SetupService(s, service)
+        return await ds.setup_dummy_data()
+
+
+result = await setup()
+result
+
+
+# %%
+
 from docent_core._db_service.db import DocentDB
 from docent_core._db_service.service import DBService
 from docent_core.services.diff import DiffService
@@ -69,7 +88,7 @@ await ts.commit()
 # %%
 
 
-query_id
+await ds.get_paired_search_results(query_id)
 
 
 # %%
