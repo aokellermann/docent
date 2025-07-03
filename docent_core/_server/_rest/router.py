@@ -574,14 +574,26 @@ async def agent_run_metadata_fields(
 @user_router.get("/{collection_id}/agent_run")
 async def get_agent_run(
     agent_run_id: str,
+    apply_base_where_clause: bool = True,
     db: DBService = Depends(get_db),
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.READ)),
 ):
+    """
+    Get an agent run by ID.
+
+    Args:
+        agent_run_id: The ID of the agent run to get.
+        apply_base_where_clause: Whether to apply the base where clause to the query.
+
+    Returns:
+        The agent run.
+    """
+
     # Track analytics
     await track_endpoint_with_user(db, EndpointType.GET_AGENT_RUN, ctx.user, ctx.collection_id)
 
-    return await db.get_agent_run(ctx, agent_run_id)
+    return await db.get_agent_run(ctx, agent_run_id, apply_base_where_clause)
 
 
 class AgentRunMetadataRequest(BaseModel):
@@ -1685,7 +1697,7 @@ async def get_actions_summary(
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.READ)),
 ):
-    agent_run = await db.get_agent_run(ctx, agent_run_id)
+    agent_run = await db.get_agent_run(ctx, agent_run_id, apply_base_where_clause=False)
     if not agent_run:
         raise ValueError(f"AgentRun {agent_run_id} not found")
     transcript = next(
