@@ -4,7 +4,7 @@ from typing import Any
 import requests
 
 from docent._log_util.logger import get_logger
-from docent.data_models.agent_run import AgentRun
+from docent.data_models.agent_run import AgentRun, AgentRunWithoutMetadataValidator
 
 logger = get_logger(__name__)
 
@@ -268,3 +268,26 @@ class Docent:
         response = self._session.post(url, json={"centroid": centroid})
         response.raise_for_status()
         return response.json()
+
+    def get_agent_run(self, collection_id: str, agent_run_id: str) -> AgentRun | None:
+        """Get a specific agent run by its ID.
+
+        Args:
+            collection_id: ID of the Collection.
+            agent_run_id: The ID of the agent run to retrieve.
+
+        Returns:
+            dict: Dictionary containing the agent run information.
+
+        Raises:
+            requests.exceptions.HTTPError: If the API request fails.
+        """
+        url = f"{self._server_url}/{collection_id}/agent_run"
+        response = self._session.get(url, params={"agent_run_id": agent_run_id})
+        response.raise_for_status()
+        if response.json() is None:
+            return None
+        else:
+            # We do this to avoid metadata validation failing
+            # TODO(mengk): kinda hacky
+            return AgentRunWithoutMetadataValidator.model_validate(response.json())
