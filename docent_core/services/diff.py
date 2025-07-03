@@ -65,7 +65,6 @@ class DiffService:
     async def add_paired_search_query(self, ctx: ViewContext, query: SearchPairedQuery):
         sqla_query = SQLAPairedSearchQuery.from_pydantic(query, ctx.collection_id)
         self.session.add(sqla_query)
-        await self.session.commit()  # Ensure writer session can see this query
         return sqla_query.id
 
     async def compute_paired_search(
