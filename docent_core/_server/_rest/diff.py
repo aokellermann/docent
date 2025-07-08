@@ -37,22 +37,25 @@ async def get_all_diff_queries(
     return queries
 
 
-@diff_router.post("/{collection_id}/listen_diff")
+@diff_router.get("/{collection_id}/listen_diff")
 async def listen_for_diff_results(
     query_id: str,
     diff_svc: DiffService = Depends(get_diff_service),
-    ctx: ViewContext = Depends(get_default_view_ctx),
 ):
     send_stream, recv_stream = anyio.create_memory_object_stream[list[DiffResult]](
         max_buffer_size=100_000
     )
 
     async def _execute():
-        while True:
+        """Poll for outputs until the query is done."""
+        done = False
+        while not done:
             results = await diff_svc.get_diff_results(query_id)
-            await send_stream.send(results)
+            if results is not None:  # type: ignore
+                await send_stream.send(results)
+
             await anyio.sleep(1)
 
     return StreamingResponse(
-        sse_event_stream(_execute, recv_stream), media_type="text/event-stream"
+        sse_event_stream(_execute, send_stream, recv_stream), media_type="text/event-stream"
     )

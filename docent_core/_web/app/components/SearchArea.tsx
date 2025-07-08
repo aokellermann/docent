@@ -44,7 +44,6 @@ import { ProgressBar } from './ProgressBar';
 import { apiRestClient } from '../services/apiService';
 import { useHasCollectionWritePermission } from '@/lib/permissions/hooks';
 import { copyToClipboard } from '@/lib/utils';
-import DiffSelector from './DiffSelector';
 
 // Preset search queries with custom icons
 const PRESET_QUERIES = [
@@ -708,7 +707,7 @@ const SearchArea = () => {
       </div>
 
       {/* Paired search */}
-      <div className="space-y-2">
+      {/* <div className="space-y-2">
         <div>
           <div className="text-sm font-semibold">Paired Search</div>
           <div className="text-xs">
@@ -716,10 +715,10 @@ const SearchArea = () => {
           </div>
         </div>
         Not implemented yet
-      </div>
+      </div> */}
 
       {/* Diffing */}
-      <DiffSelector />
+      {/* <DiffSelector /> */}
     </Card>
   );
 };

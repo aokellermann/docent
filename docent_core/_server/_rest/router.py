@@ -1445,7 +1445,7 @@ async def listen_compute_search(
             await send_stream.aclose()
 
     return StreamingResponse(
-        sse_event_stream(_execute, recv_stream), media_type="text/event-stream"
+        sse_event_stream(_execute, send_stream, recv_stream), media_type="text/event-stream"
     )
 
 
@@ -1805,7 +1805,9 @@ async def listen_cluster_search_results(
 
                 await send_stream.aclose()
 
-    return StreamingResponse(sse_event_stream(execute, recv_stream), media_type="text/event-stream")
+    return StreamingResponse(
+        sse_event_stream(execute, send_stream, recv_stream), media_type="text/event-stream"
+    )
 
 
 #######################
@@ -1907,7 +1909,7 @@ async def get_actions_summary(
         await send_stream.aclose()
 
     return StreamingResponse(
-        sse_event_stream(_execute, recv_stream), media_type="text/event-stream"
+        sse_event_stream(_execute, send_stream, recv_stream), media_type="text/event-stream"
     )
 
 
@@ -1947,7 +1949,7 @@ async def get_actions_summary(
 #         await recv_stream.aclose()
 
 #     return StreamingResponse(
-#         sse_event_stream(_execute, recv_stream), media_type="text/event-stream"
+#         sse_event_stream(_execute, send_stream, recv_stream), media_type="text/event-stream"
 #     )
 
 
@@ -2144,7 +2146,7 @@ async def get_ta_message(
     )
 
     return StreamingResponse(
-        sse_event_stream(_execute, recv_stream), media_type="text/event-stream"
+        sse_event_stream(_execute, send_stream, recv_stream), media_type="text/event-stream"
     )
 
 
@@ -2350,7 +2352,7 @@ class StreamedDiffSearchResult(TypedDict):
 #             await publish_homepage_state(mono_svc, ctx)
 
 #     return StreamingResponse(
-#         sse_event_stream(_execute, recv_stream), media_type="text/event-stream"
+#         sse_event_stream(_execute, send_stream, recv_stream), media_type="text/event-stream"
 #     )
 
 
@@ -2499,7 +2501,7 @@ class ComputeDiffSearchRequest(BaseModel):
 #             )
 
 #     return StreamingResponse(
-#         sse_event_stream(_execute, recv_stream), media_type="text/event-stream"
+#         sse_event_stream(_execute, send_stream, recv_stream), media_type="text/event-stream"
 #     )
 
 

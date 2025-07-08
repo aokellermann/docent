@@ -1,6 +1,8 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import { BASE_URL } from '@/app/constants';
-import { DiffQuery, DiffResult } from '@/app/types/diffTypes';
+import { DiffQuery } from '@/app/types/diffTypes';
+import { diffResultReceived } from '@/app/store/diffSlice';
+import sseService from '../services/sseService';
 
 export const diffApi = createApi({
   reducerPath: 'diffApi',
@@ -26,14 +28,27 @@ export const diffApi = createApi({
       invalidatesTags: ['DiffQuery'],
     }),
     listenForDiffResults: build.query<
-      DiffResult[],
+      { isSSEConnected: boolean },
       { collectionId: string; queryId: string }
     >({
-      query: ({ collectionId, queryId }) => ({
-        url: `/${collectionId}/listen_diff`,
-        method: 'POST',
-        body: { query_id: queryId },
-      }),
+      queryFn: () => ({ data: { isSSEConnected: true } }),
+      async onCacheEntryAdded(
+        { collectionId, queryId },
+        { dispatch, updateCachedData, cacheEntryRemoved }
+      ) {
+        const url = `/rest/diff/${collectionId}/listen_diff?query_id=${queryId}`;
+        sseService.createEventSource(
+          url,
+          (data) => dispatch(diffResultReceived({ queryId, diff: data })),
+          () =>
+            updateCachedData((draft) => {
+              draft.isSSEConnected = false;
+            })
+        );
+
+        // Suspends until the query completes
+        await cacheEntryRemoved;
+      },
       providesTags: ['DiffResult'],
     }),
   }),

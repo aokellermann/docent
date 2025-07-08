@@ -1,6 +1,16 @@
-import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+import {
+  createSlice,
+  type PayloadAction,
+  createAction,
+} from '@reduxjs/toolkit';
 import { diffApi } from '@/app/api/diffApi';
 import { DiffQuery, DiffResult } from '@/app/types/diffTypes';
+
+// Define the action for when a diff event arrives via SSE
+export const diffResultReceived = createAction<{
+  queryId: string;
+  diff: DiffResult;
+}>('diff/eventReceived');
 
 export interface DiffState {
   queries: DiffQuery[];
@@ -30,22 +40,16 @@ export const diffSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
+      // Handle diff results from SSE
+      .addCase(diffResultReceived, (state, { payload }) => {
+        const { queryId, diff } = payload;
+        (state.results[queryId] ??= []).push(diff);
+      })
       // Handle getAllDiffQueries
       .addMatcher(
         diffApi.endpoints.getAllDiffQueries.matchFulfilled,
         (state, action) => {
           state.queries = action.payload;
-        }
-      )
-      // Handle listenForDiffResults
-      .addMatcher(
-        diffApi.endpoints.listenForDiffResults.matchFulfilled,
-        (state, action) => {
-          // Store results by query ID (extract from the query params)
-          const queryId = state.selectedQueryId;
-          if (queryId) {
-            state.results[queryId] = action.payload;
-          }
         }
       );
   },

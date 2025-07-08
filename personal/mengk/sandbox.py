@@ -14,13 +14,13 @@ IPython.get_ipython().run_line_magic("autoreload", "2")
 
 async def setup():
     from docent_core._db_service.db import DocentDB
-    from docent_core._db_service.service import DBService
+    from docent_core._db_service.service import MonoService
     from docent_core.services.setup import SetupService
 
     db = await DocentDB.init()
-    service = await DBService.init()
+    mono_svc = await MonoService.init()
     async with db.session() as s:
-        ds = SetupService(s, service)
+        ds = SetupService(s, mono_svc)
         return await ds.setup_dummy_user()
 
 
@@ -31,16 +31,16 @@ result
 # %%
 
 from docent_core._db_service.db import DocentDB
-from docent_core._db_service.service import DBService
+from docent_core._db_service.service import MonoService
 from docent_core.services.diff import DiffService
 
 db = await DocentDB.init()
-service = await DBService.init()
+service = await MonoService.init()
 
 
 # %%
 
-fg_id = "e43b95a7-4e0c-45c6-b8f5-9170c94a32f1"
+fg_id = "0e4a0318-e072-4dce-ac41-ba97d988b903"
 user = await service.get_user_by_email("a@b.com")
 ctx = await service.get_default_view_ctx(fg_id, user)
 
