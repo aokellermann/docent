@@ -3,8 +3,10 @@ from contextlib import asynccontextmanager
 from typing import Any, Awaitable, Callable
 
 import anyio
+import sentry_sdk
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from sentry_sdk.integrations.asgi import SentryAsgiMiddleware  # type: ignore
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from docent._log_util import get_logger
@@ -168,17 +170,10 @@ for router in REST_ROUTERS:
     asgi_app.include_router(router["router"], prefix=router["prefix"])
 
 # If running in production, add Sentry middleware
-# import sentry_sdk
-# from sentry_sdk.integrations.asgi import SentryAsgiMiddleware  # type: ignore
-# if ENV.ENV_TYPE == "prod" or os.environ.get("ENABLE_SENTRY", False):
-#     logger.info("Initializing Sentry for production")
-#     sentry_sdk.init(  # type: ignore
-#         dsn="https://c5f049f4a74b7cd17fbf688db7f4838a@o4509013218689024.ingest.us.sentry.io/4509013219803136",
-#         # Add data like request headers and IP for users,
-#         # see https://docs.sentry.io/platforms/python/data-management/data-collected/ for more info
-#         send_default_pii=True,
-#     )
-#     asgi_app.add_middleware(SentryAsgiMiddleware)  # type: ignore
+if ENV.get("ENVIRONMENT") == "prod" and (dsn := ENV.get("SENTRY_DSN")) is not None:
+    sentry_sdk.init(dsn=dsn, send_default_pii=True)  # type: ignore
+    asgi_app.add_middleware(SentryAsgiMiddleware)  # type: ignore
+    logger.info("Initialized Sentry for production")
 
 
 @asgi_app.get("/")
