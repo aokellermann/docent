@@ -1749,7 +1749,6 @@ async def listen_cluster_search_results(
                     done = True
 
                 # Only compute new clusters if not read_only
-                logger.critical(f"read_only: {read_only}")
                 if not read_only:
                     tg.start_soon(_f)
                 else:

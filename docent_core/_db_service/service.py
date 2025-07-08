@@ -1042,8 +1042,8 @@ class MonoService:
         reranked_agent_runs = [id_to_agent_run[ar_id] for ar_id in ordered_agent_run_ids]
 
         if len(reranked_agent_runs) != len(agent_runs):
-            logger.critical(
-                f"Reranked {len(reranked_agent_runs)} agent runs, but expected {len(agent_runs)}"
+            logger.error(
+                f"Reranked to {len(reranked_agent_runs)} agent runs, but expected {len(agent_runs)}"
             )
 
         logger.info(f"Reranked to {len(reranked_agent_runs)}")
@@ -1264,7 +1264,7 @@ class MonoService:
                 extra_instructions_list=[guidance],
             )
 
-        logger.critical(f"centroids: {centroids}")
+        logger.info(f"centroids: {centroids}")
 
         # store clusters in the database
         centroid_to_id: dict[str, str] = {}
