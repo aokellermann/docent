@@ -51,20 +51,11 @@ export default function AgentRunPage() {
   useEffect(() => {
     if (alreadyScrolledRef.current) return;
 
-    // Only wait for search results if there's actually a search query
+    // We wait until hasInitSearchQuery is known before continuing
+    if (hasInitSearchQuery === undefined) return;
+    // If there is an initial search query, then we wait until the search has populated
     if (hasInitSearchQuery === true && !searchResultMap) return;
-
-    // If hasInitSearchQuery is undefined, we can still proceed if there's no search query in the URL
-    // This handles the case where we're navigating via citations
-    if (hasInitSearchQuery === undefined) {
-      // Check if there are search params that would indicate we need to wait
-      const urlSearchParams = new URLSearchParams(window.location.search);
-      if (urlSearchParams.has('searchQuery')) {
-        // There's a search query in the URL, so we should wait for hasInitSearchQuery to be set
-        return;
-      }
-      // No search query in URL, safe to proceed
-    }
+    // Else, if it's false, then we don't need to wait
 
     if (
       agentRunViewerRef.current &&
@@ -107,15 +98,15 @@ export default function AgentRunPage() {
   };
 
   // Show loading state while transcript is being fetched
-  const isLoading = !collectionId || !curAgentRun || curAgentRun.id !== agentRunId;
+  // const isLoading = !collectionId || !curAgentRun || curAgentRun.id !== agentRunId;
 
-  if (isLoading) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="text-muted-foreground">Loading agent run...</div>
-      </div>
-    );
-  }
+  // if (isLoading) {
+  //   return (
+  //     <div className="flex-1 flex items-center justify-center">
+  //       <div className="text-muted-foreground">Loading agent run...</div>
+  //     </div>
+  //   );
+  // }
 
   return (
     <Suspense>
