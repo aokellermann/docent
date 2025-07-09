@@ -1162,6 +1162,10 @@ class ShareViewRequest(BaseModel):
     level: Literal["read"]
 
 
+class ShareWithEmailRequest(BaseModel):
+    email: str
+
+
 # @user_router.post("/{collection_id}/share_view")
 # async def share_view(
 #     collection_id: str,
@@ -1178,6 +1182,58 @@ class ShareViewRequest(BaseModel):
 #         permission=Permission(request.level),
 #     )
 #     return {"status": "success"}
+
+
+@user_router.post("/collections/{collection_id}/make_public")
+async def make_collection_public(
+    collection_id: str,
+    user: User = Depends(get_user_anonymous_ok),
+    mono_svc: MonoService = Depends(get_mono_svc),
+    _: None = Depends(require_collection_permission(Permission.ADMIN)),
+):
+    """Make a collection publicly accessible to anyone with the link."""
+    await mono_svc.set_acl_permission(
+        subject_type=SubjectType.PUBLIC,
+        subject_id=None,
+        resource_type=ResourceType.COLLECTION,
+        resource_id=collection_id,
+        permission=Permission.READ,
+    )
+
+    # Track analytics
+    await track_endpoint_with_user(mono_svc, EndpointType.MAKE_COLLECTION_PUBLIC, user, collection_id)
+
+    return {"status": "success", "message": "Collection is now public"}
+
+
+@user_router.post("/collections/{collection_id}/share_with_email")
+async def share_collection_with_email(
+    collection_id: str,
+    request: ShareWithEmailRequest,
+    user: User = Depends(get_user_anonymous_ok),
+    mono_svc: MonoService = Depends(get_mono_svc),
+    _: None = Depends(require_collection_permission(Permission.ADMIN)),
+):
+    """Share a collection with a specific user by email address."""
+    target_user = await mono_svc.get_user_by_email(request.email)
+    if target_user is None:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"User with email {request.email} not found"
+        )
+
+    await mono_svc.set_acl_permission(
+        subject_type=SubjectType.USER,
+        subject_id=target_user.id,
+        resource_type=ResourceType.COLLECTION,
+        resource_id=collection_id,
+        permission=Permission.READ,
+    )
+
+    # Track analytics
+    await track_endpoint_with_user(mono_svc, EndpointType.SHARE_COLLECTION_WITH_EMAIL, user, collection_id)
+
+    return {"status": "success", "message": f"Collection shared with {request.email}"}
 
 
 ##################################

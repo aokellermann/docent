@@ -291,3 +291,43 @@ class Docent:
             # We do this to avoid metadata validation failing
             # TODO(mengk): kinda hacky
             return AgentRunWithoutMetadataValidator.model_validate(response.json())
+
+    def make_collection_public(self, collection_id: str) -> dict[str, Any]:
+        """Make a collection publicly accessible to anyone with the link.
+
+        Args:
+            collection_id: ID of the Collection to make public.
+
+        Returns:
+            dict: API response data.
+
+        Raises:
+            requests.exceptions.HTTPError: If the API request fails.
+        """
+        url = f"{self._server_url}/{collection_id}/make_public"
+        response = self._session.post(url)
+        response.raise_for_status()
+        
+        logger.info(f"Successfully made Collection '{collection_id}' public")
+        return response.json()
+
+    def share_collection_with_email(self, collection_id: str, email: str) -> dict[str, Any]:
+        """Share a collection with a specific user by email address.
+
+        Args:
+            collection_id: ID of the Collection to share.
+            email: Email address of the user to share with.
+
+        Returns:
+            dict: API response data.
+
+        Raises:
+            requests.exceptions.HTTPError: If the API request fails.
+        """
+        url = f"{self._server_url}/{collection_id}/share_with_email"
+        payload = {"email": email}
+        response = self._session.post(url, json=payload)
+        response.raise_for_status()
+        
+        logger.info(f"Successfully shared Collection '{collection_id}' with {email}")
+        return response.json()
