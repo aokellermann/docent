@@ -584,6 +584,8 @@ class EndpointType(enum.Enum):
     CREATE_CHART = "create_chart"
     UPDATE_CHART = "update_chart"
     DELETE_CHART = "delete_chart"
+    MAKE_COLLECTION_PUBLIC = "make_collection_public"
+    SHARE_COLLECTION_WITH_EMAIL = "share_collection_with_email"
 
 
 class SQLAChatSession(SQLABase):
