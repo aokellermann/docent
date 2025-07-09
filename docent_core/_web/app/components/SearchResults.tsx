@@ -47,7 +47,6 @@ export function SearchResultsSection() {
                 <SearchResultsList
                     curSearchQuery={curSearchQuery}
                     searchResults={searchResults ?? []}
-                    usePreview={true}
                 />
             )}
         </>
@@ -58,7 +57,7 @@ export function SearchResultsSection() {
 interface SearchResultsListProps {
     curSearchQuery: string;
     searchResults: SearchResultWithCitations[];
-    usePreview?: boolean;
+    usePreview?: boolean; // Whether to use the agent run preview
 }
 
 export const SearchResultsList = ({
@@ -178,9 +177,6 @@ export const SearchResultCard = ({ curSearchQuery, searchResult, usePreview }: S
                         )}
                     </p>
                 </div>
-                {/* <div className="flex items-center gap-1 text-[10px] text-primary mt-1">
-                    <span className="opacity-70">{curSearchQuery}</span>
-                </div> */}
             </div>
         </div>
     );

@@ -45,7 +45,7 @@ export const renderTextWithCitations = (
         onMouseDown={(e) => {
           e.stopPropagation();
 
-          if (e.metaKey || e.ctrlKey || e.button === 1) {
+          if (e.ctrlKey || e.metaKey) {
             // Open in new tab - use original navigation
             navToAgentRun(
               e,

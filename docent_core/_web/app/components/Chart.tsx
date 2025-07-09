@@ -227,7 +227,7 @@ function LineChart({ chartData }: { chartData: ChartData }) {
   );
 }
 
-const getTickValues = (values: string[]) => {
+const getTickValues = (values: (string | number)[]) => {
   if (values.length <= 20) return values;
   const step = Math.ceil(values.length / 20);
   return values.filter((_, index) => index % step === 0);

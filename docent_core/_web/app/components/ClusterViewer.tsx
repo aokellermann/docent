@@ -214,7 +214,7 @@ export default function ClusterViewer({ searchQuery }: ClusterViewerProps) {
               <SearchResultsList
                 searchResults={allSearchResults}
                 curSearchQuery={searchQuery}
-                usePreview={true}
+
               />
             </div>
           </div>
@@ -247,7 +247,7 @@ export default function ClusterViewer({ searchQuery }: ClusterViewerProps) {
             <SearchResultsList
               searchResults={allSearchResults}
               curSearchQuery={searchQuery}
-              usePreview={true}
+
             />
           </div>
         </div>
@@ -324,7 +324,7 @@ export default function ClusterViewer({ searchQuery }: ClusterViewerProps) {
                 <SearchResultsList
                   searchResults={clusterSearchResults}
                   curSearchQuery={searchQuery}
-                  usePreview={true}
+
                 />
               </div>
             )}
@@ -351,7 +351,7 @@ export default function ClusterViewer({ searchQuery }: ClusterViewerProps) {
               <SearchResultsList
                 searchResults={residualSearchResults}
                 curSearchQuery={searchQuery}
-                usePreview={true}
+
               />
             </div>
           </div>
