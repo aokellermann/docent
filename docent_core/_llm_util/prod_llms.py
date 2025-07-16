@@ -85,6 +85,7 @@ async def _parallelize_calls(
     # use_tqdm: bool,
     cache: LLMCache | None = None,
     fill_cache: str | None = None,
+    cancellation_event: anyio.Event | None = None,
 ):
     base_func = partial(
         single_output_getter,
@@ -107,8 +108,14 @@ async def _parallelize_calls(
         else None
     )
 
-    async def _limited_task(i: int, messages: list[ChatMessage]):
-        nonlocal responses, pbar
+    # Track cancellation scopes for ongoing tasks
+    active_scopes: dict[int, anyio.CancelScope] = {}
+    scopes_lock = anyio.Lock()
+
+    async def _limited_task(
+        i: int, messages: list[ChatMessage], cancellation_event: anyio.Event | None
+    ):
+        nonlocal responses, pbar, active_scopes
 
         if fill_cache is not None:
             responses[i] = LLMOutput(
@@ -123,38 +130,81 @@ async def _parallelize_calls(
             return
 
         async with semaphore or nullcontext():
-            try:
-                if streaming_callback is None:
-                    result = await base_func(client=client, messages=messages)
-                else:
-                    result = await base_func(
-                        client=client,
-                        streaming_callback=_get_single_streaming_callback(i, streaming_callback),
-                        messages=messages,
-                    )
+            # Create a cancellation scope for this task
+            with anyio.CancelScope() as scope:
+                # Register this scope so it can be cancelled externally
+                if cancellation_event is not None:
+                    async with scopes_lock:
+                        active_scopes[i] = scope
 
-                # Always call the completion callback if provided
-                if completion_callback:
-                    await completion_callback(i, result)
-            except Exception as e:
-                error_message = (
-                    f"Call to {model_name} failed even with backoff: {e.__class__.__name__}."
-                )
-                if not isinstance(e, RateLimitException):
-                    # If the error is not a rate limit (which we don't need details for), add the traceback
-                    error_message += f" Failure traceback:\n{traceback.format_exc()}"
-                logger.error(error_message)
+                try:
+                    # Check for cancellation before starting the actual call
+                    if cancellation_event is not None and cancellation_event.is_set():
+                        raise Exception("requests cancelled by user")
 
-                result = LLMOutput(
+                    if streaming_callback is None:
+                        result = await base_func(client=client, messages=messages)
+                    else:
+                        result = await base_func(
+                            client=client,
+                            streaming_callback=_get_single_streaming_callback(
+                                i, streaming_callback
+                            ),
+                            messages=messages,
+                        )
+
+                    # Always call the completion callback if provided
+                    if completion_callback:
+                        await completion_callback(i, result)
+                except Exception as e:
+                    # Handle cancellation separately from other errors
+                    if str(e) == "requests cancelled by user":
+                        result = LLMOutput(
+                            model=model_name,
+                            completions=[],
+                            errors=["other"],
+                        )
+                    else:
+                        error_message = f"Call to {model_name} failed even with backoff: {e.__class__.__name__}."
+                        if not isinstance(e, RateLimitException):
+                            # If the error is not a rate limit (which we don't need details for), add the traceback
+                            error_message += f" Failure traceback:\n{traceback.format_exc()}"
+                        logger.error(error_message)
+
+                        result = LLMOutput(
+                            model=model_name,
+                            completions=[],
+                            errors=["rate_limit" if isinstance(e, RateLimitException) else "other"],
+                        )
+                finally:
+                    # Remove scope from active scopes
+                    if cancellation_event is not None:
+                        async with scopes_lock:
+                            active_scopes.pop(i, None)
+
+                # Set the result in either case
+                responses[i] = result
+                if pbar is not None:
+                    pbar.update(1)
+
+    async def _cancellation_monitor():
+        """Monitor the cancellation event and cancel all active scopes when it's set."""
+        if cancellation_event is None:
+            return
+
+        await cancellation_event.wait()
+
+        # Cancel all active scopes
+        async with scopes_lock:
+            for i, scope in active_scopes.items():
+                scope.cancel()
+                responses[i] = LLMOutput(
                     model=model_name,
                     completions=[],
-                    errors=["rate_limit" if isinstance(e, RateLimitException) else "other"],
+                    errors=["other"],
                 )
 
-            # Set the result in either case
-            responses[i] = result
-            if pbar is not None:
-                pbar.update(1)
+            logger.info(f"Cancelled {len(active_scopes)} ongoing API calls")
 
     def _cache_responses():
         nonlocal responses, cache
@@ -184,8 +234,13 @@ async def _parallelize_calls(
     # Get all results concurrently
     try:
         async with anyio.create_task_group() as tg:
+            # Start the cancellation monitor if we have a cancellation event
+            if cancellation_event is not None:
+                tg.start_soon(_cancellation_monitor)
+
+            # Start all the individual tasks
             for i, messages in enumerate(messages_list):
-                tg.start_soon(_limited_task, i, messages)
+                tg.start_soon(_limited_task, i, messages, cancellation_event)
 
     # Cache what we have so far if something got cancelled
     except anyio.get_cancelled_exc_class():
@@ -236,6 +291,7 @@ class LLMManager:
         fill_cache: str | None = None,
         streaming_callback: AsyncLLMOutputStreamingCallback | None = None,
         completion_callback: AsyncLLMOutputStreamingCallback | None = None,
+        cancellation_event: anyio.Event | None = None,
     ) -> list[LLMOutput]:
         results: list[LLMOutput | None] = [None] * len(messages_list)
 
@@ -333,6 +389,7 @@ class LLMManager:
                     # use_tqdm=len(uncached_messages) >= 5,
                     cache=self.cache,
                     fill_cache=fill_cache,
+                    cancellation_event=cancellation_event,
                 )
                 for batch_index, messages, output in zip(
                     uncached_indices, uncached_messages, outputs
@@ -395,6 +452,7 @@ async def get_llm_completions_async(
     completion_callback: AsyncLLMOutputStreamingCallback | None = None,
     use_cache: bool = False,
     fill_cache: str | None = None,
+    cancellation_event: anyio.Event | None = None,
 ) -> list[LLMOutput]:
     # We don't support logprobs for Anthropic yet
     if logprobs:
@@ -428,4 +486,5 @@ async def get_llm_completions_async(
         streaming_callback=streaming_callback,
         completion_callback=completion_callback,
         fill_cache=fill_cache,
+        cancellation_event=cancellation_event,
     )

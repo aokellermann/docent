@@ -17,6 +17,8 @@ from docent_core._worker.constants import WorkerFunction
 
 logger = get_logger(__name__)
 
+MAX_RUBRIC_RESULTS = 50
+
 
 class RubricService:
     def __init__(
@@ -120,10 +122,15 @@ class RubricService:
 
         # Get the agent runs
         agent_runs = await self.service.get_agent_runs(ctx)
+        num_results = 0
+        cancellation_event = anyio.Event()
 
         async def _callback(judge_results: list[JudgeResult] | None):
             if judge_results is None:
                 return
+
+            nonlocal num_results
+            num_results += sum(1 for j in judge_results if j.value is not None)
 
             # Use the session_cm_factory to get a session that commits immediately
             async with self.session_cm_factory() as writer_session:
@@ -131,12 +138,16 @@ class RubricService:
                     [SQLAJudgeResult.from_pydantic(judge_result) for judge_result in judge_results]
                 )
 
+            if num_results >= MAX_RUBRIC_RESULTS:
+                cancellation_event.set()
+
         # Run the search, saving data to the database as we go
         await evaluate_rubric(
             agent_runs,
             rubric.to_pydantic(),
             model_options=PROVIDER_PREFERENCES.execute_search,
             callback=_callback,
+            cancellation_event=cancellation_event,
         )
 
     async def get_active_job_for_rubric(self, rubric_id: str) -> SQLAJob | None:
