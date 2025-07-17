@@ -386,10 +386,6 @@ class MonoService:
         """
         Get all agent runs for a given Collection ID.
         """
-        logger.info(
-            f"get_agent_runs called with ctx.collection_id={ctx.collection_id}, agent_run_ids={len(agent_run_ids) if agent_run_ids else None}, _limit={_limit}"
-        )
-
         async with self.db.session() as session:
             if agent_run_ids is not None and len(agent_run_ids) > 10_000:
                 agent_runs_raw: list[SQLAAgentRun] = []
@@ -427,8 +423,6 @@ class MonoService:
                 result = await session.execute(query)
                 agent_runs_raw = list(result.scalars().all())
 
-            logger.info(f"get_agent_runs: Found {len(agent_runs_raw)} agent runs")
-
             # Get transcripts for those runs
             agent_run_ids = [ar.id for ar in agent_runs_raw]
             if agent_run_ids:
@@ -443,13 +437,8 @@ class MonoService:
                     )
                     batch_transcripts = result.scalars().all()
                     transcripts_raw.extend(batch_transcripts)
-
-                logger.info(
-                    f"get_agent_runs: Found {len(transcripts_raw)} transcripts for {len(agent_run_ids)} agent runs (processed in {len(agent_run_ids) // batch_size + 1} batches)"
-                )
             else:
                 transcripts_raw = []
-                logger.info("get_agent_runs: No agent runs found, no transcripts to fetch")
 
         # Collate run_id -> transcripts
         agent_run_transcripts: dict[str, list[tuple[str, Transcript]]] = {}
@@ -465,7 +454,6 @@ class MonoService:
             for ar_raw in agent_runs_raw
         ]
 
-        logger.info(f"get_agent_runs: Returning {len(final_result)} agent runs with transcripts")
         return final_result
 
     async def get_agent_run(

@@ -1,10 +1,16 @@
 'use client';
 
-import { useMemo, useEffect, useRef } from 'react';
+import { useMemo, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import { Textarea } from '@/components/ui/textarea';
 
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 
@@ -12,6 +18,7 @@ import {
   setActiveRubricId,
   clearJudgeResults,
   setEditingRubricId,
+  clearCentroids,
 } from '../store/rubricSlice';
 
 import { ProgressBar } from './ProgressBar';
@@ -23,14 +30,24 @@ import {
   useUpdateRubricMutation,
   useListenForJudgeResultsQuery,
   useStartEvaluationMutation,
+  useProposeCentroidsMutation,
+  useStartCentroidAssignmentMutation,
+  useListenForCentroidAssignmentsQuery,
+  useCancelAssignmentMutation,
 } from '../api/rubricApi';
 import { toast } from '@/hooks/use-toast';
 
 const RubricArea = () => {
   const dispatch = useAppDispatch();
   const searchParams = useSearchParams();
+  const [shouldListenForResults, setShouldListenForResults] = useState(false);
+  const [shouldListenForAssignments, setShouldListenForAssignments] =
+    useState(false);
+  const [isReclusterPopoverOpen, setIsReclusterPopoverOpen] = useState(false);
+  const [feedbackText, setFeedbackText] = useState('');
 
-  const [cancelEvaluation] = useCancelEvaluationMutation();
+  const [cancelEvaluation, { isLoading: isCancellingEvaluation }] =
+    useCancelEvaluationMutation();
   const [updateRubric, { isLoading: isUpdatingRubric }] =
     useUpdateRubricMutation();
 
@@ -38,7 +55,9 @@ const RubricArea = () => {
   const isPollingResults = useAppSelector(
     (state) => state.rubric.isPollingResults
   );
-  const activeJobId = useAppSelector((state) => state.rubric.activeJobId);
+  const activeRubricJobId = useAppSelector(
+    (state) => state.rubric.activeRubricJobId
+  );
   const totalAgentRuns = useAppSelector((state) => state.rubric.totalAgentRuns);
   const judgeResultsMap = useAppSelector(
     (state) => state.rubric.judgeResultsMap
@@ -70,9 +89,10 @@ const RubricArea = () => {
       rubricId,
     });
     if (activateUi) {
-      // We set the active rubric afterward; this helps avoid a race condition
+      // We set the active rubric *after* starting the job; this helps avoid a race condition
       // where we start listening before the job even exists, and thus it immediately closes.
       dispatch(setActiveRubricId(rubricId));
+      setShouldListenForResults(true);
     }
   };
 
@@ -88,32 +108,43 @@ const RubricArea = () => {
     ) {
       if (alreadyInitiated.current) return;
       alreadyInitiated.current = true;
-      handleEvaluate(urlRubricId);
+
+      // Active interface and listen for results without triggering a new job
+      dispatch(setActiveRubricId(urlRubricId));
+      setShouldListenForResults(true);
     }
   }, [searchParams, rubricsMap, activeRubricId, dispatch]);
 
-  // If there is an active job, listen for judge results with RTK
+  // If there is an active rubric job, listen for judge results with RTK
   useListenForJudgeResultsQuery(
     {
       collectionId: collectionId!,
       rubricId: activeRubric?.id || '',
     },
     {
-      skip: !collectionId || !activeRubric || !activeJobId,
+      skip: !collectionId || !activeRubric || !shouldListenForResults,
     }
   );
 
-  const resetInterface = (cancelJob = false) => {
+  const handleCancelRubricJob = async () => {
+    if (!collectionId || !activeRubricJobId || !activeRubricId) return;
+    await cancelEvaluation({
+      collectionId,
+      rubricId: activeRubricId,
+      jobId: activeRubricJobId,
+    });
+
+    // Kill the listening job
+    setShouldListenForResults(false);
+    setShouldListenForAssignments(false);
+  };
+
+  const resetInterface = () => {
     dispatch(setActiveRubricId(null));
     dispatch(clearJudgeResults());
-    if (cancelJob) {
-      if (!collectionId || !activeJobId || !activeRubricId) return;
-      cancelEvaluation({
-        collectionId,
-        rubricId: activeRubricId,
-        jobId: activeJobId,
-      });
-    }
+    dispatch(clearCentroids());
+    setShouldListenForResults(false);
+    setShouldListenForAssignments(false);
   };
 
   const handleSaveRubric = async (rubric: any) => {
@@ -160,6 +191,124 @@ const RubricArea = () => {
       });
     }
   };
+
+  /**
+   * Clustering
+   */
+  const centroidsMap = useAppSelector((state) => state.rubric.centroidsMap);
+  const activeCentroidAssignmentJobId = useAppSelector(
+    (state) => state.rubric.activeCentroidAssignmentJobId
+  );
+  const [proposeCentroids, { isLoading: isProposingCentroids }] =
+    useProposeCentroidsMutation();
+  const [startCentroidAssignment] = useStartCentroidAssignmentMutation();
+
+  const handleProposeCentroids = async (feedback?: string) => {
+    if (!collectionId || !activeRubricId) return;
+
+    await proposeCentroids({
+      collectionId,
+      rubricId: activeRubricId,
+      feedback,
+    });
+
+    // After proposing centroids, trigger centroid assignment
+    await startCentroidAssignment({
+      collectionId,
+      rubricId: activeRubricId,
+    });
+    setShouldListenForAssignments(true);
+  };
+
+  const handleReclusterSubmit = async () => {
+    await handleProposeCentroids(feedbackText.trim() || undefined);
+    setIsReclusterPopoverOpen(false);
+    setFeedbackText('');
+  };
+
+  const handleReclusterCancel = () => {
+    setIsReclusterPopoverOpen(false);
+    setFeedbackText('');
+  };
+
+  const [cancelAssignment, { isLoading: isCancellingAssignment }] =
+    useCancelAssignmentMutation();
+  const handleCancelAssignmentJob = async () => {
+    if (!collectionId || !activeCentroidAssignmentJobId || !activeRubricId)
+      return;
+    await cancelAssignment({
+      collectionId,
+      rubricId: activeRubricId,
+      jobId: activeCentroidAssignmentJobId,
+    });
+
+    // Kill the listening job
+    setShouldListenForAssignments(false);
+  };
+
+  // If there are centroids, listen for assignments
+  useListenForCentroidAssignmentsQuery(
+    {
+      collectionId: collectionId!,
+      rubricId: activeRubricId!,
+    },
+    {
+      skip: !collectionId || !activeRubricId || !shouldListenForAssignments,
+    }
+  );
+
+  const reclusterPopover = (
+    <Popover
+      open={isReclusterPopoverOpen}
+      onOpenChange={setIsReclusterPopoverOpen}
+    >
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          size="sm"
+          className="gap-1 h-7 text-xs"
+          variant="outline"
+          disabled={isProposingCentroids}
+        >
+          {isProposingCentroids ? 'Proposing...' : 'Re-cluster results'}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-96 p-2 space-y-2">
+        <div className="space-y-2">
+          <div className="text-sm">
+            Provide feedback for re-clustering (optional)
+          </div>
+          <Textarea
+            id="feedback"
+            placeholder="Describe how you'd like clusters to be improved..."
+            value={feedbackText}
+            onChange={(e) => setFeedbackText(e.target.value)}
+            className="min-h-[80px] resize-none text-xs"
+          />
+        </div>
+        <div className="flex items-center justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="text-xs"
+            onClick={handleReclusterCancel}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            className="text-xs"
+            onClick={handleReclusterSubmit}
+            disabled={isProposingCentroids}
+          >
+            {isProposingCentroids ? 'Proposing...' : 'Re-cluster'}
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
 
   return (
     <Card className="h-full flex overflow-y-auto flex-col flex-1 p-3 custom-scrollbar space-y-3">
@@ -216,14 +365,45 @@ const RubricArea = () => {
               Share
             </Button>
             {!isPollingResults && (
-              <Button
-                type="button"
-                size="sm"
-                className="gap-1 h-7 text-xs"
-                onClick={() => resetInterface()}
-              >
-                Exit
-              </Button>
+              <>
+                {Object.keys(centroidsMap).length === 0 && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="gap-1 h-7 text-xs"
+                    variant="outline"
+                    disabled={isProposingCentroids}
+                    onClick={() => handleProposeCentroids()}
+                  >
+                    {isProposingCentroids ? 'Proposing...' : 'Cluster results'}
+                  </Button>
+                )}
+                {!activeCentroidAssignmentJobId &&
+                  Object.keys(centroidsMap).length > 0 &&
+                  reclusterPopover}
+                {activeCentroidAssignmentJobId && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="gap-1 h-7 text-xs"
+                    disabled={isCancellingAssignment}
+                    variant="outline"
+                    onClick={() => handleCancelAssignmentJob()}
+                  >
+                    {isCancellingAssignment
+                      ? 'Stopping...'
+                      : 'Stop centroid assignment'}
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  size="sm"
+                  className="gap-1 h-7 text-xs"
+                  onClick={() => resetInterface()}
+                >
+                  Exit
+                </Button>
+              </>
             )}
             {isPollingResults && (
               <>
@@ -240,9 +420,10 @@ const RubricArea = () => {
                   type="button"
                   size="sm"
                   className="gap-1 h-7 text-xs"
-                  onClick={() => resetInterface(true)}
+                  disabled={isCancellingEvaluation || !activeRubricJobId}
+                  onClick={() => handleCancelRubricJob()}
                 >
-                  Cancel
+                  {isCancellingEvaluation ? 'Stopping...' : 'Stop'}
                 </Button>
               </>
             )}

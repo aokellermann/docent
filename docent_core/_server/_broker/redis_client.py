@@ -98,6 +98,11 @@ async def enqueue_rubric_job(view_ctx: ViewContext, job_id: str) -> None:
     await _enqueue_job(WORKER_QUEUE_NAME, "run_job", view_ctx, job_id)
 
 
+async def enqueue_job(view_ctx: ViewContext, job_id: str) -> None:
+    """Enqueue a centroid assignment job to the worker."""
+    await _enqueue_job(WORKER_QUEUE_NAME, "run_job", view_ctx, job_id)
+
+
 async def cancel_job(job_id: str) -> None:
     """Cancel a job and wait for confirmation that the cancellation was processed."""
     # Queue names

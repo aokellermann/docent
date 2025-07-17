@@ -47,6 +47,18 @@ async def rubric_job(ctx: ViewContext, job: SQLAJob):
         await rs.run_rubric_job(ctx, job)
 
 
+async def centroid_assignment_job(ctx: ViewContext, job: SQLAJob):
+    db = await DocentDB.init()
+    mono_svc = await MonoService.init()
+
+    async with db.session() as session:
+        rs = RubricService(session, db.session, mono_svc)
+        sqla_rubric = await rs.get_rubric(job.job_json["rubric_id"])
+        if sqla_rubric is None:
+            raise ValueError(f"Rubric {job.job_json['rubric_id']} not found")
+        await rs.assign_centroids(sqla_rubric)
+
+
 async def run_job(_: Any, ctx: ViewContext, job_id: str):
     mono_svc = await MonoService.init()
     canceled = False
@@ -86,6 +98,8 @@ async def run_job(_: Any, ctx: ViewContext, job_id: str):
                 await compute_search(ctx, job_id, read_only=False, REDIS=REDIS)
             elif job.type == WorkerFunction.COMPUTE_EMBEDDINGS.value:
                 await compute_embeddings(ctx, job_id)
+            elif job.type == WorkerFunction.CENTROID_ASSIGNMENT_JOB.value:
+                await centroid_assignment_job(ctx, job)
             else:
                 raise ValueError(f"Unknown job type: {job.type}")
         except anyio.get_cancelled_exc_class():
@@ -96,7 +110,9 @@ async def run_job(_: Any, ctx: ViewContext, job_id: str):
             canceled = True
             raise
         finally:
+            # If the job finishes normally, we need to cancel the `await_commands` loop
             tg.cancel_scope.cancel()
+
             with anyio.CancelScope(shield=True):
                 # Update the job status
                 if canceled:
@@ -107,9 +123,12 @@ async def run_job(_: Any, ctx: ViewContext, job_id: str):
                     await mono_svc.set_job_status(job_id, JobStatus.COMPLETED)
 
                 # Send immediate cancellation confirmation to caller
-                response_queue = f"cancel_response_{job_id}"
-                await REDIS.rpush(response_queue, "cancelled")  # type: ignore
-                logger.info(f"Sent cancellation confirmation for job {job_id} to {response_queue}")
+                if canceled:
+                    response_queue = f"cancel_response_{job_id}"
+                    await REDIS.rpush(response_queue, "cancelled")  # type: ignore
+                    logger.info(
+                        f"Sent cancellation confirmation for job {job_id} to {response_queue}"
+                    )
 
     async def await_commands(tg: TaskGroup):
         nonlocal canceled
