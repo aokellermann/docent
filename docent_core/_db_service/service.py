@@ -1211,6 +1211,20 @@ class MonoService:
             result = await session.execute(query)
             return result.scalar() or 0
 
+    async def get_oldest_active_embedding_job(self, collection_id: str) -> SQLAJob | None:
+        async with self.db.session() as session:
+            query = (
+                select(SQLAJob)
+                .where(
+                    SQLAJob.type == "compute_embeddings",
+                    SQLAJob.job_json["collection_id"].astext == collection_id,
+                    SQLAJob.status == JobStatus.RUNNING,
+                )
+                .order_by(SQLAJob.created_at.asc())
+            )
+            result = await session.execute(query)
+            return result.scalar_one_or_none()
+
     #########################################
     # Computing filters and clustering dims #
     #########################################

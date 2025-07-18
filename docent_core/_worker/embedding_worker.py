@@ -4,7 +4,7 @@ import anyio
 
 from docent._log_util import get_logger
 from docent_core._db_service.contexts import ViewContext
-from docent_core._db_service.schemas.tables import JobStatus, SQLAJob
+from docent_core._db_service.schemas.tables import JobStatus
 from docent_core._db_service.service import MonoService
 from docent_core._server._broker.redis_client import publish_collection_update
 
@@ -27,12 +27,8 @@ async def compute_embeddings(view_ctx: ViewContext, job_id: str):
 
     # Wait for any running embedding jobs
     while (
-        await mono_svc.get_embedding_job_count(
-            view_ctx.collection_id,
-            _where_clause=SQLAJob.status == JobStatus.RUNNING,
-        )
-        >= 1
-    ):
+        res := await mono_svc.get_oldest_active_embedding_job(view_ctx.collection_id)
+    ) is not None and res.id != job_id:
         logger.info(
             f"Job {job_id} waiting for existing embedding job to complete for collection_id {view_ctx.collection_id}"
         )
