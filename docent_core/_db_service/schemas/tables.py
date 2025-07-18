@@ -58,6 +58,7 @@ TABLE_ANALYTICS_EVENT = "analytics_events"
 TABLE_CHAT_SESSION = "chat_sessions"
 TABLE_API_KEY = "api_keys"
 TABLE_CHART = "charts"
+TABLE_TELEMETRY_LOG = "telemetry_logs"
 
 
 def sanitize_pg_text(text: str) -> str:
@@ -697,3 +698,17 @@ class SQLAChart(SQLABase):
     # Relationships
     creator: Mapped["SQLAUser"] = relationship("SQLAUser", lazy="select")
     view: Mapped["SQLAView"] = relationship("SQLAView", lazy="select")
+
+
+class SQLATelemetryLog(SQLABase):
+    __tablename__ = TABLE_TELEMETRY_LOG
+
+    id = mapped_column(String(36), primary_key=True)
+    user_id = mapped_column(String(36), ForeignKey(f"{TABLE_USER}.id"), nullable=False, index=True)
+    collection_id = mapped_column(
+        String(36), ForeignKey(f"{TABLE_COLLECTION}.id"), nullable=True, index=True
+    )
+    json_data = mapped_column(JSONB, nullable=False)
+    created_at = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False
+    )

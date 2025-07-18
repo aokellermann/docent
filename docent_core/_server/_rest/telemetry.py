@@ -19,7 +19,62 @@ logger = get_logger(__name__)
 # Global state for accumulating spans across multiple requests
 _accumulated_spans: Dict[str, List[Dict[str, Any]]] = {}
 _trace_completion_tasks: Dict[str, asyncio.Task[None]] = {}
+_spans_lock = asyncio.Lock()
 _TRACE_TIMEOUT_SECONDS = 5 * 60  # Timeout for trace completion
+
+
+async def _add_spans_to_accumulation(trace_id: str, spans: List[Dict[str, Any]]) -> None:
+    """Add spans to accumulation with lock protection."""
+    async with _spans_lock:
+        if trace_id not in _accumulated_spans:
+            _accumulated_spans[trace_id] = []
+        _accumulated_spans[trace_id].extend(spans)
+
+
+async def _get_accumulated_spans(trace_id: str) -> List[Dict[str, Any]]:
+    """Get accumulated spans for a trace with lock protection."""
+    async with _spans_lock:
+        return _accumulated_spans.get(trace_id, [])
+
+
+async def _remove_trace_from_accumulation(trace_id: str) -> None:
+    """Remove a trace from accumulation with lock protection."""
+    async with _spans_lock:
+        if trace_id in _accumulated_spans:
+            del _accumulated_spans[trace_id]
+
+
+async def _cancel_and_remove_trace_task(trace_id: str) -> None:
+    """Cancel and remove a trace completion task with lock protection."""
+    async with _spans_lock:
+        if trace_id in _trace_completion_tasks:
+            _trace_completion_tasks[trace_id].cancel()
+            del _trace_completion_tasks[trace_id]
+
+
+def schedule_trace_timeout(trace_id: str) -> None:
+    """Schedule a timeout task for trace completion."""
+
+    # Create new timeout task
+    async def timeout_handler():
+        await asyncio.sleep(_TRACE_TIMEOUT_SECONDS)
+        accumulated_spans = await _get_accumulated_spans(trace_id)
+        if accumulated_spans:
+            logger.info(f"Trace {trace_id} timed out, processing accumulated spans")
+            await process_completed_trace(trace_id, accumulated_spans)
+            await _remove_trace_from_accumulation(trace_id)
+            await _cancel_and_remove_trace_task(trace_id)
+
+    # Schedule the task with lock protection
+    async def _schedule_with_lock():
+        async with _spans_lock:
+            # Cancel existing timeout if any
+            if trace_id in _trace_completion_tasks:
+                _trace_completion_tasks[trace_id].cancel()
+            _trace_completion_tasks[trace_id] = asyncio.create_task(timeout_handler())
+
+    # Run the lock-protected operation
+    asyncio.create_task(_schedule_with_lock())
 
 
 class AgentRunData(TypedDict):
@@ -60,6 +115,22 @@ async def trace_endpoint(request: Request):
             trace_data = process_json_traces(body)
         else:
             raise HTTPException(status_code=415, detail=f"Unsupported content type: {content_type}")
+
+        # Initialize database service
+        mono_svc = await MonoService.init()
+
+        # TODO(gregor): implement actual authentication
+
+        test_user_email = "gregor@transluce.org"
+        user = await mono_svc.get_user_by_email(test_user_email)
+
+        if not user:
+            raise HTTPException(status_code=401, detail="Unauthorized: User not found")
+
+        logger.info(f"Using test user: {user.email} (ID: {user.id})")
+
+        # Store the raw telemetry data for request
+        await mono_svc.store_telemetry_log(user.id, trace_data)
 
         # Process the traces
         processing_result = await process_traces(trace_data)
@@ -135,7 +206,7 @@ async def process_traces(trace_data: Dict[str, Any]) -> Dict[str, Any]:
                 spans = scope_span.get("spans", [])
 
                 for span in spans:
-                    processed_span = process_single_span(
+                    processed_span = otel_span_format_to_dict(
                         span, resource_attrs, scope_name, scope_version
                     )
                     processed_spans.append(processed_span)
@@ -155,27 +226,52 @@ async def process_traces(trace_data: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
+def _extract_single_value(value: Dict[str, Any]) -> Any:
+    """Extract a single value from OTLP format based on its type."""
+    if "string_value" in value:
+        return value["string_value"]
+    elif "int_value" in value:
+        return int(value["int_value"])
+    elif "double_value" in value:
+        return float(value["double_value"])
+    elif "bool_value" in value:
+        return bool(value["bool_value"])
+    elif "array_value" in value:
+        return extract_array_value(value["array_value"])
+    elif "kvlist_value" in value:
+        return extract_kvlist_value(value["kvlist_value"])
+    else:
+        return None
+
+
 def extract_attributes(attributes: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Extract attributes from OTLP format to a simple dictionary."""
+    """
+    Extract attributes from OTLP format to a simple dictionary.
+
+    Example input (OTLP format):
+        [
+            {"key": "service.name", "value": {"string_value": "my-service"}},
+            {"key": "foo", "value": {"int_value": 42}},
+            {"key": "bar", "value": {"bool_value": True}},
+            {"key": "tags", "value": {"array_value": {"values": [
+                {"string_value": "a"}, {"string_value": "b"}
+            ]}}},
+        ]
+
+    Example output:
+        {
+            "service.name": "my-service",
+            "foo": 42,
+            "bar": True,
+            "tags": ["a", "b"]
+        }
+    """
     result: Dict[str, Any] = {}
 
     for attr in attributes:
         key = attr.get("key", "")
         value = attr.get("value", {})
-
-        # Extract the actual value based on its type
-        if "string_value" in value:
-            result[key] = value["string_value"]
-        elif "int_value" in value:
-            result[key] = int(value["int_value"])
-        elif "double_value" in value:
-            result[key] = float(value["double_value"])
-        elif "bool_value" in value:
-            result[key] = bool(value["bool_value"])
-        elif "array_value" in value:
-            result[key] = extract_array_value(value["array_value"])
-        elif "kvlist_value" in value:
-            result[key] = extract_kvlist_value(value["kvlist_value"])
+        result[key] = _extract_single_value(value)
 
     return result
 
@@ -184,14 +280,9 @@ def extract_array_value(array_value: Dict[str, Any]) -> List[Any]:
     """Extract array values from OTLP format."""
     values: List[Any] = []
     for item in array_value.get("values", []):
-        if "string_value" in item:
-            values.append(item["string_value"])
-        elif "int_value" in item:
-            values.append(int(item["int_value"]))
-        elif "double_value" in item:
-            values.append(float(item["double_value"]))
-        elif "bool_value" in item:
-            values.append(bool(item["bool_value"]))
+        extracted_value = _extract_single_value(item)
+        if extracted_value is not None:
+            values.append(extracted_value)
     return values
 
 
@@ -200,7 +291,7 @@ def extract_kvlist_value(kvlist: Dict[str, Any]) -> Dict[str, Any]:
     return extract_attributes(kvlist.get("values", []))
 
 
-def process_single_span(
+def otel_span_format_to_dict(
     span: Dict[str, Any], resource_attrs: Dict[str, Any], scope_name: str, scope_version: str
 ) -> Dict[str, Any]:
     """Process a single span and extract relevant information."""
@@ -234,7 +325,9 @@ def process_single_span(
         events.append(
             {
                 "name": event.get("name", ""),
-                "timestamp": int(event.get("time_unix_nano", 0)) / 1e9,
+                "timestamp": datetime.fromtimestamp(
+                    int(event.get("time_unix_nano", 0)) / 1e9, tz=timezone.utc
+                ).isoformat(),
                 "attributes": extract_attributes(event.get("attributes", [])),
             }
         )
@@ -289,37 +382,36 @@ async def accumulate_and_check_completion(spans: List[Dict[str, Any]]) -> None:
     Args:
         spans: List of processed spans to accumulate
     """
-    global _accumulated_spans, _trace_completion_tasks
+    # Group spans by trace_id for efficient processing
+    spans_by_trace: Dict[str, List[Dict[str, Any]]] = {}
+    for span in spans:
+        trace_id = span.get("trace_id")
+        if trace_id:
+            if trace_id not in spans_by_trace:
+                spans_by_trace[trace_id] = []
+            spans_by_trace[trace_id].append(span)
 
-    # First, add all spans to accumulation
+    # Add spans to accumulation using targeted locks
+    for trace_id, trace_spans in spans_by_trace.items():
+        await _add_spans_to_accumulation(trace_id, trace_spans)
+
+    # Check for trace completion after all spans are accumulated
     for span in spans:
         trace_id = span.get("trace_id")
         if not trace_id:
             continue
 
-        # Initialize trace accumulation if not exists
-        if trace_id not in _accumulated_spans:
-            _accumulated_spans[trace_id] = []
-
-        # Add span to accumulation
-        _accumulated_spans[trace_id].append(span)
-
-    # Then check for trace completion after all spans are accumulated
-    for span in spans:
-        trace_id = span.get("trace_id")
-        if not trace_id:
-            continue
+        # Get accumulated spans for this trace
+        accumulated_spans = await _get_accumulated_spans(trace_id)
 
         # Check if this span indicates trace completion
-        if is_trace_complete(span, _accumulated_spans[trace_id]):
+        if is_trace_complete(span, accumulated_spans):
             # Process the completed trace with all accumulated spans
-            await process_completed_trace(trace_id, _accumulated_spans[trace_id])
+            await process_completed_trace(trace_id, accumulated_spans)
 
-            # Clean up
-            del _accumulated_spans[trace_id]
-            if trace_id in _trace_completion_tasks:
-                _trace_completion_tasks[trace_id].cancel()
-                del _trace_completion_tasks[trace_id]
+            # Clean up using targeted locks
+            await _remove_trace_from_accumulation(trace_id)
+            await _cancel_and_remove_trace_task(trace_id)
         else:
             # Schedule timeout for trace completion
             schedule_trace_timeout(trace_id)
@@ -341,27 +433,6 @@ def is_trace_complete(span: Dict[str, Any], all_spans: List[Dict[str, Any]]) -> 
         return True
 
     return False
-
-
-def schedule_trace_timeout(trace_id: str) -> None:
-    """Schedule a timeout task for trace completion."""
-    global _trace_completion_tasks
-
-    # Cancel existing timeout if any
-    if trace_id in _trace_completion_tasks:
-        _trace_completion_tasks[trace_id].cancel()
-
-    # Create new timeout task
-    async def timeout_handler():
-        await asyncio.sleep(_TRACE_TIMEOUT_SECONDS)
-        if trace_id in _accumulated_spans:
-            logger.info(f"Trace {trace_id} timed out, processing accumulated spans")
-            await process_completed_trace(trace_id, _accumulated_spans[trace_id])
-            del _accumulated_spans[trace_id]
-            if trace_id in _trace_completion_tasks:
-                del _trace_completion_tasks[trace_id]
-
-    _trace_completion_tasks[trace_id] = asyncio.create_task(timeout_handler())
 
 
 async def process_completed_trace(trace_id: str, spans: List[Dict[str, Any]]) -> None:
@@ -417,6 +488,8 @@ async def store_spans(spans: List[Dict[str, Any]]) -> None:
             logger.warning(
                 f"Skipping span {span.get('span_id')} - missing collection_id or agent_run_id"
             )
+            # pprint the json span
+            print(json.dumps(span, indent=2))
             continue
 
         # Use setdefault to organize spans (following existing codebase patterns)

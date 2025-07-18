@@ -71,6 +71,7 @@ from docent_core._db_service.schemas.tables import (
     SQLASearchResult,
     SQLASearchResultCluster,
     SQLASession,
+    SQLATelemetryLog,
     SQLATranscript,
     SQLATranscriptEmbedding,
     SQLAUser,
@@ -2052,3 +2053,32 @@ class MonoService:
                     return api_key.user.to_user()
 
             return None
+
+    ######################
+    # Telemetry Log #
+    ######################
+
+    async def store_telemetry_log(
+        self, user_id: str, json_data: dict[str, Any], collection_id: str | None = None
+    ) -> str:
+        """Store telemetry log data in the database."""
+        telemetry_id = str(uuid4())
+        async with self.db.session() as session:
+            session.add(
+                SQLATelemetryLog(
+                    id=telemetry_id,
+                    user_id=user_id,
+                    collection_id=collection_id,
+                    json_data=json_data,
+                )
+            )
+        return telemetry_id
+
+    async def update_telemetry_log_collection_id(self, telemetry_id: str, collection_id: str):
+        """Update the collection ID for a telemetry log entry."""
+        async with self.db.session() as session:
+            await session.execute(
+                update(SQLATelemetryLog)
+                .where(SQLATelemetryLog.id == telemetry_id)
+                .values(collection_id=collection_id)
+            )
