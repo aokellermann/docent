@@ -185,6 +185,8 @@ async def _parallelize_calls(
 
                 # Set the result in either case
                 responses[i] = result
+                if pbar is not None:
+                    pbar.update(1)
                 if pbar is None or pbar.n == pbar.total:
                     tg.cancel_scope.cancel()
 
