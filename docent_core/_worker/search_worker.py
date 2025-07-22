@@ -39,12 +39,12 @@ async def compute_search(view_ctx: ViewContext, job_id: str, read_only: bool, RE
                 await publish_searches(mono_svc, view_ctx)
 
     async with mono_svc.advisory_lock(
-        view_ctx.collection_id + "__search__" + query.search_query,
+        view_ctx.collection_id + "__search__" + query.id,
         action_id="mutation",
     ):
         await mono_svc.compute_search(
             view_ctx,
-            query.search_query,
+            query.id,
             _search_result_callback,
             read_only,
         )

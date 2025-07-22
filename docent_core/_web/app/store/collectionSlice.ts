@@ -9,7 +9,6 @@ import socketService from '../services/socketService';
 import { TranscriptMetadataField } from '../types/experimentViewerTypes';
 import {
   ComplexFilter,
-  CollectionDimension,
   CollectionFilter,
   Collection,
   Bins,
@@ -28,7 +27,6 @@ export interface CollectionState {
   collections?: Collection[];
   isLoadingCollections: boolean;
   // Collection state
-  dimensionsMap?: Record<string, CollectionDimension>;
   filtersMap?: Record<string, CollectionFilter>;
   baseFilter?: ComplexFilter;
   // Metadata
@@ -36,8 +34,7 @@ export interface CollectionState {
   agentRunMetadata?: Record<string, Record<string, BaseAgentRunMetadata>>;
   // Global variables
   collectionId?: string;
-  innerBinKey?: string;
-  outerBinKey?: string;
+  viewId?: string;
   bins?: Bins;
 }
 
@@ -81,7 +78,7 @@ export const initSession = createAsyncThunk(
 
       // Set various IDs
       dispatch(setCollectionId(collectionId));
-      dispatch(setCollectionId(collectionId));
+      dispatch(setViewId(view_id));
 
       dispatch(getAgentRunMetadataFields());
       // Start a broker socket to listen for state updates with dual-channel support
@@ -92,7 +89,7 @@ export const initSession = createAsyncThunk(
       // Cleanup on error
       socketService.closeSocket();
       dispatch(setCollectionId(undefined));
-      dispatch(setCollectionId(undefined));
+      dispatch(setViewId(undefined));
       dispatch(
         setToastNotification({
           title: 'Error connecting to server',
@@ -202,46 +199,6 @@ export const getAgentRunMetadata = createAsyncThunk(
         setToastNotification({
           title: 'Error fetching metadata',
           description: 'Failed to retrieve metadata',
-          variant: 'destructive',
-        })
-      );
-      throw error;
-    }
-  }
-);
-
-export const getDimensions = createAsyncThunk(
-  'collection/getDimensions',
-  async (dimIds: string[] | undefined, { dispatch, getState }) => {
-    const state = getState() as { collection: CollectionState };
-    const collectionId = state.collection.collectionId;
-    const curDimensions = Object.values(state.collection.dimensionsMap ?? {});
-
-    if (!collectionId) {
-      dispatch(
-        setToastNotification({
-          title: 'Configuration error',
-          description: 'No collection ID available',
-          variant: 'destructive',
-        })
-      );
-      throw new Error('No collection ID available');
-    }
-
-    try {
-      const response = await apiRestClient.post(
-        `/${collectionId}/get_dimensions`,
-        {
-          dim_ids: dimIds,
-        }
-      );
-      dispatch(setDimensions([...curDimensions, ...response.data]));
-      return response.data;
-    } catch (error) {
-      dispatch(
-        setToastNotification({
-          title: 'Error fetching dimensions',
-          description: 'Failed to retrieve dimensions',
           variant: 'destructive',
         })
       );
@@ -390,15 +347,6 @@ export const collectionSlice = createSlice({
     setBins: (state, action: PayloadAction<Bins>) => {
       state.bins = action.payload;
     },
-    setDimensions: (state, action: PayloadAction<CollectionDimension[]>) => {
-      state.dimensionsMap = action.payload.reduce(
-        (map, dimension) => {
-          map[dimension.id] = dimension;
-          return map;
-        },
-        {} as Record<string, CollectionDimension>
-      );
-    },
     setBaseFilter: (
       state,
       action: PayloadAction<ComplexFilter | undefined>
@@ -425,11 +373,8 @@ export const collectionSlice = createSlice({
     setCollectionId: (state, action: PayloadAction<string | undefined>) => {
       state.collectionId = action.payload;
     },
-    setInnerBinKey: (state, action: PayloadAction<string | undefined>) => {
-      state.innerBinKey = action.payload;
-    },
-    setOuterBinKey: (state, action: PayloadAction<string | undefined>) => {
-      state.outerBinKey = action.payload;
+    setViewId: (state, action: PayloadAction<string | undefined>) => {
+      state.viewId = action.payload;
     },
     setCollections: (state, action: PayloadAction<Collection[]>) => {
       state.collections = action.payload;
@@ -446,13 +391,11 @@ export const collectionSlice = createSlice({
 
 export const {
   setBins,
-  setDimensions,
   setBaseFilter,
   setAgentRunMetadataFields,
   updateAgentRunMetadata,
   setCollectionId,
-  setInnerBinKey,
-  setOuterBinKey,
+  setViewId,
   setCollections,
   setIsLoadingCollections,
   setHasInitSearchQuery,

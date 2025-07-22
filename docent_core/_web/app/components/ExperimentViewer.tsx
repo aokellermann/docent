@@ -42,8 +42,6 @@ export default function ExperimentViewer() {
   const dispatch = useAppDispatch();
 
   // Get all state at the top level
-  const innerBinKey = useAppSelector((state) => state.collection.innerBinKey);
-  const outerBinKey = useAppSelector((state) => state.collection.outerBinKey);
   const collectionId = useAppSelector((state) => state.collection.collectionId);
   const baseFilter = useAppSelector((state) => state.collection.baseFilter);
 
@@ -55,9 +53,6 @@ export default function ExperimentViewer() {
 
   const experimentViewerScrollPosition = useAppSelector(
     (state) => state.experimentViewer.experimentViewerScrollPosition
-  );
-  const rawBinStats = useAppSelector(
-    (state) => state.experimentViewer.binStats
   );
   const rawAgentRunIds = useAppSelector(
     (state) => state.experimentViewer.agentRunIds
@@ -198,18 +193,6 @@ export default function ExperimentViewer() {
     },
     [totalPages]
   );
-
-  // If data isn't available, show a loading spinner
-  // But if both dimensions are None, we don't need stats, so we can show the agent run list
-  if (!rawBinStats && (outerBinKey || innerBinKey)) {
-    return (
-      <Card className="h-full flex-1 p-3">
-        <div className="flex-1 flex flex-col items-center justify-center space-y-2 h-full">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-        </div>
-      </Card>
-    );
-  }
 
   return (
     <Card className="flex-1 p-3 flex flex-col h-full min-w-0 space-y-3">

@@ -46,7 +46,7 @@ This list should be exhaustive.
 class SearchResult(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     agent_run_id: str
-    search_query: str
+    search_query_id: str
     search_result_idx: int | None = None
     value: str | None = None
 
@@ -76,7 +76,7 @@ class SearchResultStreamingCallback(Protocol):
 
 
 def _get_llm_streaming_callback(
-    search_query: str,
+    search_query_id: str,
     datapoint_ids: list[str],
     search_result_callback: SearchResultStreamingCallback,
 ):
@@ -91,7 +91,7 @@ def _get_llm_streaming_callback(
                 [
                     SearchResult(
                         agent_run_id=datapoint_ids[batch_index],
-                        search_query=search_query,
+                        search_query_id=search_query_id,
                         search_result_idx=i,
                         value=value,
                     )
@@ -105,7 +105,7 @@ def _get_llm_streaming_callback(
 
 
 def _get_llm_streaming_callback_for_sharded_search(
-    search_query: str,
+    search_query_id: str,
     datapoint_ids: list[str],
     search_result_callback: SearchResultStreamingCallback,
 ):
@@ -123,7 +123,7 @@ def _get_llm_streaming_callback_for_sharded_search(
                 [
                     SearchResult(
                         agent_run_id=datapoint_ids[batch_index],
-                        search_query=search_query,
+                        search_query_id=search_query_id,
                         search_result_idx=i,
                         value=value,
                     )
@@ -152,6 +152,7 @@ def _parse_llm_output(output: LLMOutput) -> list[str] | None:
 
 async def execute_search(
     agent_runs: list[AgentRun],
+    search_query_id: str,
     search_query: str,
     search_result_callback: SearchResultStreamingCallback | None = None,
 ):
@@ -175,7 +176,7 @@ async def execute_search(
     short_texts = [texts[i] for i in short_indices]
 
     llm_callback = (
-        _get_llm_streaming_callback(search_query, short_ids, search_result_callback)
+        _get_llm_streaming_callback(search_query_id, short_ids, search_result_callback)
         if search_result_callback is not None
         else None
     )
@@ -248,7 +249,7 @@ async def execute_search(
 
     if search_result_callback is not None:
         long_llm_callback = _get_llm_streaming_callback_for_sharded_search(
-            search_query, long_ids, search_result_callback
+            search_query_id, long_ids, search_result_callback
         )
         callbacks = [
             long_llm_callback(i, output_group) for i, output_group in enumerate(grouped_outputs)

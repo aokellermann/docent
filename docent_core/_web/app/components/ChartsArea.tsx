@@ -1,7 +1,7 @@
 'use client';
 
-import { useMemo, useState, useEffect } from 'react';
-import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { useState, useEffect } from 'react';
+import { useAppSelector } from '../store/hooks';
 import Chart from './Chart';
 import { ChartColumn, ChartLine, Plus, Table, X } from 'lucide-react';
 import ChartSettings from './ChartSettings';
@@ -9,35 +9,30 @@ import {
   useCreateChartMutation,
   useUpdateChartMutation,
   useDeleteChartMutation,
-} from '../api/experimentViewerApi';
-import { getFieldsByPrefix } from '../utils/chartDataUtils';
+  useGetChartsQuery,
+} from '../api/chartApi';
 import { ChartSpec } from '../types/collectionTypes';
 
 export function ChartsArea() {
-  const dispatch = useAppDispatch();
-
-  const charts: ChartSpec[] = useAppSelector(
-    (state) => state.experimentViewer.charts || []
-  );
   const collectionId = useAppSelector((state) => state.collection.collectionId);
-  const agentRunMetadataFields =
-    useAppSelector((state) => state.collection.agentRunMetadataFields) || [];
+  const viewId = useAppSelector((state) => state.collection.viewId);
+
+  const {
+    data: charts = [],
+    isLoading,
+    error,
+  } = useGetChartsQuery(
+    {
+      collectionId: collectionId!,
+    },
+    {
+      skip: !collectionId || !viewId,
+    }
+  );
 
   const [createChart] = useCreateChartMutation();
   const [updateChart] = useUpdateChartMutation();
   const [deleteChart] = useDeleteChartMutation();
-
-  const metadataKeys = useMemo(
-    () =>
-      getFieldsByPrefix(agentRunMetadataFields, 'metadata.').filter(
-        (key) => !key.startsWith('scores.')
-      ),
-    [agentRunMetadataFields]
-  );
-  const scoreKeys = useMemo(
-    () => getFieldsByPrefix(agentRunMetadataFields, 'metadata.scores.'),
-    [agentRunMetadataFields]
-  );
 
   const [activeTabId, setActiveTabId] = useState('');
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
@@ -79,11 +74,8 @@ export function ChartsArea() {
     try {
       const response = await createChart({
         collectionId,
-        seriesKey: undefined,
-        xKey: metadataKeys.length > 0 ? metadataKeys[0] : '',
-        yKey: scoreKeys.length > 0 ? scoreKeys[0] : '',
       }).unwrap();
-      updateActiveTabId(response.chart_id);
+      updateActiveTabId(response.id);
     } catch (error) {
       console.error('Failed to create chart:', error);
     }
@@ -118,12 +110,15 @@ export function ChartsArea() {
       try {
         await updateChart({
           collectionId,
-          id: chartId,
-          name: editingName.trim(),
-          seriesKey: chart.seriesKey,
-          xKey: chart.xKey,
-          yKey: chart.yKey,
-          chartType: chart.chartType,
+          chart: {
+            id: chartId,
+            name: editingName.trim(),
+            series_key: chart.series_key,
+            x_key: chart.x_key,
+            y_key: chart.y_key,
+            chart_type: chart.chart_type,
+            rubric_filter: chart.rubric_filter,
+          },
         }).unwrap();
       } catch (error) {
         console.error('Failed to update chart:', error);
@@ -148,6 +143,27 @@ export function ChartsArea() {
 
   const activeChart = charts.find((chart) => chart.id === activeTabId);
 
+  // Handle loading and error states
+  if (isLoading) {
+    return (
+      <div className="max-h-[35%] flex flex-col">
+        <div className="flex items-center justify-center p-4">
+          Loading charts...
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="max-h-[35%] flex flex-col">
+        <div className="flex items-center justify-center p-4 text-red-500">
+          Error loading charts
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-h-[35%] flex flex-col">
       {/* Tab Bar */}
@@ -155,21 +171,21 @@ export function ChartsArea() {
         {charts.map((chart: ChartSpec) => (
           <div
             key={chart.id}
-            className={`group relative flex items-center px-2 py-1 text-xs font-medium cursor-pointer transition-colors rounded-t-md border-t border-l border-r mr-1 ${
+            className={`group relative flex items-center px-2 py-1 text-xs font-medium cursor-pointer transition-colors rounded-t-md border mr-1 -mb-px ${
               activeTabId === chart.id
-                ? 'bg-background border-border text-primary -mb-px border-b'
+                ? 'bg-background border-border text-primary border-b-white'
                 : 'bg-secondary/80 border-border text-muted-foreground hover:bg-muted hover:text-primary'
             }`}
             onClick={() => updateActiveTabId(chart.id)}
             onDoubleClick={() => handleTabDoubleClick(chart)}
           >
-            {chart.chartType === 'bar' && (
+            {chart.chart_type === 'bar' && (
               <ChartColumn className="inline w-4 h-4 mr-2" />
             )}
-            {chart.chartType === 'line' && (
+            {chart.chart_type === 'line' && (
               <ChartLine className="inline w-4 h-4 mr-2" />
             )}
-            {chart.chartType === 'table' && (
+            {chart.chart_type === 'table' && (
               <Table className="inline w-4 h-4 mr-2" />
             )}
             {editingTabId === chart.id ? (
@@ -217,10 +233,10 @@ export function ChartsArea() {
         <div className="flex flex-col flex-1 bg-background border border-border rounded-b-md rounded-tr-md min-h-0">
           <ChartSettings
             chart={activeChart}
-            onChange={async (chart) => {
+            onChange={async (chart: ChartSpec) => {
               if (collectionId) {
                 try {
-                  await updateChart({ collectionId, ...chart }).unwrap();
+                  await updateChart({ collectionId, chart }).unwrap();
                 } catch (error) {
                   console.error('Failed to update chart:', error);
                 }

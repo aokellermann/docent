@@ -11,7 +11,7 @@ import { diffReducer } from './diffSlice';
 import embedReducer from './embedSlice';
 import createWebSocketMiddleware from './webSocketMiddleware';
 import { collabApi } from '@/lib/permissions/collabSlice';
-import { experimentViewerApi } from '../api/experimentViewerApi';
+import { chartApi } from '../api/chartApi';
 import { diffApi } from '../api/diffApi';
 import { rubricApi } from '../api/rubricApi';
 import rubricReducer from './rubricSlice';
@@ -42,7 +42,7 @@ const store = configureStore({
     transcript: transcriptReducer,
     toast: toastReducer,
     [collabApi.reducerPath]: collabApi.reducer,
-    [experimentViewerApi.reducerPath]: experimentViewerApi.reducer,
+    [chartApi.reducerPath]: chartApi.reducer,
     [diffApi.reducerPath]: diffApi.reducer,
     [rubricApi.reducerPath]: rubricApi.reducer,
   },
@@ -51,7 +51,7 @@ const store = configureStore({
       .concat(createWebSocketMiddleware())
       .concat(errorLogger)
       .concat(collabApi.middleware)
-      .concat(experimentViewerApi.middleware)
+      .concat(chartApi.middleware)
       .concat(diffApi.middleware)
       .concat(rubricApi.middleware),
 });

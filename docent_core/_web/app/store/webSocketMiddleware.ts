@@ -3,21 +3,15 @@ import type { Middleware } from '@reduxjs/toolkit';
 import socketService from '../services/socketService';
 
 import { setSearchesWithStats, handleSearchUpdate } from './searchSlice';
-import {
-  setAgentRunIds,
-  setBinStats,
-  setCharts,
-} from './experimentViewerSlice';
+import { setAgentRunIds } from './experimentViewerSlice';
 import {
   setBaseFilter,
   setAgentRunMetadataFields,
   updateAgentRunMetadata,
-  setInnerBinKey,
-  setOuterBinKey,
-  setDimensions,
   setCollections,
 } from './collectionSlice';
 import { AppDispatch } from './store';
+import { chartApi } from '../api/chartApi';
 import {
   handleAgentRunsUpdated,
   onFinishLoadingActionsSummary,
@@ -30,18 +24,6 @@ import {
   setTaSessionId,
 } from './transcriptSlice';
 import { setEmbeddingProgress, setIsListening } from './embedSlice';
-
-function convertChart(chart: any) {
-  return {
-    id: chart.id,
-    name: chart.name,
-    sqlQuery: chart.sql_query,
-    chartType: chart.chart_type,
-    xKey: chart.x_key,
-    yKey: chart.y_key,
-    seriesKey: chart.series_key,
-  };
-}
 
 export const createWebSocketMiddleware = (): Middleware => {
   return (store) => {
@@ -59,9 +41,6 @@ export const createWebSocketMiddleware = (): Middleware => {
           // If the current collection is deleted, we could potentially redirect to the home page
           // This would be handled by a different part of the app
           break;
-        case 'dimensions':
-          dispatch(setDimensions(data.payload));
-          break;
         case 'base_filter':
           dispatch(setBaseFilter(data.payload));
           break;
@@ -73,10 +52,9 @@ export const createWebSocketMiddleware = (): Middleware => {
           break;
         case 'specific_bins':
           if (data.payload.request_type === 'comb_stats') {
-            dispatch(setBinStats(data.payload.result));
             dispatch(setAgentRunIds(data.payload.result?.agentRunIds || []));
-          } else if (data.payload.request_type === 'agent_runs') {
-            dispatch(setAgentRunIds(data.payload.result?.agentRunIds || []));
+            // Invalidate the chart data cache
+            dispatch(chartApi.util.invalidateTags(['ChartData']));
           }
           break;
         case 'datapoint':
@@ -97,13 +75,6 @@ export const createWebSocketMiddleware = (): Middleware => {
               num_search_hits: data.num_search_hits || 0,
             })
           );
-          break;
-        case 'io_dims_updated':
-          dispatch(setInnerBinKey(data.payload.inner_bin_key));
-          dispatch(setOuterBinKey(data.payload.outer_bin_key));
-          break;
-        case 'charts':
-          dispatch(setCharts(data.payload.map(convertChart)));
           break;
         case 'summarize_transcript_update':
           if (data.payload.type === 'solution') {

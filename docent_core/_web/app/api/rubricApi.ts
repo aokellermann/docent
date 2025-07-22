@@ -11,6 +11,7 @@ import {
   setIsPollingAssignments,
   setActiveCentroidAssignmentJob,
 } from '@/app/store/rubricSlice';
+import { chartApi } from './chartApi';
 import sseService from '../services/sseService';
 
 // Types based on the backend models
@@ -204,6 +205,8 @@ export const rubricApi = createApi({
             dispatch(setJudgeResults(data.results));
             dispatch(setTotalAgentRuns(data.total_agent_runs));
             dispatch(setActiveRubricJobId(data.job_id));
+            // Invalidate chart data when judge results stream in
+            dispatch(chartApi.util.invalidateTags(['ChartData']));
           },
           () => {
             dispatch(setIsPollingResults(false));
@@ -310,6 +313,8 @@ export const rubricApi = createApi({
             });
             dispatch(setCentroidAssignments(data.assignments));
             dispatch(setActiveCentroidAssignmentJob(data.job_id));
+            // Invalidate chart data when cluster assignments stream in
+            dispatch(chartApi.util.invalidateTags(['ChartData']));
           },
           () => {
             dispatch(setIsPollingAssignments(false));
