@@ -1,15 +1,16 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useAppSelector } from '../store/hooks';
+import { useAppSelector, useAppDispatch } from '../store/hooks';
 import Chart from './Chart';
-import { ChartColumn, ChartLine, Plus, Table, X } from 'lucide-react';
+import { ChartColumn, ChartLine, Plus, Table, X, RefreshCw } from 'lucide-react';
 import ChartSettings from './ChartSettings';
 import {
   useCreateChartMutation,
   useUpdateChartMutation,
   useDeleteChartMutation,
   useGetChartsQuery,
+  chartApi,
 } from '../api/chartApi';
 import { ChartSpec } from '../types/collectionTypes';
 
@@ -33,6 +34,11 @@ export function ChartsArea() {
   const [createChart] = useCreateChartMutation();
   const [updateChart] = useUpdateChartMutation();
   const [deleteChart] = useDeleteChartMutation();
+  const dispatch = useAppDispatch();
+
+  const handleRefresh = () => {
+    dispatch(chartApi.util.invalidateTags(['Charts', 'ChartData', 'ChartMetadata']));
+  };
 
   const [activeTabId, setActiveTabId] = useState('');
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
@@ -226,6 +232,15 @@ export function ChartsArea() {
           onClick={addTab}
         >
           <Plus className="h-3 w-3" />
+        </button>
+
+        {/* Refresh Button */}
+        <button
+          className="flex items-center justify-center p-1 ml-1 text-muted-foreground bg-muted rounded transition-colors self-center hover:bg-secondary hover:text-primary"
+          onClick={handleRefresh}
+          title="Refresh charts and data"
+        >
+          <RefreshCw className="h-3 w-3" />
         </button>
       </div>
 

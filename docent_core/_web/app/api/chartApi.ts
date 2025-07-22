@@ -9,7 +9,7 @@ export const chartApi = createApi({
     baseUrl: `${BASE_URL}/rest/chart`,
     credentials: 'include',
   }),
-  tagTypes: ['Charts', 'ChartData'],
+  tagTypes: ['Charts', 'ChartData', 'ChartMetadata'],
   endpoints: (build) => ({
     createChart: build.mutation<
       { id: string },
@@ -98,6 +98,7 @@ export const chartApi = createApi({
         url: `/${collectionId}/metadata`,
         method: 'GET',
       }),
+      providesTags: ['ChartMetadata'],
     }),
   }),
 });
