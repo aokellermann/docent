@@ -344,6 +344,7 @@ export const {
   useListenForJudgeResultsQuery,
   useProposeCentroidsMutation,
   useGetCentroidsQuery,
+  useLazyGetCentroidsQuery,
   useClearCentroidsMutation,
   useStartCentroidAssignmentMutation,
   useGetCentroidAssignmentsQuery,

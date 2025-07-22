@@ -79,7 +79,7 @@ export default function QuickSearchBox({ onSubmit }: QuickSearchBoxProps) {
         <div className="flex flex-col">
           <div className="text-sm font-semibold">Quick search</div>
           <div className="text-xs text-muted-foreground">
-            Find and explore occurrences of an agent behavior.
+            Find and explore occurrences of an agent behavior
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -110,6 +110,7 @@ export default function QuickSearchBox({ onSubmit }: QuickSearchBoxProps) {
             className="h-[10rem] resize-none border-0 p-2 shadow-none focus-visible:ring-0 text-xs font-mono"
             placeholder={placeholderText}
             value={isPresetHovered ? '' : searchQueryTextboxValue}
+            disabled={!hasWritePermission}
             onChange={(e) => setSearchQueryTextboxValue(e.target.value)}
           />
 

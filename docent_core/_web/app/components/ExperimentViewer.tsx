@@ -199,9 +199,9 @@ export default function ExperimentViewer() {
       {/* Header with organization dropdown - always visible */}
       <div className="flex justify-between items-center shrink-0">
         <div className="flex flex-col">
-          <div className="text-sm font-semibold">Grouped Visualization</div>
+          <div className="text-sm font-semibold">Chart Visualization</div>
           <div className="text-xs text-muted-foreground">
-            Select fields to group by, and click to filter
+            Plot trends in your data
           </div>
         </div>
       </div>

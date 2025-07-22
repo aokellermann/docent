@@ -14,6 +14,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 
 import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { useHasCollectionWritePermission } from '@/lib/permissions/hooks';
 
 import {
   setActiveRubricId,
@@ -32,6 +33,7 @@ import {
   useListenForJudgeResultsQuery,
   useStartEvaluationMutation,
   useProposeCentroidsMutation,
+  useLazyGetCentroidsQuery,
   useStartCentroidAssignmentMutation,
   useListenForCentroidAssignmentsQuery,
   useCancelAssignmentMutation,
@@ -49,10 +51,14 @@ const RubricArea = () => {
   const [isReclusterPopoverOpen, setIsReclusterPopoverOpen] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
 
+  const hasWritePermission = useHasCollectionWritePermission();
+
   const [cancelEvaluation, { isLoading: isCancellingEvaluation }] =
     useCancelEvaluationMutation();
   const [updateRubric, { isLoading: isUpdatingRubric }] =
     useUpdateRubricMutation();
+  const [getCentroids, { isLoading: isGettingCentroids }] =
+    useLazyGetCentroidsQuery();
 
   const collectionId = useAppSelector((state) => state.collection.collectionId);
   const isPollingResults = useAppSelector(
@@ -103,10 +109,13 @@ const RubricArea = () => {
   const alreadyInitiated = useRef(false);
   useEffect(() => {
     const urlRubricId = searchParams.get('activeRubricId');
+    const includeCentroids = searchParams.get('includeCentroids') === 'true';
+
     if (
       urlRubricId &&
       rubricsMap &&
       rubricsMap[urlRubricId] &&
+      collectionId &&
       activeRubricId === null
     ) {
       if (alreadyInitiated.current) return;
@@ -115,8 +124,29 @@ const RubricArea = () => {
       // Active interface and listen for results without triggering a new job
       dispatch(setActiveRubricId(urlRubricId));
       setShouldListenForResults(true);
+
+      // If the shared link includes centroids, automatically fetch them
+      if (includeCentroids) {
+        (async () => {
+          // For read-only users, we fetch existing centroids and then listen for assignments
+          await getCentroids({
+            collectionId,
+            rubricId: urlRubricId,
+          });
+
+          // Start listening for existing assignments without starting a new centroid assignment job
+          setShouldListenForAssignments(true);
+        })();
+      }
     }
-  }, [searchParams, rubricsMap, activeRubricId, dispatch]);
+  }, [
+    searchParams,
+    rubricsMap,
+    activeRubricId,
+    dispatch,
+    collectionId,
+    getCentroids,
+  ]);
 
   // If there is an active rubric job, listen for judge results with RTK
   useListenForJudgeResultsQuery(
@@ -179,6 +209,11 @@ const RubricArea = () => {
       const currentUrl = new URL(window.location.href);
       currentUrl.searchParams.set('activeRubricId', activeRubricId);
 
+      // If centroids exist, add parameter to auto-load them in the shared link
+      if (Object.keys(centroidsMap).length > 0) {
+        currentUrl.searchParams.set('includeCentroids', 'true');
+      }
+
       await navigator.clipboard.writeText(currentUrl.toString());
 
       toast({
@@ -220,6 +255,19 @@ const RubricArea = () => {
       collectionId,
       rubricId: activeRubricId,
     });
+    setShouldListenForAssignments(true);
+  };
+
+  const handleGetCentroids = async () => {
+    if (!collectionId || !activeRubricId) return;
+
+    // For read-only users, we fetch existing centroids and then listen for assignments
+    await getCentroids({
+      collectionId,
+      rubricId: activeRubricId,
+    });
+
+    // Start listening for existing assignments without starting a new centroid assignment job
     setShouldListenForAssignments(true);
   };
 
@@ -444,16 +492,27 @@ const RubricArea = () => {
                     size="sm"
                     className="gap-1 h-7 text-xs"
                     variant="outline"
-                    disabled={isProposingCentroids}
-                    onClick={() => handleProposeCentroids()}
+                    disabled={isProposingCentroids || isGettingCentroids}
+                    onClick={() =>
+                      hasWritePermission
+                        ? handleProposeCentroids()
+                        : handleGetCentroids()
+                    }
                   >
-                    {isProposingCentroids ? 'Proposing...' : 'Cluster results'}
+                    {hasWritePermission
+                      ? isProposingCentroids
+                        ? 'Proposing...'
+                        : 'Cluster results'
+                      : isGettingCentroids
+                        ? 'Loading...'
+                        : 'View clusters'}
                   </Button>
                 )}
                 {!activeCentroidAssignmentJobId &&
                   Object.keys(centroidsMap).length > 0 &&
+                  hasWritePermission &&
                   reclusterPopover}
-                {activeCentroidAssignmentJobId && (
+                {activeCentroidAssignmentJobId && hasWritePermission && (
                   <Button
                     type="button"
                     size="sm"
@@ -488,15 +547,17 @@ const RubricArea = () => {
                 >
                   Run in background
                 </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  className="gap-1 h-7 text-xs"
-                  disabled={isCancellingEvaluation || !activeRubricJobId}
-                  onClick={() => handleCancelRubricJob()}
-                >
-                  {isCancellingEvaluation ? 'Stopping...' : 'Stop'}
-                </Button>
+                {hasWritePermission && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="gap-1 h-7 text-xs"
+                    disabled={isCancellingEvaluation || !activeRubricJobId}
+                    onClick={() => handleCancelRubricJob()}
+                  >
+                    {isCancellingEvaluation ? 'Stopping...' : 'Stop'}
+                  </Button>
+                )}
               </>
             )}
           </div>

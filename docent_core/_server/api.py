@@ -178,3 +178,8 @@ if ENV.get("ENVIRONMENT") == "prod" and (dsn := ENV.get("SENTRY_DSN")) is not No
 @asgi_app.get("/")
 async def root():
     return "clarity has been achieved"
+
+
+@asgi_app.get("/test_error")
+async def test_error():
+    raise Exception("Test error")

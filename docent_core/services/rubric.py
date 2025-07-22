@@ -26,7 +26,7 @@ from docent_core.services.job import JobService
 
 logger = get_logger(__name__)
 
-MAX_RUBRIC_RESULTS = 50
+# MAX_RUBRIC_RESULTS = 50
 
 
 class RubricService:
@@ -174,8 +174,8 @@ class RubricService:
                     [SQLAJudgeResult.from_pydantic(judge_result) for judge_result in judge_results]
                 )
 
-                if num_results >= MAX_RUBRIC_RESULTS and not cancellation_event.is_set():
-                    cancellation_event.set()
+                # if num_results >= MAX_RUBRIC_RESULTS and not cancellation_event.is_set():
+                #     cancellation_event.set()
 
             # Run the search, saving data to the database as we go
             await evaluate_rubric(
