@@ -172,7 +172,7 @@ export const JudgeResultsList = ({
       {/* Render residuals */}
       {residualResultIds.length > 0 && (
         <CollapsibleResultsSection
-          title="Residuals"
+          title={Object.keys(centroidsMap).length > 0 ? 'Residuals' : 'Results'}
           judgeResultIds={residualResultIds}
           judgeResultsMap={judgeResultsMap}
           usePreview={usePreview}

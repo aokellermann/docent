@@ -2,10 +2,7 @@
 
 import { Plus, Pencil, Play, FileText, Trash2, Pause } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
-import {
-  setEditingRubricId,
-  type Rubric,
-} from '@/app/store/rubricSlice';
+import { setEditingRubricId, type Rubric } from '@/app/store/rubricSlice';
 import { Button } from '@/components/ui/button';
 import {
   useGetRubricsQuery,
@@ -241,6 +238,11 @@ export default function RubricList({ handleEvaluate }: RubricListProps) {
       // The rubric will be automatically added to the store via extraReducers
     } catch (error) {
       console.error('Failed to create rubric:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to create rubric',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -266,7 +268,12 @@ export default function RubricList({ handleEvaluate }: RubricListProps) {
     <div className="space-y-2">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div className="text-sm font-semibold">Saved Rubrics</div>
+        <div className="flex flex-col">
+          <div className="text-sm font-semibold">Saved Rubrics</div>
+          <div className="text-xs text-muted-foreground">
+            Run and modify previously-created rubrics.
+          </div>
+        </div>
         <Button
           onClick={handleAddNew}
           size="sm"
@@ -274,8 +281,8 @@ export default function RubricList({ handleEvaluate }: RubricListProps) {
           className="h-7 gap-1 text-xs"
           disabled={isCreatingRubric}
         >
-          <Plus className="h-3 w-3" />
-          {isCreatingRubric ? 'Creating...' : 'New Rubric'}
+          <Plus className="h-3 w-3 -ml-1" />
+          {isCreatingRubric ? 'Creating...' : 'Rubric'}
         </Button>
       </div>
 

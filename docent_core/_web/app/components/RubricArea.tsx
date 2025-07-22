@@ -2,6 +2,7 @@
 
 import { useMemo, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { v4 as uuidv4 } from 'uuid';
 
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -34,8 +35,10 @@ import {
   useStartCentroidAssignmentMutation,
   useListenForCentroidAssignmentsQuery,
   useCancelAssignmentMutation,
+  useCreateRubricMutation,
 } from '../api/rubricApi';
 import { toast } from '@/hooks/use-toast';
+import QuickSearchBox from '../dashboard/[collection_id]/components/QuickSearchBox';
 
 const RubricArea = () => {
   const dispatch = useAppDispatch();
@@ -310,38 +313,107 @@ const RubricArea = () => {
     </Popover>
   );
 
+  /**
+   * Quick search box
+   */
+
+  const [createRubric, { isLoading: isCreatingRubric }] =
+    useCreateRubricMutation();
+  const handleAddNewRubric = async (highLevelDescription: string) => {
+    if (!collectionId) return undefined;
+
+    try {
+      // Create a new rubric using the API
+      const rubricId = uuidv4();
+      const newRubric = {
+        high_level_description: highLevelDescription,
+        inclusion_rules: [],
+        exclusion_rules: [],
+        id: rubricId,
+      };
+
+      await createRubric({
+        collectionId,
+        rubric: newRubric,
+      }).unwrap();
+
+      return rubricId;
+    } catch (error) {
+      console.error('Failed to create rubric:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to create rubric',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleQuickSearchSubmit = async (
+    highLevelDescription: string,
+    mode: 'explore' | 'full'
+  ) => {
+    console.log('handleQuickSearchSubmit', mode);
+    if (mode === 'explore') {
+      toast({
+        title: 'Explore mode',
+        description: 'Explore mode is not yet implemented',
+        variant: 'destructive',
+      });
+    } else {
+      const rubricId = await handleAddNewRubric(highLevelDescription);
+      if (rubricId) {
+        handleEvaluate(rubricId, true);
+      }
+    }
+  };
+
   return (
     <Card className="h-full flex overflow-y-auto flex-col flex-1 p-3 custom-scrollbar space-y-3">
       {/* Rubric Display */}
       <div className="space-y-2">
-        <div className="flex flex-col">
-          <div className="text-sm font-semibold">Rubric Evaluation</div>
-          <div className="text-xs text-muted-foreground">
-            Define evaluation criteria and rules for agent performance
+        {!activeRubric && !editingRubric && (
+          <div>
+            <QuickSearchBox onSubmit={handleQuickSearchSubmit} />
           </div>
-        </div>
-
-        {/* Rubric List - show when not actively evaluating */}
-        {!activeRubric && <RubricList handleEvaluate={handleEvaluate} />}
-
+        )}
         {/* Display the active rubric but with read only */}
         {activeRubric && (
-          <RubricEditor
-            initRubric={activeRubric}
-            onSave={() => {}}
-            onCloseWithoutSave={() => {}}
-            readOnly={true}
-          />
+          <>
+            <div className="flex flex-col">
+              <div className="text-sm font-semibold">Rubric Evaluation</div>
+              <div className="text-xs text-muted-foreground">
+                Explore the results of running the rubric against data.
+              </div>
+            </div>
+            <RubricEditor
+              initRubric={activeRubric}
+              onSave={() => {}}
+              onCloseWithoutSave={() => {}}
+              readOnly={true}
+            />
+          </>
         )}
         {/* Editor */}
         {editingRubric && (
-          <RubricEditor
-            initRubric={editingRubric}
-            onSave={handleSaveRubric}
-            onCloseWithoutSave={() => dispatch(setEditingRubricId(null))}
-            readOnly={isPollingResults || isUpdatingRubric}
-          />
+          <>
+            <div className="flex flex-col">
+              <div className="text-sm font-semibold">Rubric Editor</div>
+              <div className="text-xs text-muted-foreground">
+                Modify a rubric&apos;s high level description, inclusion rules,
+                and exclusion rules.
+              </div>
+            </div>
+            <RubricEditor
+              initRubric={editingRubric}
+              onSave={handleSaveRubric}
+              onCloseWithoutSave={() => dispatch(setEditingRubricId(null))}
+              readOnly={isPollingResults || isUpdatingRubric}
+            />
+          </>
         )}
+
+        {/* Rubric List - show when not actively evaluating */}
+        {!activeRubric && <RubricList handleEvaluate={handleEvaluate} />}
 
         {/* Progress bar */}
         {activeRubric && isPollingResults && (
