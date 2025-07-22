@@ -1,6 +1,6 @@
 [project]
 name = "docent-core"
-version = "0.0.1"
+version = "0.1.0-alpha"
 description = "Docent core"
 classifiers = ["Private :: Do Not Upload"]
 
