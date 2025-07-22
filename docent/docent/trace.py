@@ -4,17 +4,20 @@ import contextvars
 import inspect
 import itertools
 import logging
+import os
 import signal
 import sys
 import threading
 import uuid
 from collections import defaultdict
 from contextlib import asynccontextmanager, contextmanager
-from typing import Any, Callable, Dict, Optional, Union
+from contextvars import ContextVar, Token
+from typing import Any, AsyncIterator, Callable, Dict, Iterator, Optional, Union
 
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter as GRPCExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter as HTTPExporter
+from opentelemetry.instrumentation.anthropic import AnthropicInstrumentor
 from opentelemetry.instrumentation.openai import OpenAIInstrumentor
 from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 from opentelemetry.sdk.resources import Resource
@@ -29,8 +32,13 @@ from opentelemetry.sdk.trace.export import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Default configuration
+# DEFAULT_ENDPOINT = "http://localhost:4318"
+# DEFAULT_ENDPOINT = "https://aws-docent-backend.transluce.org/rest/telemetry"
+DEFAULT_ENDPOINT = "http://localhost:8889/rest/telemetry"
 
-def _is_async_context():
+
+def _is_async_context() -> bool:
     """Detect if we're in an async context."""
     try:
         # Check if we're in an async function
@@ -44,15 +52,16 @@ def _is_async_context():
         return False
 
 
-def _is_running_in_event_loop():
+def _is_running_in_event_loop() -> bool:
     """Check if we're running in an event loop."""
     try:
-        return asyncio.get_running_loop() is not None
+        asyncio.get_running_loop()
+        return True
     except RuntimeError:
         return False
 
 
-def _is_notebook():
+def _is_notebook() -> bool:
     """Check if we're running in a Jupyter notebook."""
     try:
         return "ipykernel" in sys.modules
@@ -67,10 +76,9 @@ class DocentTracer:
         self,
         collection_name: str = "default-collection-name",
         collection_id: Optional[str] = None,
-        endpoint: str = "http://localhost:4318",
+        endpoint: str = DEFAULT_ENDPOINT,
         headers: Optional[Dict[str, str]] = None,
-        email: Optional[str] = None,
-        password: Optional[str] = None,
+        api_key: Optional[str] = None,
         enable_console_export: bool = False,
         enable_otlp_export: bool = True,
         disable_batch: bool = False,
@@ -84,8 +92,7 @@ class DocentTracer:
             collection_id: Optional collection ID (auto-generated if not provided)
             endpoint: OTLP endpoint URL
             headers: Optional headers for authentication
-            email: Optional email for basic authentication
-            password: Optional password for basic authentication
+            api_key: Optional API key for bearer token authentication (takes precedence over env var)
             enable_console_export: Whether to export to console
             enable_otlp_export: Whether to export to OTLP endpoint
             disable_batch: Whether to disable batch processing (use SimpleSpanProcessor)
@@ -94,19 +101,18 @@ class DocentTracer:
         self.collection_name = collection_name
         self.collection_id = collection_id if collection_id else str(uuid.uuid4())
         self.endpoint = endpoint
-        self.email = email
-        self.password = password
 
         # Build headers with authentication if provided
         self.headers = headers or {}
-        if email and password:
-            # Add basic auth header
-            import base64
 
-            auth_string = f"{email}:{password}"
-            auth_bytes = auth_string.encode("ascii")
-            auth_b64 = base64.b64encode(auth_bytes).decode("ascii")
-            self.headers["Authorization"] = f"Basic {auth_b64}"
+        # Handle API key authentication (takes precedence over custom headers)
+        if api_key:
+            self.headers["Authorization"] = f"Bearer {api_key}"
+            logger.info(f"Using API key authentication for {self.collection_name}")
+        elif self.headers.get("Authorization"):
+            logger.info(f"Using custom Authorization header for {self.collection_name}")
+        else:
+            logger.info(f"No authentication configured for {self.collection_name}")
 
         self.enable_console_export = enable_console_export
         self.enable_otlp_export = enable_otlp_export
@@ -114,21 +120,24 @@ class DocentTracer:
         self.span_postprocess_callback = span_postprocess_callback
 
         # Use separate tracer provider to avoid interfering with existing OTEL setup
-        self._tracer_provider = None
-        self._root_span = None
-        self._root_context = None
-        self._tracer = None
-        self._initialized = False
-        self._cleanup_registered = False
-        self._disabled = False
+        self._tracer_provider: Optional[Any] = None
+        self._root_span: Optional[Any] = None
+        self._root_context: Optional[Any] = None
+        self._tracer: Optional[Any] = None
+        self._initialized: bool = False
+        self._cleanup_registered: bool = False
+        self._disabled: bool = False
+        self._spans_processor: Optional[Any] = None
 
         # Context variables for agent_run_id and transcript_id (thread/async safe)
-        self._collection_id_var = contextvars.ContextVar("collection_id")
-        self._agent_run_id_var = contextvars.ContextVar("agent_run_id")
-        self._transcript_id_var = contextvars.ContextVar("transcript_id")
-        self._attributes_var = contextvars.ContextVar("attributes")
+        self._collection_id_var: ContextVar[str] = contextvars.ContextVar("collection_id")
+        self._agent_run_id_var: ContextVar[str] = contextvars.ContextVar("agent_run_id")
+        self._transcript_id_var: ContextVar[str] = contextvars.ContextVar("transcript_id")
+        self._attributes_var: ContextVar[dict[str, Any]] = contextvars.ContextVar("attributes")
         # Store atomic span order counters per transcript_id to persist across context switches
-        self._transcript_counters = defaultdict(lambda: itertools.count(0))
+        self._transcript_counters: defaultdict[str, itertools.count[int]] = defaultdict(
+            lambda: itertools.count(0)
+        )
         self._transcript_counter_lock = threading.Lock()
 
     def _register_cleanup(self):
@@ -157,7 +166,7 @@ class DocentTracer:
         with self._transcript_counter_lock:
             return next(self._transcript_counters[transcript_id])
 
-    def _signal_handler(self, signum, frame):
+    def _signal_handler(self, signum: int, frame: Any):
         """Handle shutdown signals."""
         self.cleanup()
         sys.exit(0)
@@ -169,33 +178,27 @@ class DocentTracer:
 
         try:
             if "http" in self.endpoint.lower() or "https" in self.endpoint.lower():
-                return HTTPExporter(endpoint=f"{self.endpoint}/v1/traces", headers=self.headers)
+                http_exporter: HTTPExporter = HTTPExporter(
+                    endpoint=f"{self.endpoint}/v1/traces", headers=self.headers
+                )
+                return http_exporter
             else:
-                return GRPCExporter(endpoint=self.endpoint, headers=self.headers)
+                grpc_exporter: GRPCExporter = GRPCExporter(
+                    endpoint=self.endpoint, headers=self.headers
+                )
+                return grpc_exporter
         except Exception as e:
             logger.error(f"Failed to initialize span exporter: {e}")
             return None
 
-    def _create_span_processor(self, exporter):
+    def _create_span_processor(self, exporter: Any) -> Any:
         """Create appropriate span processor based on configuration."""
         if self.disable_batch or _is_notebook():
-            processor = SimpleSpanProcessor(exporter)
+            simple_processor: Any = SimpleSpanProcessor(exporter)
+            return simple_processor
         else:
-            processor = BatchSpanProcessor(exporter)
-
-        # Add post-processing callback if provided
-        if self.span_postprocess_callback:
-            original_on_end = processor.on_end
-
-            def wrapped_on_end(span):
-                # Call the custom on_end first
-                self.span_postprocess_callback(span)
-                # Then call the original to ensure normal processing
-                original_on_end(span)
-
-            processor.on_end = wrapped_on_end
-
-        return processor
+            batch_processor: Any = BatchSpanProcessor(exporter)
+            return batch_processor
 
     def initialize(self):
         """Initialize Docent tracing setup."""
@@ -210,57 +213,59 @@ class DocentTracer:
 
             # Add custom span processor for run_id and transcript_id
             class ContextSpanProcessor:
-                def __init__(self, manager):
-                    self.manager = manager
+                def __init__(self, manager: "DocentTracer"):
+                    self.manager: "DocentTracer" = manager
 
-                def on_start(self, span, parent_context=None):
+                def on_start(self, span: Any, parent_context: Any = None) -> None:
                     # Add collection_id, agent_run_id, transcript_id, and any other current attributes
                     try:
                         span.set_attribute("collection_id", self.manager.collection_id)
 
-                        agent_run_id = self.manager._agent_run_id_var.get()
+                        agent_run_id: str = self.manager._agent_run_id_var.get()
                         if agent_run_id:
                             span.set_attribute("agent_run_id", agent_run_id)
 
-                        transcript_id = self.manager._transcript_id_var.get()
+                        transcript_id: str = self.manager._transcript_id_var.get()
                         if transcript_id:
                             span.set_attribute("transcript_id", transcript_id)
                             # Add atomic span order number
-                            span_order = self.manager._next_span_order(transcript_id)
+                            span_order: int = self.manager._next_span_order(transcript_id)
                             span.set_attribute("span_order", span_order)
 
                         # Add any other current attributes
-                        attributes = self.manager._attributes_var.get()
+                        attributes: dict[str, Any] = self.manager._attributes_var.get()
                         for key, value in attributes.items():
                             span.set_attribute(key, value)
                     except LookupError:
                         # Still add collection_id as it's always available
                         span.set_attribute("collection_id", self.manager.collection_id)
 
-                def on_end(self, span):
+                def on_end(self, span: Any) -> None:
                     pass
 
-                def shutdown(self):
+                def shutdown(self) -> None:
                     pass
 
-                def force_flush(self):
+                def force_flush(self) -> None:
                     pass
 
             # Configure span exporters for our isolated provider
             if self.enable_otlp_export:
-                exporter = self._init_spans_exporter()
-                if exporter:
-                    processor = self._create_span_processor(exporter)
-                    self._tracer_provider.add_span_processor(processor)
-                    self._spans_processor = processor
+                otlp_exporter: Optional[Union[HTTPExporter, GRPCExporter]] = (
+                    self._init_spans_exporter()
+                )
+                if otlp_exporter:
+                    otlp_processor: Any = self._create_span_processor(otlp_exporter)
+                    self._tracer_provider.add_span_processor(otlp_processor)
+                    self._spans_processor = otlp_processor
                 else:
                     logger.warning(
                         "Failed to initialize OTLP exporter, falling back to console only"
                     )
 
             if self.enable_console_export:
-                console_exporter = ConsoleSpanExporter()
-                console_processor = self._create_span_processor(console_exporter)
+                console_exporter: Any = ConsoleSpanExporter()
+                console_processor: Any = self._create_span_processor(console_exporter)
                 self._tracer_provider.add_span_processor(console_processor)
                 if not hasattr(self, "_spans_processor"):
                     self._spans_processor = console_processor
@@ -273,6 +278,9 @@ class DocentTracer:
             self._tracer = self._tracer_provider.get_tracer(__name__)
 
             # Start root span
+            if self._tracer is None:
+                raise RuntimeError("Failed to get tracer from provider")
+
             self._root_span = self._tracer.start_span(
                 "application_session",
                 attributes={
@@ -281,13 +289,20 @@ class DocentTracer:
                     "endpoint": self.endpoint,
                 },
             )
-            self._root_context = trace.set_span_in_context(self._root_span)
+            if self._root_span is not None:
+                self._root_context = trace.set_span_in_context(self._root_span)
 
             # Instrument OpenAI with our isolated tracer provider
             try:
                 OpenAIInstrumentor().instrument(tracer_provider=self._tracer_provider)
             except Exception as e:
                 logger.warning(f"Failed to instrument OpenAI: {e}")
+
+            # Instrument Anthropic with our isolated tracer provider
+            try:
+                AnthropicInstrumentor().instrument(tracer_provider=self._tracer_provider)
+            except Exception as e:
+                logger.warning(f"Failed to instrument Anthropic: {e}")
 
             # Instrument threading for better context propagation
             try:
@@ -339,7 +354,7 @@ class DocentTracer:
         except Exception as e:
             logger.error(f"Error during close: {e}")
 
-    def flush(self):
+    def flush(self) -> None:
         """Force flush all spans to exporters."""
         try:
             if hasattr(self, "_spans_processor") and self._spans_processor:
@@ -347,7 +362,7 @@ class DocentTracer:
         except Exception as e:
             logger.error(f"Error during flush: {e}")
 
-    def set_disabled(self, disabled: bool):
+    def set_disabled(self, disabled: bool) -> None:
         """Enable or disable tracing."""
         self._disabled = disabled
         if disabled and self._initialized:
@@ -359,42 +374,41 @@ class DocentTracer:
             return False
         return self._initialized
 
-    def __enter__(self):
+    def __enter__(self) -> "DocentTracer":
         """Context manager entry."""
         self.initialize()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: type[BaseException], exc_val: Any, exc_tb: Any) -> None:
         """Context manager exit."""
         self.close()
 
     @property
-    def tracer(self):
+    def tracer(self) -> Optional[Any]:
         """Get the tracer instance."""
         if not self._initialized:
             self.initialize()
         return self._tracer
 
     @property
-    def root_context(self):
+    def root_context(self) -> Optional[Any]:
         """Get the root context."""
         if not self._initialized:
             self.initialize()
         return self._root_context
 
     @contextmanager
-    def span(self, name: str, attributes: Optional[Dict[str, Any]] = None):
+    def span(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> Iterator[Any]:
         """
         Context manager for creating spans with attributes.
-
-        Args:
-            name: Name of the span
-            attributes: Dictionary of attributes to add to the span
         """
         if not self._initialized:
             self.initialize()
 
-        span_attributes = attributes or {}
+        if self._tracer is None:
+            raise RuntimeError("Tracer not initialized")
+
+        span_attributes: dict[str, Any] = attributes or {}
 
         with self._tracer.start_as_current_span(
             name, context=self._root_context, attributes=span_attributes
@@ -402,7 +416,9 @@ class DocentTracer:
             yield span
 
     @asynccontextmanager
-    async def async_span(self, name: str, attributes: Optional[Dict[str, Any]] = None):
+    async def async_span(
+        self, name: str, attributes: Optional[Dict[str, Any]] = None
+    ) -> AsyncIterator[Any]:
         """
         Async context manager for creating spans with attributes.
 
@@ -413,7 +429,10 @@ class DocentTracer:
         if not self._initialized:
             self.initialize()
 
-        span_attributes = attributes or {}
+        if self._tracer is None:
+            raise RuntimeError("Tracer not initialized")
+
+        span_attributes: dict[str, Any] = attributes or {}
 
         with self._tracer.start_as_current_span(
             name, context=self._root_context, attributes=span_attributes
@@ -421,12 +440,14 @@ class DocentTracer:
             yield span
 
     @contextmanager
-    def transcript_context(
-        self, agent_run_id: Optional[str] = None, transcript_id: Optional[str] = None, **attributes
-    ):
+    def agent_run_context(
+        self,
+        agent_run_id: Optional[str] = None,
+        transcript_id: Optional[str] = None,
+        **attributes: Any,
+    ) -> Iterator[Any]:
         """
-        Context manager for setting up a transcript context.
-        Modifies the OpenTelemetry context so all spans inherit agent_run_id and transcript_id.
+        Context manager for setting up an agent run context.
 
         Args:
             agent_run_id: Optional agent run ID (auto-generated if not provided)
@@ -439,26 +460,29 @@ class DocentTracer:
         if not self._initialized:
             self.initialize()
 
+        if self._tracer is None:
+            raise RuntimeError("Tracer not initialized")
+
         if agent_run_id is None:
             agent_run_id = str(uuid.uuid4())
         if transcript_id is None:
             transcript_id = str(uuid.uuid4())
 
         # Set context variables for this execution context
-        token1 = self._agent_run_id_var.set(agent_run_id)
-        token2 = self._transcript_id_var.set(transcript_id)
-        token3 = self._attributes_var.set(attributes)
+        token1: Token[str] = self._agent_run_id_var.set(agent_run_id)
+        token2: Token[str] = self._transcript_id_var.set(transcript_id)
+        token3: Token[dict[str, Any]] = self._attributes_var.set(attributes)
 
         try:
-            # Create a span with the transcript attributes
-            span_attributes = {
+            # Create a span with the agent run attributes
+            span_attributes: dict[str, Any] = {
                 "agent_run_id": agent_run_id,
                 "transcript_id": transcript_id,
                 **attributes,
             }
             with self._tracer.start_as_current_span(
-                "transcript_context", context=self._root_context, attributes=span_attributes
-            ) as span:
+                "agent_run_context", context=self._root_context, attributes=span_attributes
+            ) as _span:
                 context = trace.get_current_span().get_span_context()
                 yield context, agent_run_id, transcript_id
         finally:
@@ -467,11 +491,14 @@ class DocentTracer:
             self._attributes_var.reset(token3)
 
     @asynccontextmanager
-    async def async_transcript_context(
-        self, agent_run_id: Optional[str] = None, transcript_id: Optional[str] = None, **attributes
-    ):
+    async def async_agent_run_context(
+        self,
+        agent_run_id: Optional[str] = None,
+        transcript_id: Optional[str] = None,
+        **attributes: Any,
+    ) -> AsyncIterator[Any]:
         """
-        Async context manager for setting up a transcript context.
+        Async context manager for setting up an agent run context.
         Modifies the OpenTelemetry context so all spans inherit agent_run_id and transcript_id.
 
         Args:
@@ -485,26 +512,29 @@ class DocentTracer:
         if not self._initialized:
             self.initialize()
 
+        if self._tracer is None:
+            raise RuntimeError("Tracer not initialized")
+
         if agent_run_id is None:
             agent_run_id = str(uuid.uuid4())
         if transcript_id is None:
             transcript_id = str(uuid.uuid4())
 
         # Set context variables for this execution context
-        token1 = self._agent_run_id_var.set(agent_run_id)
-        token2 = self._transcript_id_var.set(transcript_id)
-        token3 = self._attributes_var.set(attributes)
+        token1: Any = self._agent_run_id_var.set(agent_run_id)
+        token2: Any = self._transcript_id_var.set(transcript_id)
+        token3: Any = self._attributes_var.set(attributes)
 
         try:
-            # Create a span with the transcript attributes
-            span_attributes = {
+            # Create a span with the agent run attributes
+            span_attributes: dict[str, Any] = {
                 "agent_run_id": agent_run_id,
                 "transcript_id": transcript_id,
                 **attributes,
             }
             with self._tracer.start_as_current_span(
-                "transcript_context", context=self._root_context, attributes=span_attributes
-            ) as span:
+                "agent_run_context", context=self._root_context, attributes=span_attributes
+            ) as _span:
                 context = trace.get_current_span().get_span_context()
                 yield context, agent_run_id, transcript_id
         finally:
@@ -513,8 +543,11 @@ class DocentTracer:
             self._attributes_var.reset(token3)
 
     def start_transcript(
-        self, agent_run_id: Optional[str] = None, transcript_id: Optional[str] = None, **attributes
-    ):
+        self,
+        agent_run_id: Optional[str] = None,
+        transcript_id: Optional[str] = None,
+        **attributes: Any,
+    ) -> tuple[Any, str, str]:
         """
         Manually start a transcript span.
 
@@ -529,24 +562,27 @@ class DocentTracer:
         if not self._initialized:
             self.initialize()
 
+        if self._tracer is None:
+            raise RuntimeError("Tracer not initialized")
+
         if agent_run_id is None:
             agent_run_id = str(uuid.uuid4())
         if transcript_id is None:
             transcript_id = str(uuid.uuid4())
 
-        span_attributes = {
+        span_attributes: dict[str, Any] = {
             "agent_run_id": agent_run_id,
             "transcript_id": transcript_id,
             **attributes,
         }
 
-        span = self._tracer.start_span(
+        span: Any = self._tracer.start_span(
             "transcript_span", context=self._root_context, attributes=span_attributes
         )
 
         return span, agent_run_id, transcript_id
 
-    def stop_transcript(self, span):
+    def stop_transcript(self, span: Any) -> None:
         """
         Manually stop a transcript span.
 
@@ -556,7 +592,7 @@ class DocentTracer:
         if span and hasattr(span, "end"):
             span.end()
 
-    def start_span(self, name: str, attributes: Optional[Dict[str, Any]] = None):
+    def start_span(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> Any:
         """
         Manually start a span.
 
@@ -570,13 +606,18 @@ class DocentTracer:
         if not self._initialized:
             self.initialize()
 
-        span_attributes = attributes or {}
+        if self._tracer is None:
+            raise RuntimeError("Tracer not initialized")
 
-        span = self._tracer.start_span(name, context=self._root_context, attributes=span_attributes)
+        span_attributes: dict[str, Any] = attributes or {}
+
+        span: Any = self._tracer.start_span(
+            name, context=self._root_context, attributes=span_attributes
+        )
 
         return span
 
-    def stop_span(self, span):
+    def stop_span(self, span: Any) -> None:
         """
         Manually stop a span.
 
@@ -594,10 +635,9 @@ _global_tracer: Optional[DocentTracer] = None
 def initialize_tracing(
     collection_name: str = "default-service",
     collection_id: Optional[str] = None,
-    endpoint: str = "http://localhost:4318",
+    endpoint: str = DEFAULT_ENDPOINT,
     headers: Optional[Dict[str, str]] = None,
-    email: Optional[str] = None,
-    password: Optional[str] = None,
+    api_key: Optional[str] = None,
     enable_console_export: bool = False,
     enable_otlp_export: bool = True,
     disable_batch: bool = False,
@@ -610,12 +650,10 @@ def initialize_tracing(
     It creates a global singleton instance that can be accessed via get_tracer().
 
     Args:
-        collection_name: Name of the service/collection for resource attributes
+        collection_name: Name of the collection
         collection_id: Optional collection ID (auto-generated if not provided)
         endpoint: OTLP endpoint URL for span export
-        headers: Optional headers for authentication
-        email: Optional email for basic authentication
-        password: Optional password for basic authentication
+        api_key: Optional API key for bearer token authentication (takes precedence over env var)
         enable_console_export: Whether to export spans to console
         enable_otlp_export: Whether to export spans to OTLP endpoint
         disable_batch: Whether to disable batch processing (use SimpleSpanProcessor)
@@ -626,17 +664,15 @@ def initialize_tracing(
 
     Example:
         # Basic setup
-        initialize_tracing("my-service")
-
-        # With authentication
-        initialize_tracing(
-            collection_name="my-service",
-            endpoint="https://my-collector.com:4318",
-            email="user@example.com",
-            password="secret"
-        )
+        initialize_tracing("my-collection")
     """
     global _global_tracer
+
+    # Check for API key in environment variable if not provided as parameter
+    if api_key is None:
+        env_api_key: Optional[str] = os.environ.get("DOCENT_API_KEY")
+        print(f"API key: {env_api_key}")
+        api_key = env_api_key
 
     if _global_tracer is None:
         _global_tracer = DocentTracer(
@@ -644,8 +680,7 @@ def initialize_tracing(
             collection_id=collection_id,
             endpoint=endpoint,
             headers=headers,
-            email=email,
-            password=password,
+            api_key=api_key,
             enable_console_export=enable_console_export,
             enable_otlp_export=enable_otlp_export,
             disable_batch=disable_batch,
@@ -667,7 +702,7 @@ def get_tracer() -> DocentTracer:
     return _global_tracer
 
 
-def close_tracing():
+def close_tracing() -> None:
     """Close the global Docent tracer."""
     global _global_tracer
     if _global_tracer:
@@ -675,7 +710,7 @@ def close_tracing():
         _global_tracer = None
 
 
-def flush_tracing():
+def flush_tracing() -> None:
     """Force flush all spans to exporters."""
     if _global_tracer:
         _global_tracer.flush()
@@ -688,26 +723,59 @@ def verify_initialized() -> bool:
     return _global_tracer.verify_initialized()
 
 
-def set_disabled(disabled: bool):
+def set_disabled(disabled: bool) -> None:
     """Enable or disable global tracing."""
     if _global_tracer:
         _global_tracer.set_disabled(disabled)
 
 
+def get_api_key() -> Optional[str]:
+    """
+    Get the API key from environment variable.
+
+    Returns:
+        The API key from DOCENT_API_KEY environment variable, or None if not set
+    """
+    return os.environ.get("DOCENT_API_KEY")
+
+
 # Async convenience functions
 @asynccontextmanager
-async def async_span(name: str, attributes: Optional[Dict[str, Any]] = None):
+async def async_span(name: str, attributes: Optional[Dict[str, Any]] = None) -> AsyncIterator[Any]:
     """Async convenience function for creating spans."""
     async with get_tracer().async_span(name, attributes) as span:
         yield span
 
 
 @asynccontextmanager
-async def async_transcript_context(
-    agent_run_id: Optional[str] = None, transcript_id: Optional[str] = None, **attributes
-):
-    """Async convenience function for creating transcript contexts."""
-    async with get_tracer().async_transcript_context(agent_run_id, transcript_id, **attributes) as (
+async def async_agent_run_context(
+    agent_run_id: Optional[str] = None, transcript_id: Optional[str] = None, **attributes: Any
+) -> AsyncIterator[Any]:
+    """Async convenience function for creating agent run contexts."""
+    async with get_tracer().async_agent_run_context(agent_run_id, transcript_id, **attributes) as (
+        context,
+        agent_run_id,
+        transcript_id,
+    ):
+        yield context, agent_run_id, transcript_id
+
+
+@asynccontextmanager
+async def agent_run_context_async(
+    agent_run_id: Optional[str] = None, transcript_id: Optional[str] = None, **attributes: Any
+) -> AsyncIterator[Any]:
+    """
+    Async version of agent_run_context for explicit async usage.
+
+    Args:
+        agent_run_id: Optional agent run ID (auto-generated if not provided)
+        transcript_id: Optional transcript ID (auto-generated if not provided)
+        **attributes: Additional attributes to add to the context
+
+    Yields:
+        Tuple of (context, agent_run_id, transcript_id)
+    """
+    async with get_tracer().async_agent_run_context(agent_run_id, transcript_id, **attributes) as (
         context,
         agent_run_id,
         transcript_id,
@@ -717,28 +785,28 @@ async def async_transcript_context(
 
 # Manual start/stop convenience functions
 def start_transcript(
-    agent_run_id: Optional[str] = None, transcript_id: Optional[str] = None, **attributes
-):
+    agent_run_id: Optional[str] = None, transcript_id: Optional[str] = None, **attributes: Any
+) -> tuple[Any, str, str]:
     """Convenience function for manually starting a transcript span."""
     return get_tracer().start_transcript(agent_run_id, transcript_id, **attributes)
 
 
-def stop_transcript(span):
+def stop_transcript(span: Any) -> None:
     """Convenience function for manually stopping a transcript span."""
     get_tracer().stop_transcript(span)
 
 
-def start_span(name: str, attributes: Optional[Dict[str, Any]] = None):
+def start_span(name: str, attributes: Optional[Dict[str, Any]] = None) -> Any:
     """Convenience function for manually starting a span."""
     return get_tracer().start_span(name, attributes)
 
 
-def stop_span(span):
+def stop_span(span: Any) -> None:
     """Convenience function for manually stopping a span."""
     get_tracer().stop_span(span)
 
 
-def agent_run_score(name: str, score: float, attributes: Optional[Dict[str, Any]] = None):
+def agent_run_score(name: str, score: float, attributes: Optional[Dict[str, Any]] = None) -> None:
     """
     Record a score event on the current span.
     Automatically works in both sync and async contexts.
@@ -749,9 +817,13 @@ def agent_run_score(name: str, score: float, attributes: Optional[Dict[str, Any]
         attributes: Optional additional attributes for the score event
     """
     try:
-        current_span = trace.get_current_span()
+        current_span: Any = trace.get_current_span()
         if current_span and hasattr(current_span, "add_event"):
-            event_attributes = {"score.name": name, "score.value": score, "event.type": "score"}
+            event_attributes: dict[str, Any] = {
+                "score.name": name,
+                "score.value": score,
+                "event.type": "score",
+            }
             if attributes:
                 event_attributes.update(attributes)
 
@@ -764,7 +836,7 @@ def agent_run_score(name: str, score: float, attributes: Optional[Dict[str, Any]
 
 # Unified functions that automatically detect context
 @asynccontextmanager
-async def span(name: str, attributes: Optional[Dict[str, Any]] = None):
+async def span(name: str, attributes: Optional[Dict[str, Any]] = None) -> AsyncIterator[Any]:
     """
     Automatically choose sync or async span based on context.
     Can be used with both 'with' and 'async with'.
@@ -777,23 +849,109 @@ async def span(name: str, attributes: Optional[Dict[str, Any]] = None):
             yield span
 
 
-@asynccontextmanager
-async def transcript_context(
-    agent_run_id: Optional[str] = None, transcript_id: Optional[str] = None, **attributes
-):
+class AgentRunContext:
+    """Context manager that works in both sync and async contexts."""
+
+    def __init__(
+        self,
+        agent_run_id: Optional[str] = None,
+        transcript_id: Optional[str] = None,
+        **attributes: Any,
+    ):
+        self.agent_run_id = agent_run_id
+        self.transcript_id = transcript_id
+        self.attributes: dict[str, Any] = attributes
+        self._sync_context: Optional[Any] = None
+        self._async_context: Optional[Any] = None
+
+    def __enter__(self) -> Any:
+        """Sync context manager entry."""
+        self._sync_context = get_tracer().agent_run_context(
+            self.agent_run_id, self.transcript_id, **self.attributes
+        )
+        return self._sync_context.__enter__()
+
+    def __exit__(self, exc_type: type[BaseException], exc_val: Any, exc_tb: Any) -> None:
+        """Sync context manager exit."""
+        if self._sync_context:
+            self._sync_context.__exit__(exc_type, exc_val, exc_tb)
+
+    async def __aenter__(self) -> Any:
+        """Async context manager entry."""
+        self._async_context = get_tracer().async_agent_run_context(
+            self.agent_run_id, self.transcript_id, **self.attributes
+        )
+        return await self._async_context.__aenter__()
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Async context manager exit."""
+        if self._async_context:
+            await self._async_context.__aexit__(exc_type, exc_val, exc_tb)
+
+
+def agent_run(func: Callable[..., Any]) -> Callable[..., Any]:
     """
-    Automatically choose sync or async transcript_context based on context.
-    Can be used with both 'with' and 'async with'.
+    Decorator to wrap a function in an agent_run_context (sync or async).
+    Injects context, agent_run_id, and transcript_id as keyword arguments if not already present.
+
+    Example:
+        @agent_run
+        def my_func(x, y, **kwargs):
+            print(kwargs.get("context"), kwargs.get("agent_run_id"), kwargs.get("transcript_id"))
+
+        @agent_run
+        async def my_async_func(z, **kwargs):
+            print(kwargs.get("agent_run_id"))
     """
-    if _is_async_context() or _is_running_in_event_loop():
-        async with get_tracer().async_transcript_context(
-            agent_run_id, transcript_id, **attributes
-        ) as (context, agent_run_id, transcript_id):
-            yield context, agent_run_id, transcript_id
+    import functools
+    import inspect
+
+    if inspect.iscoroutinefunction(func):
+
+        @functools.wraps(func)
+        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+            async with AgentRunContext() as (context, agent_run_id, transcript_id):
+                kwargs = dict(kwargs)
+                kwargs.setdefault("context", context)
+                kwargs.setdefault("agent_run_id", agent_run_id)
+                kwargs.setdefault("transcript_id", transcript_id)
+                return await func(*args, **kwargs)
+
+        return async_wrapper
     else:
-        with get_tracer().transcript_context(agent_run_id, transcript_id, **attributes) as (
-            context,
-            agent_run_id,
-            transcript_id,
-        ):
-            yield context, agent_run_id, transcript_id
+
+        @functools.wraps(func)
+        def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+            with AgentRunContext() as (context, agent_run_id, transcript_id):
+                kwargs = dict(kwargs)
+                kwargs.setdefault("context", context)
+                kwargs.setdefault("agent_run_id", agent_run_id)
+                kwargs.setdefault("transcript_id", transcript_id)
+                return func(*args, **kwargs)
+
+        return sync_wrapper
+
+
+def agent_run_context(
+    agent_run_id: Optional[str] = None, transcript_id: Optional[str] = None, **attributes: Any
+) -> AgentRunContext:
+    """
+    Create an agent run context for tracing.
+
+    Args:
+        agent_run_id: Optional agent run ID (auto-generated if not provided)
+        **attributes: Additional attributes to add to the context
+
+    Returns:
+        A context manager that can be used with both 'with' and 'async with'
+
+    Example:
+        # Sync usage
+        with agent_run_context() as (context, agent_run_id, transcript_id):
+            pass
+
+        # Async usage
+        async with agent_run_context() as (context, agent_run_id, transcript_id):
+            pass
+    """
+    return AgentRunContext(agent_run_id, transcript_id, **attributes)

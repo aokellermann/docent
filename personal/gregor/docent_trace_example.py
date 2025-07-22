@@ -1,18 +1,20 @@
 """
 Multi-Turn Customer Service Chat Evaluation using Inspect AI
+
+run with:
+inspect eval docent_trace_example.py --model openai/gpt-4o-mini
 """
 
-# Initialize OpenTelemetry
-from docent_trace import agent_run_score, initialize_tracing, transcript_context
 from inspect_ai import Task, task
 from inspect_ai.dataset import MemoryDataset, Sample
-from inspect_ai.model import ChatMessageAssistant, ChatMessageSystem, ChatMessageUser, get_model
+from inspect_ai.model import ChatMessageSystem, ChatMessageUser, get_model
 from inspect_ai.scorer import Score, Target, accuracy, mean, scorer
 from inspect_ai.solver import Generate, solver
 from inspect_ai.tool import tool
 
-# Initialize OpenTelemetry for this service
-initialize_tracing(collection_name="multi-turn-chat-eval")
+from docent.trace import agent_run, agent_run_context, agent_run_score, initialize_tracing
+
+initialize_tracing(collection_name="multi-turn-chat-eval", enable_console_export=True)
 
 
 # Sample tools for customer service agent
@@ -87,14 +89,14 @@ SCENARIOS = [
             "I don't see the reset email anywhere",
         ],
     },
-    {
-        "scenario": "Product Return",
-        "turns": [
-            "I want to return something I bought",
-            "It's order #12345, a sweater that doesn't fit",
-            "Do I need to pay for return shipping?",
-        ],
-    },
+    # {
+    #     "scenario": "Product Return",
+    #     "turns": [
+    #         "I want to return something I bought",
+    #         "It's order #12345, a sweater that doesn't fit",
+    #         "Do I need to pay for return shipping?"
+    #     ]
+    # },
     # {
     #     "scenario": "Billing Question",
     #     "turns": [
@@ -110,66 +112,68 @@ SCENARIOS = [
 def multi_turn_solver():
     """Solver that conducts multi-turn conversations with tools"""
 
-    async def solve(state, generate: Generate):
+    @agent_run
+    async def solve(state, generate: Generate, **kwargs):
+        kwargs.get("context")
+        agent_run_id = kwargs.get("agent_run_id")
+        transcript_id = kwargs.get("transcript_id")
 
-        # Create solver transcript context with agent_run_id and transcript_id (auto-detects async context)
-        async with transcript_context() as (context, agent_run_id, transcript_id):
-            # Add system message
-            system_prompt = """You are a helpful customer service representative.
-            Be polite, professional, and work to resolve customer issues.
-            You have access to tools to help customers with their requests.
-            Use tools when appropriate to provide accurate information and assistance."""
+        # Add system message
+        system_prompt = """You are a helpful customer service representative.
+        Be polite, professional, and work to resolve customer issues.
+        You have access to tools to help customers with their requests.
+        Use tools when appropriate to provide accurate information and assistance."""
 
-            state.messages = [ChatMessageSystem(content=system_prompt)]
+        state.messages = [ChatMessageSystem(content=system_prompt)]
 
-            # Add tools to the state
-            state.tools = [
-                lookup_customer(),
-                check_order_status(),
-                initiate_password_reset(),
-                create_return_request(),
-            ]
+        # Add tools to the state
+        state.tools = [
+            lookup_customer(),
+            check_order_status(),
+            initiate_password_reset(),
+            create_return_request(),
+        ]
 
-            # Get conversation turns
-            turns = state.metadata.get("turns", [])
-            responses = []
-            tool_usage = []
+        # Get conversation turns
+        turns = state.metadata.get("turns", [])
+        responses = []
+        tool_usage = []
 
-            # Conduct conversation
-            for i, user_message in enumerate(turns):
-                # Add user message
-                state.messages.append(ChatMessageUser(content=user_message))
+        # Conduct conversation
+        for i, user_message in enumerate(turns):
+            # Add user message
+            state.messages.append(ChatMessageUser(content=user_message))
 
-                # Generate response (may include tool calls)
-                state = await generate(state)
+            # Generate response (may include tool calls)
+            state = await generate(state)
 
-                # Track tool usage if any
-                if hasattr(state.output, "tool_calls") and state.output.tool_calls:
-                    for tool_call in state.output.tool_calls:
-                        tool_usage.append(
-                            {
-                                "turn": i + 1,
-                                "tool_name": tool_call.function.name,
-                                "arguments": tool_call.function.arguments,
-                                "result": getattr(tool_call, "result", "N/A"),
-                            }
-                        )
+            # Track tool usage if any
+            if hasattr(state.output, "tool_calls") and state.output.tool_calls:
+                for tool_call in state.output.tool_calls:
+                    tool_usage.append(
+                        {
+                            "turn": i + 1,
+                            "tool_name": tool_call.function.name,
+                            "arguments": tool_call.function.arguments,
+                            "result": getattr(tool_call, "result", "N/A"),
+                        }
+                    )
 
-                # Store response
-                if state.output and state.output.completion:
-                    response = state.output.completion
-                    responses.append(response)
-                    # Add assistant message to conversation history
-                    state.messages.append(ChatMessageAssistant(content=response))
+            # Store response
+            if state.output and state.output.completion:
+                response = state.output.completion
+                responses.append(response)
+                # Add assistant message to conversation history
+                # state.messages.append(ChatMessageAssistant(content=response))
 
-            # Store conversation data for scoring
-            state.metadata["responses"] = responses
-            state.metadata["user_turns"] = turns
-            state.metadata["tool_usage"] = tool_usage
-            state.metadata["agent_run_id"] = agent_run_id  # Store agent_run_id for scorer to use
-            state.metadata["solver_transcript_id"] = transcript_id  # Store solver transcript_id
+        # Store conversation data for scoring
+        state.metadata["responses"] = responses
+        state.metadata["user_turns"] = turns
+        state.metadata["tool_usage"] = tool_usage
+        state.metadata["agent_run_id"] = agent_run_id  # Store agent_run_id for scorer to use
+        state.metadata["solver_transcript_id"] = transcript_id  # Store solver transcript_id
 
-            return state
+        return state
 
     return solve
 
@@ -190,7 +194,7 @@ def conversation_scorer():
             return Score(value=0.0, explanation="No responses generated")
 
         # Create scoring transcript context with same agent_run_id but different transcript_id (auto-detects async context)
-        async with transcript_context(agent_run_id=agent_run_id) as (context, _, transcript_id):
+        async with agent_run_context(agent_run_id=agent_run_id) as (context, _, transcript_id):
             # Create evaluation prompt
             conversation = []
             for i, (user_msg, response) in enumerate(zip(user_turns, responses)):

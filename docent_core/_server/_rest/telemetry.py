@@ -1,10 +1,11 @@
 import asyncio
 import base64
 import json
+import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, TypedDict
+from typing import Any, Dict, List, TypedDict, cast
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from google.protobuf.json_format import MessageToDict
 from opentelemetry.proto.collector.trace.v1 import trace_service_pb2
@@ -12,66 +13,93 @@ from opentelemetry.proto.collector.trace.v1 import trace_service_pb2
 from docent._log_util import get_logger
 from docent.data_models import AgentRun, BaseAgentRunMetadata, Transcript
 from docent.data_models.chat import ChatMessage, parse_chat_message
+from docent.data_models.chat.tool import ToolCall
+from docent_core._db_service.schemas.auth_models import User
 from docent_core._db_service.service import MonoService
+from docent_core._server._broker.redis_client import REDIS
+from docent_core._server._dependencies.database import get_mono_svc
+from docent_core._server._dependencies.user import get_authenticated_user
 
 logger = get_logger(__name__)
 
-# Global state for accumulating spans across multiple requests
-_accumulated_spans: Dict[str, List[Dict[str, Any]]] = {}
-_trace_completion_tasks: Dict[str, asyncio.Task[None]] = {}
-_spans_lock = asyncio.Lock()
-_TRACE_TIMEOUT_SECONDS = 5 * 60  # Timeout for trace completion
+# Redis key patterns for trace accumulation
+_TRACE_SPANS_KEY_PREFIX = "trace_spans:"
+_TRACE_TIMEOUT_KEY_PREFIX = "trace_timeout:"
+_TRACE_TIMEOUT_SECONDS = 15 * 60  # Timeout for trace completion
 
 
 async def _add_spans_to_accumulation(trace_id: str, spans: List[Dict[str, Any]]) -> None:
-    """Add spans to accumulation with lock protection."""
-    async with _spans_lock:
-        if trace_id not in _accumulated_spans:
-            _accumulated_spans[trace_id] = []
-        _accumulated_spans[trace_id].extend(spans)
+    """Add spans to accumulation using Redis."""
+    trace_key = f"{_TRACE_SPANS_KEY_PREFIX}{trace_id}"
+
+    # Add spans to Redis list
+    for span in spans:
+        await REDIS.lpush(trace_key, json.dumps(span))  # type: ignore
+
+    # Set TTL for automatic cleanup if trace doesn't complete
+    await REDIS.expire(trace_key, _TRACE_TIMEOUT_SECONDS)  # type: ignore
 
 
 async def _get_accumulated_spans(trace_id: str) -> List[Dict[str, Any]]:
-    """Get accumulated spans for a trace with lock protection."""
-    async with _spans_lock:
-        return _accumulated_spans.get(trace_id, [])
+    """Get accumulated spans for a trace from Redis."""
+    trace_key = f"{_TRACE_SPANS_KEY_PREFIX}{trace_id}"
+
+    # Get all spans from Redis list
+    span_jsons = cast(List[str], await REDIS.lrange(trace_key, 0, -1))  # type: ignore
+
+    spans: List[Dict[str, Any]] = []
+    for span_json in reversed(list(span_jsons)):
+        try:
+            spans.append(json.loads(span_json))
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to decode span JSON for trace {trace_id}: {e}")
+            continue
+
+    return spans
 
 
 async def _remove_trace_from_accumulation(trace_id: str) -> None:
-    """Remove a trace from accumulation with lock protection."""
-    async with _spans_lock:
-        if trace_id in _accumulated_spans:
-            del _accumulated_spans[trace_id]
+    """Remove a trace from accumulation in Redis."""
+    trace_key = f"{_TRACE_SPANS_KEY_PREFIX}{trace_id}"
+    await REDIS.delete(trace_key)
 
 
 async def _cancel_and_remove_trace_task(trace_id: str) -> None:
-    """Cancel and remove a trace completion task with lock protection."""
-    async with _spans_lock:
-        if trace_id in _trace_completion_tasks:
-            _trace_completion_tasks[trace_id].cancel()
-            del _trace_completion_tasks[trace_id]
+    """Cancel and remove a trace completion task from Redis."""
+    timeout_key = f"{_TRACE_TIMEOUT_KEY_PREFIX}{trace_id}"
+    await REDIS.delete(timeout_key)
 
 
-def schedule_trace_timeout(trace_id: str) -> None:
-    """Schedule a timeout task for trace completion."""
+def schedule_trace_timeout(trace_id: str, user: User) -> None:
+    """Schedule a timeout task for trace completion using Redis."""
 
-    # Create new timeout task
     async def timeout_handler():
         await asyncio.sleep(_TRACE_TIMEOUT_SECONDS)
-        accumulated_spans = await _get_accumulated_spans(trace_id)
-        if accumulated_spans:
-            logger.info(f"Trace {trace_id} timed out, processing accumulated spans")
-            await process_completed_trace(trace_id, accumulated_spans)
-            await _remove_trace_from_accumulation(trace_id)
-            await _cancel_and_remove_trace_task(trace_id)
 
-    # Schedule the task with lock protection
+        # Check if trace still exists and hasn't been processed
+        timeout_key = f"{_TRACE_TIMEOUT_KEY_PREFIX}{trace_id}"
+
+        # Only process if this worker still owns the timeout
+        if await REDIS.exists(timeout_key):  # type: ignore
+            accumulated_spans = await _get_accumulated_spans(trace_id)
+            if accumulated_spans:
+                logger.info(f"Trace {trace_id} timed out, processing accumulated spans")
+                await process_completed_trace(trace_id, accumulated_spans, user)
+                await _remove_trace_from_accumulation(trace_id)
+                await _cancel_and_remove_trace_task(trace_id)
+
+        # Use Redis to ensure only one worker handles the timeout
+
     async def _schedule_with_lock():
-        async with _spans_lock:
-            # Cancel existing timeout if any
-            if trace_id in _trace_completion_tasks:
-                _trace_completion_tasks[trace_id].cancel()
-            _trace_completion_tasks[trace_id] = asyncio.create_task(timeout_handler())
+        timeout_key = f"{_TRACE_TIMEOUT_KEY_PREFIX}{trace_id}"
+
+        # Try to set the timeout key (only succeeds if it doesn't exist)
+        if await REDIS.set(timeout_key, "1", ex=_TRACE_TIMEOUT_SECONDS, nx=True):  # type: ignore
+            # This worker owns the timeout, schedule the task
+            asyncio.create_task(timeout_handler())
+        else:
+            # Another worker already owns the timeout
+            logger.debug(f"Timeout for trace {trace_id} already scheduled by another worker")
 
     # Run the lock-protected operation
     asyncio.create_task(_schedule_with_lock())
@@ -87,11 +115,16 @@ telemetry_router = APIRouter()
 
 
 @telemetry_router.post("/v1/traces")
-async def trace_endpoint(request: Request):
+async def trace_endpoint(
+    request: Request,
+    user: User = Depends(get_authenticated_user),
+    mono_svc: MonoService = Depends(get_mono_svc),
+):
     """
     Direct trace endpoint for OpenTelemetry collector HTTP exporter.
 
     This endpoint accepts OTLP HTTP format telemetry data and logs it.
+    Requires authentication via bearer token (API key) in the Authorization header.
     """
     try:
         # Check content type
@@ -116,24 +149,13 @@ async def trace_endpoint(request: Request):
         else:
             raise HTTPException(status_code=415, detail=f"Unsupported content type: {content_type}")
 
-        # Initialize database service
-        mono_svc = await MonoService.init()
-
-        # TODO(gregor): implement actual authentication
-
-        test_user_email = "gregor@transluce.org"
-        user = await mono_svc.get_user_by_email(test_user_email)
-
-        if not user:
-            raise HTTPException(status_code=401, detail="Unauthorized: User not found")
-
-        logger.info(f"Using test user: {user.email} (ID: {user.id})")
+        print(f"Headers: {dict(request.headers)}")
 
         # Store the raw telemetry data for request
         await mono_svc.store_telemetry_log(user.id, trace_data)
 
         # Process the traces
-        processing_result = await process_traces(trace_data)
+        processing_result = await process_traces(trace_data, user)
 
         # Return success response
         return JSONResponse(
@@ -171,7 +193,7 @@ def process_json_traces(body: bytes) -> Dict[str, Any]:
         raise ValueError(f"Invalid JSON format: {str(e)}")
 
 
-async def process_traces(trace_data: Dict[str, Any]) -> Dict[str, Any]:
+async def process_traces(trace_data: Dict[str, Any], user: User) -> Dict[str, Any]:
     """
     Process the trace data - extract spans, accumulate them, and detect trace completion.
 
@@ -213,7 +235,7 @@ async def process_traces(trace_data: Dict[str, Any]) -> Dict[str, Any]:
                     total_spans += 1
 
         # Accumulate spans and check for trace completion
-        await accumulate_and_check_completion(processed_spans)
+        await accumulate_and_check_completion(processed_spans, user)
 
         return {
             "count": total_spans,
@@ -375,7 +397,7 @@ def otel_span_format_to_dict(
     return processed_span
 
 
-async def accumulate_and_check_completion(spans: List[Dict[str, Any]]) -> None:
+async def accumulate_and_check_completion(spans: List[Dict[str, Any]], user: User) -> None:
     """
     Accumulate spans and check for trace completion.
 
@@ -407,14 +429,14 @@ async def accumulate_and_check_completion(spans: List[Dict[str, Any]]) -> None:
         # Check if this span indicates trace completion
         if is_trace_complete(span, accumulated_spans):
             # Process the completed trace with all accumulated spans
-            await process_completed_trace(trace_id, accumulated_spans)
+            await process_completed_trace(trace_id, accumulated_spans, user)
 
             # Clean up using targeted locks
             await _remove_trace_from_accumulation(trace_id)
             await _cancel_and_remove_trace_task(trace_id)
         else:
             # Schedule timeout for trace completion
-            schedule_trace_timeout(trace_id)
+            schedule_trace_timeout(trace_id, user)
 
 
 def is_trace_complete(span: Dict[str, Any], all_spans: List[Dict[str, Any]]) -> bool:
@@ -435,7 +457,7 @@ def is_trace_complete(span: Dict[str, Any], all_spans: List[Dict[str, Any]]) -> 
     return False
 
 
-async def process_completed_trace(trace_id: str, spans: List[Dict[str, Any]]) -> None:
+async def process_completed_trace(trace_id: str, spans: List[Dict[str, Any]], user: User) -> None:
     """
     Process a completed trace by creating collections, agent runs, and transcripts.
 
@@ -446,10 +468,10 @@ async def process_completed_trace(trace_id: str, spans: List[Dict[str, Any]]) ->
     logger.info(f"Processing completed trace {trace_id} with {len(spans)} spans")
 
     # Process spans to create agent runs
-    await store_spans(spans)
+    await store_spans(spans, user)
 
 
-async def store_spans(spans: List[Dict[str, Any]]) -> None:
+async def store_spans(spans: List[Dict[str, Any]], user: User) -> None:
     """
     Store spans by creating collections, agent runs, and transcripts.
 
@@ -461,18 +483,6 @@ async def store_spans(spans: List[Dict[str, Any]]) -> None:
 
     # Initialize database service
     mono_svc = await MonoService.init()
-
-    # Get test user for telemetry operations (for testing purposes)
-    # You can change this email to your test user's email
-    test_user_email = "gregor@transluce.org"  # Change this to your test user's email
-    user = await mono_svc.get_user_by_email(test_user_email)
-
-    if not user:
-        # Fallback to anonymous user if test user doesn't exist
-        logger.warning(f"Test user {test_user_email} not found, creating anonymous user")
-        user = await mono_svc.create_anonymous_user()
-    else:
-        logger.info(f"Using test user: {user.email} (ID: {user.id})")
 
     # Organize spans by collection_id -> agent_run_id -> transcript_id -> spans[]
     organized_spans: Dict[str, Dict[str, Dict[str, List[Dict[str, Any]]]]] = {}
@@ -492,7 +502,7 @@ async def store_spans(spans: List[Dict[str, Any]]) -> None:
             print(json.dumps(span, indent=2))
             continue
 
-        # Use setdefault to organize spans (following existing codebase patterns)
+        # Use setdefault to organize spans
         organized_spans.setdefault(collection_id, {}).setdefault(agent_run_id, {}).setdefault(
             transcript_id, []
         ).append(span)
@@ -544,8 +554,8 @@ async def store_spans(spans: List[Dict[str, Any]]) -> None:
                     f"  Processing transcript_id: {transcript_id} with {len(transcript_spans)} spans"
                 )
 
-                # Convert spans to chat messages and collect scores
-                messages: List[ChatMessage] = []
+                # store all the chat threads
+                chat_threads: List[List[ChatMessage]] = []
 
                 for span in transcript_spans:
                     # Check for agent_run_score events
@@ -563,32 +573,67 @@ async def store_spans(spans: List[Dict[str, Any]]) -> None:
                         agent_run_model = span_attrs["gen_ai.response.model"]
                         logger.info(f"    Found model: {agent_run_model}")
 
-                    # Convert span to chat messages and deduplicate
+                    # Extract messages from this span
                     span_messages = _span_to_chat_message(span)
-                    new_messages = _deduplicate_messages(span_messages, messages)
 
-                    if new_messages:
-                        logger.debug(
-                            f"    Added {len(new_messages)} new messages from span {span.get('span_id')}"
-                        )
-                        messages.extend(new_messages)
+                    if not span_messages:
+                        continue
+
+                    # look at each span (which will include the chat history, if any)
+                    # if there is only 1 message it's a new chat thread
+                    # if there are multiple messages we need to find the chat thread it's continuing
+                    # by matching the span messages (+role and order) to the existing chat threads
+                    # if we find a match, we add any new messages to the existing chat thread
+                    # if we don't find a match, we create a new chat thread
+
+                    if len(span_messages) == 1:
+                        # Single message - create new chat thread
+                        chat_threads.append(span_messages)
+                        logger.debug(f"    Created new chat thread with 1 message")
                     else:
-                        logger.debug(
-                            f"    No new messages from span {span.get('span_id')} (all duplicates)"
-                        )
+                        # Multiple messages - try to find matching existing thread
+                        matched_thread_index = None
 
-                if messages:
-                    # Create transcript directly with ChatMessage objects
-                    transcript = Transcript(
-                        id=transcript_id,
-                        messages=messages,
-                        name="",
-                        description="",
-                    )
-                    agent_run_transcripts[transcript_id] = transcript
-                    logger.info(
-                        f"    Created transcript {transcript_id} with {len(messages)} messages"
-                    )
+                        for i, existing_thread in enumerate(chat_threads):
+                            # Check if the beginning of span_messages matches the existing thread
+                            if len(span_messages) > len(existing_thread):
+                                # Check if existing thread is a prefix of span_messages
+                                if span_messages[: len(existing_thread)] == existing_thread:
+                                    matched_thread_index = i
+                                    break
+
+                        if matched_thread_index is not None:
+                            # Found matching thread - add new messages
+                            existing_thread = chat_threads[matched_thread_index]
+                            new_messages = span_messages[len(existing_thread) :]
+                            chat_threads[matched_thread_index].extend(new_messages)
+                            logger.debug(
+                                f"    Extended chat thread {matched_thread_index} with {len(new_messages)} new messages"
+                            )
+                        else:
+                            # No match found - create new chat thread
+                            chat_threads.append(span_messages)
+                            logger.debug(
+                                f"    Created new chat thread with {len(span_messages)} messages"
+                            )
+
+                # update this to record each chat thread as a transcript
+                if chat_threads:
+                    # Create a transcript for each chat thread
+                    for i, chat_thread in enumerate(chat_threads):
+                        # Create unique transcript ID for each thread
+                        thread_transcript_id = str(uuid.uuid4())
+
+                        transcript = Transcript(
+                            id=thread_transcript_id,
+                            messages=chat_thread,
+                            name=f"Chat Thread {i + 1}" if len(chat_threads) > 1 else "",
+                            description="",
+                        )
+                        agent_run_transcripts[thread_transcript_id] = transcript
+                        logger.info(
+                            f"    Created transcript {thread_transcript_id} with {len(chat_thread)} messages"
+                        )
                 else:
                     logger.warning(
                         f"    No messages extracted from {len(transcript_spans)} spans for transcript {transcript_id}"
@@ -648,6 +693,98 @@ async def store_spans(spans: List[Dict[str, Any]]) -> None:
     logger.info(f"Processed {len(spans)} spans into {total_agent_runs} agent runs")
 
 
+def _extract_tool_calls_from_content(content: str) -> tuple[str, list[ToolCall] | None]:
+    """Extract tool calls from content that may contain JSON arrays with tool_use objects.
+
+    Args:
+        content: The content string that may contain tool calls
+
+    Returns:
+        Tuple of (filtered_content, tool_calls) where tool_calls is None if no tool calls found
+    """
+    tool_calls = None
+
+    # Check if content contains tool calls (JSON array with tool_use objects)
+    if content.startswith("[") and content.endswith("]"):
+        try:
+            content_array = json.loads(content)
+            if isinstance(content_array, list):
+                content_array_any = cast(List[Any], content_array)
+                # Only keep dict items
+                dict_items: list[dict[str, Any]] = [
+                    i for i in content_array_any if isinstance(i, dict)
+                ]
+                # Extract tool calls and filter content
+                extracted_tool_calls: list[ToolCall] = []
+                filtered_content_parts: list[str] = []
+
+                for item in dict_items:
+                    tool_type = item.get("type")
+                    if tool_type == "tool_use":
+                        tool_item: dict[str, Any] = item
+                        tool_call = ToolCall(
+                            id=str(tool_item.get("id", "")),
+                            type="function",
+                            function=str(tool_item.get("name", "")),
+                            arguments=(
+                                tool_item.get("input", {})
+                                if isinstance(tool_item.get("input"), dict)
+                                else {}
+                            ),
+                        )
+                        extracted_tool_calls.append(tool_call)
+                    elif tool_type == "text":
+                        filtered_content_parts.append(str(item.get("text", "")))
+
+                # Update content and tool_calls
+                if filtered_content_parts:
+                    content = "\n".join(filtered_content_parts)
+                else:
+                    content = ""
+
+                if extracted_tool_calls:
+                    tool_calls = extracted_tool_calls
+        except json.JSONDecodeError:
+            # Not valid JSON, treat as regular content
+            pass
+
+    return content, tool_calls
+
+
+def _extract_tool_calls_from_completion_data(tool_calls_data: dict[str, Any]) -> list[ToolCall]:
+    """Extract tool calls from completion message tool_calls data.
+
+    Args:
+        tool_calls_data: Dictionary containing tool call data organized by tool index
+
+    Returns:
+        List of ToolCall objects
+    """
+    tool_calls: list[ToolCall] = []
+
+    for tool_index in sorted(tool_calls_data.keys()):
+        tool_data = tool_calls_data[tool_index]
+
+        # Parse arguments if present
+        arguments: dict[str, Any] = {}
+        if "arguments" in tool_data:
+            try:
+                arguments = json.loads(tool_data["arguments"])
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse tool call arguments: {tool_data['arguments']}")
+                arguments = {"raw_arguments": tool_data["arguments"]}
+
+        tool_call = ToolCall(
+            id=tool_data.get("id", ""),
+            type="function",
+            function=tool_data.get("name", ""),
+            arguments=arguments,
+        )
+        tool_calls.append(tool_call)
+
+    return tool_calls
+
+
 def _span_to_chat_message(span: Dict[str, Any]) -> List[ChatMessage]:
     """Convert a span to a list of chat message objects."""
     span_attrs = span.get("span_attributes", {})
@@ -659,7 +796,7 @@ def _span_to_chat_message(span: Dict[str, Any]) -> List[ChatMessage]:
     logger.debug(f"Processing span {span_id} ({operation_name}) with {len(span_attrs)} attributes")
 
     # Extract prompt messages from gen_ai.prompt.{index}.role/content format
-    prompt_messages: Dict[int, Dict[str, str]] = {}
+    prompt_messages: Dict[int, Dict[str, Any]] = {}
 
     for key, value in span_attrs.items():
         prefix = "gen_ai.prompt."
@@ -683,12 +820,19 @@ def _span_to_chat_message(span: Dict[str, Any]) -> List[ChatMessage]:
         msg_data = prompt_messages[index]
         if "role" in msg_data and "content" in msg_data:
             try:
-                message = parse_chat_message(
-                    {
-                        "role": msg_data["role"],
-                        "content": msg_data["content"],
-                    }
-                )
+                # Handle tool calls embedded in content for prompt messages
+                content, tool_calls = _extract_tool_calls_from_content(msg_data["content"])
+
+                message_data = {
+                    "role": msg_data["role"],
+                    "content": content,
+                }
+
+                # Add tool_calls if present
+                if tool_calls:
+                    message_data["tool_calls"] = tool_calls
+
+                message = parse_chat_message(message_data)
                 messages.append(message)
             except ValueError as e:
                 logger.error(
@@ -699,13 +843,13 @@ def _span_to_chat_message(span: Dict[str, Any]) -> List[ChatMessage]:
                 logger.error(f"Failed to parse message at index {index}: {e}")
                 continue
 
-    # Extract completion messages from gen_ai.completion.{index}.role/content format
-    completion_messages: Dict[int, Dict[str, str]] = {}
+    # Extract completion messages from gen_ai.completion.{index}.role/content/tool_calls format
+    completion_messages: Dict[int, Dict[str, Any]] = {}
 
     for key, value in span_attrs.items():
         prefix = "gen_ai.completion."
         if key.startswith(prefix) and "." in key[len(prefix) :]:
-            # Extract index and field (role or content)
+            # Extract index and field (role, content, or tool_calls)
             parts = key[len(prefix) :].split(".", 1)
             if len(parts) == 2:
                 try:
@@ -715,6 +859,23 @@ def _span_to_chat_message(span: Dict[str, Any]) -> List[ChatMessage]:
                         if index not in completion_messages:
                             completion_messages[index] = {}
                         completion_messages[index][field] = str(value)
+                    elif field.startswith("tool_calls."):
+                        # Handle tool calls: gen_ai.completion.{index}.tool_calls.{tool_index}.{field}
+                        tool_parts = field.split(".", 2)
+                        if len(tool_parts) >= 3:
+                            tool_index = int(tool_parts[1])
+                            tool_field = tool_parts[2]
+
+                            if index not in completion_messages:
+                                completion_messages[index] = {}
+                            if "tool_calls" not in completion_messages[index]:
+                                completion_messages[index]["tool_calls"] = {}
+                            if tool_index not in completion_messages[index]["tool_calls"]:
+                                completion_messages[index]["tool_calls"][tool_index] = {}
+
+                            completion_messages[index]["tool_calls"][tool_index][tool_field] = str(
+                                value
+                            )
                 except Exception as e:
                     logger.error(f"Failed to parse completion message key '{key}': {e}")
                     continue
@@ -724,12 +885,18 @@ def _span_to_chat_message(span: Dict[str, Any]) -> List[ChatMessage]:
         msg_data = completion_messages[index]
         if "role" in msg_data and "content" in msg_data:
             try:
-                completion_message = parse_chat_message(
-                    {
-                        "role": msg_data["role"],
-                        "content": msg_data["content"],
-                    }
-                )
+                message_data = {
+                    "role": msg_data["role"],
+                    "content": msg_data["content"],
+                }
+
+                # Add tool calls if present
+                if "tool_calls" in msg_data:
+                    tool_calls = _extract_tool_calls_from_completion_data(msg_data["tool_calls"])
+                    if tool_calls:
+                        message_data["tool_calls"] = tool_calls
+
+                completion_message = parse_chat_message(message_data)
                 messages.append(completion_message)
             except ValueError as e:
                 logger.error(
@@ -747,44 +914,3 @@ def _span_to_chat_message(span: Dict[str, Any]) -> List[ChatMessage]:
         )
 
     return messages
-
-
-def _deduplicate_messages(
-    span_messages: List[ChatMessage],
-    existing_messages: List[ChatMessage],
-) -> List[ChatMessage]:
-    """
-    Deduplicate messages from a span and log conflicts.
-
-    Args:
-        span_messages: Messages extracted from the current span
-        existing_messages: List of messages already processed
-
-    Returns:
-        List of new messages that should be added
-    """
-
-    new_messages: List[ChatMessage] = []
-
-    for i, message in enumerate(span_messages):
-        # Check if we already have a message at this index
-        if i < len(existing_messages):
-            existing_message = existing_messages[i]
-
-            # Check if the message content matches what we've seen before
-            if existing_message.role != message.role or existing_message.content != message.content:
-                changes: List[str] = []
-                if existing_message.role != message.role:
-                    changes.append(f"role: '{existing_message.role}' -> '{message.role}'")
-                if existing_message.content != message.content:
-                    changes.append(f"content: '{existing_message.content}' -> '{message.content}'")
-
-                logger.error(f"Message at index {i} changed: {', '.join(changes)}")
-                continue
-            # Message already exists and matches, skip it
-            continue
-        else:
-            # This is a new message, add it
-            new_messages.append(message)
-
-    return new_messages
