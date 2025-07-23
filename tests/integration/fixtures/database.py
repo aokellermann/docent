@@ -41,15 +41,12 @@ async def db_engine() -> AsyncGenerator[AsyncEngine, None]:
     )
     try:
         async with engine.begin() as conn:
+            # Clean slate: drop all tables first, then create them
+            # This ensures tests start clean even if previous run was interrupted
+            await conn.run_sync(SQLABase.metadata.drop_all)
             await conn.run_sync(SQLABase.metadata.create_all)
         yield engine
     finally:
-        try:
-            async with engine.begin() as conn:
-                await conn.run_sync(SQLABase.metadata.drop_all)
-        except Exception:
-            pass
-
         try:
             await engine.dispose()
         except Exception:
@@ -137,7 +134,7 @@ async def redis_client() -> AsyncGenerator[ArqRedis, None]:
         try:
             # Clear test database after test
             await client.flushdb()
-            await client.close()
+            await client.aclose()
         except Exception:
             pass
 
