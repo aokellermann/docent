@@ -3,6 +3,8 @@
 from typing import AsyncGenerator
 
 import pytest_asyncio
+import redis.asyncio as redis
+from arq import ArqRedis
 from sqlalchemy.engine.url import URL
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -16,6 +18,8 @@ from docent_core._db_service.db import DocentDB
 from docent_core._db_service.schemas.auth_models import User
 from docent_core._db_service.schemas.base import SQLABase
 from docent_core._db_service.service import MonoService
+from docent_core._server._dependencies.database import get_db, get_mono_svc
+from docent_core._server.api import asgi_app
 from docent_core.services.charts import ChartsService
 
 TEST_DATABASE_URL = URL.create(
@@ -27,42 +31,50 @@ TEST_DATABASE_URL = URL.create(
     database="_pytest_docent_test",
 )
 
+TEST_REDIS_URL = "redis://localhost:6379/1"  # Use database 1 for tests
 
-@pytest_asyncio.fixture(scope="session")
+
+@pytest_asyncio.fixture(scope="function")
 async def db_engine() -> AsyncGenerator[AsyncEngine, None]:
-    engine = create_async_engine(TEST_DATABASE_URL)
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLABase.metadata.create_all)
-    yield engine
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLABase.metadata.drop_all)
-    await engine.dispose()
+    engine = create_async_engine(
+        TEST_DATABASE_URL, pool_size=10, max_overflow=20, pool_pre_ping=True, echo=False
+    )
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLABase.metadata.create_all)
+        yield engine
+    finally:
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(SQLABase.metadata.drop_all)
+        except Exception:
+            pass
+
+        try:
+            await engine.dispose()
+        except Exception:
+            pass
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="function")
 async def db_connection(db_engine: AsyncEngine) -> AsyncGenerator[AsyncConnection, None]:
     async with db_engine.connect() as connection:
         yield connection
-        await connection.close()
 
 
-@pytest_asyncio.fixture
-async def db_session(db_connection: AsyncConnection) -> AsyncGenerator[AsyncSession, None]:
-    async with db_connection.begin() as transaction:
-        async with AsyncSession(bind=db_connection) as session:
-            yield session
-            await session.close()
-            await transaction.rollback()
+@pytest_asyncio.fixture(scope="function")
+async def db_session(db_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
+    async with AsyncSession(bind=db_engine, expire_on_commit=False) as session:
+        yield session
 
 
-@pytest_asyncio.fixture(scope="session")
-async def db_service(
-    db_engine: AsyncEngine, db_connection: AsyncConnection
-) -> AsyncGenerator[DocentDB, None]:
-    yield DocentDB(db_engine, async_sessionmaker(bind=db_connection, expire_on_commit=False))
+@pytest_asyncio.fixture(scope="function")
+async def db_service(db_engine: AsyncEngine) -> AsyncGenerator[DocentDB, None]:
+    session_maker = async_sessionmaker(bind=db_engine, expire_on_commit=False)
+    yield DocentDB(db_engine, session_maker)
 
 
-@pytest_asyncio.fixture
+@pytest_asyncio.fixture(scope="function")
 async def mono_service(db_service: DocentDB) -> AsyncGenerator[MonoService, None]:
     """
     Test-scoped fixture that provides MonoService with real database.
@@ -71,7 +83,7 @@ async def mono_service(db_service: DocentDB) -> AsyncGenerator[MonoService, None
     yield service
 
 
-@pytest_asyncio.fixture
+@pytest_asyncio.fixture(scope="function")
 async def charts_service(
     db_session: AsyncSession, mono_service: MonoService
 ) -> AsyncGenerator[ChartsService, None]:
@@ -82,8 +94,10 @@ async def charts_service(
     yield service
 
 
-@pytest_asyncio.fixture
-async def test_collection(mono_service: MonoService, test_user: User) -> AsyncGenerator[str, None]:
+@pytest_asyncio.fixture(scope="function")
+async def test_collection_id(
+    mono_service: MonoService, test_user: User
+) -> AsyncGenerator[str, None]:
     """
     Fixture that creates a test collection and returns its ID.
     Cleans up the collection after the test.
@@ -97,7 +111,7 @@ async def test_collection(mono_service: MonoService, test_user: User) -> AsyncGe
     await mono_service.delete_collection(collection_id)
 
 
-@pytest_asyncio.fixture
+@pytest_asyncio.fixture(scope="function")
 async def test_user(mono_service: MonoService) -> AsyncGenerator[User, None]:
     """
     Fixture that creates a test user and returns the user ID.
@@ -106,3 +120,58 @@ async def test_user(mono_service: MonoService) -> AsyncGenerator[User, None]:
         email="pytest_integration@example.com", password="test_password_123"
     )
     yield user
+
+
+@pytest_asyncio.fixture(scope="function")
+async def redis_client() -> AsyncGenerator[ArqRedis, None]:
+    """
+    Test-scoped fixture that provides Redis client with test database.
+    """
+    client = ArqRedis(
+        connection_pool=redis.ConnectionPool.from_url(TEST_REDIS_URL, decode_responses=True)
+    )
+    try:
+        # Clear test database before test
+        await client.flushdb()
+        yield client
+    finally:
+        try:
+            # Clear test database after test
+            await client.flushdb()
+            await client.close()
+        except Exception:
+            pass
+
+
+@pytest_asyncio.fixture(scope="function", autouse=True)
+async def override_db(
+    db_service: DocentDB, mono_service: MonoService, redis_client: ArqRedis
+) -> AsyncGenerator[None, None]:
+    original_overrides = asgi_app.dependency_overrides.copy()
+
+    # Import here to avoid circular imports
+    from docent_core._server._broker import redis_client as redis_client_module
+
+    original_redis = redis_client_module.REDIS
+
+    try:
+
+        async def get_db_override():
+            return db_service
+
+        async def get_mono_svc_override():
+            return mono_service
+
+        asgi_app.dependency_overrides[get_db] = get_db_override
+        asgi_app.dependency_overrides[get_mono_svc] = get_mono_svc_override
+
+        # Override the global Redis client
+        redis_client_module.REDIS = redis_client
+
+        yield
+    finally:
+        asgi_app.dependency_overrides.clear()
+        asgi_app.dependency_overrides.update(original_overrides)
+
+        # Restore original Redis client
+        redis_client_module.REDIS = original_redis

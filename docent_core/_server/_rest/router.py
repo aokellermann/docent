@@ -155,7 +155,7 @@ async def signup(
     user = await mono_svc.create_user(request.email, request.password)
 
     # Create a session for the new user
-    await create_user_session(user.id, response)
+    await create_user_session(user.id, response, mono_svc)
 
     # Track analytics
     await track_endpoint_with_user(mono_svc, EndpointType.SIGNUP, user)
@@ -189,7 +189,7 @@ async def login(
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     # Create a new session
-    await create_user_session(user.id, response)
+    await create_user_session(user.id, response, mono_svc)
 
     return user
 
@@ -212,7 +212,7 @@ async def create_anonymous_session(
     anonymous_user = await mono_svc.create_anonymous_user()
 
     # Create a session for the anonymous user
-    await create_user_session(anonymous_user.id, response)
+    await create_user_session(anonymous_user.id, response, mono_svc)
 
     # Track analytics
     await track_endpoint_with_user(mono_svc, EndpointType.CREATE_ANONYMOUS_SESSION, anonymous_user)
@@ -254,13 +254,16 @@ async def get_current_user(request: Request, mono_svc: MonoService = Depends(get
 
 
 @user_router.post("/logout")
-async def logout(request: Request, response: Response):
+async def logout(
+    request: Request, response: Response, mono_svc: MonoService = Depends(get_mono_svc)
+):
     """
     User logout endpoint. Invalidates the current session.
 
     Args:
         request: FastAPI Request object to access cookies
         response: FastAPI Response object to clear cookies
+        mono_svc: MonoService instance for database operations
 
     Returns:
         Success message
@@ -269,7 +272,7 @@ async def logout(request: Request, response: Response):
     session_id = request.cookies.get("docent_session_id")
     if session_id:
         # Invalidate the session using the auth helper
-        await invalidate_user_session(session_id, response)
+        await invalidate_user_session(session_id, response, mono_svc)
 
     return {"message": "Logged out successfully"}
 

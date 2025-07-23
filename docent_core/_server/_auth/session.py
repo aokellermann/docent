@@ -33,7 +33,7 @@ else:
     raise ValueError(f"Invalid environment: {ENVIRONMENT}")
 
 
-async def create_user_session(user_id: str, response: Response) -> str:
+async def create_user_session(user_id: str, response: Response, mono_svc: MonoService) -> str:
     """
     Create a new session for a user and set the session cookie.
 
@@ -43,13 +43,11 @@ async def create_user_session(user_id: str, response: Response) -> str:
     Args:
         user_id: The user ID to create a session for
         response: FastAPI Response object to set cookies
+        mono_svc: MonoService instance for database operations
 
     Returns:
         The created session ID
     """
-    # Get database service instance
-    mono_svc = await MonoService.init()
-
     # Create a new session in the database
     session_id = await mono_svc.create_session(user_id)
 
@@ -67,17 +65,17 @@ async def create_user_session(user_id: str, response: Response) -> str:
     return session_id
 
 
-async def invalidate_user_session(session_id: str, response: Response) -> None:
+async def invalidate_user_session(
+    session_id: str, response: Response, mono_svc: MonoService
+) -> None:
     """
     Invalidate a user session and clear the session cookie.
 
     Args:
         session_id: The session ID to invalidate
         response: FastAPI Response object to clear cookies
+        mono_svc: MonoService instance for database operations
     """
-    # Get database service instance
-    mono_svc = await MonoService.init()
-
     # Invalidate the session in the database
     await mono_svc.invalidate_session(session_id)
 

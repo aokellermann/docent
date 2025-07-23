@@ -1,3 +1,4 @@
+from tests.integration.fixtures.client import authed_client
 from tests.integration.fixtures.database import (
     charts_service,
     db_connection,
@@ -5,7 +6,9 @@ from tests.integration.fixtures.database import (
     db_service,
     db_session,
     mono_service,
-    test_collection,
+    override_db,
+    redis_client,
+    test_collection_id,
     test_user,
 )
 
@@ -15,7 +18,10 @@ __all__ = [
     "db_session",
     "db_service",
     "mono_service",
-    "test_collection",
+    "test_collection_id",
     "test_user",
     "charts_service",
+    "authed_client",
+    "override_db",
+    "redis_client",
 ]

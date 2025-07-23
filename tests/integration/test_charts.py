@@ -8,9 +8,12 @@ from docent_core.services.charts import ChartsService
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_create_chart(
-    mono_service: MonoService, charts_service: ChartsService, test_user: User, test_collection: str
+    mono_service: MonoService,
+    charts_service: ChartsService,
+    test_user: User,
+    test_collection_id: str,
 ):
-    view_ctx = await mono_service.get_default_view_ctx(test_collection, test_user)
+    view_ctx = await mono_service.get_default_view_ctx(test_collection_id, test_user)
 
     await charts_service.create_chart(
         ctx=view_ctx,
