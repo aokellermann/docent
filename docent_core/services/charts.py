@@ -136,7 +136,12 @@ class ChartDimension(BaseModel):
 
             # Then extract the final value
             expression = nested_expr.op("->>")(path_parts[-1])
-            key = f"{base_field}->{'->'.join(path_parts)}"
+
+            # Give it a key that resembles the SQL expression
+            parts_except_last = path_parts[:-1]
+            last_part = path_parts[-1]
+            parts_except_last_joined = "->".join(parts_except_last)
+            key = f"{base_field}->{parts_except_last_joined}->>{last_part}"
 
         if data_type == MetadataFieldType.NUMERIC:
             expression = expression.cast(Numeric)  # type: ignore

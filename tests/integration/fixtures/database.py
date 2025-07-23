@@ -34,6 +34,7 @@ TEST_DATABASE_URL = URL.create(
 TEST_REDIS_URL = "redis://localhost:6379/1"  # Use database 1 for tests
 
 
+# Function scope for this fixture may slow down tests, but avoids tricky asyncio problems
 @pytest_asyncio.fixture(scope="function")
 async def db_engine() -> AsyncGenerator[AsyncEngine, None]:
     engine = create_async_engine(
