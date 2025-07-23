@@ -4,7 +4,7 @@ import pytest
 
 @pytest.mark.integration
 async def test_upload_file(test_collection_id: str, authed_client: httpx.AsyncClient):
-    with open("tests/integration/test_data/ctf.json", "rb") as f:
+    with open("tests/integration/data/ctf.json", "rb") as f:
         file_content = f.read()
     response = await authed_client.post(
         f"/rest/{test_collection_id}/preview_import_runs_from_file",

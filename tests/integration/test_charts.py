@@ -1,5 +1,52 @@
 import httpx
 import pytest
+from pydantic import Field
+
+from docent.data_models import AgentRun, BaseAgentRunMetadata, Transcript
+from docent.data_models.chat import parse_chat_message
+
+
+class MyMetadata(BaseAgentRunMetadata):
+    agent_scaffold: str = Field(description="Agent scaffold in which the agent was run")
+
+
+transcript_raw = [
+    {"role": "user", "content": "What's the weather like in New York today?"},
+    {
+        "role": "assistant",
+        "content": "The weather in New York today is mostly sunny with a high of 75°F (24°C).",
+    },
+]
+
+metadata_1 = {
+    "agent_scaffold": "foo",
+    "int_float_bool_null": 1,
+}
+metadata_2 = {
+    "agent_scaffold": "foo",
+    "int_float_bool_null": 0.1,
+}
+metadata_3 = {
+    "agent_scaffold": "bar",
+    "int_float_bool_null": False,
+}
+metadata_4 = {
+    "agent_scaffold": "bar",
+    "int_float_bool_null": None,
+}
+
+agent_runs = [
+    AgentRun(
+        transcripts={
+            "default": Transcript(messages=[parse_chat_message(msg) for msg in transcript_raw])
+        },
+        metadata=MyMetadata(
+            agent_scaffold=m["agent_scaffold"],
+            scores={"int_float_bool_null": m["int_float_bool_null"]},
+        ),
+    )
+    for m in [metadata_1, metadata_2, metadata_3, metadata_4]
+]
 
 
 @pytest.mark.integration
@@ -8,10 +55,10 @@ async def test_default_chart(
     test_collection_id: str,
 ):
     # Upload a bit of data
-    with open("tests/integration/test_data/ctf.json", "rb") as f:
+    with open("tests/integration/data/ctf.json", "rb") as f:
         file_content = f.read()
     response = await authed_client.post(
-        f"/rest/{test_collection_id}/import_runs_from_file",
+        f"/rest/{test_collection_id}/agent_runs",
         files={"file": ("abc.json", file_content, "application/json")},
     )
 
@@ -34,3 +81,29 @@ async def test_default_chart(
     stats = data["result"]["binStats"]
 
     assert stats != {}
+
+
+@pytest.mark.integration
+async def test_available_metadata_keys(
+    authed_client: httpx.AsyncClient,
+    test_collection_id: str,
+):
+    # Upload agent runs data directly via API
+    payload = {"agent_runs": [ar.model_dump(mode="json") for ar in agent_runs]}
+    response = await authed_client.post(
+        f"/rest/{test_collection_id}/agent_runs",
+        json=payload,
+    )
+    assert response.status_code == 200
+
+    response = await authed_client.get(
+        f"/rest/chart/{test_collection_id}/metadata",
+    )
+    assert response.status_code == 200
+    data = response.json()
+    dimensions = data["fields"]["dimensions"]
+    measures = data["fields"]["measures"]
+
+    assert any("agent_scaffold" in m["name"] for m in dimensions)
+
+    assert any("int_float_bool_null" in m["name"] for m in measures)
