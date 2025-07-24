@@ -112,7 +112,7 @@ resource "aws_ecs_task_definition" "worker" {
           value = tostring(aws_db_instance.postgres.port)
         },
         {
-          name  = "DOCENT_PG_NAME"
+          name  = "DOCENT_PG_DATABASE"
           value = var.db_name
         },
         {

@@ -75,7 +75,7 @@ resource "aws_apprunner_service" "api" {
           LLM_CACHE_PATH       = ""  # Disable cache
           DOCENT_PG_HOST       = aws_db_instance.postgres.address
           DOCENT_PG_PORT       = aws_db_instance.postgres.port
-          DOCENT_PG_NAME       = var.db_name
+          DOCENT_PG_DATABASE   = var.db_name
           DOCENT_PG_USER       = var.db_username
           DOCENT_PG_PASSWORD   = var.db_password
           DOCENT_REDIS_HOST    = aws_elasticache_replication_group.redis.primary_endpoint_address
@@ -110,7 +110,7 @@ resource "aws_apprunner_service" "api" {
     unhealthy_threshold = 5
   }
 
-  auto_scaling_configuration_arn = aws_apprunner_auto_scaling_configuration_version.api.arn
+  auto_scaling_configuration_arn = aws_apprunner_auto_scaling_configuration_version.api_new.arn
 
   tags = {
     Name        = "${var.project_name}-${var.environment}-api"
@@ -118,10 +118,10 @@ resource "aws_apprunner_service" "api" {
   }
 }
 
-resource "aws_apprunner_auto_scaling_configuration_version" "api" {
+resource "aws_apprunner_auto_scaling_configuration_version" "api_new" {
   auto_scaling_configuration_name = "${var.project_name}-${var.environment}-api-autoscaling"
 
-  max_concurrency = 100
+  max_concurrency = 10
   max_size        = 10
   min_size        = 1
 

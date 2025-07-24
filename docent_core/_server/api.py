@@ -169,11 +169,13 @@ asgi_app.add_middleware(CORSMiddleware, **cors_config)
 for router in REST_ROUTERS:
     asgi_app.include_router(router["router"], prefix=router["prefix"])
 
-# If running in production, add Sentry middleware
-if ENV.get("ENVIRONMENT") == "prod" and (dsn := ENV.get("SENTRY_DSN")) is not None:
-    sentry_sdk.init(dsn=dsn, send_default_pii=True)  # type: ignore
+# If running in prod or staging, add Sentry middleware
+if (cur_env := ENV.get("ENVIRONMENT")) in ("prod", "staging") and (
+    dsn := ENV.get("SENTRY_DSN")
+) is not None:
+    sentry_sdk.init(dsn=dsn, environment=cur_env, send_default_pii=True)  # type: ignore
     asgi_app.add_middleware(SentryAsgiMiddleware)  # type: ignore
-    logger.info("Initialized Sentry for production")
+    logger.info(f"Initialized Sentry for {cur_env}")
 
 
 @asgi_app.get("/")

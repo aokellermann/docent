@@ -7,7 +7,7 @@ variable "aws_region" {
 variable "environment" {
   description = "Environment name"
   type        = string
-  default     = "dev"
+  default     = "staging"
 }
 
 variable "project_name" {
@@ -19,7 +19,7 @@ variable "project_name" {
 variable "db_username" {
   description = "Database username"
   type        = string
-  default     = "docent"
+  default     = "docent_user"
 }
 
 variable "db_password" {
@@ -31,7 +31,7 @@ variable "db_password" {
 variable "db_name" {
   description = "Database name"
   type        = string
-  default     = "docent"
+  default     = "docent_db"
 }
 
 variable "app_runner_cpu" {
