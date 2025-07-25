@@ -13,7 +13,7 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: app
+    environment: Production
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
