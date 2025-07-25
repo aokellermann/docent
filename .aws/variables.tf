@@ -55,6 +55,21 @@ variable "app_runner_memory" {
   default     = 12288
 }
 
+variable "app_runner_max_concurrency" {
+  description = "Maximum concurrency for App Runner"
+  type        = number
+}
+
+variable "app_runner_min_size" {
+  description = "Minimum number of App Runner instances"
+  type        = number
+}
+
+variable "app_runner_max_size" {
+  description = "Maximum number of App Runner instances"
+  type        = number
+}
+
 variable "ecs_cpu" {
   description = "CPU units for ECS Fargate (256, 512, 1024, 2048, 4096)"
   type        = number

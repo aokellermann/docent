@@ -81,7 +81,8 @@ resource "aws_apprunner_service" "api" {
           DOCENT_REDIS_HOST    = aws_elasticache_replication_group.redis.primary_endpoint_address
           DOCENT_REDIS_PORT    = aws_elasticache_replication_group.redis.port
           DOCENT_REDIS_TLS     = "true"
-          DOCENT_CORS_ORIGINS = var.environment == "prod" ? "https://${var.project_name}.transluce.org" : "https://${var.project_name}-${var.environment}.transluce.org"
+          # DOCENT_CORS_ORIGINS = var.environment == "prod" ? "https://${var.project_name}.transluce.org" : "https://${var.project_name}-${var.environment}.transluce.org"
+          DOCENT_CORS_ORIGINS = "https://${var.project_name}-${var.environment}.transluce.org"
         }
       }
       image_repository_type = "ECR"
@@ -110,7 +111,7 @@ resource "aws_apprunner_service" "api" {
     unhealthy_threshold = 5
   }
 
-  auto_scaling_configuration_arn = aws_apprunner_auto_scaling_configuration_version.api_new.arn
+  auto_scaling_configuration_arn = aws_apprunner_auto_scaling_configuration_version.api.arn
 
   tags = {
     Name        = "${var.project_name}-${var.environment}-api"
@@ -118,12 +119,12 @@ resource "aws_apprunner_service" "api" {
   }
 }
 
-resource "aws_apprunner_auto_scaling_configuration_version" "api_new" {
+resource "aws_apprunner_auto_scaling_configuration_version" "api" {
   auto_scaling_configuration_name = "${var.project_name}-${var.environment}-api-autoscaling"
 
-  max_concurrency = 10
-  max_size        = 10
-  min_size        = 1
+  max_concurrency = var.app_runner_max_concurrency
+  max_size        = var.app_runner_max_size
+  min_size        = var.app_runner_min_size
 
   tags = {
     Name        = "${var.project_name}-${var.environment}-api-autoscaling"
