@@ -9,7 +9,9 @@ from docent_core._db_service.schemas.auth_models import (
 )
 from docent_core._db_service.schemas.tables import EndpointType
 from docent_core._db_service.service import MonoService
+from docent_core._server._analytics.posthog import AnalyticsClient
 from docent_core._server._analytics.tracker import track_endpoint_with_user
+from docent_core._server._dependencies.analytics import use_posthog_user_context
 from docent_core._server._dependencies.permissions import (
     require_view_permission,
 )
@@ -43,6 +45,7 @@ async def create_chart(
     mono_svc: MonoService = Depends(get_mono_svc),
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.WRITE)),
+    analytics: AnalyticsClient = Depends(use_posthog_user_context),
 ) -> dict[str, str]:
     async with mono_svc.advisory_lock(collection_id, action_id="mutation"):
         async with mono_svc.db.session() as session:
@@ -57,8 +60,13 @@ async def create_chart(
                 rubric_filter=request.rubric_filter,
             )
 
-    # Track analytics
-    await track_endpoint_with_user(mono_svc, EndpointType.CREATE_CHART, ctx.user, collection_id)
+    analytics.track_event(
+        "create_chart",
+        properties={
+            "collection_id": collection_id,
+            "request": request.model_dump(),
+        },
+    )
 
     return {"id": chart_id}
 
@@ -80,6 +88,7 @@ async def update_chart(
     mono_svc: MonoService = Depends(get_mono_svc),
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.WRITE)),
+    analytics: AnalyticsClient = Depends(use_posthog_user_context),
 ):
     # Only include fields that were explicitly set in the request
     update_fields = {
@@ -93,8 +102,13 @@ async def update_chart(
         async with mono_svc.advisory_lock(collection_id, action_id="mutation"):
             await chart_service.update_chart(ctx=ctx, chart_id=request.id, updates=update_fields)
 
-    # Track analytics
-    await track_endpoint_with_user(mono_svc, EndpointType.UPDATE_CHART, ctx.user, collection_id)
+    analytics.track_event(
+        "update_chart",
+        properties={
+            "collection_id": collection_id,
+            "request": request.model_dump(),
+        },
+    )
 
     return {"status": "ok"}
 

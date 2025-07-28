@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Awaitable, Callable
 
 import anyio
+import posthog
 import sentry_sdk
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -150,12 +151,16 @@ async def lifespan(app: FastAPI):
         logger.info("Shutting down...")
         tg.cancel_scope.cancel()
 
+    # Make sure posthog is flushed
+    with anyio.CancelScope(shield=True):
+        posthog.flush()
+
 
 asgi_app = FastAPI()  # type: ignore
 
 # Add middlewares in order (they are processed in reverse order when handling responses)
 # 1. Request logging middleware first
-asgi_app.add_middleware(RequestLoggingMiddleware)
+# asgi_app.add_middleware(RequestLoggingMiddleware)
 # 2. Session authentication middleware second (after logging, before CORS)
 asgi_app.add_middleware(SessionAuthMiddleware)
 

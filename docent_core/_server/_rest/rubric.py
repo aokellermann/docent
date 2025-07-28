@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from docent_core._ai_tools.rubric.rubric import JudgeResultWithCitations, Rubric
 from docent_core._db_service.contexts import ViewContext
 from docent_core._db_service.service import DocentDB, MonoService
+from docent_core._server._analytics.posthog import AnalyticsClient
+from docent_core._server._dependencies.analytics import use_posthog_user_context
 from docent_core._server._dependencies.database import get_db, get_mono_svc, get_session
 from docent_core._server._dependencies.permissions import Permission, require_collection_permission
 from docent_core._server._dependencies.services import get_job_service, get_rubric_service
@@ -99,9 +101,29 @@ async def start_eval_rubric_job(
     rubric_svc: RubricService = Depends(get_rubric_service),
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
+    analytics: AnalyticsClient = Depends(use_posthog_user_context),
 ):
     """Start or get an existing evaluation job for the specified rubric."""
+
+    # Get the rubric; check that it exists
+    sqla_rubric = await rubric_svc.get_rubric(rubric_id)
+    if sqla_rubric is None:
+        raise HTTPException(status_code=404, detail=f"Rubric {rubric_id} not found")
+
     job_id = await rubric_svc.start_or_get_eval_rubric_job(ctx, rubric_id)
+
+    analytics.track_event(
+        "start_eval_rubric_job",
+        properties={
+            "collection_id": collection_id,
+            "rubric_id": rubric_id,
+            # Log the rubric content
+            "high_level_description": sqla_rubric.high_level_description,
+            "inclusion_rules": sqla_rubric.inclusion_rules,
+            "exclusion_rules": sqla_rubric.exclusion_rules,
+        },
+    )
+
     return {"job_id": job_id}
 
 
@@ -187,6 +209,7 @@ async def propose_centroids(
     session: AsyncSession = Depends(get_session),
     rubric_svc: RubricService = Depends(get_rubric_service),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
+    analytics: AnalyticsClient = Depends(use_posthog_user_context),
 ):
     """Propose centroids for a rubric and return them as dictionaries."""
     sqla_rubric = await rubric_svc.get_rubric(rubric_id)
@@ -194,6 +217,16 @@ async def propose_centroids(
         raise HTTPException(status_code=404, detail=f"Rubric {rubric_id} not found")
 
     sqla_centroids = await rubric_svc.propose_centroids(sqla_rubric, request.feedback)
+
+    analytics.track_event(
+        "propose_centroids",
+        properties={
+            "collection_id": collection_id,
+            "rubric_id": rubric_id,
+            "feedback": request.feedback,
+        },
+    )
+
     return {"centroids": [centroid.dict() for centroid in sqla_centroids]}
 
 
@@ -203,9 +236,15 @@ async def get_centroids(
     rubric_id: str,
     rubric_svc: RubricService = Depends(get_rubric_service),
     _: None = Depends(require_collection_permission(Permission.READ)),
+    analytics: AnalyticsClient = Depends(use_posthog_user_context),
 ):
     """Get existing centroids for a rubric."""
     sqla_centroids = await rubric_svc.get_centroids(rubric_id)
+
+    analytics.track_event(
+        "get_centroids", properties={"collection_id": collection_id, "rubric_id": rubric_id}
+    )
+
     return {"centroids": [centroid.dict() for centroid in sqla_centroids]}
 
 
@@ -228,9 +267,16 @@ async def start_centroid_assignment_job(
     rubric_svc: RubricService = Depends(get_rubric_service),
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
+    analytics: AnalyticsClient = Depends(use_posthog_user_context),
 ):
     """Start or get an existing centroid assignment job for the specified rubric."""
     job_id = await rubric_svc.start_or_get_centroid_assignment_job(ctx, rubric_id)
+
+    analytics.track_event(
+        "start_centroid_assignment_job",
+        properties={"collection_id": collection_id, "rubric_id": rubric_id},
+    )
+
     return {"job_id": job_id}
 
 
