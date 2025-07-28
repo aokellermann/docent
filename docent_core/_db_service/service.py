@@ -2082,3 +2082,37 @@ class MonoService:
                 .where(SQLATelemetryLog.id == telemetry_id)
                 .values(collection_id=collection_id)
             )
+
+    async def get_telemetry_log(self, telemetry_id: str) -> SQLATelemetryLog | None:
+        """Get a telemetry log entry by ID."""
+        async with self.db.session() as session:
+            result = await session.execute(
+                select(SQLATelemetryLog).where(SQLATelemetryLog.id == telemetry_id)
+            )
+            return result.scalar_one_or_none()
+
+    async def get_telemetry_logs_by_user(
+        self, user_id: str, limit: int = 100
+    ) -> list[SQLATelemetryLog]:
+        """Get telemetry logs for a user, ordered by creation time (newest first)."""
+        async with self.db.session() as session:
+            result = await session.execute(
+                select(SQLATelemetryLog)
+                .where(SQLATelemetryLog.user_id == user_id)
+                .order_by(SQLATelemetryLog.created_at.desc())
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
+    async def get_telemetry_logs_by_collection(
+        self, collection_id: str, limit: int = 100
+    ) -> list[SQLATelemetryLog]:
+        """Get telemetry logs for a collection, ordered by creation time (newest first)."""
+        async with self.db.session() as session:
+            result = await session.execute(
+                select(SQLATelemetryLog)
+                .where(SQLATelemetryLog.collection_id == collection_id)
+                .order_by(SQLATelemetryLog.created_at.desc())
+                .limit(limit)
+            )
+            return list(result.scalars().all())

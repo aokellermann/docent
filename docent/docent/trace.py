@@ -12,7 +12,7 @@ import uuid
 from collections import defaultdict
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar, Token
-from typing import Any, AsyncIterator, Callable, Dict, Iterator, Optional, Union
+from typing import Any, AsyncIterator, Callable, Dict, Iterator, List, Optional, Union
 
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter as GRPCExporter
@@ -76,7 +76,8 @@ class DocentTracer:
         self,
         collection_name: str = "default-collection-name",
         collection_id: Optional[str] = None,
-        endpoint: str = DEFAULT_ENDPOINT,
+        agent_run_id: Optional[str] = None,
+        endpoint: Union[str, List[str]] = DEFAULT_ENDPOINT,
         headers: Optional[Dict[str, str]] = None,
         api_key: Optional[str] = None,
         enable_console_export: bool = False,
@@ -90,7 +91,8 @@ class DocentTracer:
         Args:
             collection_name: Name of the collection for resource attributes
             collection_id: Optional collection ID (auto-generated if not provided)
-            endpoint: OTLP endpoint URL
+            agent_run_id: Optional agent_run_id to use for code outside of an agent run context (auto-generated if not provided)
+            endpoint: OTLP endpoint URL(s) - can be a single string or list of strings for multiple endpoints
             headers: Optional headers for authentication
             api_key: Optional API key for bearer token authentication (takes precedence over env var)
             enable_console_export: Whether to export to console
@@ -98,9 +100,16 @@ class DocentTracer:
             disable_batch: Whether to disable batch processing (use SimpleSpanProcessor)
             span_postprocess_callback: Optional callback for post-processing spans
         """
-        self.collection_name = collection_name
-        self.collection_id = collection_id if collection_id else str(uuid.uuid4())
-        self.endpoint = endpoint
+        self.collection_name: str = collection_name
+        self.collection_id: str = collection_id if collection_id else str(uuid.uuid4())
+        self.default_agent_run_id: str = agent_run_id if agent_run_id else str(uuid.uuid4())
+        self.endpoints: List[str]
+
+        # Handle endpoint parameter - convert to list if it's a string
+        if isinstance(endpoint, str):
+            self.endpoints = [endpoint]
+        else:
+            self.endpoints = endpoint
 
         # Build headers with authentication if provided
         self.headers = headers or {}
@@ -127,7 +136,7 @@ class DocentTracer:
         self._initialized: bool = False
         self._cleanup_registered: bool = False
         self._disabled: bool = False
-        self._spans_processor: Optional[Any] = None
+        self._spans_processors: List[Any] = []
 
         # Context variables for agent_run_id and transcript_id (thread/async safe)
         self._collection_id_var: ContextVar[str] = contextvars.ContextVar("collection_id")
@@ -171,25 +180,37 @@ class DocentTracer:
         self.cleanup()
         sys.exit(0)
 
-    def _init_spans_exporter(self) -> Optional[Union[HTTPExporter, GRPCExporter]]:
+    def _init_spans_exporter(self, endpoint: str) -> Optional[Union[HTTPExporter, GRPCExporter]]:
         """Initialize the appropriate span exporter based on endpoint."""
         if not self.enable_otlp_export:
             return None
 
         try:
-            if "http" in self.endpoint.lower() or "https" in self.endpoint.lower():
+            if "http" in endpoint.lower() or "https" in endpoint.lower():
                 http_exporter: HTTPExporter = HTTPExporter(
-                    endpoint=f"{self.endpoint}/v1/traces", headers=self.headers
+                    endpoint=f"{endpoint}/v1/traces", headers=self.headers
                 )
                 return http_exporter
             else:
-                grpc_exporter: GRPCExporter = GRPCExporter(
-                    endpoint=self.endpoint, headers=self.headers
-                )
+                grpc_exporter: GRPCExporter = GRPCExporter(endpoint=endpoint, headers=self.headers)
                 return grpc_exporter
         except Exception as e:
-            logger.error(f"Failed to initialize span exporter: {e}")
+            logger.error(f"Failed to initialize span exporter for {endpoint}: {e}")
             return None
+
+    def _init_spans_exporters(self) -> List[Union[HTTPExporter, GRPCExporter]]:
+        """Initialize span exporters for all endpoints."""
+        exporters: List[Union[HTTPExporter, GRPCExporter]] = []
+
+        for endpoint in self.endpoints:
+            exporter = self._init_spans_exporter(endpoint)
+            if exporter:
+                exporters.append(exporter)
+                logger.info(f"Initialized exporter for endpoint: {endpoint}")
+            else:
+                logger.warning(f"Failed to initialize exporter for endpoint: {endpoint}")
+
+        return exporters
 
     def _create_span_processor(self, exporter: Any) -> Any:
         """Create appropriate span processor based on configuration."""
@@ -218,27 +239,39 @@ class DocentTracer:
 
                 def on_start(self, span: Any, parent_context: Any = None) -> None:
                     # Add collection_id, agent_run_id, transcript_id, and any other current attributes
-                    try:
-                        span.set_attribute("collection_id", self.manager.collection_id)
+                    # Always add collection_id as it's always available
+                    span.set_attribute("collection_id", self.manager.collection_id)
 
+                    # Handle agent_run_id with individual try-except
+                    try:
                         agent_run_id: str = self.manager._agent_run_id_var.get()
                         if agent_run_id:
                             span.set_attribute("agent_run_id", agent_run_id)
+                        else:
+                            span.set_attribute("agent_run_id", "default1")
+                    except LookupError:
+                        span.set_attribute("agent_run_id", "default2")
 
+                    # Handle transcript_id with individual try-except
+                    try:
                         transcript_id: str = self.manager._transcript_id_var.get()
                         if transcript_id:
                             span.set_attribute("transcript_id", transcript_id)
                             # Add atomic span order number
                             span_order: int = self.manager._next_span_order(transcript_id)
                             span.set_attribute("span_order", span_order)
+                    except LookupError:
+                        # transcript_id not available, skip it
+                        pass
 
-                        # Add any other current attributes
+                    # Handle attributes with individual try-except
+                    try:
                         attributes: dict[str, Any] = self.manager._attributes_var.get()
                         for key, value in attributes.items():
                             span.set_attribute(key, value)
                     except LookupError:
-                        # Still add collection_id as it's always available
-                        span.set_attribute("collection_id", self.manager.collection_id)
+                        # attributes not available, skip them
+                        pass
 
                 def on_end(self, span: Any) -> None:
                     pass
@@ -251,24 +284,28 @@ class DocentTracer:
 
             # Configure span exporters for our isolated provider
             if self.enable_otlp_export:
-                otlp_exporter: Optional[Union[HTTPExporter, GRPCExporter]] = (
-                    self._init_spans_exporter()
+                otlp_exporters: List[Union[HTTPExporter, GRPCExporter]] = (
+                    self._init_spans_exporters()
                 )
-                if otlp_exporter:
-                    otlp_processor: Any = self._create_span_processor(otlp_exporter)
-                    self._tracer_provider.add_span_processor(otlp_processor)
-                    self._spans_processor = otlp_processor
-                else:
-                    logger.warning(
-                        "Failed to initialize OTLP exporter, falling back to console only"
+
+                if otlp_exporters:
+                    # Create a processor for each exporter
+                    for exporter in otlp_exporters:
+                        otlp_processor: Any = self._create_span_processor(exporter)
+                        self._tracer_provider.add_span_processor(otlp_processor)
+                        self._spans_processors.append(otlp_processor)
+
+                    logger.info(
+                        f"Added {len(otlp_exporters)} OTLP exporters for {len(self.endpoints)} endpoints"
                     )
+                else:
+                    logger.warning("Failed to initialize OTLP exporter")
 
             if self.enable_console_export:
                 console_exporter: Any = ConsoleSpanExporter()
                 console_processor: Any = self._create_span_processor(console_exporter)
                 self._tracer_provider.add_span_processor(console_processor)
-                if not hasattr(self, "_spans_processor"):
-                    self._spans_processor = console_processor
+                self._spans_processors.append(console_processor)
 
             # Add our custom context span processor
             context_processor = ContextSpanProcessor(self)
@@ -286,11 +323,16 @@ class DocentTracer:
                 attributes={
                     "service.name": self.collection_name,
                     "session.type": "application_root",
-                    "endpoint": self.endpoint,
                 },
             )
             if self._root_span is not None:
                 self._root_context = trace.set_span_in_context(self._root_span)
+
+            # Instrument threading for better context propagation
+            try:
+                ThreadingInstrumentor().instrument()
+            except Exception as e:
+                logger.warning(f"Failed to instrument threading: {e}")
 
             # Instrument OpenAI with our isolated tracer provider
             try:
@@ -303,12 +345,6 @@ class DocentTracer:
                 AnthropicInstrumentor().instrument(tracer_provider=self._tracer_provider)
             except Exception as e:
                 logger.warning(f"Failed to instrument Anthropic: {e}")
-
-            # Instrument threading for better context propagation
-            try:
-                ThreadingInstrumentor().instrument()
-            except Exception as e:
-                logger.warning(f"Failed to instrument threading: {e}")
 
             # Register cleanup handlers
             self._register_cleanup()
@@ -324,6 +360,17 @@ class DocentTracer:
     def cleanup(self):
         """Clean up Docent tracing resources."""
         try:
+            # Create an explicit end-of-trace span before ending the root span
+            if self._tracer and self._root_span:
+                end_span = self._tracer.start_span(
+                    "trace_end",
+                    context=self._root_context,
+                    attributes={
+                        "event.type": "trace_end",
+                    },
+                )
+                end_span.end()
+
             if (
                 self._root_span
                 and hasattr(self._root_span, "is_recording")
@@ -357,8 +404,9 @@ class DocentTracer:
     def flush(self) -> None:
         """Force flush all spans to exporters."""
         try:
-            if hasattr(self, "_spans_processor") and self._spans_processor:
-                self._spans_processor.force_flush()
+            for processor in self._spans_processors:
+                if hasattr(processor, "force_flush"):
+                    processor.force_flush()
         except Exception as e:
             logger.error(f"Error during flush: {e}")
 
@@ -635,7 +683,7 @@ _global_tracer: Optional[DocentTracer] = None
 def initialize_tracing(
     collection_name: str = "default-service",
     collection_id: Optional[str] = None,
-    endpoint: str = DEFAULT_ENDPOINT,
+    endpoint: Union[str, List[str]] = DEFAULT_ENDPOINT,
     headers: Optional[Dict[str, str]] = None,
     api_key: Optional[str] = None,
     enable_console_export: bool = False,
@@ -652,7 +700,8 @@ def initialize_tracing(
     Args:
         collection_name: Name of the collection
         collection_id: Optional collection ID (auto-generated if not provided)
-        endpoint: OTLP endpoint URL for span export
+        endpoint: OTLP endpoint URL(s) for span export - can be a single string or list of strings for multiple endpoints
+        headers: Optional headers for authentication
         api_key: Optional API key for bearer token authentication (takes precedence over env var)
         enable_console_export: Whether to export spans to console
         enable_otlp_export: Whether to export spans to OTLP endpoint
@@ -892,16 +941,16 @@ class AgentRunContext:
 def agent_run(func: Callable[..., Any]) -> Callable[..., Any]:
     """
     Decorator to wrap a function in an agent_run_context (sync or async).
-    Injects context, agent_run_id, and transcript_id as keyword arguments if not already present.
+    Injects context, agent_run_id, and transcript_id as function attributes.
 
     Example:
         @agent_run
-        def my_func(x, y, **kwargs):
-            print(kwargs.get("context"), kwargs.get("agent_run_id"), kwargs.get("transcript_id"))
+        def my_func(x, y):
+            print(my_func.docent.context, my_func.docent.agent_run_id, my_func.docent.transcript_id)
 
         @agent_run
-        async def my_async_func(z, **kwargs):
-            print(kwargs.get("agent_run_id"))
+        async def my_async_func(z):
+            print(my_async_func.docent.agent_run_id)
     """
     import functools
     import inspect
@@ -911,10 +960,20 @@ def agent_run(func: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(func)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             async with AgentRunContext() as (context, agent_run_id, transcript_id):
-                kwargs = dict(kwargs)
-                kwargs.setdefault("context", context)
-                kwargs.setdefault("agent_run_id", agent_run_id)
-                kwargs.setdefault("transcript_id", transcript_id)
+                # Store docent data as function attributes
+                setattr(
+                    async_wrapper,
+                    "docent",
+                    type(
+                        "DocentData",
+                        (),
+                        {
+                            "context": context,
+                            "agent_run_id": agent_run_id,
+                            "transcript_id": transcript_id,
+                        },
+                    )(),
+                )
                 return await func(*args, **kwargs)
 
         return async_wrapper
@@ -923,10 +982,20 @@ def agent_run(func: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(func)
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
             with AgentRunContext() as (context, agent_run_id, transcript_id):
-                kwargs = dict(kwargs)
-                kwargs.setdefault("context", context)
-                kwargs.setdefault("agent_run_id", agent_run_id)
-                kwargs.setdefault("transcript_id", transcript_id)
+                # Store docent data as function attributes
+                setattr(
+                    sync_wrapper,
+                    "docent",
+                    type(
+                        "DocentData",
+                        (),
+                        {
+                            "context": context,
+                            "agent_run_id": agent_run_id,
+                            "transcript_id": transcript_id,
+                        },
+                    )(),
+                )
                 return func(*args, **kwargs)
 
         return sync_wrapper
