@@ -5,7 +5,7 @@ This guide helps you ingest agent runs into Docent.
 
 ### Ingesting transcripts
 
-Before starting, navigate to [docent-alpha.transluce.org](https://docent-alpha.transluce.org){target=_blank} and sign up for an account.
+Before starting, navigate to [docent.transluce.org](https://docent.transluce.org){target=_blank} and sign up for an account.
 
 Then install Docent's Python SDK:
 
@@ -13,7 +13,7 @@ Then install Docent's Python SDK:
 pip install docent-python
 ```
 
-Next, go to the [API keys page](https://docent-alpha.transluce.org/settings/api_keys){target=_blank}, create a key, and instantiate a client object with that key:
+Next, go to the [API keys page](https://docent.transluce.org/settings/api_keys){target=_blank}, create a key, and instantiate a client object with that key:
 
 ```python
 import os
