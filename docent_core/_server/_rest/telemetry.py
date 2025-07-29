@@ -24,7 +24,6 @@ logger = get_logger(__name__)
 
 # logger.setLevel(logging.DEBUG)
 
-REDIS = get_redis_client()
 # Redis key patterns for collection accumulation
 _COLLECTION_SPANS_KEY_PREFIX = "collection_spans:"
 _COLLECTION_TIMEOUT_KEY_PREFIX = "collection_timeout:"
@@ -33,24 +32,26 @@ _COLLECTION_TIMEOUT_SECONDS = 2 * 60  # Timeout for collection completion
 
 async def _add_spans_to_accumulation(collection_id: str, spans: List[Dict[str, Any]]) -> None:
     """Add spans to accumulation using Redis."""
+    redis_client = await get_redis_client()
     collection_key = f"{_COLLECTION_SPANS_KEY_PREFIX}{collection_id}"
 
     # Add spans to Redis list
     for span in spans:
-        await REDIS.lpush(collection_key, json.dumps(span))  # type: ignore
+        await redis_client.lpush(collection_key, json.dumps(span))  # type: ignore
 
     # Set TTL for automatic cleanup if collection doesn't complete
-    await REDIS.expire(collection_key, _COLLECTION_TIMEOUT_SECONDS)  # type: ignore
+    await redis_client.expire(collection_key, _COLLECTION_TIMEOUT_SECONDS)  # type: ignore
 
     logger.info(f"Added {len(spans)} spans to Redis for collection {collection_id}")
 
 
 async def _get_accumulated_spans(collection_id: str) -> List[Dict[str, Any]]:
     """Get accumulated spans for a collection from Redis."""
+    redis_client = await get_redis_client()
     collection_key = f"{_COLLECTION_SPANS_KEY_PREFIX}{collection_id}"
 
     # Get all spans from Redis list
-    span_jsons = cast(List[str], await REDIS.lrange(collection_key, 0, -1))  # type: ignore
+    span_jsons = cast(List[str], await redis_client.lrange(collection_key, 0, -1))  # type: ignore
 
     spans: List[Dict[str, Any]] = []
     for span_json in reversed(list(span_jsons)):
@@ -65,14 +66,16 @@ async def _get_accumulated_spans(collection_id: str) -> List[Dict[str, Any]]:
 
 async def _remove_collection_from_accumulation(collection_id: str) -> None:
     """Remove a collection from accumulation in Redis."""
+    redis_client = await get_redis_client()
     collection_key = f"{_COLLECTION_SPANS_KEY_PREFIX}{collection_id}"
-    await REDIS.delete(collection_key)  # type: ignore
+    await redis_client.delete(collection_key)  # type: ignore
 
 
 async def _cancel_collection_timeout(collection_id: str) -> None:
     """Cancel and remove a collection completion task from Redis."""
+    redis_client = await get_redis_client()
     timeout_key = f"{_COLLECTION_TIMEOUT_KEY_PREFIX}{collection_id}"
-    await REDIS.delete(timeout_key)  # type: ignore
+    await redis_client.delete(timeout_key)  # type: ignore
 
 
 def schedule_collection_timeout(collection_id: str, user: User) -> None:
@@ -83,9 +86,10 @@ def schedule_collection_timeout(collection_id: str, user: User) -> None:
 
         # Check if collection still exists and hasn't been processed
         timeout_key = f"{_COLLECTION_TIMEOUT_KEY_PREFIX}{collection_id}"
+        redis_client = await get_redis_client()
 
         # Only process if this worker still owns the timeout
-        if await REDIS.exists(timeout_key):  # type: ignore
+        if await redis_client.exists(timeout_key):  # type: ignore
             accumulated_spans = await _get_accumulated_spans(collection_id)
             if accumulated_spans:
                 logger.info(f"Collection {collection_id} timed out, processing accumulated spans")
@@ -97,9 +101,10 @@ def schedule_collection_timeout(collection_id: str, user: User) -> None:
 
     async def _schedule_timeout():
         timeout_key = f"{_COLLECTION_TIMEOUT_KEY_PREFIX}{collection_id}"
+        redis_client = await get_redis_client()
 
         # Try to set the timeout key (only succeeds if it doesn't exist)
-        if await REDIS.set(timeout_key, "1", nx=True):  # type: ignore
+        if await redis_client.set(timeout_key, "1", nx=True):  # type: ignore
             # This worker owns the timeout, schedule the task
             asyncio.create_task(timeout_handler())
 
