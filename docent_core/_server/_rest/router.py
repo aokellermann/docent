@@ -57,6 +57,7 @@ from docent_core._db_service.service import MonoService
 from docent_core._llm_util.data_models.llm_output import LLMOutput
 from docent_core._llm_util.prod_llms import get_llm_completions_async
 from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES
+from docent_core._server._analytics.posthog import AnalyticsClient
 from docent_core._server._analytics.tracker import track_endpoint_with_user
 from docent_core._server._assistant.chat import make_single_tasst_system_prompt
 from docent_core._server._assistant.summarizer import (
@@ -75,6 +76,7 @@ from docent_core._server._broker.redis_client import (
     enqueue_search_job,
     get_redis_client,
 )
+from docent_core._server._dependencies.analytics import use_posthog_user_context
 from docent_core._server._dependencies.database import (
     get_mono_svc,
     require_collection_exists,
@@ -317,6 +319,7 @@ async def create_collection(
     request: CreateCollectionRequest = CreateCollectionRequest(),
     user: User = Depends(get_authenticated_user),
     mono_svc: MonoService = Depends(get_mono_svc),
+    analytics: AnalyticsClient = Depends(use_posthog_user_context),
 ):
     collection_id = await mono_svc.create_collection(
         user=user,
@@ -326,7 +329,17 @@ async def create_collection(
     )
 
     # Track analytics
-    await track_endpoint_with_user(mono_svc, EndpointType.CREATE_FG, user, collection_id)
+    # await track_endpoint_with_user(mono_svc, EndpointType.CREATE_FG, user, collection_id)
+
+    # Track with PostHog
+    analytics.track_event(
+        "collection_created",
+        properties={
+            "collection_id": collection_id,
+            "name": request.name,
+            "description": request.description,
+        },
+    )
 
     return {"collection_id": collection_id}
 
@@ -499,6 +512,7 @@ async def import_runs_from_file(
     file: UploadFile = File(...),
     mono_svc: MonoService = Depends(get_mono_svc),
     ctx: ViewContext = Depends(get_default_view_ctx),
+    analytics: AnalyticsClient = Depends(use_posthog_user_context),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
 ):
     """
@@ -531,7 +545,20 @@ async def import_runs_from_file(
         await mono_svc.add_agent_runs(ctx, agent_runs)
 
     # Track analytics
-    await track_endpoint_with_user(mono_svc, EndpointType.POST_AGENT_RUNS, ctx.user, collection_id)
+    # await track_endpoint_with_user(mono_svc, EndpointType.POST_AGENT_RUNS, ctx.user, collection_id)
+
+    # Track with PostHog
+    analytics.track_event(
+        "agent_runs_ingested",
+        properties={
+            "collection_id": collection_id,
+            "num_runs": len(agent_runs),
+            "source": "file_upload",
+            "filename": file_info.get("filename"),
+            "task": file_info.get("task"),
+            "model": file_info.get("model"),
+        },
+    )
 
     return {
         "status": "success",
@@ -618,13 +645,23 @@ async def post_agent_runs(
     request: PostAgentRunsRequest,
     mono_svc: MonoService = Depends(get_mono_svc),
     ctx: ViewContext = Depends(get_default_view_ctx),
+    analytics: AnalyticsClient = Depends(use_posthog_user_context),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
 ):
     async with mono_svc.advisory_lock(collection_id, action_id="mutation"):
         await mono_svc.add_agent_runs(ctx, request.agent_runs)
 
     # Track analytics - we need to get the user from the context
-    await track_endpoint_with_user(mono_svc, EndpointType.POST_AGENT_RUNS, ctx.user, collection_id)
+    # await track_endpoint_with_user(mono_svc, EndpointType.POST_AGENT_RUNS, ctx.user, collection_id)
+
+    # Track with PostHog
+    analytics.track_event(
+        "agent_runs_ingested",
+        properties={
+            "collection_id": collection_id,
+            "num_runs": len(request.agent_runs),
+        },
+    )
 
 
 ########
@@ -668,6 +705,7 @@ async def post_base_filter(
     request: PostBaseFilterRequest,
     mono_svc: MonoService = Depends(get_mono_svc),
     ctx: ViewContext = Depends(get_default_view_ctx),
+    analytics: AnalyticsClient = Depends(use_posthog_user_context),
     _: None = Depends(require_view_permission(Permission.WRITE)),
 ):
     async with mono_svc.advisory_lock(collection_id, action_id="mutation"):
@@ -677,7 +715,17 @@ async def post_base_filter(
             new_ctx = await mono_svc.set_view_base_filter(ctx, request.filter)
 
     # Track analytics
-    await track_endpoint_with_user(mono_svc, EndpointType.POST_BASE_FILTER, ctx.user, collection_id)
+    # await track_endpoint_with_user(mono_svc, EndpointType.POST_BASE_FILTER, ctx.user, collection_id)
+
+    # Track with PostHog
+    analytics.track_event(
+        "base_filter_updated",
+        properties={
+            "collection_id": collection_id,
+            "filter": request.filter.model_dump() if request.filter else None,
+            "action": "clear" if request.filter is None else "set",
+        },
+    )
 
     return new_ctx.base_filter
 
