@@ -22,6 +22,17 @@ if [ -z "$BRANCH" ]; then
   exit 1
 fi
 
+# Confirmation prompt - this is a destructive operation
+echo "⚠️  WARNING: This will completely overwrite branch '$BRANCH' with the contents of 'main'!"
+read -p "Type 'FORCE PUSH' to confirm this destructive operation: " confirmation
+
+if [ "$confirmation" != "FORCE PUSH" ]; then
+  echo "Operation cancelled. Confirmation text did not match."
+  exit 1
+fi
+
+echo "Proceeding with force push operation..."
+
 # Sync branches
 git checkout main
 git pull origin main
