@@ -19,7 +19,7 @@ The Docent tracing system allows you to:
 Docent tracing is included with the main Docent package:
 
 ```bash
-pip install docent
+pip install docent-python
 ```
 
 ### 2. API Key Setup
@@ -239,7 +239,7 @@ def run_agent(state):
 
 def evaluate_agent(state):
     # Resume the same agent run by passing the agent_run_id
-    with agent_run_context(agent_run_id=state.metadat.agent_run_id):
+    with agent_run_context(agent_run_id=state.metadata.agent_run_id):
         # This continues the same agent run
         accuracy = calculate_accuracy(response, expected_answer)
         agent_run_score("evaluation_accuracy", accuracy)
