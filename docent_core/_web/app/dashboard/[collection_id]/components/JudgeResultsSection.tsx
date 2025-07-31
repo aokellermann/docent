@@ -5,7 +5,10 @@ import { useAppSelector, useAppDispatch } from '@/app/store/hooks';
 import { renderTextWithCitations } from '@/lib/renderCitations';
 import { openAgentRunInDashboard } from '@/app/store/transcriptSlice';
 import { cn } from '@/lib/utils';
-import { JudgeResultWithCitations } from '@/app/store/rubricSlice';
+import {
+  JudgeResultWithCitations,
+  toggleShowUniqueAgentRuns,
+} from '@/app/store/rubricSlice';
 import { useCallback, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -27,6 +30,10 @@ const CollapsibleResultsSection = ({
   isExpanded = true,
   onToggle,
 }: CollapsibleResultsSectionProps) => {
+  const dispatch = useAppDispatch();
+  const showUniqueAgentRuns = useAppSelector(
+    (state) => state.rubric.showUniqueAgentRuns
+  );
   // Count only judge results with non-null values (what actually gets displayed)
   const resultHits = useMemo(() => {
     return judgeResultIds
@@ -48,6 +55,8 @@ const CollapsibleResultsSection = ({
     });
     return groups;
   }, [resultHits]);
+
+  const uniqueAgentRunCount = Object.keys(groupedResults).length;
 
   const isPollingAssignments = useAppSelector(
     (state) => state.rubric.isPollingAssignments
@@ -89,8 +98,13 @@ const CollapsibleResultsSection = ({
 
         {/* Count */}
         <div className="flex-shrink-0 flex items-center">
-          <span className="text-xs px-1.5 py-0.5 rounded-sm bg-muted text-muted-foreground cursor-default flex items-center min-w-[2rem] justify-center">
-            {resultHits.length}
+          <span
+            className="text-xs px-1.5 py-0.5 rounded-sm bg-muted text-muted-foreground cursor-pointer flex items-center min-w-[2rem] justify-center hover:bg-muted/80 transition-colors"
+            onClick={() => dispatch(toggleShowUniqueAgentRuns())}
+          >
+            {showUniqueAgentRuns
+              ? `${uniqueAgentRunCount} runs`
+              : `${resultHits.length} hits`}
             {isPollingAssignments && (
               <div className="animate-spin ml-1 rounded-full h-2 w-2 border-[1.5px] border-border border-t-gray-500 inline-block" />
             )}
