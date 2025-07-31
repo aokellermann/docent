@@ -21,10 +21,10 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-http>=1.35.0",
     # instrumentation
     "opentelemetry-instrumentation-threading>=0.56b0",
-    "anthropic>=0.58.2",
     "opentelemetry-instrumentation-anthropic>=0.42.0",
-    "openai>=1.97.0",
     "opentelemetry-instrumentation-openai>=0.42.0",
+    "opentelemetry-instrumentation-bedrock>=0.42.0",
+    "opentelemetry-instrumentation-langchain>=0.43.1",
 ]
 
 [build-system]

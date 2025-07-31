@@ -34,6 +34,7 @@ async def _add_spans_to_accumulation(collection_id: str, spans: List[Dict[str, A
     """Add spans to accumulation using Redis."""
     redis_client = await get_redis_client()
     collection_key = f"{_COLLECTION_SPANS_KEY_PREFIX}{collection_id}"
+    redis_client = await get_redis_client()
 
     # Add spans to Redis list
     for span in spans:
@@ -49,6 +50,7 @@ async def _get_accumulated_spans(collection_id: str) -> List[Dict[str, Any]]:
     """Get accumulated spans for a collection from Redis."""
     redis_client = await get_redis_client()
     collection_key = f"{_COLLECTION_SPANS_KEY_PREFIX}{collection_id}"
+    redis_client = await get_redis_client()
 
     # Get all spans from Redis list
     span_jsons = cast(List[str], await redis_client.lrange(collection_key, 0, -1))  # type: ignore
@@ -146,20 +148,13 @@ async def trace_endpoint(
 
             body = gzip.decompress(body)
 
-        # Process based on content type
         if "application/x-protobuf" in content_type:
-            # Handle protobuf format
             trace_data = parse_protobuf_traces(body)
-        # elif "application/json" in content_type:
-        #     # Handle JSON format
-        #     trace_data = process_json_traces(body)
         else:
             raise HTTPException(status_code=415, detail=f"Unsupported content type: {content_type}")
 
-        # print(f"Headers: {dict(request.headers)}")
-
         # Store the raw telemetry data for request
-        # await mono_svc.store_telemetry_log(user.id, trace_data)
+        await mono_svc.store_telemetry_log(user.id, trace_data)
 
         # Extract spans from trace data
         spans = await extract_spans(trace_data)
@@ -188,17 +183,6 @@ def parse_protobuf_traces(body: bytes) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error parsing protobuf traces: {str(e)}")
         raise ValueError(f"Invalid protobuf format: {str(e)}")
-
-
-# def process_json_traces(body: bytes) -> Dict[str, Any]:
-#     """Process JSON formatted trace data."""
-#     try:
-#         # Decode and parse JSON
-#         trace_data = json.loads(body.decode("utf-8"))
-#         return trace_data
-#     except json.JSONDecodeError as e:
-#         logger.error(f"Error parsing JSON traces: {str(e)}")
-#         raise ValueError(f"Invalid JSON format: {str(e)}")
 
 
 async def extract_spans(trace_data: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -557,6 +541,7 @@ async def store_spans(spans: List[Dict[str, Any]], user: User) -> None:
             agent_run_transcripts: Dict[str, Transcript] = {}
             agent_run_scores: Dict[str, int | float | bool | None] = {}
             agent_run_model: str | None = None
+            agent_run_metadata_dict: Dict[str, Any] = {}
 
             # Process each transcript
             for transcript_id, transcript_spans in transcripts.items():
@@ -576,6 +561,14 @@ async def store_spans(spans: List[Dict[str, Any]], user: User) -> None:
                             if score_name and score_value is not None:
                                 agent_run_scores[score_name] = score_value
                                 logger.info(f"    Found score: {score_name} = {score_value}")
+
+                    # Extract metadata from span events
+                    span_metadata = _extract_metadata_from_span_events(span)
+                    if span_metadata:
+                        # Unflatten the metadata to restore nested structure
+                        unflattened_metadata = _unflatten_metadata(span_metadata)
+                        agent_run_metadata_dict.update(unflattened_metadata)
+                        logger.info(f"    Found metadata: {unflattened_metadata}")
 
                     # Extract model from span attributes
                     span_attrs = span.get("attributes", {})
@@ -683,10 +676,15 @@ async def store_spans(spans: List[Dict[str, Any]], user: User) -> None:
 
                     # Create agent run if it has transcripts
             if agent_run_transcripts:
-                # Create metadata with scores and model using BaseAgentRunMetadata
+                # Create metadata with scores, model, and any additional metadata using BaseAgentRunMetadata
                 metadata_dict: Dict[str, Any] = {"scores": agent_run_scores}
                 if agent_run_model:
                     metadata_dict["model"] = agent_run_model
+
+                # Add any additional metadata from span events
+                if agent_run_metadata_dict:
+                    metadata_dict.update(agent_run_metadata_dict)
+                    logger.info(f"  Added metadata to agent run: {agent_run_metadata_dict}")
 
                 metadata = BaseAgentRunMetadata(**metadata_dict)
                 agent_run = AgentRun(
@@ -1168,3 +1166,57 @@ def _create_message_from_data(
     except Exception as e:
         logger.error(f"Failed to parse {context} message for span {span_id}: {e}")
         return None
+
+
+def _extract_metadata_from_span_events(span: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Extract metadata from span events that were created by agent_run_metadata().
+
+    Args:
+        span: The span dictionary containing events
+
+    Returns:
+        Dictionary of metadata key-value pairs
+    """
+    metadata: Dict[str, Any] = {}
+
+    for event in span.get("events", []):
+        if event.get("name") == "agent_run_metadata":
+            event_attrs = event.get("attributes", {})
+
+            # Extract metadata attributes that start with "metadata."
+            for key, value in event_attrs.items():
+                if key.startswith("metadata."):
+                    # Remove the "metadata." prefix to get the actual key
+                    metadata_key = key[len("metadata.") :]
+                    metadata[metadata_key] = value
+
+    return metadata
+
+
+def _unflatten_metadata(flattened_metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Convert flattened metadata with dot notation back to nested structure.
+
+    Args:
+        flattened_metadata: Dictionary with flattened keys like "user.id", "config.model"
+
+    Returns:
+        Nested dictionary structure
+    """
+    unflattened: Dict[str, Any] = {}
+
+    for key, value in flattened_metadata.items():
+        parts = key.split(".")
+        current = unflattened
+
+        # Navigate/create the nested structure
+        for part in parts[:-1]:
+            if part not in current:
+                current[part] = {}
+            current = current[part]
+
+        # Set the value at the final location
+        current[parts[-1]] = value
+
+    return unflattened

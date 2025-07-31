@@ -18,6 +18,8 @@ from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter as GRPCExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter as HTTPExporter
 from opentelemetry.instrumentation.anthropic import AnthropicInstrumentor
+from opentelemetry.instrumentation.bedrock import BedrockInstrumentor
+from opentelemetry.instrumentation.langchain import LangchainInstrumentor
 from opentelemetry.instrumentation.openai import OpenAIInstrumentor
 from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 from opentelemetry.sdk.resources import Resource
@@ -31,10 +33,9 @@ from opentelemetry.sdk.trace.export import (
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logging.disable()
 
 # Default configuration
-# DEFAULT_ENDPOINT = "http://localhost:4318"
-# DEFAULT_ENDPOINT = "https://aws-docent-backend.transluce.org/rest/telemetry"
 DEFAULT_ENDPOINT = "http://localhost:8889/rest/telemetry"
 
 
@@ -242,17 +243,19 @@ class DocentTracer:
                     # Always add collection_id as it's always available
                     span.set_attribute("collection_id", self.manager.collection_id)
 
-                    # Handle agent_run_id with individual try-except
+                    # Handle agent_run_id
                     try:
                         agent_run_id: str = self.manager._agent_run_id_var.get()
                         if agent_run_id:
                             span.set_attribute("agent_run_id", agent_run_id)
                         else:
-                            span.set_attribute("agent_run_id", "default1")
+                            span.set_attribute("agent_run_id_default", True)
+                            span.set_attribute("agent_run_id", self.manager.default_agent_run_id)
                     except LookupError:
-                        span.set_attribute("agent_run_id", "default2")
+                        span.set_attribute("agent_run_id_default", True)
+                        span.set_attribute("agent_run_id", self.manager.default_agent_run_id)
 
-                    # Handle transcript_id with individual try-except
+                    # Handle transcript_id
                     try:
                         transcript_id: str = self.manager._transcript_id_var.get()
                         if transcript_id:
@@ -264,7 +267,7 @@ class DocentTracer:
                         # transcript_id not available, skip it
                         pass
 
-                    # Handle attributes with individual try-except
+                    # Handle attributes
                     try:
                         attributes: dict[str, Any] = self.manager._attributes_var.get()
                         for key, value in attributes.items():
@@ -337,14 +340,30 @@ class DocentTracer:
             # Instrument OpenAI with our isolated tracer provider
             try:
                 OpenAIInstrumentor().instrument(tracer_provider=self._tracer_provider)
+                logger.info("Instrumented OpenAI")
             except Exception as e:
                 logger.warning(f"Failed to instrument OpenAI: {e}")
 
             # Instrument Anthropic with our isolated tracer provider
             try:
                 AnthropicInstrumentor().instrument(tracer_provider=self._tracer_provider)
+                logger.info("Instrumented Anthropic")
             except Exception as e:
                 logger.warning(f"Failed to instrument Anthropic: {e}")
+
+            # Instrument Bedrock with our isolated tracer provider
+            try:
+                BedrockInstrumentor().instrument(tracer_provider=self._tracer_provider)
+                logger.info("Instrumented Bedrock")
+            except Exception as e:
+                logger.warning(f"Failed to instrument Bedrock: {e}")
+
+            # Instrument LangChain with our isolated tracer provider
+            try:
+                LangchainInstrumentor().instrument(tracer_provider=self._tracer_provider)
+                logger.info("Instrumented LangChain")
+            except Exception as e:
+                logger.warning(f"Failed to instrument LangChain: {e}")
 
             # Register cleanup handlers
             self._register_cleanup()
@@ -492,6 +511,7 @@ class DocentTracer:
         self,
         agent_run_id: Optional[str] = None,
         transcript_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
         **attributes: Any,
     ) -> Iterator[Any]:
         """
@@ -500,6 +520,7 @@ class DocentTracer:
         Args:
             agent_run_id: Optional agent run ID (auto-generated if not provided)
             transcript_id: Optional transcript ID (auto-generated if not provided)
+            metadata: Optional nested dictionary of metadata to attach as events
             **attributes: Additional attributes to add to the context
 
         Yields:
@@ -517,9 +538,9 @@ class DocentTracer:
             transcript_id = str(uuid.uuid4())
 
         # Set context variables for this execution context
-        token1: Token[str] = self._agent_run_id_var.set(agent_run_id)
-        token2: Token[str] = self._transcript_id_var.set(transcript_id)
-        token3: Token[dict[str, Any]] = self._attributes_var.set(attributes)
+        agent_run_id_token: Token[str] = self._agent_run_id_var.set(agent_run_id)
+        transcript_id_token: Token[str] = self._transcript_id_var.set(transcript_id)
+        attributes_token: Token[dict[str, Any]] = self._attributes_var.set(attributes)
 
         try:
             # Create a span with the agent run attributes
@@ -531,18 +552,23 @@ class DocentTracer:
             with self._tracer.start_as_current_span(
                 "agent_run_context", context=self._root_context, attributes=span_attributes
             ) as _span:
+                # Attach metadata as events if provided
+                if metadata:
+                    _add_metadata_event_to_span(_span, metadata)
+
                 context = trace.get_current_span().get_span_context()
                 yield context, agent_run_id, transcript_id
         finally:
-            self._agent_run_id_var.reset(token1)
-            self._transcript_id_var.reset(token2)
-            self._attributes_var.reset(token3)
+            self._agent_run_id_var.reset(agent_run_id_token)
+            self._transcript_id_var.reset(transcript_id_token)
+            self._attributes_var.reset(attributes_token)
 
     @asynccontextmanager
     async def async_agent_run_context(
         self,
         agent_run_id: Optional[str] = None,
         transcript_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
         **attributes: Any,
     ) -> AsyncIterator[Any]:
         """
@@ -552,6 +578,7 @@ class DocentTracer:
         Args:
             agent_run_id: Optional agent run ID (auto-generated if not provided)
             transcript_id: Optional transcript ID (auto-generated if not provided)
+            metadata: Optional nested dictionary of metadata to attach as events
             **attributes: Additional attributes to add to the context
 
         Yields:
@@ -569,9 +596,9 @@ class DocentTracer:
             transcript_id = str(uuid.uuid4())
 
         # Set context variables for this execution context
-        token1: Any = self._agent_run_id_var.set(agent_run_id)
-        token2: Any = self._transcript_id_var.set(transcript_id)
-        token3: Any = self._attributes_var.set(attributes)
+        agent_run_id_token: Any = self._agent_run_id_var.set(agent_run_id)
+        transcript_id_token: Any = self._transcript_id_var.set(transcript_id)
+        attributes_token: Any = self._attributes_var.set(attributes)
 
         try:
             # Create a span with the agent run attributes
@@ -583,12 +610,16 @@ class DocentTracer:
             with self._tracer.start_as_current_span(
                 "agent_run_context", context=self._root_context, attributes=span_attributes
             ) as _span:
+                # Attach metadata as events if provided
+                if metadata:
+                    _add_metadata_event_to_span(_span, metadata)
+
                 context = trace.get_current_span().get_span_context()
                 yield context, agent_run_id, transcript_id
         finally:
-            self._agent_run_id_var.reset(token1)
-            self._transcript_id_var.reset(token2)
-            self._attributes_var.reset(token3)
+            self._agent_run_id_var.reset(agent_run_id_token)
+            self._transcript_id_var.reset(transcript_id_token)
+            self._attributes_var.reset(attributes_token)
 
     def start_transcript(
         self,
@@ -720,7 +751,6 @@ def initialize_tracing(
     # Check for API key in environment variable if not provided as parameter
     if api_key is None:
         env_api_key: Optional[str] = os.environ.get("DOCENT_API_KEY")
-        print(f"API key: {env_api_key}")
         api_key = env_api_key
 
     if _global_tracer is None:
@@ -788,73 +818,6 @@ def get_api_key() -> Optional[str]:
     return os.environ.get("DOCENT_API_KEY")
 
 
-# Async convenience functions
-@asynccontextmanager
-async def async_span(name: str, attributes: Optional[Dict[str, Any]] = None) -> AsyncIterator[Any]:
-    """Async convenience function for creating spans."""
-    async with get_tracer().async_span(name, attributes) as span:
-        yield span
-
-
-@asynccontextmanager
-async def async_agent_run_context(
-    agent_run_id: Optional[str] = None, transcript_id: Optional[str] = None, **attributes: Any
-) -> AsyncIterator[Any]:
-    """Async convenience function for creating agent run contexts."""
-    async with get_tracer().async_agent_run_context(agent_run_id, transcript_id, **attributes) as (
-        context,
-        agent_run_id,
-        transcript_id,
-    ):
-        yield context, agent_run_id, transcript_id
-
-
-@asynccontextmanager
-async def agent_run_context_async(
-    agent_run_id: Optional[str] = None, transcript_id: Optional[str] = None, **attributes: Any
-) -> AsyncIterator[Any]:
-    """
-    Async version of agent_run_context for explicit async usage.
-
-    Args:
-        agent_run_id: Optional agent run ID (auto-generated if not provided)
-        transcript_id: Optional transcript ID (auto-generated if not provided)
-        **attributes: Additional attributes to add to the context
-
-    Yields:
-        Tuple of (context, agent_run_id, transcript_id)
-    """
-    async with get_tracer().async_agent_run_context(agent_run_id, transcript_id, **attributes) as (
-        context,
-        agent_run_id,
-        transcript_id,
-    ):
-        yield context, agent_run_id, transcript_id
-
-
-# Manual start/stop convenience functions
-def start_transcript(
-    agent_run_id: Optional[str] = None, transcript_id: Optional[str] = None, **attributes: Any
-) -> tuple[Any, str, str]:
-    """Convenience function for manually starting a transcript span."""
-    return get_tracer().start_transcript(agent_run_id, transcript_id, **attributes)
-
-
-def stop_transcript(span: Any) -> None:
-    """Convenience function for manually stopping a transcript span."""
-    get_tracer().stop_transcript(span)
-
-
-def start_span(name: str, attributes: Optional[Dict[str, Any]] = None) -> Any:
-    """Convenience function for manually starting a span."""
-    return get_tracer().start_span(name, attributes)
-
-
-def stop_span(span: Any) -> None:
-    """Convenience function for manually stopping a span."""
-    get_tracer().stop_span(span)
-
-
 def agent_run_score(name: str, score: float, attributes: Optional[Dict[str, Any]] = None) -> None:
     """
     Record a score event on the current span.
@@ -883,6 +846,61 @@ def agent_run_score(name: str, score: float, attributes: Optional[Dict[str, Any]
         logger.error(f"Failed to record score event: {e}")
 
 
+def _flatten_dict(d: Dict[str, Any], prefix: str = "") -> Dict[str, Any]:
+    """Flatten nested dictionary with dot notation."""
+    flattened: Dict[str, Any] = {}
+    for key, value in d.items():
+        new_key = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, dict):
+            flattened.update(_flatten_dict(dict(value), new_key))  # type: ignore
+        else:
+            flattened[new_key] = value
+    return flattened
+
+
+def _add_metadata_event_to_span(span: Any, metadata: Dict[str, Any]) -> None:
+    """
+    Add metadata as an event to a span.
+
+    Args:
+        span: The span to add the event to
+        metadata: Dictionary of metadata (can be nested)
+    """
+    if span and hasattr(span, "add_event"):
+        event_attributes: dict[str, Any] = {
+            "event.type": "metadata",
+        }
+
+        # Flatten nested metadata and add as event attributes
+        flattened_metadata = _flatten_dict(metadata)
+        for key, value in flattened_metadata.items():
+            event_attributes[f"metadata.{key}"] = value
+        span.add_event(name="agent_run_metadata", attributes=event_attributes)
+
+
+def agent_run_metadata(metadata: Dict[str, Any]) -> None:
+    """
+    Record metadata as an event on the current span.
+    Automatically works in both sync and async contexts.
+    Supports nested dictionaries by flattening them with dot notation.
+
+    Args:
+        metadata: Dictionary of metadata to attach to the current span (can be nested)
+
+    Example:
+        agent_run_metadata({"user": "John", "id": 123, "flagged": True})
+        agent_run_metadata({"user": {"id": "123", "name": "John"}, "config": {"model": "gpt-4"}})
+    """
+    try:
+        current_span: Any = trace.get_current_span()
+        if current_span:
+            _add_metadata_event_to_span(current_span, metadata)
+        else:
+            logger.warning("No current span available for recording metadata")
+    except Exception as e:
+        logger.error(f"Failed to record metadata event: {e}")
+
+
 # Unified functions that automatically detect context
 @asynccontextmanager
 async def span(name: str, attributes: Optional[Dict[str, Any]] = None) -> AsyncIterator[Any]:
@@ -905,10 +923,12 @@ class AgentRunContext:
         self,
         agent_run_id: Optional[str] = None,
         transcript_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
         **attributes: Any,
     ):
         self.agent_run_id = agent_run_id
         self.transcript_id = transcript_id
+        self.metadata = metadata
         self.attributes: dict[str, Any] = attributes
         self._sync_context: Optional[Any] = None
         self._async_context: Optional[Any] = None
@@ -916,7 +936,7 @@ class AgentRunContext:
     def __enter__(self) -> Any:
         """Sync context manager entry."""
         self._sync_context = get_tracer().agent_run_context(
-            self.agent_run_id, self.transcript_id, **self.attributes
+            self.agent_run_id, self.transcript_id, metadata=self.metadata, **self.attributes
         )
         return self._sync_context.__enter__()
 
@@ -928,7 +948,7 @@ class AgentRunContext:
     async def __aenter__(self) -> Any:
         """Async context manager entry."""
         self._async_context = get_tracer().async_agent_run_context(
-            self.agent_run_id, self.transcript_id, **self.attributes
+            self.agent_run_id, self.transcript_id, metadata=self.metadata, **self.attributes
         )
         return await self._async_context.__aenter__()
 
@@ -938,77 +958,99 @@ class AgentRunContext:
             await self._async_context.__aexit__(exc_type, exc_val, exc_tb)
 
 
-def agent_run(func: Callable[..., Any]) -> Callable[..., Any]:
+def agent_run(
+    func: Optional[Callable[..., Any]] = None, *, metadata: Optional[Dict[str, Any]] = None
+):
     """
     Decorator to wrap a function in an agent_run_context (sync or async).
     Injects context, agent_run_id, and transcript_id as function attributes.
+    Optionally accepts metadata to attach to the agent run context.
 
     Example:
         @agent_run
         def my_func(x, y):
             print(my_func.docent.context, my_func.docent.agent_run_id, my_func.docent.transcript_id)
 
-        @agent_run
+        @agent_run(metadata={"user": "John", "model": "gpt-4"})
+        def my_func_with_metadata(x, y):
+            print(my_func_with_metadata.docent.agent_run_id)
+
+        @agent_run(metadata={"config": {"model": "gpt-4", "temperature": 0.7}})
         async def my_async_func(z):
             print(my_async_func.docent.agent_run_id)
     """
     import functools
     import inspect
 
-    if inspect.iscoroutinefunction(func):
+    def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
+        if inspect.iscoroutinefunction(f):
 
-        @functools.wraps(func)
-        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-            async with AgentRunContext() as (context, agent_run_id, transcript_id):
-                # Store docent data as function attributes
-                setattr(
-                    async_wrapper,
-                    "docent",
-                    type(
-                        "DocentData",
-                        (),
-                        {
-                            "context": context,
-                            "agent_run_id": agent_run_id,
-                            "transcript_id": transcript_id,
-                        },
-                    )(),
-                )
-                return await func(*args, **kwargs)
+            @functools.wraps(f)
+            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                async with AgentRunContext(metadata=metadata) as (
+                    context,
+                    agent_run_id,
+                    transcript_id,
+                ):
+                    # Store docent data as function attributes
+                    setattr(
+                        async_wrapper,
+                        "docent",
+                        type(
+                            "DocentData",
+                            (),
+                            {
+                                "context": context,
+                                "agent_run_id": agent_run_id,
+                                "transcript_id": transcript_id,
+                            },
+                        )(),
+                    )
+                    return await f(*args, **kwargs)
 
-        return async_wrapper
+            return async_wrapper
+        else:
+
+            @functools.wraps(f)
+            def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+                with AgentRunContext(metadata=metadata) as (context, agent_run_id, transcript_id):
+                    # Store docent data as function attributes
+                    setattr(
+                        sync_wrapper,
+                        "docent",
+                        type(
+                            "DocentData",
+                            (),
+                            {
+                                "context": context,
+                                "agent_run_id": agent_run_id,
+                                "transcript_id": transcript_id,
+                            },
+                        )(),
+                    )
+                    return f(*args, **kwargs)
+
+            return sync_wrapper
+
+    if func is None:
+        return decorator
     else:
-
-        @functools.wraps(func)
-        def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-            with AgentRunContext() as (context, agent_run_id, transcript_id):
-                # Store docent data as function attributes
-                setattr(
-                    sync_wrapper,
-                    "docent",
-                    type(
-                        "DocentData",
-                        (),
-                        {
-                            "context": context,
-                            "agent_run_id": agent_run_id,
-                            "transcript_id": transcript_id,
-                        },
-                    )(),
-                )
-                return func(*args, **kwargs)
-
-        return sync_wrapper
+        return decorator(func)
 
 
 def agent_run_context(
-    agent_run_id: Optional[str] = None, transcript_id: Optional[str] = None, **attributes: Any
+    agent_run_id: Optional[str] = None,
+    transcript_id: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    **attributes: Any,
 ) -> AgentRunContext:
     """
     Create an agent run context for tracing.
 
     Args:
         agent_run_id: Optional agent run ID (auto-generated if not provided)
+        transcript_id: Optional transcript ID (auto-generated if not provided)
+        metadata: Optional nested dictionary of metadata to attach as events
         **attributes: Additional attributes to add to the context
 
     Returns:
@@ -1022,5 +1064,9 @@ def agent_run_context(
         # Async usage
         async with agent_run_context() as (context, agent_run_id, transcript_id):
             pass
+
+        # With metadata
+        with agent_run_context(metadata={"user": "John", "model": "gpt-4"}) as (context, agent_run_id, transcript_id):
+            pass
     """
-    return AgentRunContext(agent_run_id, transcript_id, **attributes)
+    return AgentRunContext(agent_run_id, transcript_id, metadata=metadata, **attributes)
