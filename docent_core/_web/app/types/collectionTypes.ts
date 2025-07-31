@@ -72,6 +72,7 @@ export interface ChartSpec {
   x_label?: string;
   y_label?: string;
   series_label?: string;
+  runs_filter?: ComplexFilter | null;
 
   rubric_filter: string | null;
 

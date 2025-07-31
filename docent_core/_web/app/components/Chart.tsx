@@ -2,13 +2,15 @@
 
 import { ResponsiveBar } from '@nivo/bar';
 import { ResponsiveLine } from '@nivo/line';
-import { useMemo } from 'react';
+import { useMemo, useCallback } from 'react';
 import TableChart from './TableChart';
 import ChartContainer from './ChartContainer';
 import { ChartSpec } from '../types/collectionTypes';
 import { useAppSelector } from '../store/hooks';
 import { ChartData, ScoreData, getScoreAt } from '../utils/chartDataUtils';
 import { useGetChartDataQuery } from '../api/chartApi';
+import { useChartFilters } from '../../hooks/use-chart-filters';
+import { CustomBarTooltip, CustomLineTooltip } from './CustomTooltips';
 
 type GraphValue = string | number;
 
@@ -18,6 +20,7 @@ export interface GraphDatum {
 
 export default function Chart({ chart }: { chart: ChartSpec }) {
   const collectionId = useAppSelector((state) => state.collection.collectionId);
+  const { handleCellClick } = useChartFilters(collectionId);
 
   const {
     data: chartDataResponse,
@@ -106,7 +109,15 @@ export default function Chart({ chart }: { chart: ChartSpec }) {
       yLabel: chart.y_label || chart.y_key || '',
       is2d: Boolean(chart.series_key),
     };
-  }, [relevantBinStats, chart.x_key, chart.y_key, chart.series_key]);
+  }, [
+    relevantBinStats,
+    chart.x_key,
+    chart.y_key,
+    chart.series_key,
+    chart.x_label,
+    chart.y_label,
+    chart.series_label,
+  ]);
 
   // Handle loading and error states after all hooks
   if (isLoading) {
@@ -118,9 +129,11 @@ export default function Chart({ chart }: { chart: ChartSpec }) {
   }
 
   if (chart.chart_type === 'bar') {
-    return <BarChart chartData={chartData} />;
+    return <BarChart chartData={chartData} handleCellClick={handleCellClick} />;
   } else if (chart.chart_type === 'line') {
-    return <LineChart chartData={chartData} />;
+    return (
+      <LineChart chartData={chartData} handleCellClick={handleCellClick} />
+    );
   } else if (chart.chart_type === 'table') {
     return <TableChart chartData={chartData} />;
   }
@@ -129,7 +142,18 @@ export default function Chart({ chart }: { chart: ChartSpec }) {
 
 type NivoBar = Record<string, any>;
 
-function BarChart({ chartData }: { chartData: ChartData }) {
+function BarChart({
+  chartData,
+  handleCellClick,
+}: {
+  chartData: ChartData;
+  handleCellClick: (
+    xKey: string,
+    xValue: string,
+    seriesKey?: string,
+    seriesValue?: string
+  ) => void;
+}) {
   const data: NivoBar[] = useMemo(
     () =>
       chartData.xValues.map((xValue) => {
@@ -147,6 +171,23 @@ function BarChart({ chartData }: { chartData: ChartData }) {
     [chartData]
   );
 
+  const handleBarClick = useCallback(
+    (bar: any) => {
+      const xValue = bar.indexValue;
+      const seriesValue = bar.id;
+
+      if (chartData.xKey) {
+        handleCellClick(
+          chartData.xKey,
+          xValue,
+          chartData.is2d ? chartData.seriesKey : undefined,
+          chartData.is2d ? seriesValue : undefined
+        );
+      }
+    },
+    [chartData, handleCellClick]
+  );
+
   return (
     <ChartContainer minHeight={200}>
       <ResponsiveBar
@@ -157,6 +198,8 @@ function BarChart({ chartData }: { chartData: ChartData }) {
         labelSkipWidth={12}
         labelSkipHeight={12}
         theme={chartTheme}
+        onClick={handleBarClick}
+        tooltip={CustomBarTooltip}
         legends={
           chartData.seriesValues.length > 1
             ? [
@@ -196,7 +239,18 @@ type NivoLineSeries = {
   data: { x: any; y: number | null }[];
 };
 
-function LineChart({ chartData }: { chartData: ChartData }) {
+function LineChart({
+  chartData,
+  handleCellClick,
+}: {
+  chartData: ChartData;
+  handleCellClick: (
+    xKey: string,
+    xValue: string,
+    seriesKey?: string,
+    seriesValue?: string
+  ) => void;
+}) {
   const data: NivoLineSeries[] = useMemo(() => {
     const seriesMap: Record<string, { x: any; y: number | null }[]> = {};
 
@@ -211,6 +265,23 @@ function LineChart({ chartData }: { chartData: ChartData }) {
     return Object.entries(seriesMap).map(([id, data]) => ({ id, data }));
   }, [chartData]);
 
+  const handlePointClick = useCallback(
+    (point: any) => {
+      const xValue = point.data.x;
+      const seriesValue = point.seriesId;
+
+      if (chartData.xKey) {
+        handleCellClick(
+          chartData.xKey,
+          xValue,
+          chartData.is2d ? chartData.seriesKey : undefined,
+          chartData.is2d ? seriesValue : undefined
+        );
+      }
+    },
+    [chartData, handleCellClick]
+  );
+
   if (!chartData.xKey || data.length === 0) {
     return null;
   }
@@ -220,6 +291,8 @@ function LineChart({ chartData }: { chartData: ChartData }) {
       <ResponsiveLine
         animate={false}
         data={data}
+        onClick={handlePointClick}
+        tooltip={CustomLineTooltip}
         margin={{
           top: 20,
           right: chartData.seriesValues.length > 1 ? 110 : 20,

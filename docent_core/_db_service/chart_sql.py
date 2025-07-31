@@ -5,6 +5,7 @@ from sqlalchemy import Numeric, and_, case, cast, func, select, text
 from sqlalchemy.sql import Select
 from sqlalchemy.sql.sqltypes import Text
 
+from docent_core._db_service.filters import ComplexFilter
 from docent_core._db_service.schemas.rubric import (
     SQLAJudgeResult,
     SQLAJudgeResultCentroid,
@@ -183,7 +184,9 @@ def _apply_run_normalization(
 
 
 def _build_base_query(
-    visible_collection_ids: List[str], rubric_filter: Optional[str]
+    visible_collection_ids: List[str],
+    runs_filter: Optional[ComplexFilter],
+    rubric_filter: Optional[str],
 ) -> Select[Any]:
     """Return foundational SELECT with all necessary joins & static filters."""
 
@@ -219,6 +222,12 @@ def _build_base_query(
         )
         .where(SQLAAgentRun.collection_id.in_(visible_collection_ids))
     )
+
+    # Optional runs filter
+    if runs_filter:
+        runs_filter_clause = runs_filter.to_sqla_where_clause(SQLAAgentRun)
+        if runs_filter_clause is not None:
+            base = base.where(runs_filter_clause)
 
     # Optional user-supplied search-query filter
     if rubric_filter:
@@ -389,6 +398,7 @@ def generate_chart_query(
     measure: "ChartDimension",
     normalize_by_run: bool,
     rubric_filter: Optional[str],
+    runs_filter: Optional[ComplexFilter],
     visible_collection_ids: List[str],
 ) -> Select[Any]:
     """Generate SQL query for chart data using ChartDimension objects.
@@ -416,7 +426,7 @@ def generate_chart_query(
 
     try:
         # Stage 1: Build the base query with static filters
-        base_query = _build_base_query(visible_collection_ids, rubric_filter)
+        base_query = _build_base_query(visible_collection_ids, runs_filter, rubric_filter)
 
         # Stage 2: Apply DISTINCT de-duplication
         dedup_subquery = _deduplicate(base_query, unique_dimensions, measure)

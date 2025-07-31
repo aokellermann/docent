@@ -1,5 +1,5 @@
-import { ArrowLeftRight } from 'lucide-react';
-import React, { useMemo } from 'react';
+import { ArrowLeftRight, FunnelPlus } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -9,10 +9,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 
 import { useAppSelector } from '../store/hooks';
-import { ChartSpec, ChartDimension } from '../types/collectionTypes';
+import {
+  ChartSpec,
+  ChartDimension,
+  ComplexFilter,
+} from '../types/collectionTypes';
 import { useGetChartMetadataQuery } from '../api/chartApi';
+import { FilterControls } from './FilterControls';
+import { FilterChips } from './FilterChips';
+import { useGetAgentRunMetadataFieldsQuery } from '../api/collectionApi';
 
 interface ChartSettingsProps {
   chart: ChartSpec;
@@ -52,8 +64,16 @@ function DimensionSelect({
 }
 
 export default function ChartSettings({ chart, onChange }: ChartSettingsProps) {
-  const { x_key, y_key, series_key } = chart;
+  const { x_key, y_key, series_key, runs_filter } = chart;
   const collectionId = useAppSelector((state) => state.collection.collectionId);
+  const { data: metadataFieldsData } = useGetAgentRunMetadataFieldsQuery(
+    collectionId!,
+    {
+      skip: !collectionId,
+    }
+  );
+  const agentRunMetadataFields = metadataFieldsData?.fields ?? [];
+  const [filterPopoverOpen, setFilterPopoverOpen] = useState(false);
 
   // Get chart metadata (fields + search queries) in one request
   const { data: chartMetadata } = useGetChartMetadataQuery(
@@ -122,9 +142,32 @@ export default function ChartSettings({ chart, onChange }: ChartSettingsProps) {
     }
   }
 
+  function handleRunsFilterChange(runsFilter: ComplexFilter | null) {
+    onChange({ ...chart, runs_filter: runsFilter });
+  }
+
+  const removeFilter = (filterId: string) => {
+    if (!runs_filter) return;
+
+    const updatedFilters = runs_filter.filters.filter((f) => f.id !== filterId);
+
+    if (updatedFilters.length === 0) {
+      handleRunsFilterChange(null);
+    } else {
+      handleRunsFilterChange({
+        ...runs_filter,
+        filters: updatedFilters,
+      });
+    }
+  };
+
+  const clearAllFilters = () => {
+    handleRunsFilterChange(null);
+  };
+
   return (
-    <div className="flex flex-col lg:flex-row items-start sm:items-center gap-2 p-2">
-      <div className="flex items-center space-x-1 py-0.5 overflow-x-auto min-w-0 w-full">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 p-2">
+      <div className="flex items-center gap-x-1">
         <span className="text-xs text-muted-foreground whitespace-nowrap">
           Type:
         </span>
@@ -144,30 +187,9 @@ export default function ChartSettings({ chart, onChange }: ChartSettingsProps) {
             </SelectItem>
           </SelectContent>
         </Select>
+      </div>
 
-        <span className="text-xs text-muted-foreground whitespace-nowrap">
-          Filter:
-        </span>
-
-        <Select
-          value={chart.rubric_filter || 'None'}
-          onValueChange={handleRubricFilterChange}
-        >
-          <SelectTrigger className="h-6 max-w-24 w-24 text-xs border-border bg-transparent hover:bg-secondary px-2 font-normal">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="None" className="text-xs">
-              All Data
-            </SelectItem>
-            {chartMetadata?.rubrics.map((rubric) => (
-              <SelectItem key={rubric.id} value={rubric.id} className="text-xs">
-                {rubric.description.slice(0, 60)}...
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
+      <div className="flex items-center gap-x-1">
         <span className="text-xs text-muted-foreground whitespace-nowrap">
           Series:
         </span>
@@ -176,11 +198,10 @@ export default function ChartSettings({ chart, onChange }: ChartSettingsProps) {
           onChange={handleOuterDimChange}
           fields={metadataKeys}
         />
-
         <Button
           variant="ghost"
           size="icon"
-          className="h-6 px-1 w-6 hover:bg-accent transition-all duration-200 text-muted-foreground hover:text-primary flex-shrink-0"
+          className="h-6 w-6 hover:bg-accent transition-all duration-200 text-muted-foreground hover:text-primary flex-shrink-0"
           onClick={handleSwapDimensions}
           title="Swap dimensions"
           disabled={!showSwapButton}
@@ -213,6 +234,73 @@ export default function ChartSettings({ chart, onChange }: ChartSettingsProps) {
             ))}
           </SelectContent>
         </Select>
+      </div>
+
+      {/* Second row: Rubric menu and filters */}
+      <div className="flex items-center gap-x-1">
+        <span className="text-xs text-muted-foreground whitespace-nowrap">
+          Rubric:
+        </span>
+
+        <Select
+          value={chart.rubric_filter || 'None'}
+          onValueChange={handleRubricFilterChange}
+        >
+          <SelectTrigger className="h-6 max-w-24 w-24 text-xs border-border bg-transparent hover:bg-secondary px-2 font-normal">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="None" className="text-xs">
+              All Data
+            </SelectItem>
+            {chartMetadata?.rubrics.map((rubric) => (
+              <SelectItem key={rubric.id} value={rubric.id} className="text-xs">
+                {rubric.description.slice(0, 60)}...
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="flex items-center gap-x-1">
+        <span className="text-xs text-muted-foreground whitespace-nowrap">
+          Filters:
+        </span>
+
+        {runs_filter && (
+          <FilterChips
+            filters={runs_filter}
+            onRemoveFilter={removeFilter}
+            onClearAllFilters={clearAllFilters}
+            className="mr-1"
+          />
+        )}
+
+        {/* Add filter button/popover */}
+        <Popover open={filterPopoverOpen} onOpenChange={setFilterPopoverOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              className="h-6 px-1 hover:bg-accent transition-all duration-200 text-muted-foreground hover:text-primary flex-shrink-0"
+              title="Add filter"
+            >
+              <FunnelPlus size={18} className="stroke-[1.5]" />
+              <span className="text-xs">Add Filter</span>
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="start"
+            sideOffset={4}
+            className="w-[520px] overflow-x-auto"
+          >
+            <FilterControls
+              filters={runs_filter}
+              onFiltersChange={handleRunsFilterChange}
+              metadataFields={agentRunMetadataFields}
+              showFilterChips={false}
+            />
+          </PopoverContent>
+        </Popover>
       </div>
     </div>
   );

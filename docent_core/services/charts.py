@@ -9,6 +9,7 @@ from sqlalchemy.types import Numeric
 
 from docent._log_util import get_logger
 from docent_core._db_service.contexts import ViewContext
+from docent_core._db_service.filters import ComplexFilter
 from docent_core._db_service.schemas.chart import SQLAChart
 from docent_core._db_service.schemas.rubric import (
     SQLAJudgeResult,
@@ -44,6 +45,7 @@ class ChartSpec(BaseModel):
     y_label: str | None = None
     series_label: str | None = None
     rubric_filter: str | None
+    runs_filter: ComplexFilter | None
     chart_type: str
 
     @classmethod
@@ -57,6 +59,7 @@ class ChartSpec(BaseModel):
             y_key=chart.y_key,
             rubric_filter=chart.rubric_filter,
             chart_type=chart.chart_type,
+            runs_filter=chart.runs_filter,
         )
 
 
@@ -257,13 +260,14 @@ class ChartsService:
             y_label=y_label,
             series_label=series_label,
             rubric_filter=chart_spec.rubric_filter,
+            runs_filter=chart_spec.runs_filter,
             chart_type=chart_spec.chart_type,
         )
 
     async def get_charts(self, ctx: ViewContext) -> list[ChartSpec]:
-        """Get all charts for a view."""
+        """Get all charts for a collection."""
         result = await self.session.execute(
-            select(SQLAChart).where(SQLAChart.view_id == ctx.view_id)
+            select(SQLAChart).where(SQLAChart.collection_id == ctx.collection_id)
         )
         charts = list(result.scalars().all())
 
@@ -299,7 +303,7 @@ class ChartsService:
         # Generate default name if not provided
         if name is None:
             result = await self.session.execute(
-                select(SQLAChart.name).where(SQLAChart.view_id == ctx.view_id)
+                select(SQLAChart.name).where(SQLAChart.collection_id == ctx.collection_id)
             )
             existing_names = [row[0] for row in result.fetchall()]
 
@@ -317,7 +321,7 @@ class ChartsService:
 
         chart = SQLAChart(
             id=chart_id,
-            view_id=ctx.view_id,
+            collection_id=ctx.collection_id,
             name=name,
             series_key=corrected_series_key,
             x_key=corrected_x_key,
@@ -346,10 +350,6 @@ class ChartsService:
 
         if not chart:
             raise ValueError(f"Chart with ID {chart_id} not found")
-
-        # Verify user has permission to update this chart
-        if ctx.user is None or chart.created_by != ctx.user.id:
-            raise PermissionError("You can only update charts you created")
 
         # Get current values, using updates if provided, otherwise existing values
         current_x_key = updates.get("x_key", chart.x_key)
@@ -383,10 +383,6 @@ class ChartsService:
 
         if not chart:
             raise ValueError(f"Chart with ID {chart_id} not found")
-
-        # Verify user has permission to delete this chart
-        if ctx.user is None or chart.created_by != ctx.user.id:
-            raise PermissionError("You can only delete charts you created")
 
         await self.session.execute(delete(SQLAChart).where(SQLAChart.id == chart_id))
 
@@ -476,7 +472,10 @@ class ChartsService:
         dynamic_metadata: List[ChartDimension] = []
         for key, data_type in metadata_keys_with_types:
             dimension = ChartDimension.create_json_field(
-                "ar.metadata_json", key, data_type=data_type
+                "ar.metadata_json",
+                key,
+                data_type=data_type,
+                short_name=key,
             )
             dynamic_metadata.append(dimension)
 
@@ -491,6 +490,7 @@ class ChartsService:
                 "ar.metadata_json",
                 f"scores.{key}",
                 name=f"Score: {key}",
+                short_name=key,
             )
             dynamic_scores.append(dimension)
 
@@ -509,24 +509,34 @@ class ChartsService:
         """
         # Get available fields for this table type
         available_dimensions = await self.get_available_dimensions(ctx)
-        available_measures = await self.get_available_measures(ctx)
-
         available_dimension_keys = [dimension.key for dimension in available_dimensions]
+        available_metadata_keys = [
+            dimension.key
+            for dimension in available_dimensions
+            if dimension.extra.get("metadata_key")
+        ]
+
+        if series_key not in available_dimension_keys:
+            series_key = None
+
+        if x_key not in available_dimension_keys:
+            if available_metadata_keys:
+                x_key = available_metadata_keys[0]
+            elif available_dimensions:
+                x_key = available_dimension_keys[0]
+            else:
+                x_key = None
+
+        available_measures = await self.get_available_measures(ctx)
         available_measure_keys = [measure.key for measure in available_measures]
 
-        corrected_x_key: str | None = x_key
-        if x_key not in available_dimension_keys:
-            corrected_x_key = available_dimension_keys[0] if available_dimension_keys else None
-
-        corrected_series_key: str | None = series_key
-        if series_key and series_key not in available_dimension_keys:
-            corrected_series_key = available_dimension_keys[0] if available_dimension_keys else None
-
-        corrected_y_key: str | None = y_key
         if y_key not in available_measure_keys:
-            corrected_y_key = available_measure_keys[0] if available_measure_keys else None
+            if available_measures:
+                y_key = available_measure_keys[0]
+            else:
+                y_key = None
 
-        return corrected_x_key, corrected_series_key, corrected_y_key
+        return x_key, series_key, y_key
 
     async def get_chart(self, ctx: ViewContext, chart_id: str) -> ChartSpec | None:
         """Get a specific chart by ID."""
@@ -584,6 +594,7 @@ class ChartsService:
             measure=measure_dimension,
             normalize_by_run=measure_dimension.extra.get("normalize_by_run", False),
             rubric_filter=chart.rubric_filter,
+            runs_filter=chart.runs_filter,
             visible_collection_ids=[ctx.collection_id],
         )
 

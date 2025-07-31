@@ -1,14 +1,17 @@
+from copy import deepcopy
 from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from docent_core._db_service.filters import ComplexFilter, parse_filter_dict
 from docent_core._db_service.schemas.base import SQLABase
 from docent_core._db_service.schemas.tables import (
+    TABLE_COLLECTION,
     TABLE_USER,
-    TABLE_VIEW,
+    SQLACollection,
     SQLAUser,
-    SQLAView,
 )
 
 TABLE_CHART = "charts"
@@ -21,7 +24,9 @@ class SQLAChart(SQLABase):
     name = mapped_column(Text, nullable=False)
 
     # Foreign keys
-    view_id = mapped_column(String(36), ForeignKey(f"{TABLE_VIEW}.id"), nullable=False, index=True)
+    collection_id = mapped_column(
+        String(36), ForeignKey(f"{TABLE_COLLECTION}.id"), nullable=False, index=True
+    )
     created_by = mapped_column(
         String(36), ForeignKey(f"{TABLE_USER}.id"), nullable=False, index=True
     )
@@ -33,6 +38,9 @@ class SQLAChart(SQLABase):
 
     # If set, chart only shows results/judgements associated with this rubric
     rubric_filter = mapped_column(Text, nullable=True)
+
+    # If set, chart only shows data from these runs
+    runs_filter_dict = mapped_column(JSONB, nullable=True)
 
     # Chart visualization settings
     chart_type = mapped_column(Text, nullable=False, default="bar")  # 'bar', 'line', 'table'
@@ -49,4 +57,12 @@ class SQLAChart(SQLABase):
 
     # Relationships
     creator: Mapped["SQLAUser"] = relationship("SQLAUser", lazy="select")
-    view: Mapped["SQLAView"] = relationship("SQLAView", lazy="select")
+    collection: Mapped["SQLACollection"] = relationship("SQLACollection", lazy="select")
+
+    @property
+    def runs_filter(self) -> ComplexFilter | None:
+        if self.runs_filter_dict is None:
+            return None
+        result = parse_filter_dict(deepcopy(self.runs_filter_dict))
+        assert isinstance(result, ComplexFilter)
+        return result

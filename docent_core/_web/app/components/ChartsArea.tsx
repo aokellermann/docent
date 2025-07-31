@@ -86,9 +86,17 @@ export function ChartsArea() {
   const addTab = async () => {
     if (!collectionId) return;
 
+    // Get the currently selected chart to copy its settings
+    const currentChart = charts.find((chart) => chart.id === activeTabId);
+
     try {
       const response = await createChart({
         collectionId,
+        seriesKey: currentChart?.series_key || undefined,
+        xKey: currentChart?.x_key || undefined,
+        yKey: currentChart?.y_key || undefined,
+        chartType: currentChart?.chart_type || 'table',
+        rubricFilter: currentChart?.rubric_filter || undefined,
       }).unwrap();
       updateActiveTabId(response.id);
     } catch (error) {

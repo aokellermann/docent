@@ -1,14 +1,10 @@
 'use client';
 
-import { useCallback } from 'react';
-import { v4 as uuid4 } from 'uuid';
-import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { PrimitiveFilter } from '../types/collectionTypes';
-import { addFilters } from '../store/collectionSlice';
+import { useAppSelector } from '../store/hooks';
 import { cn } from '@/lib/utils';
 import { ChartData, getScoreAt } from '../utils/chartDataUtils';
 import ChartContainer from './ChartContainer';
-import { useGetChartMetadataQuery } from '../api/chartApi';
+import { useChartFilters } from '../../hooks/use-chart-filters';
 
 // Constants
 const MAX_DIMENSION_VALUES = 100;
@@ -45,14 +41,9 @@ const getFilterTitle = (
 };
 
 export default function TableChart({ chartData }: { chartData: ChartData }) {
-  const dispatch = useAppDispatch();
   const { collectionId } = useAppSelector((state) => state.collection);
-
-  // Get chart metadata including dimensions
-  const { data: chartMetadata } = useGetChartMetadataQuery(
-    { collectionId: collectionId! },
-    { skip: !collectionId }
-  );
+  const { handleCellClick, handleDimensionClick } =
+    useChartFilters(collectionId);
 
   const tableData = {
     rows: chartData.xValues,
@@ -63,37 +54,6 @@ export default function TableChart({ chartData }: { chartData: ChartData }) {
     totalCols: chartData.seriesValues.length,
     is2d: chartData.is2d,
   };
-
-  // Helper function to create filters
-  const createFilter = useCallback(
-    (dimId: string, value: string): PrimitiveFilter | undefined => {
-      // Find the dimension in the chart metadata
-      const allDimensions = [
-        ...(chartMetadata?.fields?.dimensions || []),
-        ...(chartMetadata?.fields?.measures || []),
-      ];
-      const dimension = allDimensions.find((dim) => dim.key === dimId);
-
-      // We can't filter on anything besides run metadata, e.g. cluster centroid
-      if (!dimension?.extra?.metadata_key) {
-        return undefined;
-      }
-
-      // Build key path from dimension metadata
-      const key_path = ['metadata', ...dimension.extra.metadata_key.split('.')];
-
-      return {
-        type: 'primitive',
-        key_path,
-        value,
-        op: '==',
-        id: uuid4(),
-        name: null,
-        supports_sql: true,
-      };
-    },
-    [chartMetadata?.fields?.dimensions, chartMetadata?.fields?.measures]
-  );
 
   if (!tableData || !chartData.xKey) {
     return (
@@ -128,10 +88,7 @@ export default function TableChart({ chartData }: { chartData: ChartData }) {
                   }
                   onClick={() => {
                     if (tableData.is2d && tableData.colDimId) {
-                      const filter = createFilter(tableData.colDimId, colValue);
-                      if (filter) {
-                        dispatch(addFilters([filter]));
-                      }
+                      handleDimensionClick(tableData.colDimId, colValue);
                     }
                   }}
                 >
@@ -155,10 +112,7 @@ export default function TableChart({ chartData }: { chartData: ChartData }) {
                   title={`Filter to ${tableData.rowDimId}: ${rowValue}`}
                   onClick={() => {
                     if (tableData.rowDimId) {
-                      const filter = createFilter(tableData.rowDimId, rowValue);
-                      if (filter) {
-                        dispatch(addFilters([filter]));
-                      }
+                      handleDimensionClick(tableData.rowDimId, rowValue);
                     }
                   }}
                 >
@@ -190,33 +144,12 @@ export default function TableChart({ chartData }: { chartData: ChartData }) {
                       )}
                       onClick={() => {
                         if (tableData.rowDimId) {
-                          if (tableData.is2d && tableData.colDimId) {
-                            // 2D case: add both filters
-                            const rowFilter = createFilter(
-                              tableData.rowDimId,
-                              rowValue
-                            );
-                            const colFilter = createFilter(
-                              tableData.colDimId,
-                              colValue
-                            );
-                            if (rowFilter && colFilter) {
-                              dispatch(addFilters([rowFilter, colFilter]));
-                            } else if (rowFilter) {
-                              dispatch(addFilters([rowFilter]));
-                            } else if (colFilter) {
-                              dispatch(addFilters([colFilter]));
-                            }
-                          } else {
-                            // 1D case: add single filter
-                            const filter = createFilter(
-                              tableData.rowDimId,
-                              rowValue
-                            );
-                            if (filter) {
-                              dispatch(addFilters([filter]));
-                            }
-                          }
+                          handleCellClick(
+                            tableData.rowDimId,
+                            rowValue,
+                            tableData.is2d ? tableData.colDimId : undefined,
+                            tableData.is2d ? colValue : undefined
+                          );
                         }
                       }}
                     >

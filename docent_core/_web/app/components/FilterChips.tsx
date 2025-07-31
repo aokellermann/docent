@@ -1,0 +1,71 @@
+'use client';
+
+import { CircleX, RefreshCw } from 'lucide-react';
+import {
+  PrimitiveFilter,
+  CollectionFilter,
+  ComplexFilter,
+} from '@/app/types/collectionTypes';
+
+interface FilterChipsProps {
+  filters: ComplexFilter | undefined | null;
+  onRemoveFilter: (filterId: string) => void;
+  onClearAllFilters: () => void;
+  className?: string;
+}
+
+export const FilterChips = ({
+  filters,
+  onRemoveFilter,
+  onClearAllFilters,
+  className,
+}: FilterChipsProps) => {
+  const currentFilters = filters?.filters || [];
+
+  if (currentFilters.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className={`flex flex-wrap gap-1.5 ${className || ''}`}>
+      {currentFilters.map((subFilter: CollectionFilter) => (
+        <div
+          key={subFilter.id}
+          className="inline-flex items-center gap-x-1 text-[11px] bg-indigo-bg text-primary border border-indigo-border pl-1.5 pr-1 py-0 rounded-md"
+        >
+          {(() => {
+            if (subFilter.type === 'primitive') {
+              const filterCast = subFilter as PrimitiveFilter;
+              return (
+                <>
+                  <span className="font-mono">
+                    {filterCast.key_path.join('.')}
+                  </span>
+                  <span className="text-indigo-400 font-mono">
+                    {filterCast.op || '=='}
+                  </span>
+                  <span className="font-mono">{String(filterCast.value)}</span>
+                </>
+              );
+            } else {
+              return `${subFilter.type} filter`;
+            }
+          })()}
+          <button
+            onClick={() => onRemoveFilter(subFilter.id)}
+            className="p-0.5 text-primary hover:text-primary/50 transition-colors"
+          >
+            <CircleX size={10} />
+          </button>
+        </div>
+      ))}
+      <button
+        onClick={onClearAllFilters}
+        className="inline-flex items-center gap-x-1 text-[11px] bg-red-bg text-primary border border-red-border px-1.5 py-0.5 rounded-md hover:bg-red-bg/50 transition-colors"
+      >
+        Clear
+        <RefreshCw size={10} />
+      </button>
+    </div>
+  );
+};

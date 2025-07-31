@@ -141,46 +141,57 @@ export const clearFilters = createAsyncThunk(
   }
 );
 
+function createFilter(filters: CollectionFilter[], baseFilter?: ComplexFilter) {
+  // Create new base filter with all filters added
+  const newBaseFilter: ComplexFilter = baseFilter
+    ? {
+        ...baseFilter,
+        filters: [...baseFilter.filters, ...filters],
+      }
+    : {
+        filters: [...filters],
+        type: 'complex',
+        op: 'and',
+        id: uuid4(),
+        name: null,
+        supports_sql: true,
+      };
+
+  // Remove duplicate primitive filters
+  const seenFilterKeys = new Set<string>();
+  newBaseFilter.filters = newBaseFilter.filters.reduceRight((acc, filter) => {
+    if (filter.type === 'primitive') {
+      const primitiveFilter = filter as PrimitiveFilter;
+      const keyPath = primitiveFilter.key_path?.join('.') || '';
+      const value = primitiveFilter.value;
+      const op = primitiveFilter.op;
+      const filterKey = `${keyPath}:${value}:${op}`;
+
+      if (seenFilterKeys.has(filterKey)) {
+        return acc;
+      }
+      seenFilterKeys.add(filterKey);
+    }
+    return [filter, ...acc];
+  }, [] as CollectionFilter[]);
+
+  return newBaseFilter;
+}
+
 export const addFilters = createAsyncThunk(
   'collection/addFilters',
   async (filters: CollectionFilter[], { dispatch, getState }) => {
     const state = getState() as { collection: CollectionState };
-    const baseFilter = state.collection.baseFilter;
+    const newFilter = createFilter(filters, state.collection.baseFilter);
+    dispatch(postFilter(newFilter));
+  }
+);
 
-    // Create new base filter with all filters added
-    const newBaseFilter: ComplexFilter = baseFilter
-      ? {
-          ...baseFilter,
-          filters: [...baseFilter.filters, ...filters],
-        }
-      : {
-          filters: [...filters],
-          type: 'complex',
-          op: 'and',
-          id: uuid4(),
-          name: null,
-          supports_sql: true,
-        };
-
-    // Remove duplicate primitive filters
-    const seenFilterKeys = new Set<string>();
-    newBaseFilter.filters = newBaseFilter.filters.reduceRight((acc, filter) => {
-      if (filter.type === 'primitive') {
-        const primitiveFilter = filter as PrimitiveFilter;
-        const keyPath = primitiveFilter.key_path?.join('.') || '';
-        const value = primitiveFilter.value;
-        const op = primitiveFilter.op;
-        const filterKey = `${keyPath}:${value}:${op}`;
-
-        if (seenFilterKeys.has(filterKey)) {
-          return acc;
-        }
-        seenFilterKeys.add(filterKey);
-      }
-      return [filter, ...acc];
-    }, [] as CollectionFilter[]);
-
-    dispatch(postFilter(newBaseFilter));
+export const replaceFilters = createAsyncThunk(
+  'collection/replaceFilters',
+  async (filters: CollectionFilter[], { dispatch, getState }) => {
+    const newFilter = createFilter(filters);
+    dispatch(postFilter(newFilter));
   }
 );
 
