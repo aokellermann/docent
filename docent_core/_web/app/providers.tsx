@@ -7,16 +7,18 @@ import store from './store/store';
 
 if (typeof window !== 'undefined') {
   if (
-    process.env.NEXT_PUBLIC_POSTHOG_KEY &&
-    process.env.NEXT_PUBLIC_POSTHOG_HOST
+    process.env.NEXT_PUBLIC_POSTHOG_API_KEY &&
+    process.env.NEXT_PUBLIC_POSTHOG_API_HOST
   ) {
-    posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY, {
-      api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST,
-      person_profiles: 'always', // or 'always' to create profiles for anonymous users as well
+    posthog.init(process.env.NEXT_PUBLIC_POSTHOG_API_KEY, {
+      api_host: process.env.NEXT_PUBLIC_POSTHOG_API_HOST,
       disable_session_recording: true,
       autocapture: false,
     });
-    console.log('PostHog initialized');
+    console.log(
+      'PostHog initialized, logging to',
+      process.env.NEXT_PUBLIC_POSTHOG_API_HOST
+    );
   }
 }
 export function CSPostHogProvider({ children }: { children: React.ReactNode }) {

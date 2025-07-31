@@ -35,6 +35,7 @@ export interface RubricState {
   judgeResultsMap: Record<string, JudgeResultWithCitations>; // judge_result_id -> JudgeResult
   isPollingResults: boolean;
   totalAgentRuns: number | null;
+  showUniqueAgentRuns: boolean; // Toggle between total results and unique agent run count
   // Clustering state
   centroidsMap: Record<string, RubricCentroid>; // centroid_id -> centroid
   centroidAssignments: Record<string, string[]>; // centroid_id -> judge_result_ids
@@ -50,6 +51,7 @@ const initialState: RubricState = {
   isPollingResults: false,
   totalAgentRuns: null,
   activeRubricJobId: null,
+  showUniqueAgentRuns: false,
   // Clustering state
   centroidsMap: {},
   centroidAssignments: {},
@@ -137,6 +139,9 @@ export const rubricSlice = createSlice({
     },
     setActiveCentroidAssignmentJob(state, action) {
       state.activeCentroidAssignmentJobId = action.payload;
+    },
+    toggleShowUniqueAgentRuns(state) {
+      state.showUniqueAgentRuns = !state.showUniqueAgentRuns;
     },
   },
   extraReducers: (builder) => {
@@ -243,6 +248,7 @@ export const {
   setCentroidAssignments,
   setIsPollingAssignments,
   setActiveCentroidAssignmentJob,
+  toggleShowUniqueAgentRuns,
 } = rubricSlice.actions;
 
 export default rubricSlice.reducer;

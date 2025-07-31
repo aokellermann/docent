@@ -24,8 +24,8 @@ class Docent:
 
     def __init__(
         self,
-        server_url: str = "https://aws-docent-backend.transluce.org",
-        web_url: str = "https://docent-alpha.transluce.org",
+        server_url: str = "https://api.docent.transluce.org",
+        web_url: str = "https://docent.transluce.org",
         api_key: str | None = None,
     ):
         self._server_url = server_url.rstrip("/") + "/rest"

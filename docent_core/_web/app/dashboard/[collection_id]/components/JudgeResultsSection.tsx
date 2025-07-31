@@ -5,7 +5,10 @@ import { useAppSelector, useAppDispatch } from '@/app/store/hooks';
 import { renderTextWithCitations } from '@/lib/renderCitations';
 import { openAgentRunInDashboard } from '@/app/store/transcriptSlice';
 import { cn } from '@/lib/utils';
-import { JudgeResultWithCitations } from '@/app/store/rubricSlice';
+import {
+  JudgeResultWithCitations,
+  toggleShowUniqueAgentRuns,
+} from '@/app/store/rubricSlice';
 import { useCallback, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -27,6 +30,10 @@ const CollapsibleResultsSection = ({
   isExpanded = true,
   onToggle,
 }: CollapsibleResultsSectionProps) => {
+  const dispatch = useAppDispatch();
+  const showUniqueAgentRuns = useAppSelector(
+    (state) => state.rubric.showUniqueAgentRuns
+  );
   // Count only judge results with non-null values (what actually gets displayed)
   const resultHits = useMemo(() => {
     return judgeResultIds
@@ -37,9 +44,40 @@ const CollapsibleResultsSection = ({
       .filter((result) => result !== null);
   }, [judgeResultIds, judgeResultsMap]);
 
+  // Group results by agent run ID
+  const groupedResults = useMemo(() => {
+    const groups: { [agentRunId: string]: typeof resultHits } = {};
+    resultHits.forEach((result) => {
+      if (!groups[result.agent_run_id]) {
+        groups[result.agent_run_id] = [];
+      }
+      groups[result.agent_run_id].push(result);
+    });
+    return groups;
+  }, [resultHits]);
+
+  const uniqueAgentRunCount = Object.keys(groupedResults).length;
+
   const isPollingAssignments = useAppSelector(
     (state) => state.rubric.isPollingAssignments
   );
+
+  const AgentRunGroupHeader = ({
+    agentRunId,
+    resultCount,
+  }: {
+    agentRunId: string;
+    resultCount: number;
+  }) => {
+    return (
+      <div className="text-[10px] text-muted-foreground font-medium px-2 py-1 bg-secondary/50 rounded-sm mb-1 flex items-center justify-between">
+        <span>Agent Run {agentRunId.slice(0, 8)}</span>
+        <span className="text-[9px] bg-muted px-1.5 py-0.5 rounded">
+          {resultCount}
+        </span>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-2">
@@ -60,8 +98,13 @@ const CollapsibleResultsSection = ({
 
         {/* Count */}
         <div className="flex-shrink-0 flex items-center">
-          <span className="text-xs px-1.5 py-0.5 rounded-sm bg-muted text-muted-foreground cursor-default flex items-center min-w-[2rem] justify-center">
-            {resultHits.length}
+          <span
+            className="text-xs px-1.5 py-0.5 rounded-sm bg-muted text-muted-foreground cursor-pointer flex items-center min-w-[2rem] justify-center hover:bg-muted/80 transition-colors"
+            onClick={() => dispatch(toggleShowUniqueAgentRuns())}
+          >
+            {showUniqueAgentRuns
+              ? `${uniqueAgentRunCount} runs`
+              : `${resultHits.length} hits`}
             {isPollingAssignments && (
               <div className="animate-spin ml-1 rounded-full h-2 w-2 border-[1.5px] border-border border-t-gray-500 inline-block" />
             )}
@@ -74,15 +117,25 @@ const CollapsibleResultsSection = ({
         </div>
       </div>
 
-      {/* Expanded results */}
+      {/* Expanded results grouped by agent run */}
       {isExpanded && resultHits.length > 0 && (
-        <div className="pl-4 space-y-1">
-          {resultHits.map((judgeResult, idx) => (
-            <JudgeResultCard
-              key={idx}
-              judgeResult={judgeResult}
-              usePreview={usePreview}
-            />
+        <div className="pl-4 space-y-2">
+          {Object.entries(groupedResults).map(([agentRunId, results]) => (
+            <div key={agentRunId} className="space-y-1">
+              <AgentRunGroupHeader
+                agentRunId={agentRunId}
+                resultCount={results.length}
+              />
+              <div className="space-y-1">
+                {results.map((judgeResult, idx) => (
+                  <JudgeResultCard
+                    key={`${agentRunId}-${idx}`}
+                    judgeResult={judgeResult}
+                    usePreview={usePreview}
+                  />
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       )}
