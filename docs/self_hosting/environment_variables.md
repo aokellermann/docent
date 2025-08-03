@@ -37,3 +37,10 @@ We have provided reasonable defaults in `.env.template`, but you're welcome to c
 * `DOCENT_CORS_ORIGINS`: CSV list of allowed frontend origins (optional)
     * Leave empty/unset for development (defaults to `localhost:*`)
     * Example for multiple domains: `DOCENT_CORS_ORIGINS=https://app.yourdomain.com,https://admin.yourdomain.com`
+
+## Optional variables for deployed environments
+
+* `DEPLOYMENT_ID`: ID of the deployment (unset for local)
+* `SENTRY_DSN`: Sentry DSN
+* `POSTHOG_API_KEY`: PostHog API key
+* `POSTHOG_API_HOST`: PostHog API host (defaults to `https://us.i.posthog.com`)
