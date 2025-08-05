@@ -1,9 +1,9 @@
+import enum
 import re
 from typing import Protocol
 from uuid import uuid4
 
-import anyio
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 
 from docent._log_util import get_logger
 from docent.data_models.agent_run import AgentRun
@@ -29,11 +29,11 @@ First think carefully about whether the agent run contains any instances of the 
 - If something matches only an exclusion rule: NO, it should not be included.
 - If something matches only an inclusion rule: YES, it should be included.
 - If something matches both an inclusion and exclusion rule: YES, it should be included, since inclusion precedes exclusion.
-- If something matches the high level description but no inclusion and no exclusion rules: YES, it should be included.
+- If something matches the high level description but no inclusion and no exclusion rules: YES, it should be included. Be proactive about looking for matches in this category, as they are very important.
 
-If there are no matches, return N/A.
+It is possible that the agent does not exhibit the rubric behavior. If so, return N/A and nothing else; do not explain why there are no matches.
 
-For every instance of a rubric match, describe how the agent run pertains to the rubric. Be concise but specific; I should be able to mentally reconstruct the pertinent parts of the run from your description. The list should also be exhaustive.
+Otherwise, for every instance of a rubric match, describe how the agent run pertains to the rubric. Be concise but specific; I should be able to mentally reconstruct the pertinent parts of the run from your description. The list should also be exhaustive.
 
 Return all instances of the rubric in the following exact format:
 <instance>
@@ -50,6 +50,7 @@ description
 
 class Rubric(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
+    version: int = 1
     high_level_description: str
     inclusion_rules: list[str]
     exclusion_rules: list[str]
@@ -58,7 +59,7 @@ class Rubric(BaseModel):
     def text(self) -> str:
         inclusion_text = "\n".join(f"- {rule}" for rule in self.inclusion_rules)
         exclusion_text = "\n".join(f"- {rule}" for rule in self.exclusion_rules)
-        return f"High level description:\n{self.high_level_description}\n\nInclusion rules:\n{inclusion_text}\n\nExclusion rules:\n{exclusion_text}"
+        return f"(v{self.version}) High level description:\n{self.high_level_description}\n\nInclusion rules:\n{inclusion_text}\n\nExclusion rules:\n{exclusion_text}"
 
 
 def _parse_llm_output(output: LLMOutput) -> list[str] | None:
@@ -73,11 +74,24 @@ def _parse_llm_output(output: LLMOutput) -> list[str] | None:
         return [str(match.group(1).strip()) for match in matches]
 
 
+class ResultType(enum.Enum):
+    """Enum for the type of result that a judge result can have."""
+
+    DIRECT_RESULT = "direct_result"
+    NEAR_MISS = "near_miss"
+
+
 class JudgeResult(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     agent_run_id: str
     rubric_id: str
+    rubric_version: int
     value: str | None = None
+    result_type: ResultType
+
+    @field_serializer("result_type")
+    def serialize_result_type(self, result_type: ResultType) -> str:
+        return result_type.value
 
 
 class JudgeResultWithCitations(JudgeResult):
@@ -100,33 +114,40 @@ class JudgeResultStreamingCallback(Protocol):
 
     async def __call__(
         self,
+        batch_index: int,
         judge_results: list[JudgeResult] | None,
     ) -> None: ...
 
 
 def _get_llm_callback(
     rubric_id: str,
+    rubric_version: int,
     agent_run_ids: list[str],
     callback: JudgeResultStreamingCallback,
+    result_type: ResultType,
 ):
     async def _llm_callback(batch_index: int, llm_output: LLMOutput):
         results = _parse_llm_output(llm_output)
 
         # Return nothing if the LLM call failed (hence None)
         if results is None:
-            await callback(None)
+            await callback(batch_index, None)
         else:
+            values: list[str | None] = results if len(results) > 0 else [None]  # type: ignore
             await callback(
+                batch_index,
                 [
                     JudgeResult(
                         agent_run_id=agent_run_ids[batch_index],
                         rubric_id=rubric_id,
+                        rubric_version=rubric_version,
                         value=value,
+                        result_type=result_type,
                     )
                     # If there were no matches, return a single None result
                     # Otherwise, return all results
-                    for value in (results if len(results) > 0 else [None])
-                ]
+                    for value in values
+                ],
             )
 
     return _llm_callback
@@ -137,7 +158,6 @@ async def evaluate_rubric(
     rubric: Rubric,
     model_options: list[ModelOption],
     callback: JudgeResultStreamingCallback | None = None,
-    cancellation_event: anyio.Event | None = None,
 ):
     ids = [ar.id for ar in agent_runs]
     texts = [ar.text for ar in agent_runs]
@@ -158,9 +178,154 @@ async def evaluate_rubric(
         timeout=180.0,
         use_cache=True,
         completion_callback=(
-            _get_llm_callback(rubric.id, ids, callback) if callback is not None else None
+            _get_llm_callback(rubric.id, rubric.version, ids, callback, ResultType.DIRECT_RESULT)
+            if callback is not None
+            else None
         ),
-        cancellation_event=cancellation_event,
+    )
+
+    ans: list[list[str] | None] = [
+        None,
+    ] * len(texts)
+    for i, output in enumerate(outputs):
+        ans[i] = _parse_llm_output(output)
+
+    # # next we search over long AgentRuns, which need to be sharded to within context length
+    # # these can't be streamed immediately since we need to search over all shards first
+
+    # long_indices = [i for i in range(len(texts)) if i not in short_indices]
+    # long_ids = [ids[i] for i in long_indices]
+    # long_texts = [agent_runs[i].to_text(100_000) for i in long_indices]
+    # flattened_long_texts = [text for run in long_texts for text in run]
+    # prompts = [
+    #     RUBRIC_PROMPT.format(rubric=rubric.text, agent_run=agent_run)
+    #     for agent_run in flattened_long_texts
+    # ]
+
+    # logger.info(f"Searching over {len(prompts)} long agent runs")
+    # outputs = await get_llm_completions_async(
+    #     [
+    #         [
+    #             {
+    #                 "role": "user",
+    #                 "content": prompt,
+    #             },
+    #         ]
+    #         for prompt in prompts
+    #     ],
+    #     model_options,
+    #     max_new_tokens=8192,
+    #     timeout=180.0,
+    #     use_cache=True,
+    # )
+
+    # grouped_outputs: list[list[LLMOutput]] = []
+    # index = 0
+    # for long_text in long_texts:
+    #     grouped_outputs.append(outputs[index : index + len(long_text)])
+    #     index += len(long_text)
+
+    # for i, output_group in enumerate(grouped_outputs):
+    #     results = [_parse_llm_output(output) for output in output_group]
+    #     if any(result is None for result in results):
+    #         ans[long_indices[i]] = None
+    #     else:
+    #         flattened_results = [r for result in results for r in cast(list[str], result)]
+    #         ans[long_indices[i]] = flattened_results
+
+    # if callback is not None:
+    #     long_llm_callback = _get_llm_callback(rubric.id, long_ids, callback)
+    #     callbacks = [
+    #         long_llm_callback(i, output_group) for i, output_group in enumerate(grouped_outputs)
+    #     ]
+    #     await asyncio.gather(*callbacks)
+
+    return ans
+
+
+RUBRIC_NEAR_MISSES_PROMPT = f"""
+You will be provided a rubric for something a user wants to find in an agent run. Your task is to check for occurrences of a rubric match in the provided run.
+
+Rubric:
+{{rubric}}
+
+Agent run:
+{{agent_run}}
+
+Another model has already tried performing this task, and came up with the following paraphrased results (some of which may be incorrect, you shouldn't treat these as exact examples of what to look for):
+<previous_rubric_matches>
+{{previous_rubric_matches}}
+</previous_rubric_matches>
+
+Your job is to come up with new rubric matches that the previous model did not find. Do not repeat any of the previous matches. Only list matches that are meaningfully different from anything within the previous rubric matches.
+
+First think carefully about whether the agent run contains any new instances of the rubric. Guidelines:
+- If something matches only an exclusion rule: NO, it should not be included.
+- If something matches only an inclusion rule: YES, it should be included.
+- If something matches both an inclusion and exclusion rule: YES, it should be included, since inclusion precedes exclusion.
+- If something matches the high level description but no inclusion and no exclusion rules: YES, it should be included.
+
+It is very possible that the agent never exhibits the rubric behavior. If that is the case, return N/A and nothing else; do not explain why there are no matches.
+
+Otherwise, for every new instance of a rubric match, describe how the agent run pertains to the rubric. Be concise but specific; I should be able to mentally reconstruct the pertinent parts of the run from your description. The list should also be exhaustive.
+
+Return all new instances of the rubric in the following exact format:
+<instance>
+description
+</instance>
+...
+<instance>
+description
+</instance>
+
+{SINGLE_RUN_CITE_INSTRUCTION}
+"""
+
+
+async def evaluate_rubric_near_misses(
+    agent_runs: list[AgentRun],
+    rubric: Rubric,
+    previous_rubric_matches: list[list[str]],
+    model_options: list[ModelOption],
+    callback: JudgeResultStreamingCallback | None = None,
+):
+    ids = [ar.id for ar in agent_runs]
+    texts = [ar.text for ar in agent_runs]
+
+    new_rubric = rubric.model_copy(deep=True)
+    new_rubric.exclusion_rules = rubric.inclusion_rules + rubric.exclusion_rules
+    new_rubric.inclusion_rules = []
+
+    prompts = [
+        RUBRIC_NEAR_MISSES_PROMPT.format(
+            rubric=new_rubric.text,
+            agent_run=agent_run,
+            previous_rubric_matches="\n".join(
+                f"<previous_rubric_matches>\n{match}\n</previous_rubric_matches>"
+                for match in previous_rubric_matches[i]
+            ),
+        )
+        for i, agent_run in enumerate(texts)
+    ]
+    outputs = await get_llm_completions_async(
+        [
+            [
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ]
+            for prompt in prompts
+        ],
+        model_options,
+        max_new_tokens=8192,
+        timeout=180.0,
+        use_cache=True,
+        completion_callback=(
+            _get_llm_callback(rubric.id, rubric.version, ids, callback, ResultType.NEAR_MISS)
+            if callback is not None
+            else None
+        ),
     )
 
     ans: list[list[str] | None] = [
@@ -421,6 +586,7 @@ def _parse_refined_rubric_output(output_text: str | None) -> Rubric | None:
         exclusion_rules = [match.group(1).strip() for match in rule_matches]
 
     return Rubric(
+        version=0,  # This will be set to the correct version when saved
         high_level_description=high_level_description,
         inclusion_rules=inclusion_rules,
         exclusion_rules=exclusion_rules,

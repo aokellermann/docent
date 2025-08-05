@@ -205,7 +205,7 @@ export default function RubricList({ handleEvaluate }: RubricListProps) {
   const dispatch = useAppDispatch();
 
   const collectionId = useAppSelector((state) => state.collection.collectionId);
-  const rubricsMap = useAppSelector((state) => state.rubric.rubricsMap);
+  const rubricsMap = useAppSelector((state) => state.rubric.latestRubricsMap);
   const editingRubricId = useAppSelector(
     (state) => state.rubric.editingRubricId
   );

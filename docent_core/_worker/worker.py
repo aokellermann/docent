@@ -42,7 +42,7 @@ async def centroid_assignment_job(ctx: ViewContext, job: SQLAJob):
 
     async with db.session() as session:
         rs = RubricService(session, db.session, mono_svc)
-        sqla_rubric = await rs.get_rubric(job.job_json["rubric_id"])
+        sqla_rubric = await rs.get_rubric(job.job_json["rubric_id"], version=None)
         if sqla_rubric is None:
             raise ValueError(f"Rubric {job.job_json['rubric_id']} not found")
         await rs.assign_centroids(sqla_rubric)

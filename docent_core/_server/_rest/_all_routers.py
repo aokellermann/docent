@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from docent_core._server._rest.chart import chart_router
 from docent_core._server._rest.diff import diff_router
+from docent_core._server._rest.refinement import refinement_router
 from docent_core._server._rest.router import public_router, user_router
 from docent_core._server._rest.rubric import rubric_router
 from docent_core._server._rest.telemetry import telemetry_router
@@ -34,6 +35,10 @@ REST_ROUTERS: list[RouterSpec] = [
     {
         "router": telemetry_router,
         "prefix": "/rest/telemetry",
+    },
+    {
+        "router": refinement_router,
+        "prefix": "/rest/refinement",
     },
     {
         "router": chart_router,

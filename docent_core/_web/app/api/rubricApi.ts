@@ -96,6 +96,31 @@ export const rubricApi = createApi({
       }),
       providesTags: ['Rubric'],
     }),
+    getRubric: build.query<
+      Rubric,
+      { collectionId: string; rubricId: string; version: number | null }
+    >({
+      query: ({ collectionId, rubricId, version }) => ({
+        url: `/${collectionId}/rubric/${rubricId}`,
+        method: 'GET',
+        params: version !== null ? { version } : undefined,
+      }),
+      providesTags: (result, error, { rubricId }) => [
+        { type: 'Rubric', id: rubricId },
+      ],
+    }),
+    getLatestRubricVersion: build.query<
+      number,
+      { collectionId: string; rubricId: string }
+    >({
+      query: ({ collectionId, rubricId }) => ({
+        url: `/${collectionId}/rubric/${rubricId}/latest-version`,
+        method: 'GET',
+      }),
+      providesTags: (result, error, { rubricId }) => [
+        { type: 'Rubric', id: rubricId },
+      ],
+    }),
     createRubric: build.mutation<
       Rubric[],
       { collectionId: string; rubric: CreateRubricRequest['rubric'] }
@@ -334,6 +359,8 @@ export const rubricApi = createApi({
 
 export const {
   useGetRubricsQuery,
+  useGetRubricQuery,
+  useGetLatestRubricVersionQuery,
   useCreateRubricMutation,
   useUpdateRubricMutation,
   useDeleteRubricMutation,

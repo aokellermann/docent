@@ -204,7 +204,7 @@ async def get_chart_metadata(
         }
 
         # Always get search queries for the collection
-        rubrics = await rubric_service.get_rubrics(collection_id)
+        rubrics = await rubric_service.get_all_rubrics(collection_id)
         result["rubrics"] = [
             {
                 "id": rubric.id,

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -73,19 +73,19 @@ const RubricArea = () => {
   );
 
   // Collect rubrics
-  const rubricsMap = useAppSelector((state) => state.rubric.rubricsMap);
+  const rubricsMap = useAppSelector((state) => state.rubric.latestRubricsMap);
   const activeRubricId = useAppSelector((state) => state.rubric.activeRubricId);
   const editingRubricId = useAppSelector(
     (state) => state.rubric.editingRubricId
   );
-  const activeRubric = useMemo(() => {
-    if (!activeRubricId) return null;
-    return rubricsMap[activeRubricId];
-  }, [activeRubricId, rubricsMap]);
-  const editingRubric = useMemo(() => {
-    if (!editingRubricId) return null;
-    return rubricsMap[editingRubricId];
-  }, [editingRubricId, rubricsMap]);
+  // const activeRubric = useMemo(() => {
+  //   if (!activeRubricId) return null;
+  //   return rubricsMap[activeRubricId];
+  // }, [activeRubricId, rubricsMap]);
+  // const editingRubric = useMemo(() => {
+  //   if (!editingRubricId) return null;
+  //   return rubricsMap[editingRubricId];
+  // }, [editingRubricId, rubricsMap]);
 
   // Handle starting evaluations
   const [startEvaluation] = useStartEvaluationMutation();
@@ -152,10 +152,10 @@ const RubricArea = () => {
   useListenForJudgeResultsQuery(
     {
       collectionId: collectionId!,
-      rubricId: activeRubric?.id || '',
+      rubricId: activeRubricId!,
     },
     {
-      skip: !collectionId || !activeRubric || !shouldListenForResults,
+      skip: !collectionId || !activeRubricId || !shouldListenForResults,
     }
   );
 
@@ -419,52 +419,35 @@ const RubricArea = () => {
     <Card className="h-full flex overflow-y-auto flex-col flex-1 p-3 custom-scrollbar space-y-3">
       {/* Rubric Display */}
       <div className="space-y-2">
-        {!activeRubric && !editingRubric && (
+        {!activeRubricId && !editingRubricId && (
           <div>
             <QuickSearchBox onSubmit={handleQuickSearchSubmit} />
           </div>
         )}
         {/* Display the active rubric but with read only */}
-        {activeRubric && (
-          <>
-            <div className="flex flex-col">
-              <div className="text-sm font-semibold">Rubric Evaluation</div>
-              <div className="text-xs text-muted-foreground">
-                Explore the results of running the rubric against data.
-              </div>
-            </div>
-            <RubricEditor
-              initRubric={activeRubric}
-              onSave={() => {}}
-              onCloseWithoutSave={() => {}}
-              readOnly={true}
-            />
-          </>
+        {activeRubricId && (
+          <RubricEditor
+            rubricId={activeRubricId}
+            onSave={() => {}}
+            onCloseWithoutSave={() => {}}
+            editable={false}
+          />
         )}
         {/* Editor */}
-        {editingRubric && (
-          <>
-            <div className="flex flex-col">
-              <div className="text-sm font-semibold">Rubric Editor</div>
-              <div className="text-xs text-muted-foreground">
-                Modify a rubric&apos;s high level description, inclusion rules,
-                and exclusion rules.
-              </div>
-            </div>
-            <RubricEditor
-              initRubric={editingRubric}
-              onSave={handleSaveRubric}
-              onCloseWithoutSave={() => dispatch(setEditingRubricId(null))}
-              readOnly={isPollingResults || isUpdatingRubric}
-            />
-          </>
+        {editingRubricId && (
+          <RubricEditor
+            rubricId={editingRubricId}
+            onSave={handleSaveRubric}
+            onCloseWithoutSave={() => dispatch(setEditingRubricId(null))}
+            editable={!isPollingResults && !isUpdatingRubric}
+          />
         )}
 
         {/* Rubric List - show when not actively evaluating */}
-        {!activeRubric && <RubricList handleEvaluate={handleEvaluate} />}
+        {!activeRubricId && <RubricList handleEvaluate={handleEvaluate} />}
 
         {/* Progress bar */}
-        {activeRubric && isPollingResults && (
+        {activeRubricId && isPollingResults && (
           <ProgressBar
             current={Object.keys(judgeResultsMap ?? {}).length}
             total={totalAgentRuns}
@@ -473,7 +456,7 @@ const RubricArea = () => {
         )}
 
         {/* Action Buttons */}
-        {activeRubric && (
+        {activeRubricId && (
           <div className="flex items-center justify-end gap-2 pt-1">
             <Button
               type="button"
@@ -564,7 +547,7 @@ const RubricArea = () => {
         )}
 
         {/* Results */}
-        {activeRubric && <JudgeResultsList />}
+        {activeRubricId && <JudgeResultsList />}
       </div>
     </Card>
   );

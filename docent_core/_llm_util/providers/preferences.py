@@ -214,6 +214,31 @@ class ProviderPreferences(BaseModel):
             ModelOption(
                 provider="openai",
                 model_name="o1",
+                reasoning_effort="low",
+            ),
+        ]
+
+    @cached_property
+    def execute_full_search(self) -> list[ModelOption]:
+        """Get model options for executing a full search on a finalized rubric.
+
+        Returns:
+            List of configured model options for this function.
+        """
+        return [
+            ModelOption(
+                provider="anthropic",
+                model_name="claude-3-7-sonnet-20250219",
+                reasoning_effort="medium",
+            ),
+            ModelOption(
+                provider="google",
+                model_name="gemini-2.5-pro",
+                reasoning_effort="medium",
+            ),
+            ModelOption(
+                provider="openai",
+                model_name="o1",
                 reasoning_effort="medium",
             ),
         ]
@@ -331,6 +356,23 @@ class ProviderPreferences(BaseModel):
                 model_name="gemini-2.5-flash-preview-05-20",
                 reasoning_effort="medium",
             ),
+        ]
+
+    @cached_property
+    def handle_refinement_message(self) -> list[ModelOption]:
+        """Get model options for the handle_refinement_message function.
+        Returns:
+            List of configured model options for this function.
+        """
+        return [
+            ModelOption(
+                provider="openai",
+                model_name="gpt-4.1",
+            ),
+            # ModelOption(
+            #     provider="anthropic",
+            #     model_name="claude-sonnet-4-20250514",
+            # ),
         ]
 
 

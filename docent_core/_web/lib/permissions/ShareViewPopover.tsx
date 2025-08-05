@@ -190,7 +190,7 @@ const ShareViewPopover = ({ collectionId }: { collectionId: string }) => {
             className="gap-x-2 h-7 px-2"
             disabled={!hasAdminPermission}
           >
-            <Share2 size={14} /> Share View
+            <Share2 size={14} /> Share
           </Button>
         )}
       </PopoverTrigger>

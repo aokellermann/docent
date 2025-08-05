@@ -8,19 +8,22 @@ from docent.data_models._tiktoken_util import truncate_to_token_limit
 from docent_core._llm_util.prod_llms import get_llm_completions_async
 from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES
 
+LARGE_CLUSTER_GUIDANCE = "Use as many clusters as you need to capture the variation in the items; we recommend generating between 5 and 10 clusters but sometimes more is necessary."
+
 CLUSTER_PROMPT = """
 Here are some items:
 {items}
 
-Please generate clusters from the provided list of items. Use as many clusters as you need to capture the variation in the items; we recommend generating between 5 and 10 clusters but sometimes more is necessary.
+Please generate clusters from the provided list of items. {cluster_size_guidance}
 
 Guidelines:
 - Clusters should contain exactly one idea/concept each.
 - Clusters should be mutually exclusive: no two clusters should describe the same thing.
-- Clusters should be collectively exhaustive: no item should be left out.
+- Clusters should be as close to collectively exhaustive as possible: ideally, no item should be left out.
 - Cluster descriptions should be specific enough such that a reader could guess the items in the cluster. Indicate exactly what you mean, and do NOT give vague descriptions that could be misinterpreted.
 - If a cluster description seems like it could pertain to a majority of the items, then it is too specific and should be broken up into multiple specific sub-clusters.
 - If two clusters describe similar enough concepts such that they would overlap on over than half of their items, only mention the first cluster.
+- If a cluster description only pertains to a single item, that does not count as a cluster and should not be used.
 - Do NOT give examples of the items in the cluster, because that will overfit.
 {extra_instructions}
 
@@ -86,8 +89,11 @@ async def propose_clusters(
             "role": "user",
             "content": (
                 CLUSTER_PROMPT.format(
-                    # n_clusters=n_clusters or "an appropriate number of",
-                    n_clusters="between 5 and 8",
+                    cluster_size_guidance=(
+                        LARGE_CLUSTER_GUIDANCE
+                        if len(items) > 20
+                        else "You must generate between 3 and 6 clusters."
+                    ),
                     extra_instructions=(f"\n{extra_instructions}\n" if extra_instructions else ""),
                     items=all_items,
                 )
