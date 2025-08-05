@@ -11,14 +11,19 @@ logger = get_logger(__name__)
 
 class AnalyticsClient:
     def __init__(self):
-        if deployment_id := get_deployment_id():
-            api_key = ENV.get("POSTHOG_API_KEY")
-            if not api_key:
+        api_key = ENV.get("POSTHOG_API_KEY")
+        deployment_id = get_deployment_id()
+        if not api_key:
+            if deployment_id:
                 raise ValueError(f"POSTHOG_API_KEY is required for {deployment_id}, but is not set")
-            self.ph = Posthog(project_api_key=api_key, host="https://us.i.posthog.com")
-            logger.info(f"PostHog client initialized for {deployment_id}")
-        else:
-            self.ph = None
+            else:
+                self.ph = None
+                return
+
+        self.ph = Posthog(project_api_key=api_key, host="https://us.i.posthog.com")
+        if not deployment_id:
+            deployment_id = "local"
+        logger.info(f"PostHog client initialized for {deployment_id}")
 
     def identify_user(self, user: Optional[User]) -> Optional[str]:
         """

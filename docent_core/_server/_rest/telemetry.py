@@ -3,7 +3,7 @@ import base64
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, TypedDict, cast
+from typing import Any, Dict, List, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -16,7 +16,9 @@ from docent.data_models.chat import ChatMessage, parse_chat_message
 from docent.data_models.chat.tool import ToolCall
 from docent_core._db_service.schemas.auth_models import User
 from docent_core._db_service.service import MonoService
+from docent_core._server._analytics.posthog import AnalyticsClient
 from docent_core._server._broker.redis_client import get_redis_client
+from docent_core._server._dependencies.analytics import use_posthog_user_context
 from docent_core._server._dependencies.database import get_mono_svc
 from docent_core._server._dependencies.user import get_authenticated_user
 
@@ -28,6 +30,112 @@ logger = get_logger(__name__)
 _COLLECTION_SPANS_KEY_PREFIX = "collection_spans:"
 _COLLECTION_TIMEOUT_KEY_PREFIX = "collection_timeout:"
 _COLLECTION_TIMEOUT_SECONDS = 2 * 60  # Timeout for collection completion
+
+
+telemetry_router = APIRouter()
+
+
+@telemetry_router.post("/v1/traces")
+async def trace_endpoint(
+    request: Request,
+    user: User = Depends(get_authenticated_user),
+    mono_svc: MonoService = Depends(get_mono_svc),
+    analytics: AnalyticsClient = Depends(use_posthog_user_context),
+):
+    """
+    Direct trace endpoint for OpenTelemetry collector HTTP exporter.
+
+    This endpoint accepts OTLP HTTP format telemetry data and logs it.
+    Requires authentication via bearer token (API key) in the Authorization header.
+    """
+    try:
+        # Check content type
+        content_type = request.headers.get("content-type", "")
+
+        # Read the request body
+        body = await request.body()
+
+        # Handle compressed data if needed
+        if request.headers.get("content-encoding") == "gzip":
+            import gzip
+
+            body = gzip.decompress(body)
+
+        if "application/x-protobuf" in content_type:
+            trace_data = parse_protobuf_traces(body)
+        else:
+            raise HTTPException(status_code=415, detail=f"Unsupported content type: {content_type}")
+
+        # Store the raw telemetry data for request
+        await mono_svc.store_telemetry_log(user.id, trace_data)
+
+        # Extract spans from trace data
+        spans = await extract_spans(trace_data)
+
+        # Extract unique collection IDs and names from spans
+        collection_ids: set[str] = set()
+        collection_names: Dict[str, str] = {}
+
+        for span in spans:
+            span_attrs = span.get("attributes", {})
+            collection_id = span_attrs.get("collection_id")
+            if collection_id and isinstance(collection_id, str):
+                collection_ids.add(collection_id)
+
+                # Extract collection name from service.name if not already found
+                if collection_id not in collection_names:
+                    resource_attributes = span.get("resource_attributes", {})
+                    service_name = resource_attributes.get("service.name", "")
+                    if service_name:
+                        collection_names[collection_id] = service_name
+
+        # Check permissions for all collections mentioned in spans
+        await _check_collection_permissions(collection_ids, user, mono_svc)
+
+        await _ensure_collections_exists(collection_ids, collection_names, user, mono_svc)
+
+        # Accumulate spans into Redis
+        await accumulate_spans(spans)
+
+        # Check completion for each collection
+        for collection_id in collection_ids:
+            await check_completion(collection_id, user, analytics)
+
+        # Return success response
+        return JSONResponse(status_code=200, content={"status": "success", "processed": len(spans)})
+
+    except Exception as e:
+        logger.error(f"Error processing traces: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _ensure_collections_exists(
+    collection_ids: set[str], collection_names: Dict[str, str], user: User, mono_svc: MonoService
+) -> None:
+    """
+    Ensure all collections exist, creating them if necessary.
+
+    Args:
+        collection_ids: Set of collection IDs to ensure exist
+        collection_names: Dictionary mapping collection IDs to their names
+        user: The user creating the collections
+        mono_svc: Database service instance
+    """
+    for collection_id in collection_ids:
+        try:
+            if not await mono_svc.collection_exists(collection_id):
+                # Use the extracted collection name or fall back to default
+                collection_name = collection_names.get(collection_id, f"Collection {collection_id}")
+                await mono_svc.create_collection(
+                    user=user,
+                    collection_id=collection_id,
+                    name=collection_name,
+                    description="",
+                )
+                logger.info(f"Created collection {collection_id} with name: {collection_name}")
+        except Exception as e:
+            logger.error(f"Error creating/checking collection {collection_id}: {str(e)}")
+            raise
 
 
 async def _add_spans_to_accumulation(collection_id: str, spans: List[Dict[str, Any]]) -> None:
@@ -95,9 +203,13 @@ def schedule_collection_timeout(collection_id: str, user: User) -> None:
             accumulated_spans = await _get_accumulated_spans(collection_id)
             if accumulated_spans:
                 logger.info(f"Collection {collection_id} timed out, processing accumulated spans")
-                await process_completed_collection(collection_id, accumulated_spans, user)
-                await _remove_collection_from_accumulation(collection_id)
-                await _cancel_collection_timeout(collection_id)
+                # Create analytics client for timeout handler since we don't have dependency injection here
+                analytics_client = AnalyticsClient()
+                # Identify the user to associate analytics events with them
+                analytics_client.identify_user(user)
+                await process_completed_collection(
+                    collection_id, accumulated_spans, user, analytics_client
+                )
 
         # Use Redis to ensure only one worker handles the timeout
 
@@ -114,74 +226,15 @@ def schedule_collection_timeout(collection_id: str, user: User) -> None:
     asyncio.create_task(_schedule_timeout())
 
 
-class AgentRunData(TypedDict):
-    collection_id: str
-    agent_run_id: str
-    transcripts: Dict[str, Transcript]
-
-
-telemetry_router = APIRouter()
-
-
-@telemetry_router.post("/v1/traces")
-async def trace_endpoint(
-    request: Request,
-    user: User = Depends(get_authenticated_user),
-    mono_svc: MonoService = Depends(get_mono_svc),
-):
-    """
-    Direct trace endpoint for OpenTelemetry collector HTTP exporter.
-
-    This endpoint accepts OTLP HTTP format telemetry data and logs it.
-    Requires authentication via bearer token (API key) in the Authorization header.
-    """
-    try:
-        # Check content type
-        content_type = request.headers.get("content-type", "")
-
-        # Read the request body
-        body = await request.body()
-
-        # Handle compressed data if needed
-        if request.headers.get("content-encoding") == "gzip":
-            import gzip
-
-            body = gzip.decompress(body)
-
-        if "application/x-protobuf" in content_type:
-            trace_data = parse_protobuf_traces(body)
-        else:
-            raise HTTPException(status_code=415, detail=f"Unsupported content type: {content_type}")
-
-        # Store the raw telemetry data for request
-        await mono_svc.store_telemetry_log(user.id, trace_data)
-
-        # Extract spans from trace data
-        spans = await extract_spans(trace_data)
-
-        # Check permissions for all collections mentioned in spans
-        await _check_collection_permissions(spans, user, mono_svc)
-
-        # Accumulate spans and check for trace completion
-        await accumulate_and_check_completion(spans, user)
-
-        # Return success response
-        return JSONResponse(status_code=200, content={"status": "success", "processed": len(spans)})
-
-    except Exception as e:
-        logger.error(f"Error processing traces: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 async def _check_collection_permissions(
-    spans: List[Dict[str, Any]], user: User, mono_svc: MonoService
+    collection_ids: set[str], user: User, mono_svc: MonoService
 ) -> None:
     """
-    Check that the user has write permissions on all collections mentioned in the spans,
+    Check that the user has write permissions on all collections,
     or that the collections don't exist yet (in which case they will be created).
 
     Args:
-        spans: List of processed spans to check
+        collection_ids: Set of collection IDs to check
         user: The authenticated user
         mono_svc: The database service
 
@@ -189,14 +242,6 @@ async def _check_collection_permissions(
         HTTPException: If user lacks write permissions on any existing collection
     """
     from docent_core._db_service.schemas.auth_models import Permission, ResourceType
-
-    # Collect all unique collection IDs from spans
-    collection_ids: set[str] = set()
-    for span in spans:
-        span_attrs = span.get("attributes", {})
-        collection_id = span_attrs.get("collection_id")
-        if collection_id and isinstance(collection_id, str):
-            collection_ids.add(collection_id)
 
     # Check permissions for each collection
     for collection_id in collection_ids:
@@ -438,9 +483,9 @@ def otel_span_format_to_dict(
     return processed_span
 
 
-async def accumulate_and_check_completion(spans: List[Dict[str, Any]], user: User) -> None:
+async def accumulate_spans(spans: List[Dict[str, Any]]) -> None:
     """
-    Accumulate spans and check for collection completion.
+    Accumulate spans by collection_id for later processing.
 
     Args:
         spans: List of processed spans to accumulate
@@ -459,35 +504,33 @@ async def accumulate_and_check_completion(spans: List[Dict[str, Any]], user: Use
     for collection_id, collection_spans in spans_by_collection.items():
         await _add_spans_to_accumulation(collection_id, collection_spans)
 
-    # Check for collection completion after all spans are accumulated
-    for span in spans:
-        span_attrs = span.get("attributes", {})
-        collection_id = span_attrs.get("collection_id")
-        if not collection_id:
-            continue
 
-        # Get accumulated spans for this collection
-        accumulated_spans = await _get_accumulated_spans(collection_id)
+async def check_completion(collection_id: str, user: User, analytics: AnalyticsClient) -> None:
+    """
+    Check for collection completion event on any span in the collection.
 
-        # Check if this span indicates collection completion
-        if is_collection_complete(span, accumulated_spans):
-            # Process the completed collection with all accumulated spans
-            await process_completed_collection(collection_id, accumulated_spans, user)
+    Args:
+        collection_id: The collection ID to check for completion
+        user: The user associated with the collection
+        analytics: Analytics client for tracking events
+    """
+    # Get accumulated spans for this collection
+    accumulated_spans = await _get_accumulated_spans(collection_id)
 
-            # Clean up using targeted locks
-            await _remove_collection_from_accumulation(collection_id)
-            await _cancel_collection_timeout(collection_id)
-        else:
-            # Schedule timeout for collection completion
-            schedule_collection_timeout(collection_id, user)
+    if not is_collection_complete(accumulated_spans):
+        # If no completion found, schedule timeout for collection completion
+        schedule_collection_timeout(collection_id, user)
+        return
+
+    # Process the completed collection with all accumulated spans
+    await process_completed_collection(collection_id, accumulated_spans, user, analytics)
 
 
-def is_collection_complete(span: Dict[str, Any], all_spans: List[Dict[str, Any]]) -> bool:
+def is_collection_complete(all_spans: List[Dict[str, Any]]) -> bool:
     """
     Check if a collection is complete based on the presence of a trace_end span.
 
     Args:
-        span: The current span being processed
         all_spans: All spans in the collection
 
     Returns:
@@ -506,7 +549,7 @@ def is_collection_complete(span: Dict[str, Any], all_spans: List[Dict[str, Any]]
 
 
 async def process_completed_collection(
-    collection_id: str, spans: List[Dict[str, Any]], user: User
+    collection_id: str, spans: List[Dict[str, Any]], user: User, analytics: AnalyticsClient
 ) -> None:
     """
     Process a completed collection by creating agent runs and transcripts.
@@ -518,244 +561,52 @@ async def process_completed_collection(
     logger.info(f"Processing completed collection {collection_id} with {len(spans)} spans")
 
     # Process spans to create agent runs
-    await store_spans(spans, user)
+    count_agent_runs = await store_spans(spans, user)
+
+    # Clean up using targeted locks
+    await _remove_collection_from_accumulation(collection_id)
+    await _cancel_collection_timeout(collection_id)
+
+    # Track with PostHog
+    analytics.track_event(
+        "agent_runs_ingested",
+        properties={
+            "collection_id": collection_id,
+            "num_runs": count_agent_runs,
+            "source": "tracing",
+        },
+    )
 
 
-async def store_spans(spans: List[Dict[str, Any]], user: User) -> None:
+async def store_spans(spans: List[Dict[str, Any]], user: User) -> int:
     """
     Store spans by creating collections, agent runs, and transcripts.
 
     Args:
         spans: List of processed span dictionaries
+        user: The user creating the agent runs
+
+    Returns:
+        int: Number of agent runs created
     """
     if not spans:
-        return
+        return 0
 
     # Initialize database service
     mono_svc = await MonoService.init()
 
     # Organize spans by collection_id -> agent_run_id -> transcript_id -> spans[]
-    organized_spans: Dict[str, Dict[str, Dict[str, List[Dict[str, Any]]]]] = {}
-
-    for span in spans:
-        # Extract IDs from span attributes
-        span_attrs = span.get("attributes", {})
-        collection_id = span_attrs.get("collection_id")
-        agent_run_id = span_attrs.get("agent_run_id")
-        transcript_id = span_attrs.get("transcript_id")
-
-        if not collection_id:
-            logger.warning(f"Skipping span {span.get('span_id')} - missing collection_id")
-            # pprint the json span
-            print(json.dumps(span, indent=2))
-            continue
-
-        organized_spans.setdefault(collection_id, {}).setdefault(agent_run_id, {}).setdefault(
-            transcript_id, []
-        ).append(span)
+    spans_by_collection = _organize_spans_by_collection(spans)
 
     # Process each collection and its agent runs
     total_agent_runs = 0
 
-    for collection_id, agent_runs in organized_spans.items():
-        # Extract service name from the first span in this collection
-        collection_name = ""
-        for agent_run_id, transcripts in agent_runs.items():
-            for transcript_id, transcript_spans in transcripts.items():
-                if transcript_spans and len(transcript_spans) > 0:
-                    # Get service name from resource attributes of the first span
-                    first_span = transcript_spans[0]
-                    resource_attributes = first_span.get("resource_attributes", {})
-                    collection_name = resource_attributes.get("service.name", "")
-                    if collection_name:
-                        break
+    for collection_id, spans_by_agent_run in spans_by_collection.items():
+        # Ensure collection exists
+        await _ensure_collection_exists(collection_id, spans_by_agent_run, user, mono_svc)
 
-        # Create collection if it doesn't exist
-        try:
-            if not await mono_svc.collection_exists(collection_id):
-                await mono_svc.create_collection(
-                    user=user,
-                    collection_id=collection_id,
-                    name=collection_name,
-                    description="",
-                )
-                logger.info(
-                    f"Created collection {collection_id} with service name: {collection_name}"
-                )
-        except Exception as e:
-            logger.error(f"Error creating/checking collection {collection_id}: {str(e)}")
-            continue
-
-        # Process agent runs for this collection
-        collection_agent_runs: List[AgentRun] = []
-
-        for agent_run_id, transcripts in agent_runs.items():
-            logger.info(f"Processing agent_run_id: {agent_run_id}")
-            agent_run_transcripts: Dict[str, Transcript] = {}
-            agent_run_scores: Dict[str, int | float | bool | None] = {}
-            agent_run_model: str | None = None
-            agent_run_metadata_dict: Dict[str, Any] = {}
-
-            # Process each transcript
-            for transcript_id, transcript_spans in transcripts.items():
-                logger.info(
-                    f"  Processing transcript_id: {transcript_id} with {len(transcript_spans)} spans"
-                )
-
-                # store all the chat threads
-                chat_threads: List[List[ChatMessage]] = []
-
-                for span in transcript_spans:
-                    # Check for agent_run_score events
-                    for event in span.get("events", []):
-                        if event.get("name") == "agent_run_score":
-                            score_name = event.get("attributes", {}).get("score.name")
-                            score_value = event.get("attributes", {}).get("score.value")
-                            if score_name and score_value is not None:
-                                agent_run_scores[score_name] = score_value
-                                logger.info(f"    Found score: {score_name} = {score_value}")
-
-                    # Extract metadata from span events
-                    span_metadata = _extract_metadata_from_span_events(span)
-                    if span_metadata:
-                        # Unflatten the metadata to restore nested structure
-                        unflattened_metadata = _unflatten_metadata(span_metadata)
-                        agent_run_metadata_dict.update(unflattened_metadata)
-                        logger.info(f"    Found metadata: {unflattened_metadata}")
-
-                    # Extract model from span attributes
-                    span_attrs = span.get("attributes", {})
-                    if not agent_run_model and "gen_ai.response.model" in span_attrs:
-                        agent_run_model = span_attrs["gen_ai.response.model"]
-                        logger.info(f"    Found model: {agent_run_model}")
-
-                    # Extract messages from this span
-                    span_messages = _span_to_chat_messages(span)
-
-                    if not span_messages:
-                        continue
-
-                    # look at each span (which will include the chat history, if any)
-                    # if there is only 1 message it's a new chat thread
-                    # if there are multiple messages we need to find the chat thread it's continuing
-                    # by matching the span messages (+role and order) to the existing chat threads
-                    # if we find a match, we add any new messages to the existing chat thread
-                    # if we don't find a match, we create a new chat thread
-
-                    if len(span_messages) == 1:
-                        # Single message - create new chat thread
-                        chat_threads.append(span_messages)
-                        logger.debug(f"    Created new chat thread with 1 message")
-                    else:
-                        # Multiple messages - try to find matching existing thread
-                        matched_thread_index = None
-                        match_type = None  # 'extend' or 'skip'
-
-                        for i, existing_thread in enumerate(chat_threads):
-                            # Case 1: Check if existing thread is a prefix of span_messages (extend existing)
-                            if len(span_messages) > len(existing_thread):
-                                if matching_thread_start(existing_thread, span_messages):
-                                    matched_thread_index = i
-                                    match_type = "extend"
-                                    logger.debug(
-                                        f"    Found matching thread {i} for span with {len(span_messages)} messages (extend existing)"
-                                    )
-                                    break
-
-                            # Case 2: Check if span_messages is a prefix of existing thread (skip new)
-                            elif len(existing_thread) >= len(span_messages):
-                                if matching_thread_start(span_messages, existing_thread):
-                                    matched_thread_index = i
-                                    match_type = "skip"
-                                    logger.debug(
-                                        f"    Found matching thread {i} for span with {len(span_messages)} messages (skip new - already contained)"
-                                    )
-                                    break
-
-                        if matched_thread_index is not None:
-                            if match_type == "extend":
-                                # Found matching thread - add new messages
-                                existing_thread = chat_threads[matched_thread_index]
-                                new_messages = span_messages[len(existing_thread) :]
-                                chat_threads[matched_thread_index].extend(new_messages)
-                                logger.info(
-                                    f"    Extended chat thread {matched_thread_index} with {len(new_messages)} new messages (reason: matched existing thread). First new message: {new_messages[0].text[:100] if new_messages else 'N/A'}"
-                                )
-                            else:  # match_type == 'skip'
-                                # New messages are already contained in existing thread - skip
-                                logger.info(
-                                    f"    Skipped span with {len(span_messages)} messages (reason: already contained in thread {matched_thread_index})"
-                                )
-                        else:
-                            # No match found - create new chat thread
-                            chat_threads.append(span_messages)
-                            logger.info(
-                                f"    Created new chat thread with {len(span_messages)} messages (reason: no matching existing thread found)"
-                            )
-                            # Log span messages in a readable format for debugging
-                            for i, span_message in enumerate(span_messages):
-                                logger.info(
-                                    f"      Span message {i}: role={getattr(span_message, 'role', 'N/A')}, "
-                                    f"text={getattr(span_message, 'text', '').strip()[:100]}{'...' if len(getattr(span_message, 'text', '').strip()) > 100 else ''}"
-                                )
-
-                # update this to record each chat thread as a transcript
-                if chat_threads:
-                    # Create a transcript for each chat thread
-                    for i, chat_thread in enumerate(chat_threads):
-                        # Create unique transcript ID for each thread
-                        thread_transcript_id = str(uuid.uuid4())
-
-                        transcript = Transcript(
-                            id=thread_transcript_id,
-                            messages=chat_thread,
-                            name=f"Chat Thread {i + 1}" if len(chat_threads) > 1 else "",
-                            description="",
-                        )
-                        agent_run_transcripts[thread_transcript_id] = transcript
-                        logger.info(
-                            f"    Created transcript {thread_transcript_id} with {len(chat_thread)} messages"
-                        )
-                else:
-                    logger.warning(
-                        f"    No messages extracted from {len(transcript_spans)} spans for transcript {transcript_id}"
-                    )
-                    # Log span details for debugging
-                    for i, span in enumerate(transcript_spans):
-                        span_attrs = span.get("attributes", {})
-                        logger.debug(
-                            f"      Span {i}: {span.get('operation_name')} - keys: {list(span_attrs.keys())}"
-                        )
-
-                    # Create agent run if it has transcripts
-            if agent_run_transcripts:
-                # Create metadata with scores, model, and any additional metadata using BaseAgentRunMetadata
-                metadata_dict: Dict[str, Any] = {"scores": agent_run_scores}
-                if agent_run_model:
-                    metadata_dict["model"] = agent_run_model
-
-                # Add any additional metadata from span events
-                if agent_run_metadata_dict:
-                    metadata_dict.update(agent_run_metadata_dict)
-                    logger.info(f"  Added metadata to agent run: {agent_run_metadata_dict}")
-
-                metadata = BaseAgentRunMetadata(**metadata_dict)
-                agent_run = AgentRun(
-                    id=agent_run_id,
-                    name="",
-                    description="",
-                    transcripts=agent_run_transcripts,
-                    metadata=metadata,
-                )
-                collection_agent_runs.append(agent_run)
-                logger.info(
-                    f"  Created agent run {agent_run_id} with {len(agent_run_transcripts)} transcripts, {len(agent_run_scores)} scores, and model: {agent_run_model or 'unknown'}"
-                )
-            else:
-                logger.warning(f"  No transcripts created for agent_run_id: {agent_run_id}")
-                # Log transcript details for debugging
-                for transcript_id, transcript_spans in transcripts.items():
-                    logger.debug(f"    Transcript {transcript_id}: {len(transcript_spans)} spans")
+        # Create agent runs for this collection
+        collection_agent_runs = await _create_agent_runs_from_spans(spans_by_agent_run)
 
         # Add agent runs to this collection
         if collection_agent_runs:
@@ -774,10 +625,264 @@ async def store_spans(spans: List[Dict[str, Any]], user: User) -> None:
         else:
             logger.warning(f"No agent runs created for collection {collection_id}")
             # Log agent run details for debugging
-            for agent_run_id, transcripts in agent_runs.items():
+            for agent_run_id, transcripts in spans_by_agent_run.items():
                 logger.debug(f"  Agent run {agent_run_id}: {len(transcripts)} transcripts")
 
     logger.info(f"Processed {len(spans)} spans into {total_agent_runs} agent runs")
+
+    return total_agent_runs
+
+
+def _organize_spans_by_collection(
+    spans: List[Dict[str, Any]]
+) -> Dict[str, Dict[str, Dict[str, List[Dict[str, Any]]]]]:
+    """
+    Organize spans by collection_id -> agent_run_id -> transcript_id -> spans[].
+
+    Args:
+        spans: List of processed span dictionaries
+
+    Returns:
+        Organized spans structure
+    """
+    organized_spans: Dict[str, Dict[str, Dict[str, List[Dict[str, Any]]]]] = {}
+
+    for span in spans:
+        # Extract IDs from span attributes
+        span_attrs = span.get("attributes", {})
+        collection_id = span_attrs.get("collection_id")
+        agent_run_id = span_attrs.get("agent_run_id")
+        transcript_id = span_attrs.get("transcript_id")
+
+        if not collection_id:
+            logger.warning(f"Skipping span {span.get('span_id')} - missing collection_id")
+            logger.debug(f"Span: {json.dumps(span, indent=2)}")
+            continue
+
+        organized_spans.setdefault(collection_id, {}).setdefault(agent_run_id, {}).setdefault(
+            transcript_id, []
+        ).append(span)
+
+    return organized_spans
+
+
+async def _ensure_collection_exists(
+    collection_id: str,
+    agent_runs: Dict[str, Dict[str, List[Dict[str, Any]]]],
+    user: User,
+    mono_svc: MonoService,
+) -> None:
+    """
+    Ensure a collection exists, creating it if necessary.
+
+    Args:
+        collection_id: The collection ID to ensure exists
+        agent_runs: Agent runs data (not used for collection creation anymore)
+        user: The user creating the collection
+        mono_svc: Database service instance
+    """
+    # Note: Collection creation is now handled in _ensure_collections_exists
+    # This function is kept for backward compatibility but no longer creates collections
+    try:
+        if not await mono_svc.collection_exists(collection_id):
+            logger.warning(
+                f"Collection {collection_id} does not exist but should have been created earlier"
+            )
+    except Exception as e:
+        logger.error(f"Error checking collection {collection_id}: {str(e)}")
+        raise
+
+
+def _find_or_create_chat_thread(
+    span_messages: List[ChatMessage], existing_chat_threads: List[List[ChatMessage]]
+) -> tuple[int | None, str]:
+    """
+    Find the right existing chat thread to add new messages to, or indicate a new thread should be created.
+
+    Args:
+        span_messages: Messages from the current span
+        existing_chat_threads: List of existing chat threads
+
+    Returns:
+        Tuple of (thread_index, action) where action is 'extend', 'skip', or 'new'
+    """
+    if len(span_messages) == 1:
+        # Single message - create new chat thread
+        return None, "new"
+
+    # Multiple messages - try to find matching existing thread
+    for i, existing_thread in enumerate(existing_chat_threads):
+        # Case 1: Check if existing thread is a prefix of span_messages (extend existing)
+        if len(span_messages) > len(existing_thread):
+            if matching_thread_start(existing_thread, span_messages):
+                logger.debug(
+                    f"    Found matching thread {i} for span with {len(span_messages)} messages (extend existing)"
+                )
+                return i, "extend"
+
+        # Case 2: Check if span_messages is a prefix of existing thread (skip new)
+        elif len(existing_thread) >= len(span_messages):
+            if matching_thread_start(span_messages, existing_thread):
+                logger.debug(
+                    f"    Found matching thread {i} for span with {len(span_messages)} messages (skip new - already contained)"
+                )
+                return i, "skip"
+
+    # No match found - create new chat thread
+    return None, "new"
+
+
+def _create_transcripts_from_spans(transcript_spans: List[Dict[str, Any]]) -> List[Transcript]:
+    """
+    Create Transcript objects from spans.
+
+    Args:
+        transcript_spans: List of spans for a transcript
+
+    Returns:
+        List of Transcript objects
+    """
+    # Store all the chat threads
+    chat_threads: List[List[ChatMessage]] = []
+
+    for span in transcript_spans:
+        # Extract messages from this span
+        span_messages = _span_to_chat_messages(span)
+
+        if not span_messages:
+            continue
+
+        # Find or create chat thread
+        thread_index, action = _find_or_create_chat_thread(span_messages, chat_threads)
+
+        if action == "new":
+            # Create new chat thread
+            chat_threads.append(span_messages)
+            logger.debug(f"    Created new chat thread with {len(span_messages)} messages")
+        elif action == "extend" and thread_index is not None:
+            # Found matching thread - add new messages
+            existing_thread = chat_threads[thread_index]
+            new_messages = span_messages[len(existing_thread) :]
+            chat_threads[thread_index].extend(new_messages)
+            logger.info(
+                f"    Extended chat thread {thread_index} with {len(new_messages)} new messages. First new message: {new_messages[0].text[:100] if new_messages else 'N/A'}"
+            )
+        elif action == "skip":
+            # New messages are already contained in existing thread - skip
+            logger.info(
+                f"    Skipped span with {len(span_messages)} messages (already contained in thread {thread_index})"
+            )
+
+    # Create transcripts from chat threads
+    transcripts: List[Transcript] = []
+    if chat_threads:
+        for i, chat_thread in enumerate(chat_threads):
+            # Create unique transcript ID for each thread
+            thread_transcript_id = str(uuid.uuid4())
+
+            transcript = Transcript(
+                id=thread_transcript_id,
+                messages=chat_thread,
+                name=f"Chat Thread {i + 1}" if len(chat_threads) > 1 else "",
+                description="",
+            )
+            transcripts.append(transcript)
+            logger.info(
+                f"    Created transcript {thread_transcript_id} with {len(chat_thread)} messages"
+            )
+    else:
+        logger.warning(f"    No messages extracted from {len(transcript_spans)} spans")
+
+    return transcripts
+
+
+async def _create_agent_runs_from_spans(
+    agent_runs: Dict[str, Dict[str, List[Dict[str, Any]]]]
+) -> List[AgentRun]:
+    """
+    Create AgentRun objects from organized spans.
+
+    Args:
+        agent_runs: Organized spans by agent_run_id -> transcript_id -> spans[]
+
+    Returns:
+        List of AgentRun objects
+    """
+    collection_agent_runs: List[AgentRun] = []
+
+    for agent_run_id, transcripts in agent_runs.items():
+        logger.info(f"Processing agent_run_id: {agent_run_id}")
+        agent_run_transcripts: Dict[str, Transcript] = {}
+        agent_run_scores: Dict[str, int | float | bool | None] = {}
+        agent_run_model: str | None = None
+        agent_run_metadata_dict: Dict[str, Any] = {}
+
+        # Process each transcript
+        for transcript_id, transcript_spans in transcripts.items():
+            logger.info(
+                f"  Processing transcript_id: {transcript_id} with {len(transcript_spans)} spans"
+            )
+
+            # Extract metadata and scores from spans
+            for span in transcript_spans:
+                # Check for agent_run_score events
+                for event in span.get("events", []):
+                    if event.get("name") == "agent_run_score":
+                        score_name = event.get("attributes", {}).get("score.name")
+                        score_value = event.get("attributes", {}).get("score.value")
+                        if score_name and score_value is not None:
+                            agent_run_scores[score_name] = score_value
+                            logger.info(f"    Found score: {score_name} = {score_value}")
+
+                # Extract metadata from span events
+                span_metadata = _extract_metadata_from_span_events(span)
+                if span_metadata:
+                    # Unflatten the metadata to restore nested structure
+                    unflattened_metadata = _unflatten_metadata(span_metadata)
+                    agent_run_metadata_dict.update(unflattened_metadata)
+                    logger.info(f"    Found metadata: {unflattened_metadata}")
+
+                # Extract model from span attributes
+                span_attrs = span.get("attributes", {})
+                if not agent_run_model and "gen_ai.response.model" in span_attrs:
+                    agent_run_model = span_attrs["gen_ai.response.model"]
+                    logger.info(f"    Found model: {agent_run_model}")
+
+            # Create transcripts from spans
+            transcripts_list = _create_transcripts_from_spans(transcript_spans)
+
+            # Add transcripts to agent run
+            for transcript in transcripts_list:
+                agent_run_transcripts[transcript.id] = transcript
+
+        # Create agent run if it has transcripts
+        if agent_run_transcripts:
+            # Create metadata with scores, model, and any additional metadata using BaseAgentRunMetadata
+            metadata_dict: Dict[str, Any] = {"scores": agent_run_scores}
+            if agent_run_model:
+                metadata_dict["model"] = agent_run_model
+
+            # Add any additional metadata from span events
+            if agent_run_metadata_dict:
+                metadata_dict.update(agent_run_metadata_dict)
+                logger.info(f"  Added metadata to agent run: {agent_run_metadata_dict}")
+
+            metadata = BaseAgentRunMetadata(**metadata_dict)
+            agent_run = AgentRun(
+                id=agent_run_id,
+                name="",
+                description="",
+                transcripts=agent_run_transcripts,
+                metadata=metadata,
+            )
+            collection_agent_runs.append(agent_run)
+            logger.info(
+                f"  Created agent run {agent_run_id} with {len(agent_run_transcripts)} transcripts, {len(agent_run_scores)} scores, and model: {agent_run_model or 'unknown'}"
+            )
+        else:
+            logger.warning(f"  No transcripts created for agent_run_id: {agent_run_id}")
+
+    return collection_agent_runs
 
 
 def _extract_tool_call_ids_from_message(msg: ChatMessage) -> set[str]:
