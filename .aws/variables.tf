@@ -174,3 +174,13 @@ variable "frontend_app_runner_max_size" {
   type        = number
   default     = 10
 }
+
+variable "vpc_cidr_block" {
+  description = "CIDR block for the VPC."
+  type        = string
+  default     = "10.0.0.0/16"
+  validation {
+    condition     = can(cidrnetmask(var.vpc_cidr_block))
+    error_message = "vpc_cidr_block must be a valid IPv4 CIDR string, e.g., 10.0.0.0/16."
+  }
+}
