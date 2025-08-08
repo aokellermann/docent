@@ -2,7 +2,7 @@ import enum
 import json
 from copy import deepcopy
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal, cast
 from uuid import uuid4
 
 from pgvector.sqlalchemy import Vector
@@ -25,7 +25,6 @@ from sqlalchemy.schema import UniqueConstraint
 
 from docent._log_util import get_logger
 from docent.data_models.agent_run import AgentRun
-from docent.data_models.metadata import BaseAgentRunMetadata, BaseMetadata
 from docent.data_models.transcript import Transcript
 from docent_core._ai_tools.search import SearchResult
 from docent_core._db_service.filters import ComplexFilter, parse_filter_dict
@@ -100,7 +99,7 @@ class SQLAAgentRun(SQLABase):
     @classmethod
     def from_agent_run(cls, agent_run: AgentRun, collection_id: str) -> "SQLAAgentRun":
         # Sanitize raw text
-        metadata_json = json.loads(sanitize_pg_text(agent_run.metadata.model_dump_json()))
+        metadata_json = json.loads(sanitize_pg_text(json.dumps(agent_run.metadata)))
         text_for_search = sanitize_pg_text(agent_run.text)
 
         return cls(
@@ -113,11 +112,14 @@ class SQLAAgentRun(SQLABase):
         )
 
     def to_agent_run(self, transcripts: dict[str, Transcript]) -> AgentRun:
+        metadata = json.loads(self.metadata_json)  # .decode("utf-8")) TODO(vincent): fix this
+        assert isinstance(metadata, dict), f"metadata is not a dict: {metadata}"
+
         return AgentRun(
             id=self.id,
             name=self.name,
             description=self.description,
-            metadata=BaseAgentRunMetadata.model_validate(self.metadata_json),
+            metadata=cast(dict[str, Any], metadata),
             transcripts=transcripts,
         )
 
@@ -164,10 +166,16 @@ class SQLATranscript(SQLABase):
 
     def to_dict_key_and_transcript(self) -> tuple[str, Transcript]:
         messages = json.loads(self.messages.decode("utf-8"))
-        metadata = BaseMetadata.model_validate_json(self.metadata_json.decode("utf-8"))
+        metadata = json.loads(self.metadata_json)  # TODO(vincent): fix this .decode("utf-8")
+        assert isinstance(metadata, dict), f"metadata is not a dict: {metadata}"
         return (
             self.dict_key,
-            Transcript(id=self.id, name=self.name, messages=messages, metadata=metadata),
+            Transcript(
+                id=self.id,
+                name=self.name,
+                messages=messages,
+                metadata=cast(dict[str, Any], metadata),
+            ),
         )
 
 

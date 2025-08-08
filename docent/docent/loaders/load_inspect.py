@@ -1,7 +1,7 @@
 from inspect_ai.log import EvalLog
 from inspect_ai.scorer import CORRECT, INCORRECT, NOANSWER, PARTIAL, Score
 
-from docent.data_models import AgentRun, InspectAgentRunMetadata, Transcript
+from docent.data_models import AgentRun, Transcript
 from docent.data_models.chat import parse_chat_message
 
 
@@ -15,6 +15,8 @@ def _normalize_inspect_score(score: Score) -> float | None:
     Returns:
         The normalized score as a float, or None if the score is not a valid value.
     """
+
+    # TODO(vincent): fix this, doesn't support list / dict rn
 
     if isinstance(score.value, int | float | bool):
         return float(score.value)
@@ -40,6 +42,7 @@ def load_inspect_log(log: EvalLog) -> list[AgentRun]:
     if log.samples is None:
         return []
 
+    # TODO(vincent): fix this
     agent_runs: list[AgentRun] = []
 
     for s in log.samples:
@@ -51,16 +54,16 @@ def load_inspect_log(log: EvalLog) -> list[AgentRun]:
         else:
             sample_scores = {k: _normalize_inspect_score(v) for k, v in s.scores.items()}
 
-        metadata = InspectAgentRunMetadata(
-            task_id=log.eval.task,
-            sample_id=str(sample_id),
-            epoch_id=epoch_id,
-            model=log.eval.model,
-            additional_metadata=s.metadata,
-            scores=sample_scores,
+        metadata = {
+            "task_id": log.eval.task,
+            "sample_id": str(sample_id),
+            "epoch_id": epoch_id,
+            "model": log.eval.model,
+            "additional_metadata": s.metadata,
+            "scores": sample_scores,
             # Scores could have answers, explanations, and other metadata besides the values we extract
-            scoring_metadata=s.scores,
-        )
+            "scoring_metadata": s.scores,
+        }
 
         agent_runs.append(
             AgentRun(
