@@ -203,7 +203,10 @@ def _build_base_query(
             )
             .join(
                 SQLARubric.__table__,
-                SQLAJudgeResult.rubric_id == SQLARubric.id,
+                and_(
+                    SQLAJudgeResult.rubric_id == SQLARubric.id,
+                    SQLAJudgeResult.rubric_version == SQLARubric.version,
+                ),
                 isouter=True,
             )
             .join(
@@ -231,7 +234,18 @@ def _build_base_query(
 
     # Optional user-supplied search-query filter
     if rubric_filter:
-        base = base.where(SQLARubric.id == rubric_filter)
+        # Constrain to the latest version of the requested rubric ID
+        latest_version_subq = (
+            select(func.max(SQLARubric.version))
+            .where(SQLARubric.id == rubric_filter)
+            .scalar_subquery()
+        )
+        base = base.where(
+            and_(
+                SQLAJudgeResult.rubric_id == rubric_filter,
+                SQLAJudgeResult.rubric_version == latest_version_subq,
+            )
+        )
 
     return base
 
