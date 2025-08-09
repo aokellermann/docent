@@ -169,7 +169,7 @@ export function ChartsArea() {
   // Handle loading and error states
   if (isLoading) {
     return (
-      <div className="max-h-[35%] flex flex-col">
+      <div className="flex flex-col resize-y overflow-y-auto min-h-[200px] h-[35%]">
         <div className="flex items-center justify-center p-4">
           Loading charts...
         </div>
@@ -179,7 +179,7 @@ export function ChartsArea() {
 
   if (error) {
     return (
-      <div className="max-h-[35%] flex flex-col">
+      <div className="flex flex-col resize-y overflow-y-auto min-h-[200px] h-[35%]">
         <div className="flex items-center justify-center p-4 text-red-500">
           Error loading charts
         </div>
@@ -188,7 +188,7 @@ export function ChartsArea() {
   }
 
   return (
-    <div className="max-h-[35%] flex flex-col">
+    <div className="flex flex-col resize-y overflow-y-auto min-h-[200px] h-[35%]">
       {/* Tab Bar */}
       <div className="flex items-end">
         {charts.map((chart: ChartSpec) => (
