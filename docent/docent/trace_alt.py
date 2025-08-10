@@ -1,10 +1,11 @@
 import asyncio
 import atexit
 import functools
+import io
 import logging
 import os
 import uuid
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager, contextmanager, redirect_stdout
 from contextvars import ContextVar, Token
 from typing import Any, AsyncIterator, Callable, Dict, Iterator, Optional, Set
 
@@ -13,6 +14,10 @@ from opentelemetry.context import Context
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor
 from opentelemetry.trace import Span
 from traceloop.sdk import Traceloop
+
+# Configure logging
+logger = logging.getLogger(__name__)
+logger.disabled = True
 
 DEFAULT_ENDPOINT = "https://api.docent.transluce.org/rest/telemetry"
 
@@ -26,6 +31,7 @@ _current_collection_id: ContextVar[Optional[str]] = ContextVar(
 _tracing_initialized = False
 _collection_name: Optional[str] = None
 _collection_id: Optional[str] = None
+_default_agent_run_id: Optional[str] = None
 _endpoint: Optional[str] = None
 _api_key: Optional[str] = None
 _enable_console_export = False
@@ -55,11 +61,11 @@ class DocentSpanProcessor(SpanProcessor):
         if agent_run_id:
             span.set_attribute("agent_run_id", agent_run_id)
         else:
-            # If no agent_run_id in context, mark this as a default span
+            span.set_attribute("agent_run_id", _get_default_agent_run_id())
             span.set_attribute("agent_run_id_default", True)
 
         # Add service name for better integration with existing OTEL setups
-        span.set_attribute("service.name", _collection_name or "docent-service")
+        span.set_attribute("service.name", _collection_name or "docent-trace")
 
         if self.enable_console_export:
             logging.debug(
@@ -102,7 +108,7 @@ def initialize_tracing(
         instruments: Set of instruments to enable (None = all instruments)
         block_instruments: Set of instruments to explicitly disable
     """
-    global _tracing_initialized, _collection_name, _collection_id, _endpoint, _api_key
+    global _tracing_initialized, _collection_name, _collection_id, _default_agent_run_id, _endpoint, _api_key
     global _enable_console_export, _disable_batch, _instruments, _block_instruments
 
     if _tracing_initialized:
@@ -111,6 +117,7 @@ def initialize_tracing(
 
     _collection_name = collection_name
     _collection_id = collection_id or _generate_id()
+    _default_agent_run_id = _get_default_agent_run_id()  # Generate default ID if not set
     _endpoint = endpoint or DEFAULT_ENDPOINT
     _api_key = api_key or os.getenv("DOCENT_API_KEY")
     _enable_console_export = enable_console_export
@@ -134,29 +141,30 @@ def initialize_tracing(
     docent_processor = DocentSpanProcessor(_collection_id, enable_console_export)
 
     # Get Traceloop's default span processor for export
-    traceloop_processor = get_default_span_processor(
+    export_processor = get_default_span_processor(
         disable_batch=_disable_batch,
         api_endpoint=_endpoint,
         headers={"Authorization": f"Bearer {_api_key}"},
     )
 
     # Combine both processors
-    processors = [docent_processor, traceloop_processor]
+    processors = [docent_processor, export_processor]
 
     os.environ["TRACELOOP_METRICS_ENABLED"] = "false"
     os.environ["TRACELOOP_TRACE_ENABLED"] = "true"
-    # Temporarily redirect stdout to suppress Traceloop's print statements
-    # with redirect_stdout(io.StringIO()):
-    Traceloop.init(  # type: ignore
-        app_name=collection_name,
-        api_endpoint=_endpoint,
-        api_key=_api_key,
-        telemetry_enabled=False,  # don't send telemetry to traceloop's backend
-        disable_batch=_disable_batch,
-        instruments=_instruments,
-        block_instruments=_block_instruments,
-        processor=processors,  # Add both our context processor and Traceloop's export processor
-    )
+
+    # Temporarily redirect stdout to suppress print statements
+    with redirect_stdout(io.StringIO()):
+        Traceloop.init(  # type: ignore
+            app_name=collection_name,
+            api_endpoint=_endpoint,
+            api_key=_api_key,
+            telemetry_enabled=False,  # don't send analytics to traceloop's backend
+            disable_batch=_disable_batch,
+            instruments=_instruments,
+            block_instruments=_block_instruments,
+            processor=processors,  # Add both our context processor and export processor
+        )
 
     _tracing_initialized = True
     logging.info(
@@ -201,6 +209,14 @@ def _get_current_agent_run_id() -> Optional[str]:
 def _get_current_collection_id() -> Optional[str]:
     """Get the current collection ID from context."""
     return _current_collection_id.get()
+
+
+def _get_default_agent_run_id() -> str:
+    """Get the default agent run ID, generating it if not set."""
+    global _default_agent_run_id
+    if _default_agent_run_id is None:
+        _default_agent_run_id = _generate_id()
+    return _default_agent_run_id
 
 
 def _set_current_agent_run_id(agent_run_id: Optional[str]) -> Token[Optional[str]]:
