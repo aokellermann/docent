@@ -23,7 +23,6 @@ from docent_core._server._dependencies.database import get_mono_svc
 from docent_core._server._dependencies.user import get_authenticated_user
 
 logger = get_logger(__name__)
-
 # logger.setLevel(logging.DEBUG)
 
 # Redis key patterns for collection accumulation
@@ -70,50 +69,61 @@ async def trace_endpoint(
         # Store the raw telemetry data for request
         await mono_svc.store_telemetry_log(user.id, trace_data)
 
-        # Extract spans from trace data
-        spans = await extract_spans(trace_data)
-
-        # Extract unique collection IDs and names from spans
-        collection_ids: set[str] = set()
-        collection_names: Dict[str, str] = {}
-
-        for span in spans:
-            span_attrs = span.get("attributes", {})
-            collection_id = span_attrs.get("collection_id")
-            if collection_id and isinstance(collection_id, str):
-                collection_ids.add(collection_id)
-
-                # Extract collection name from service.name if not already found
-                if collection_id not in collection_names:
-                    resource_attributes = span.get("resource_attributes", {})
-                    service_name = resource_attributes.get("service.name", "")
-                    if service_name:
-                        collection_names[collection_id] = service_name
-
-        # Check permissions for all collections mentioned in spans
-        await _check_collection_permissions(collection_ids, user, mono_svc)
-
-        await _ensure_collections_exists(collection_ids, collection_names, user, mono_svc)
-
-        # Accumulate spans into Redis
-        await accumulate_spans(spans)
-
-        # Check completion for each collection
-        for collection_id in collection_ids:
-            await check_completion(collection_id, user, analytics)
+        count_spans = await handle_trace_data(trace_data, user, mono_svc, analytics)
 
         # Return success response
-        return JSONResponse(status_code=200, content={"status": "success", "processed": len(spans)})
-
+        return JSONResponse(
+            status_code=200, content={"status": "success", "processed": count_spans}
+        )
     except Exception as e:
         logger.error(f"Error processing traces: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def handle_trace_data(
+    trace_data: Dict[str, Any], user: User, mono_svc: MonoService, analytics: AnalyticsClient
+) -> int:
+
+    # Extract spans from trace data
+    spans = await extract_spans(trace_data)
+
+    # Extract unique collection IDs and names from spans
+    collection_ids: set[str] = set()
+    collection_names: Dict[str, str] = {}
+
+    for span in spans:
+        span_attrs = span.get("attributes", {})
+        collection_id = span_attrs.get("collection_id")
+        if collection_id and isinstance(collection_id, str):
+            collection_ids.add(collection_id)
+
+            # Extract collection name from service.name if not already found
+            if collection_id not in collection_names:
+                resource_attributes = span.get("resource_attributes", {})
+                service_name = resource_attributes.get("service.name", "")
+                if service_name:
+                    collection_names[collection_id] = service_name
+
+    # Check permissions for all collections mentioned in spans
+    await _check_collection_permissions(collection_ids, user, mono_svc)
+
+    await _ensure_collections_exists(collection_ids, collection_names, user, mono_svc)
+
+    # Accumulate spans into Redis
+    await accumulate_spans(spans)
+
+    # Check completion for each collection
+    for collection_id in collection_ids:
+        await check_completion(collection_id, user, analytics)
+
+    return len(spans)
 
 
 @telemetry_router.post("/v1/trace-done")
 async def trace_done_endpoint(
     request: Request,
     user: User = Depends(get_authenticated_user),
+    mono_svc: MonoService = Depends(get_mono_svc),
     analytics: AnalyticsClient = Depends(use_posthog_user_context),
 ):
     """
@@ -133,6 +143,14 @@ async def trace_done_endpoint(
         # Check if collection exists and user has permissions
         await _check_single_collection_permission(collection_id, user)
 
+        # Store telemetry log for this request
+        telemetry_data = {
+            "endpoint": "/v1/trace-done",
+            "collection_id": collection_id,
+            "request_body": body,
+        }
+        await mono_svc.store_telemetry_log(user.id, telemetry_data, collection_id)
+
         # Schedule processing with a small delay to allow for late-arriving spans
         asyncio.create_task(_process_trace_done_with_delay(collection_id, user, analytics))
 
@@ -149,6 +167,7 @@ async def trace_done_endpoint(
 async def add_score_endpoint(
     request: Request,
     user: User = Depends(get_authenticated_user),
+    mono_svc: MonoService = Depends(get_mono_svc),
 ):
     """
     Endpoint to add a score to an agent run.
@@ -172,6 +191,17 @@ async def add_score_endpoint(
         # Check if collection exists and user has permissions
         await _check_single_collection_permission(collection_id, user)
 
+        # Store telemetry log for this request
+        telemetry_data = {
+            "endpoint": "/v1/scores",
+            "collection_id": collection_id,
+            "agent_run_id": agent_run_id,
+            "score_name": score_name,
+            "score_value": score_value,
+            "request_body": body,
+        }
+        await mono_svc.store_telemetry_log(user.id, telemetry_data, collection_id)
+
         # Store score in Redis
         await _store_agent_run_score(collection_id, agent_run_id, score_name, score_value)
 
@@ -186,6 +216,7 @@ async def add_score_endpoint(
 async def add_metadata_endpoint(
     request: Request,
     user: User = Depends(get_authenticated_user),
+    mono_svc: MonoService = Depends(get_mono_svc),
 ):
     """
     Endpoint to add metadata to an agent run.
@@ -206,6 +237,16 @@ async def add_metadata_endpoint(
 
         # Check if collection exists and user has permissions
         await _check_single_collection_permission(collection_id, user)
+
+        # Store telemetry log for this request
+        telemetry_data = {
+            "endpoint": "/v1/metadata",
+            "collection_id": collection_id,
+            "agent_run_id": agent_run_id,
+            "metadata": metadata,
+            "request_body": body,
+        }
+        await mono_svc.store_telemetry_log(user.id, telemetry_data, collection_id)
 
         # Store metadata in Redis
         await _store_agent_run_metadata(collection_id, agent_run_id, metadata)
