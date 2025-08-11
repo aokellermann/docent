@@ -44,7 +44,7 @@ class AgentRun(BaseModel):
     description: str | None = None
 
     transcripts: dict[str, Transcript]
-    metadata: dict[str, Any]
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_serializer("metadata")
     def serialize_metadata(self, metadata: dict[str, Any], _info: Any) -> dict[str, Any]:
