@@ -93,7 +93,7 @@ class Transcript(BaseModel):
     description: str | None = None
 
     messages: list[ChatMessage]
-    metadata: dict[str, Any]
+    metadata: dict[str, Any] = Field(default_factory=dict)
     _units_of_action: list[list[int]] | None = PrivateAttr(default=None)
 
     @field_serializer("metadata")
