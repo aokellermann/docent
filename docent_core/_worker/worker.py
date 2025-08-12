@@ -1,5 +1,5 @@
 import traceback
-from typing import Any, Callable, Coroutine
+from typing import Any
 
 import anyio
 import sentry_sdk
@@ -9,22 +9,14 @@ from arq.worker import run_worker
 
 from docent._log_util import get_logger
 from docent_core._db_service.contexts import ViewContext
-from docent_core._db_service.schemas.tables import JobStatus, SQLAJob
+from docent_core._db_service.schemas.tables import JobStatus
 from docent_core._db_service.service import MonoService
 from docent_core._env_util import ENV, get_deployment_id
 from docent_core._server._broker.redis_client import get_redis_client
-from docent_core._worker.worker_config import WORKER_QUEUE_NAME, WorkerFunction
-from docent_core.docent.workers.centroid_assignment_worker import centroid_assignment_job
-from docent_core.docent.workers.embedding_worker import compute_embeddings
-from docent_core.docent.workers.rubric_job_worker import rubric_job
+from docent_core._worker.constants import WORKER_QUEUE_NAME
+from docent_core._worker.job_worker_map import JOB_DISPATCHER_MAP
 
 logger = get_logger(__name__)
-
-JOB_DISPATCHER_MAP: dict[str, Callable[[ViewContext, SQLAJob], Coroutine[Any, Any, None]]] = {
-    WorkerFunction.RUBRIC_JOB.value: rubric_job,
-    WorkerFunction.COMPUTE_EMBEDDINGS.value: compute_embeddings,
-    WorkerFunction.CENTROID_ASSIGNMENT_JOB.value: centroid_assignment_job,
-}
 
 
 async def run_job(_: Any, ctx: ViewContext, job_id: str):
