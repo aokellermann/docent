@@ -82,47 +82,6 @@ export const initSession = createAsyncThunk(
   }
 );
 
-export const deleteSearch = createAsyncThunk(
-  'collection/deleteSearch',
-  async (
-    { searchQueryId, job }: { searchQueryId: string; job: Job },
-    { dispatch, getState }
-  ) => {
-    const state = getState() as { collection: CollectionState };
-    const collectionId = state.collection.collectionId;
-
-    if (!collectionId) {
-      dispatch(
-        setToastNotification({
-          title: 'Configuration error',
-          description: 'No collection ID available',
-          variant: 'destructive',
-        })
-      );
-      throw new Error('No collection ID available');
-    }
-
-    try {
-      if (job.status === 'running') {
-        await apiRestClient.post(`/${job.id}/cancel_compute_search`);
-      }
-      console.log('deleting search', searchQueryId, job);
-      await apiRestClient.delete(
-        `/${collectionId}/search?search_query_id=${searchQueryId}`
-      );
-    } catch (error) {
-      dispatch(
-        setToastNotification({
-          title: 'Error deleting search',
-          description: 'Failed to delete search query',
-          variant: 'destructive',
-        })
-      );
-      throw error;
-    }
-  }
-);
-
 export const postFilter = createAsyncThunk(
   'collection/postFilter',
   async (filter: ComplexFilter | null, { dispatch, getState }) => {
