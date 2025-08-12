@@ -1,7 +1,5 @@
-import asyncio
 import atexit
 import contextvars
-import inspect
 import itertools
 import logging
 import os
@@ -12,8 +10,10 @@ import uuid
 from collections import defaultdict
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar, Token
+from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Callable, Dict, Iterator, List, Optional, Union
 
+import requests
 from opentelemetry import trace
 from opentelemetry.context import Context
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter as GRPCExporter
@@ -39,36 +39,14 @@ logger.disabled = True
 
 # Default configuration
 DEFAULT_ENDPOINT = "https://api.docent.transluce.org/rest/telemetry"
-
-
-def _is_async_context() -> bool:
-    """Detect if we're in an async context."""
-    try:
-        # Check if we're in an async function
-        frame = inspect.currentframe()
-        while frame:
-            if frame.f_code.co_flags & inspect.CO_COROUTINE:
-                return True
-            frame = frame.f_back
-        return False
-    except:
-        return False
-
-
-def _is_running_in_event_loop() -> bool:
-    """Check if we're running in an event loop."""
-    try:
-        asyncio.get_running_loop()
-        return True
-    except RuntimeError:
-        return False
+DEFAULT_COLLECTION_NAME = "default-collection-name"
 
 
 def _is_notebook() -> bool:
     """Check if we're running in a Jupyter notebook."""
     try:
         return "ipykernel" in sys.modules
-    except:
+    except Exception:
         return False
 
 
@@ -77,7 +55,7 @@ class DocentTracer:
 
     def __init__(
         self,
-        collection_name: str = "default-collection-name",
+        collection_name: str = DEFAULT_COLLECTION_NAME,
         collection_id: Optional[str] = None,
         agent_run_id: Optional[str] = None,
         endpoint: Union[str, List[str]] = DEFAULT_ENDPOINT,
@@ -86,7 +64,6 @@ class DocentTracer:
         enable_console_export: bool = False,
         enable_otlp_export: bool = True,
         disable_batch: bool = False,
-        span_postprocess_callback: Optional[Callable[[ReadableSpan], None]] = None,
     ):
         """
         Initialize Docent tracing manager.
@@ -101,7 +78,6 @@ class DocentTracer:
             enable_console_export: Whether to export to console
             enable_otlp_export: Whether to export to OTLP endpoint
             disable_batch: Whether to disable batch processing (use SimpleSpanProcessor)
-            span_postprocess_callback: Optional callback for post-processing spans
         """
         self.collection_name: str = collection_name
         self.collection_id: str = collection_id if collection_id else str(uuid.uuid4())
@@ -129,22 +105,27 @@ class DocentTracer:
         self.enable_console_export = enable_console_export
         self.enable_otlp_export = enable_otlp_export
         self.disable_batch = disable_batch
-        self.span_postprocess_callback = span_postprocess_callback
 
         # Use separate tracer provider to avoid interfering with existing OTEL setup
         self._tracer_provider: Optional[TracerProvider] = None
-        self._root_span: Optional[Span] = None
-        self._root_context: Context = Context()
+        self._root_context: Optional[Context] = Context()
         self._tracer: Optional[trace.Tracer] = None
         self._initialized: bool = False
         self._cleanup_registered: bool = False
         self._disabled: bool = False
         self._spans_processors: List[Union[BatchSpanProcessor, SimpleSpanProcessor]] = []
 
-        # Context variables for agent_run_id and transcript_id (thread/async safe)
+        # Base HTTP endpoint for direct API calls (scores, metadata, trace-done)
+        if len(self.endpoints) > 0:
+            self._api_endpoint_base: Optional[str] = self.endpoints[0]
+
+        # Context variables for agent_run_id and transcript_id
         self._collection_id_var: ContextVar[str] = contextvars.ContextVar("docent_collection_id")
         self._agent_run_id_var: ContextVar[str] = contextvars.ContextVar("docent_agent_run_id")
         self._transcript_id_var: ContextVar[str] = contextvars.ContextVar("docent_transcript_id")
+        self._transcript_group_id_var: ContextVar[str] = contextvars.ContextVar(
+            "docent_transcript_group_id"
+        )
         self._attributes_var: ContextVar[dict[str, Any]] = contextvars.ContextVar(
             "docent_attributes"
         )
@@ -154,18 +135,17 @@ class DocentTracer:
         )
         self._transcript_counter_lock = threading.Lock()
 
-    def get_current_docent_span(self) -> Optional[Span]:
+    def get_current_agent_run_id(self) -> Optional[str]:
         """
-        Get the current span from our isolated context.
-        This never touches the global OpenTelemetry context.
-        """
-        if self._root_context is None:
-            return None
+        Get the current agent run ID from context.
 
+        Returns:
+            The current agent run ID if available, None otherwise
+        """
         try:
-            return trace.get_current_span(context=self._root_context)
-        except Exception:
-            return None
+            return self._agent_run_id_var.get()
+        except LookupError:
+            return self.default_agent_run_id
 
     def _register_cleanup(self):
         """Register cleanup handlers."""
@@ -187,7 +167,7 @@ class DocentTracer:
 
     def _next_span_order(self, transcript_id: str) -> int:
         """
-        Get the next atomic span order for a given transcript_id.
+        Get the next span order for a given transcript_id.
         Thread-safe and guaranteed to be unique and monotonic.
         """
         with self._transcript_counter_lock:
@@ -252,17 +232,16 @@ class DocentTracer:
                 resource=Resource.create({"service.name": self.collection_name})
             )
 
-            # Add custom span processor for run_id and transcript_id
+            # Add custom span processor for agent_run_id and transcript_id
             class ContextSpanProcessor(SpanProcessor):
                 def __init__(self, manager: "DocentTracer"):
                     self.manager: "DocentTracer" = manager
 
                 def on_start(self, span: Span, parent_context: Optional[Context] = None) -> None:
-                    # Add collection_id, agent_run_id, transcript_id, and any other current attributes
-                    # Always add collection_id as it's always available
+                    # Add collection_id, agent_run_id, transcript_id, transcript_group_id, and any other current attributes
                     span.set_attribute("collection_id", self.manager.collection_id)
 
-                    # Handle agent_run_id
+                    # Set agent_run_id from context
                     try:
                         agent_run_id: str = self.manager._agent_run_id_var.get()
                         if agent_run_id:
@@ -274,7 +253,15 @@ class DocentTracer:
                         span.set_attribute("agent_run_id_default", True)
                         span.set_attribute("agent_run_id", self.manager.default_agent_run_id)
 
-                    # Handle transcript_id
+                    # Set transcript_group_id from context
+                    try:
+                        transcript_group_id: str = self.manager._transcript_group_id_var.get()
+                        if transcript_group_id:
+                            span.set_attribute("transcript_group_id", transcript_group_id)
+                    except LookupError:
+                        pass
+
+                    # Set transcript_id from context
                     try:
                         transcript_id: str = self.manager._transcript_id_var.get()
                         if transcript_id:
@@ -286,7 +273,7 @@ class DocentTracer:
                         # transcript_id not available, skip it
                         pass
 
-                    # Handle attributes
+                    # Set custom attributes from context
                     try:
                         attributes: dict[str, Any] = self.manager._attributes_var.get()
                         for key, value in attributes.items():
@@ -340,18 +327,6 @@ class DocentTracer:
             # Get tracer from our isolated provider (don't set global provider)
             self._tracer = self._tracer_provider.get_tracer(__name__)
 
-            # Start root span
-            self._root_span = self._tracer.start_span(
-                "application_session",
-                attributes={
-                    "service.name": self.collection_name,
-                    "session.type": "application_root",
-                },
-            )
-            self._root_context = trace.set_span_in_context(
-                self._root_span, context=self._root_context
-            )
-
             # Instrument threading for better context propagation
             try:
                 ThreadingInstrumentor().instrument()
@@ -398,30 +373,14 @@ class DocentTracer:
             raise
 
     def cleanup(self):
-        """Clean up Docent tracing resources."""
+        """Clean up Docent tracing resources and signal trace completion to backend."""
         try:
-            # Create an explicit end-of-trace span before ending the root span
-            if self._tracer and self._root_span:
-                end_span = self._tracer.start_span(
-                    "trace_end",
-                    context=self._root_context,
-                    attributes={
-                        "event.type": "trace_end",
-                    },
-                )
-                end_span.end()
+            # Notify backend that trace is done (no span creation)
+            try:
+                self._send_trace_done()
+            except Exception as e:
+                logger.warning(f"Failed to notify trace done: {e}")
 
-            if (
-                self._root_span
-                and hasattr(self._root_span, "is_recording")
-                and self._root_span.is_recording()
-            ):
-                self._root_span.end()
-            elif self._root_span:
-                # Fallback if is_recording is not available
-                self._root_span.end()
-
-            self._root_span = None
             self._root_context = None  # type: ignore
 
             # Shutdown our isolated tracer provider
@@ -486,48 +445,6 @@ class DocentTracer:
         return self._root_context
 
     @contextmanager
-    def span(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> Iterator[Span]:
-        """
-        Context manager for creating spans with attributes.
-        """
-        if not self._initialized:
-            self.initialize()
-
-        if self._tracer is None:
-            raise RuntimeError("Tracer not initialized")
-
-        span_attributes: dict[str, Any] = attributes or {}
-
-        with self._tracer.start_as_current_span(
-            name, context=self._root_context, attributes=span_attributes
-        ) as span:
-            yield span
-
-    @asynccontextmanager
-    async def async_span(
-        self, name: str, attributes: Optional[Dict[str, Any]] = None
-    ) -> AsyncIterator[Span]:
-        """
-        Async context manager for creating spans with attributes.
-
-        Args:
-            name: Name of the span
-            attributes: Dictionary of attributes to add to the span
-        """
-        if not self._initialized:
-            self.initialize()
-
-        if self._tracer is None:
-            raise RuntimeError("Tracer not initialized")
-
-        span_attributes: dict[str, Any] = attributes or {}
-
-        with self._tracer.start_as_current_span(
-            name, context=self._root_context, attributes=span_attributes
-        ) as span:
-            yield span
-
-    @contextmanager
     def agent_run_context(
         self,
         agent_run_id: Optional[str] = None,
@@ -541,7 +458,7 @@ class DocentTracer:
         Args:
             agent_run_id: Optional agent run ID (auto-generated if not provided)
             transcript_id: Optional transcript ID (auto-generated if not provided)
-            metadata: Optional nested dictionary of metadata to attach as events
+            metadata: Optional nested dictionary of metadata to send to backend
             **attributes: Additional attributes to add to the context
 
         Yields:
@@ -549,9 +466,6 @@ class DocentTracer:
         """
         if not self._initialized:
             self.initialize()
-
-        if self._tracer is None:
-            raise RuntimeError("Tracer not initialized")
 
         if agent_run_id is None:
             agent_run_id = str(uuid.uuid4())
@@ -564,20 +478,14 @@ class DocentTracer:
         attributes_token: Token[dict[str, Any]] = self._attributes_var.set(attributes)
 
         try:
-            # Create a span with the agent run attributes
-            span_attributes: dict[str, Any] = {
-                "agent_run_id": agent_run_id,
-                "transcript_id": transcript_id,
-                **attributes,
-            }
-            with self._tracer.start_as_current_span(
-                "agent_run_context", context=self._root_context, attributes=span_attributes
-            ) as _span:
-                # Attach metadata as events if provided
-                if metadata:
-                    _add_metadata_event_to_span(_span, metadata)
+            # Send metadata directly to backend if provided
+            if metadata:
+                try:
+                    self.send_agent_run_metadata(agent_run_id, metadata)
+                except Exception as e:
+                    logger.warning(f"Failed sending agent run metadata: {e}")
 
-                yield agent_run_id, transcript_id
+            yield agent_run_id, transcript_id
         finally:
             self._agent_run_id_var.reset(agent_run_id_token)
             self._transcript_id_var.reset(transcript_id_token)
@@ -598,7 +506,7 @@ class DocentTracer:
         Args:
             agent_run_id: Optional agent run ID (auto-generated if not provided)
             transcript_id: Optional transcript ID (auto-generated if not provided)
-            metadata: Optional nested dictionary of metadata to attach as events
+            metadata: Optional nested dictionary of metadata to send to backend
             **attributes: Additional attributes to add to the context
 
         Yields:
@@ -606,9 +514,6 @@ class DocentTracer:
         """
         if not self._initialized:
             self.initialize()
-
-        if self._tracer is None:
-            raise RuntimeError("Tracer not initialized")
 
         if agent_run_id is None:
             agent_run_id = str(uuid.uuid4())
@@ -621,117 +526,415 @@ class DocentTracer:
         attributes_token: Token[dict[str, Any]] = self._attributes_var.set(attributes)
 
         try:
-            # Create a span with the agent run attributes
-            span_attributes: dict[str, Any] = {
-                "agent_run_id": agent_run_id,
-                "transcript_id": transcript_id,
-                **attributes,
-            }
-            with self._tracer.start_as_current_span(
-                "agent_run_context", context=self._root_context, attributes=span_attributes
-            ) as _span:
-                # Attach metadata as events if provided
-                if metadata:
-                    _add_metadata_event_to_span(_span, metadata)
+            # Send metadata directly to backend if provided
+            if metadata:
+                try:
+                    self.send_agent_run_metadata(agent_run_id, metadata)
+                except Exception as e:
+                    logger.warning(f"Failed sending agent run metadata: {e}")
 
-                yield agent_run_id, transcript_id
+            yield agent_run_id, transcript_id
         finally:
             self._agent_run_id_var.reset(agent_run_id_token)
             self._transcript_id_var.reset(transcript_id_token)
             self._attributes_var.reset(attributes_token)
 
-    def start_transcript(
-        self,
-        agent_run_id: Optional[str] = None,
-        transcript_id: Optional[str] = None,
-        **attributes: Any,
-    ) -> tuple[Any, str, str]:
+    def _api_headers(self) -> Dict[str, str]:
         """
-        Manually start a transcript span.
-
-        Args:
-            agent_run_id: Optional agent run ID (auto-generated if not provided)
-            transcript_id: Optional transcript ID (auto-generated if not provided)
-            **attributes: Additional attributes to add to the span
+        Get the API headers for HTTP requests.
 
         Returns:
-            Tuple of (span, agent_run_id, transcript_id)
+            Dictionary of headers including Authorization
+        """
+        return {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.headers.get('Authorization', '').replace('Bearer ', '')}",
+        }
+
+    def _post_json(self, path: str, data: Dict[str, Any]) -> None:
+        if not self._api_endpoint_base:
+            raise RuntimeError("API endpoint base is not configured")
+        url = f"{self._api_endpoint_base}{path}"
+        try:
+            resp = requests.post(url, json=data, headers=self._api_headers(), timeout=10)
+            resp.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed POST {url}: {e}")
+
+    def send_agent_run_score(
+        self,
+        agent_run_id: str,
+        name: str,
+        score: float,
+        attributes: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Send a score to the backend for a specific agent run.
+
+        Args:
+            agent_run_id: The agent run ID
+            name: Name of the score metric
+            score: Numeric score value
+            attributes: Optional additional attributes
+        """
+        collection_id = self.collection_id
+        payload: Dict[str, Any] = {
+            "collection_id": collection_id,
+            "agent_run_id": agent_run_id,
+            "score_name": name,
+            "score_value": score,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        if attributes:
+            payload.update(attributes)
+        self._post_json("/v1/scores", payload)
+
+    def send_agent_run_metadata(self, agent_run_id: str, metadata: Dict[str, Any]) -> None:
+        collection_id = self.collection_id
+        payload: Dict[str, Any] = {
+            "collection_id": collection_id,
+            "agent_run_id": agent_run_id,
+            "metadata": metadata,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        self._post_json("/v1/agent-run-metadata", payload)
+
+    def send_transcript_metadata(
+        self,
+        transcript_id: str,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        transcript_group_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Send transcript data to the backend.
+
+        Args:
+            transcript_id: The transcript ID
+            name: Optional transcript name
+            description: Optional transcript description
+            transcript_group_id: Optional transcript group ID
+            metadata: Optional metadata to send
+        """
+        collection_id = self.collection_id
+        payload: Dict[str, Any] = {
+            "collection_id": collection_id,
+            "transcript_id": transcript_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # Only add fields that are provided
+        if name is not None:
+            payload["name"] = name
+        if description is not None:
+            payload["description"] = description
+        if transcript_group_id is not None:
+            payload["transcript_group_id"] = transcript_group_id
+        if metadata is not None:
+            payload["metadata"] = metadata
+
+        self._post_json("/v1/transcript-metadata", payload)
+
+    def get_current_transcript_id(self) -> Optional[str]:
+        """
+        Get the current transcript ID from context.
+
+        Returns:
+            The current transcript ID if available, None otherwise
+        """
+        try:
+            return self._transcript_id_var.get()
+        except LookupError:
+            return None
+
+    def get_current_transcript_group_id(self) -> Optional[str]:
+        """
+        Get the current transcript group ID from context.
+
+        Returns:
+            The current transcript group ID if available, None otherwise
+        """
+        try:
+            return self._transcript_group_id_var.get()
+        except LookupError:
+            return None
+
+    @contextmanager
+    def transcript_context(
+        self,
+        name: Optional[str] = None,
+        transcript_id: Optional[str] = None,
+        description: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        transcript_group_id: Optional[str] = None,
+    ) -> Iterator[str]:
+        """
+        Context manager for setting up a transcript context.
+
+        Args:
+            name: Optional transcript name
+            transcript_id: Optional transcript ID (auto-generated if not provided)
+            description: Optional transcript description
+            metadata: Optional metadata to send to backend
+            transcript_group_id: Optional transcript group ID
+
+        Yields:
+            The transcript ID
         """
         if not self._initialized:
-            self.initialize()
+            raise RuntimeError(
+                "Tracer is not initialized. Call initialize_tracing() before using transcript context."
+            )
 
-        if self._tracer is None:
-            raise RuntimeError("Tracer not initialized")
-
-        if agent_run_id is None:
-            agent_run_id = str(uuid.uuid4())
         if transcript_id is None:
             transcript_id = str(uuid.uuid4())
 
-        span_attributes: dict[str, Any] = {
-            "agent_run_id": agent_run_id,
-            "transcript_id": transcript_id,
-            **attributes,
-        }
+        # Determine transcript group ID before setting new context
+        if transcript_group_id is None:
+            try:
+                transcript_group_id = self._transcript_group_id_var.get()
+            except LookupError:
+                # No current transcript group context, this transcript has no group
+                transcript_group_id = None
 
-        span: Any = self._tracer.start_span(
-            "transcript_span", context=self._root_context, attributes=span_attributes
-        )
+        # Set context variable for this execution context
+        transcript_id_token: Token[str] = self._transcript_id_var.set(transcript_id)
 
-        return span, agent_run_id, transcript_id
+        try:
+            # Send transcript data and metadata to backend
+            try:
+                self.send_transcript_metadata(
+                    transcript_id, name, description, transcript_group_id, metadata
+                )
+            except Exception as e:
+                logger.warning(f"Failed sending transcript data: {e}")
 
-    def stop_transcript(self, span: Span) -> None:
+            yield transcript_id
+        finally:
+            # Reset context variable to previous state
+            self._transcript_id_var.reset(transcript_id_token)
+
+    @asynccontextmanager
+    async def async_transcript_context(
+        self,
+        name: Optional[str] = None,
+        transcript_id: Optional[str] = None,
+        description: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        transcript_group_id: Optional[str] = None,
+    ) -> AsyncIterator[str]:
         """
-        Manually stop a transcript span.
+        Async context manager for setting up a transcript context.
 
         Args:
-            span: The span to stop
-        """
-        if span and hasattr(span, "end"):
-            span.end()
+            name: Optional transcript name
+            transcript_id: Optional transcript ID (auto-generated if not provided)
+            description: Optional transcript description
+            metadata: Optional metadata to send to backend
+            transcript_group_id: Optional transcript group ID
 
-    def start_span(self, name: str, attributes: Optional[Dict[str, Any]] = None) -> Span:
-        """
-        Manually start a span.
-
-        Args:
-            name: Name of the span
-            attributes: Dictionary of attributes to add to the span
-
-        Returns:
-            The created span
+        Yields:
+            The transcript ID
         """
         if not self._initialized:
-            self.initialize()
+            raise RuntimeError(
+                "Tracer is not initialized. Call initialize_tracing() before using transcript context."
+            )
 
-        if self._tracer is None:
-            raise RuntimeError("Tracer not initialized")
+        if transcript_id is None:
+            transcript_id = str(uuid.uuid4())
 
-        span_attributes: dict[str, Any] = attributes or {}
+        # Determine transcript group ID before setting new context
+        if transcript_group_id is None:
+            try:
+                transcript_group_id = self._transcript_group_id_var.get()
+            except LookupError:
+                # No current transcript group context, this transcript has no group
+                transcript_group_id = None
 
-        span: Span = self._tracer.start_span(
-            name, context=self._root_context, attributes=span_attributes
-        )
+        # Set context variable for this execution context
+        transcript_id_token: Token[str] = self._transcript_id_var.set(transcript_id)
 
-        return span
+        try:
+            # Send transcript data and metadata to backend
+            try:
+                self.send_transcript_metadata(
+                    transcript_id, name, description, transcript_group_id, metadata
+                )
+            except Exception as e:
+                logger.warning(f"Failed sending transcript data: {e}")
 
-    def stop_span(self, span: Span) -> None:
+            yield transcript_id
+        finally:
+            # Reset context variable to previous state
+            self._transcript_id_var.reset(transcript_id_token)
+
+    def send_transcript_group_metadata(
+        self,
+        transcript_group_id: str,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        parent_transcript_group_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """
-        Manually stop a span.
+        Send transcript group data to the backend.
 
         Args:
-            span: The span to stop
+            transcript_group_id: The transcript group ID
+            name: Optional transcript group name
+            description: Optional transcript group description
+            parent_transcript_group_id: Optional parent transcript group ID
+            metadata: Optional metadata to send
         """
-        if span and hasattr(span, "end"):
-            span.end()
+        collection_id = self.collection_id
+        payload: Dict[str, Any] = {
+            "collection_id": collection_id,
+            "transcript_group_id": transcript_group_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        if name is not None:
+            payload["name"] = name
+        if description is not None:
+            payload["description"] = description
+        if parent_transcript_group_id is not None:
+            payload["parent_transcript_group_id"] = parent_transcript_group_id
+        if metadata is not None:
+            payload["metadata"] = metadata
+
+        self._post_json("/v1/transcript-group-metadata", payload)
+
+    @contextmanager
+    def transcript_group_context(
+        self,
+        name: Optional[str] = None,
+        transcript_group_id: Optional[str] = None,
+        description: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        parent_transcript_group_id: Optional[str] = None,
+    ) -> Iterator[str]:
+        """
+        Context manager for setting up a transcript group context.
+
+        Args:
+            name: Optional transcript group name
+            transcript_group_id: Optional transcript group ID (auto-generated if not provided)
+            description: Optional transcript group description
+            metadata: Optional metadata to send to backend
+            parent_transcript_group_id: Optional parent transcript group ID
+
+        Yields:
+            The transcript group ID
+        """
+        if not self._initialized:
+            raise RuntimeError(
+                "Tracer is not initialized. Call initialize_tracing() before using transcript group context."
+            )
+
+        if transcript_group_id is None:
+            transcript_group_id = str(uuid.uuid4())
+
+        # Determine parent transcript group ID before setting new context
+        if parent_transcript_group_id is None:
+            try:
+                parent_transcript_group_id = self._transcript_group_id_var.get()
+            except LookupError:
+                # No current transcript group context, this becomes a root group
+                parent_transcript_group_id = None
+
+        # Set context variable for this execution context
+        transcript_group_id_token: Token[str] = self._transcript_group_id_var.set(
+            transcript_group_id
+        )
+
+        try:
+            # Send transcript group data and metadata to backend
+            try:
+                self.send_transcript_group_metadata(
+                    transcript_group_id, name, description, parent_transcript_group_id, metadata
+                )
+            except Exception as e:
+                logger.warning(f"Failed sending transcript group data: {e}")
+
+            yield transcript_group_id
+        finally:
+            # Reset context variable to previous state
+            self._transcript_group_id_var.reset(transcript_group_id_token)
+
+    @asynccontextmanager
+    async def async_transcript_group_context(
+        self,
+        name: Optional[str] = None,
+        transcript_group_id: Optional[str] = None,
+        description: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        parent_transcript_group_id: Optional[str] = None,
+    ) -> AsyncIterator[str]:
+        """
+        Async context manager for setting up a transcript group context.
+
+        Args:
+            name: Optional transcript group name
+            transcript_group_id: Optional transcript group ID (auto-generated if not provided)
+            description: Optional transcript group description
+            metadata: Optional metadata to send to backend
+            parent_transcript_group_id: Optional parent transcript group ID
+
+        Yields:
+            The transcript group ID
+        """
+        if not self._initialized:
+            raise RuntimeError(
+                "Tracer is not initialized. Call initialize_tracing() before using transcript group context."
+            )
+
+        if transcript_group_id is None:
+            transcript_group_id = str(uuid.uuid4())
+
+        # Determine parent transcript group ID before setting new context
+        if parent_transcript_group_id is None:
+            try:
+                parent_transcript_group_id = self._transcript_group_id_var.get()
+            except LookupError:
+                # No current transcript group context, this becomes a root group
+                parent_transcript_group_id = None
+
+        # Set context variable for this execution context
+        transcript_group_id_token: Token[str] = self._transcript_group_id_var.set(
+            transcript_group_id
+        )
+
+        try:
+            # Send transcript group data and metadata to backend
+            try:
+                self.send_transcript_group_metadata(
+                    transcript_group_id, name, description, parent_transcript_group_id, metadata
+                )
+            except Exception as e:
+                logger.warning(f"Failed sending transcript group data: {e}")
+
+            yield transcript_group_id
+        finally:
+            # Reset context variable to previous state
+            self._transcript_group_id_var.reset(transcript_group_id_token)
+
+    def _send_trace_done(self) -> None:
+        collection_id = self.collection_id
+        payload: Dict[str, Any] = {
+            "collection_id": collection_id,
+            "status": "completed",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        self._post_json("/v1/trace-done", payload)
 
 
-# Global instance for easy access
 _global_tracer: Optional[DocentTracer] = None
 
 
 def initialize_tracing(
-    collection_name: str = "default-service",
+    collection_name: str = DEFAULT_COLLECTION_NAME,
     collection_id: Optional[str] = None,
     endpoint: Union[str, List[str]] = DEFAULT_ENDPOINT,
     headers: Optional[Dict[str, str]] = None,
@@ -739,7 +942,6 @@ def initialize_tracing(
     enable_console_export: bool = False,
     enable_otlp_export: bool = True,
     disable_batch: bool = False,
-    span_postprocess_callback: Optional[Callable[[ReadableSpan], None]] = None,
 ) -> DocentTracer:
     """
     Initialize the global Docent tracer.
@@ -756,7 +958,6 @@ def initialize_tracing(
         enable_console_export: Whether to export spans to console
         enable_otlp_export: Whether to export spans to OTLP endpoint
         disable_batch: Whether to disable batch processing (use SimpleSpanProcessor)
-        span_postprocess_callback: Optional callback for post-processing spans
 
     Returns:
         The initialized Docent tracer
@@ -782,11 +983,7 @@ def initialize_tracing(
             enable_console_export=enable_console_export,
             enable_otlp_export=enable_otlp_export,
             disable_batch=disable_batch,
-            span_postprocess_callback=span_postprocess_callback,
         )
-        _global_tracer.initialize()
-    else:
-        # If already initialized, ensure it's properly set up
         _global_tracer.initialize()
 
     return _global_tracer
@@ -795,8 +992,7 @@ def initialize_tracing(
 def get_tracer() -> DocentTracer:
     """Get the global Docent tracer."""
     if _global_tracer is None:
-        # Auto-initialize with defaults if not already done
-        return initialize_tracing()
+        raise RuntimeError("Docent tracer not initialized")
     return _global_tracer
 
 
@@ -827,20 +1023,9 @@ def set_disabled(disabled: bool) -> None:
         _global_tracer.set_disabled(disabled)
 
 
-def get_api_key() -> Optional[str]:
-    """
-    Get the API key from environment variable.
-
-    Returns:
-        The API key from DOCENT_API_KEY environment variable, or None if not set
-    """
-    return os.environ.get("DOCENT_API_KEY")
-
-
 def agent_run_score(name: str, score: float, attributes: Optional[Dict[str, Any]] = None) -> None:
     """
-    Record a score event on the current span.
-    Automatically works in both sync and async contexts.
+    Send a score to the backend for the current agent run.
 
     Args:
         name: Name of the score metric
@@ -848,22 +1033,16 @@ def agent_run_score(name: str, score: float, attributes: Optional[Dict[str, Any]
         attributes: Optional additional attributes for the score event
     """
     try:
-        # Get current span from our isolated context instead of global context
-        current_span: Optional[Span] = get_tracer().get_current_docent_span()
-        if current_span and hasattr(current_span, "add_event"):
-            event_attributes: dict[str, Any] = {
-                "score.name": name,
-                "score.value": score,
-                "event.type": "score",
-            }
-            if attributes:
-                event_attributes.update(attributes)
+        tracer: DocentTracer = get_tracer()
+        agent_run_id = tracer.get_current_agent_run_id()
 
-            current_span.add_event(name="agent_run_score", attributes=event_attributes)
-        else:
-            logger.warning("No current span available for recording score")
+        if not agent_run_id:
+            logger.warning("No active agent run context. Score will not be sent.")
+            return
+
+        tracer.send_agent_run_score(agent_run_id, name, score, attributes)
     except Exception as e:
-        logger.error(f"Failed to record score event: {e}")
+        logger.error(f"Failed to send score: {e}")
 
 
 def _flatten_dict(d: Dict[str, Any], prefix: str = "") -> Dict[str, Any]:
@@ -878,31 +1057,9 @@ def _flatten_dict(d: Dict[str, Any], prefix: str = "") -> Dict[str, Any]:
     return flattened
 
 
-def _add_metadata_event_to_span(span: Span, metadata: Dict[str, Any]) -> None:
-    """
-    Add metadata as an event to a span.
-
-    Args:
-        span: The span to add the event to
-        metadata: Dictionary of metadata (can be nested)
-    """
-    if span and hasattr(span, "add_event"):
-        event_attributes: dict[str, Any] = {
-            "event.type": "metadata",
-        }
-
-        # Flatten nested metadata and add as event attributes
-        flattened_metadata = _flatten_dict(metadata)
-        for key, value in flattened_metadata.items():
-            event_attributes[f"metadata.{key}"] = value
-        span.add_event(name="agent_run_metadata", attributes=event_attributes)
-
-
 def agent_run_metadata(metadata: Dict[str, Any]) -> None:
     """
-    Record metadata as an event on the current span.
-    Automatically works in both sync and async contexts.
-    Supports nested dictionaries by flattening them with dot notation.
+    Send metadata directly to the backend for the current agent run.
 
     Args:
         metadata: Dictionary of metadata to attach to the current span (can be nested)
@@ -912,28 +1069,49 @@ def agent_run_metadata(metadata: Dict[str, Any]) -> None:
         agent_run_metadata({"user": {"id": "123", "name": "John"}, "config": {"model": "gpt-4"}})
     """
     try:
-        current_span: Optional[Span] = get_tracer().get_current_docent_span()
-        if current_span:
-            _add_metadata_event_to_span(current_span, metadata)
-        else:
-            logger.warning("No current span available for recording metadata")
+        tracer = get_tracer()
+        agent_run_id = tracer.get_current_agent_run_id()
+        if not agent_run_id:
+            logger.warning("No active agent run context. Metadata will not be sent.")
+            return
+
+        tracer.send_agent_run_metadata(agent_run_id, metadata)
     except Exception as e:
-        logger.error(f"Failed to record metadata event: {e}")
+        logger.error(f"Failed to send metadata: {e}")
 
 
-# Unified functions that automatically detect context
-@asynccontextmanager
-async def span(name: str, attributes: Optional[Dict[str, Any]] = None) -> AsyncIterator[Span]:
+def transcript_metadata(
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+    transcript_group_id: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> None:
     """
-    Automatically choose sync or async span based on context.
-    Can be used with both 'with' and 'async with'.
+    Send transcript metadata directly to the backend for the current transcript.
+
+    Args:
+        name: Optional transcript name
+        description: Optional transcript description
+        parent_transcript_id: Optional parent transcript ID
+        metadata: Optional metadata to send
+
+    Example:
+        transcript_metadata(name="data_processing", description="Process user data")
+        transcript_metadata(metadata={"user": "John", "model": "gpt-4"})
+        transcript_metadata(name="validation", parent_transcript_id="parent-123")
     """
-    if _is_async_context() or _is_running_in_event_loop():
-        async with get_tracer().async_span(name, attributes) as span:
-            yield span
-    else:
-        with get_tracer().span(name, attributes) as span:
-            yield span
+    try:
+        tracer = get_tracer()
+        transcript_id = tracer.get_current_transcript_id()
+        if not transcript_id:
+            logger.warning("No active transcript context. Metadata will not be sent.")
+            return
+
+        tracer.send_transcript_metadata(
+            transcript_id, name, description, transcript_group_id, metadata
+        )
+    except Exception as e:
+        logger.error(f"Failed to send transcript metadata: {e}")
 
 
 class AgentRunContext:
@@ -1084,3 +1262,359 @@ def agent_run_context(
             pass
     """
     return AgentRunContext(agent_run_id, transcript_id, metadata=metadata, **attributes)
+
+
+class TranscriptContext:
+    """Context manager for creating and managing transcripts."""
+
+    def __init__(
+        self,
+        name: Optional[str] = None,
+        transcript_id: Optional[str] = None,
+        description: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        transcript_group_id: Optional[str] = None,
+    ):
+        self.name = name
+        self.transcript_id = transcript_id
+        self.description = description
+        self.metadata = metadata
+        self.transcript_group_id = transcript_group_id
+        self._sync_context: Optional[Any] = None
+        self._async_context: Optional[Any] = None
+
+    def __enter__(self) -> str:
+        """Sync context manager entry."""
+        self._sync_context = get_tracer().transcript_context(
+            name=self.name,
+            transcript_id=self.transcript_id,
+            description=self.description,
+            metadata=self.metadata,
+            transcript_group_id=self.transcript_group_id,
+        )
+        return self._sync_context.__enter__()
+
+    def __exit__(self, exc_type: type[BaseException], exc_val: Any, exc_tb: Any) -> None:
+        """Sync context manager exit."""
+        if self._sync_context:
+            self._sync_context.__exit__(exc_type, exc_val, exc_tb)
+
+    async def __aenter__(self) -> str:
+        """Async context manager entry."""
+        self._async_context = get_tracer().async_transcript_context(
+            name=self.name,
+            transcript_id=self.transcript_id,
+            description=self.description,
+            metadata=self.metadata,
+            transcript_group_id=self.transcript_group_id,
+        )
+        return await self._async_context.__aenter__()
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Async context manager exit."""
+        if self._async_context:
+            await self._async_context.__aexit__(exc_type, exc_val, exc_tb)
+
+
+def transcript(
+    func: Optional[Callable[..., Any]] = None,
+    *,
+    name: Optional[str] = None,
+    transcript_id: Optional[str] = None,
+    description: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    transcript_group_id: Optional[str] = None,
+):
+    """
+    Decorator to wrap a function in a transcript context.
+    Injects transcript_id as a function attribute.
+
+    Example:
+        @transcript
+        def my_func(x, y):
+            print(my_func.docent.transcript_id)
+
+        @transcript(name="data_processing", description="Process user data")
+        def my_func_with_name(x, y):
+            print(my_func_with_name.docent.transcript_id)
+
+        @transcript(metadata={"user": "John", "model": "gpt-4"})
+        async def my_async_func(z):
+            print(my_async_func.docent.transcript_id)
+    """
+    import functools
+    import inspect
+
+    def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
+        if inspect.iscoroutinefunction(f):
+
+            @functools.wraps(f)
+            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                async with TranscriptContext(
+                    name=name,
+                    transcript_id=transcript_id,
+                    description=description,
+                    metadata=metadata,
+                    transcript_group_id=transcript_group_id,
+                ) as transcript_id_result:
+                    # Store docent data as function attributes
+                    setattr(
+                        async_wrapper,
+                        "docent",
+                        type(
+                            "DocentData",
+                            (),
+                            {
+                                "transcript_id": transcript_id_result,
+                            },
+                        )(),
+                    )
+                    return await f(*args, **kwargs)
+
+            return async_wrapper
+        else:
+
+            @functools.wraps(f)
+            def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+                with TranscriptContext(
+                    name=name,
+                    transcript_id=transcript_id,
+                    description=description,
+                    metadata=metadata,
+                    transcript_group_id=transcript_group_id,
+                ) as transcript_id_result:
+                    # Store docent data as function attributes
+                    setattr(
+                        sync_wrapper,
+                        "docent",
+                        type(
+                            "DocentData",
+                            (),
+                            {
+                                "transcript_id": transcript_id_result,
+                            },
+                        )(),
+                    )
+                    return f(*args, **kwargs)
+
+            return sync_wrapper
+
+    if func is None:
+        return decorator
+    else:
+        return decorator(func)
+
+
+def transcript_context(
+    name: Optional[str] = None,
+    transcript_id: Optional[str] = None,
+    description: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    transcript_group_id: Optional[str] = None,
+) -> TranscriptContext:
+    """
+    Create a transcript context for tracing.
+
+    Args:
+        name: Optional transcript name
+        transcript_id: Optional transcript ID (auto-generated if not provided)
+        description: Optional transcript description
+        metadata: Optional metadata to attach to the transcript
+        parent_transcript_id: Optional parent transcript ID
+
+    Returns:
+        A context manager that can be used with both 'with' and 'async with'
+
+    Example:
+        # Sync usage
+        with transcript_context(name="data_processing") as transcript_id:
+            pass
+
+        # Async usage
+        async with transcript_context(description="Process user data") as transcript_id:
+            pass
+
+        # With metadata
+        with transcript_context(metadata={"user": "John", "model": "gpt-4"}) as transcript_id:
+            pass
+    """
+    return TranscriptContext(name, transcript_id, description, metadata, transcript_group_id)
+
+
+class TranscriptGroupContext:
+    """Context manager for creating and managing transcript groups."""
+
+    def __init__(
+        self,
+        name: Optional[str] = None,
+        transcript_group_id: Optional[str] = None,
+        description: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        parent_transcript_group_id: Optional[str] = None,
+    ):
+        self.name = name
+        self.transcript_group_id = transcript_group_id
+        self.description = description
+        self.metadata = metadata
+        self.parent_transcript_group_id = parent_transcript_group_id
+        self._sync_context: Optional[Any] = None
+        self._async_context: Optional[Any] = None
+
+    def __enter__(self) -> str:
+        """Sync context manager entry."""
+        self._sync_context = get_tracer().transcript_group_context(
+            name=self.name,
+            transcript_group_id=self.transcript_group_id,
+            description=self.description,
+            metadata=self.metadata,
+            parent_transcript_group_id=self.parent_transcript_group_id,
+        )
+        return self._sync_context.__enter__()
+
+    def __exit__(self, exc_type: type[BaseException], exc_val: Any, exc_tb: Any) -> None:
+        """Sync context manager exit."""
+        if self._sync_context:
+            self._sync_context.__exit__(exc_type, exc_val, exc_tb)
+
+    async def __aenter__(self) -> str:
+        """Async context manager entry."""
+        self._async_context = get_tracer().async_transcript_group_context(
+            name=self.name,
+            transcript_group_id=self.transcript_group_id,
+            description=self.description,
+            metadata=self.metadata,
+            parent_transcript_group_id=self.parent_transcript_group_id,
+        )
+        return await self._async_context.__aenter__()
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Async context manager exit."""
+        if self._async_context:
+            await self._async_context.__aexit__(exc_type, exc_val, exc_tb)
+
+
+def transcript_group(
+    func: Optional[Callable[..., Any]] = None,
+    *,
+    name: Optional[str] = None,
+    transcript_group_id: Optional[str] = None,
+    description: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    parent_transcript_group_id: Optional[str] = None,
+):
+    """
+    Decorator to wrap a function in a transcript group context.
+    Injects transcript_group_id as a function attribute.
+
+    Example:
+        @transcript_group
+        def my_func(x, y):
+            print(my_func.docent.transcript_group_id)
+
+        @transcript_group(name="data_processing", description="Process user data")
+        def my_func_with_name(x, y):
+            print(my_func_with_name.docent.transcript_group_id)
+
+        @transcript_group(metadata={"user": "John", "model": "gpt-4"})
+        async def my_async_func(z):
+            print(my_async_func.docent.transcript_group_id)
+    """
+    import functools
+    import inspect
+
+    def decorator(f: Callable[..., Any]) -> Callable[..., Any]:
+        if inspect.iscoroutinefunction(f):
+
+            @functools.wraps(f)
+            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                async with TranscriptGroupContext(
+                    name=name,
+                    transcript_group_id=transcript_group_id,
+                    description=description,
+                    metadata=metadata,
+                    parent_transcript_group_id=parent_transcript_group_id,
+                ) as transcript_group_id_result:
+                    # Store docent data as function attributes
+                    setattr(
+                        async_wrapper,
+                        "docent",
+                        type(
+                            "DocentData",
+                            (),
+                            {
+                                "transcript_group_id": transcript_group_id_result,
+                            },
+                        )(),
+                    )
+                    return await f(*args, **kwargs)
+
+            return async_wrapper
+        else:
+
+            @functools.wraps(f)
+            def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+                with TranscriptGroupContext(
+                    name=name,
+                    transcript_group_id=transcript_group_id,
+                    description=description,
+                    metadata=metadata,
+                    parent_transcript_group_id=parent_transcript_group_id,
+                ) as transcript_group_id_result:
+                    # Store docent data as function attributes
+                    setattr(
+                        sync_wrapper,
+                        "docent",
+                        type(
+                            "DocentData",
+                            (),
+                            {
+                                "transcript_group_id": transcript_group_id_result,
+                            },
+                        )(),
+                    )
+                    return f(*args, **kwargs)
+
+            return sync_wrapper
+
+    if func is None:
+        return decorator
+    else:
+        return decorator(func)
+
+
+def transcript_group_context(
+    name: Optional[str] = None,
+    transcript_group_id: Optional[str] = None,
+    description: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    parent_transcript_group_id: Optional[str] = None,
+) -> TranscriptGroupContext:
+    """
+    Create a transcript group context for tracing.
+
+    Args:
+        name: Optional transcript group name
+        transcript_group_id: Optional transcript group ID (auto-generated if not provided)
+        description: Optional transcript group description
+        metadata: Optional metadata to attach to the transcript group
+        parent_transcript_group_id: Optional parent transcript group ID
+
+    Returns:
+        A context manager that can be used with both 'with' and 'async with'
+
+    Example:
+        # Sync usage
+        with transcript_group_context(name="data_processing") as transcript_group_id:
+            pass
+
+        # Async usage
+        async with transcript_group_context(description="Process user data") as transcript_group_id:
+            pass
+
+        # With metadata
+        with transcript_group_context(metadata={"user": "John", "model": "gpt-4"}) as transcript_group_id:
+            pass
+    """
+    return TranscriptGroupContext(
+        name, transcript_group_id, description, metadata, parent_transcript_group_id
+    )
