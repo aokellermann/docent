@@ -32,6 +32,15 @@ from docent.data_models.citation import (
 )
 from docent.data_models.transcript import fake_model_dump
 from docent.loaders.load_inspect import load_inspect_log
+from docent_core._ai_tools.assistant.chat import make_single_tasst_system_prompt
+from docent_core._ai_tools.assistant.summarizer import (
+    HighLevelAction,
+    LowLevelAction,
+    ObservationType,
+    group_actions_into_high_level_steps,
+    interesting_agent_observations,
+    summarize_agent_actions,
+)
 from docent_core._ai_tools.search import SearchResultWithCitations
 from docent_core._db_service.contexts import ViewContext
 from docent_core._db_service.filters import (
@@ -56,15 +65,6 @@ from docent_core._llm_util.prod_llms import get_llm_completions_async
 from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES
 from docent_core._server._analytics.posthog import AnalyticsClient
 from docent_core._server._analytics.tracker import track_endpoint_with_user
-from docent_core._server._assistant.chat import make_single_tasst_system_prompt
-from docent_core._server._assistant.summarizer import (
-    HighLevelAction,
-    LowLevelAction,
-    ObservationType,
-    group_actions_into_high_level_steps,
-    interesting_agent_observations,
-    summarize_agent_actions,
-)
 from docent_core._server._auth.session import (
     COOKIE_KEY,
     create_user_session,
