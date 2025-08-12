@@ -1,12 +1,12 @@
 # Docent Tracing
 
-Docent provides a comprehensive tracing system that automatically captures LLM interactions, organizes them into "agent runs", and enables detailed analysis of your AI applications.
+Docent provides a comprehensive tracing system that automatically captures LLM interactions, organizes them, and enables detailed analysis of your AI applications.
 
 ## Overview
 
 The Docent tracing system allows you to:
 
-- Automatically instrument LLM provider calls (OpenAI, Anthropic, Bedrock)
+- Automatically instrument LLM provider calls (OpenAI, Anthropic)
 - Organize code into logical agent runs with metadata and scores
 - Track chat conversations and tool calls
 - Analyze performance and quality metrics
@@ -16,7 +16,7 @@ The Docent tracing system allows you to:
 
 ### 1. Installation
 
-Docent tracing is included with the main Docent package:
+Docent tracing is included with the main Docent SDK package:
 
 ```bash
 pip install docent-python
@@ -55,6 +55,11 @@ initialize_tracing(
     endpoint="https://docent.transluce.org/rest/telemetry",  # Optional, uses default if not provided
     api_key="your-api-key",  # Optional, uses env var if not provided
 )
+
+# Add new agent runs to an existing collection
+initialize_tracing(
+    collection_id="c49ef42c-7493-4af3-84d5-ac2b67556005", # Your collection's ID from the dashboard
+)
 ```
 
 **Parameters:**
@@ -65,9 +70,9 @@ initialize_tracing(
 - `enable_console_export`: Whether to also export traces to console for debugging (default: False)
 
 
-## Three Levels of Organization
+## Four Levels of Organization
 
-Docent organizes your traces into three hierarchical levels:
+Docent organizes your traces into four hierarchical levels:
 
 ### 1. Collection
 A **collection** is the top-level organization unit. It represents a set of agent runs that you want to analyze together.
@@ -80,8 +85,15 @@ An **agent run** typically represents a single execution of your entire system. 
 - Associated metadata and scores
 - One or more chat sessions (transcripts)
 
-### 3. Transcript
-A **transcript** is essentially a chat session - a sequence of messages with an LLM. Transcripts are automatically created by detecting consistent chat messages from whithin LLM calls that are tagged to the same agent run.
+### 3. Transcript Group
+A **transcript group** is a logical grouping of related transcripts. Transcript groups are entirely optional. It allows you to organize transcripts that are conceptually related, such as:
+
+- Different phases of a multi-step process
+- Related experiments or iterations
+- Multiple conversations with the same user
+
+### 4. Transcript
+A **transcript** is essentially a chat session - a sequence of messages with an LLM. Transcripts are automatically created by detecting consistent chat messages from within LLM calls that are tagged to the same agent run (or Transcript Group if you use them).
 
 ## Creating Agent Runs
 
@@ -95,7 +107,7 @@ from docent.trace import agent_run
 @agent_run
 def analyze_document(document_text: str):
     # This entire function will be wrapped in an agent run
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": f"Analyze this document: {document_text}"}]
     )
@@ -112,7 +124,7 @@ from docent.trace import agent_run_context
 def process_user_query(query: str):
     with agent_run_context():
         # Your agent code here
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": query}]
         )
@@ -129,7 +141,7 @@ from docent.trace import agent_run_context
 async def async_agent_function():
     async with agent_run_context():
         # Async agent code here
-        response = await openai.AsyncChatCompletion.create(
+        response = await client.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": "Hello"}]
         )
@@ -138,7 +150,7 @@ async def async_agent_function():
 
 ## Attaching Scores to Agent Runs
 
-You can attach scores to agent runs to track performance metrics and quality indicators. It will automatically be assocaited with the agent run that is currently in context.
+You can attach scores to agent runs to track performance metrics and quality indicators. It will automatically be associated with the agent run that is currently in context.
 
 ```python
 from docent.trace import agent_run_score
@@ -207,6 +219,54 @@ def process_with_dynamic_metadata():
         return result
 ```
 
+## Working with Transcript Groups
+
+Transcript groups allow you to organize related transcripts into logical hierarchies. This is useful for organizing conversations that span multiple interactions or for grouping related experiments.
+
+### Creating Transcript Groups
+
+#### Using the Decorator
+
+```python
+from docent.trace import transcript_group
+
+@transcript_group(name="ask_all_agents", description="send the query to all agents")
+def ask_all_agents(user_id: str):
+    # This function will be wrapped in a transcript group context
+    # All transcripts created within this function will be grouped together
+    pass
+```
+
+#### Using Context Managers
+
+```python
+from docent.trace import transcript_group_context
+
+def process_user_session(user_id: str):
+    with transcript_group_context(
+        name=f"user_session_{user_id}",
+        description="Complete user interaction session"
+    ) as transcript_group_id:
+        # All transcripts created within this context will be grouped
+        # You can access the transcript_group_id if needed
+        pass
+```
+
+### Hierarchical Transcript Groups
+
+You can create nested transcript groups to represent hierarchical relationships:
+
+```python
+from docent.trace import transcript_group_context
+
+def run_experiment_batch():
+    with transcript_group_context(name="experiment_batch"):
+
+        for experiment_id in range(3):
+            with transcript_group_context(name=f"experiment_{experiment_id}"):
+                run_single_experiment(experiment_id)
+```
+
 ## Automatic Transcript Creation
 
 Docent automatically creates transcripts by detecting consistent chat completions. When you make LLM calls within an agent run, they're automatically grouped into logical conversation threads.
@@ -217,7 +277,7 @@ Docent automatically creates transcripts by detecting consistent chat completion
 
 You can resume agent runs across different parts of your codebase by passing the `agent_run_id`. This is useful for connecting related work that happens in different modules or at different times.
 
-#### Using Context Managers
+#### Resuming Using Context Managers
 
 With context managers, you can explicitly pass and resume agent runs:
 
@@ -227,7 +287,7 @@ from docent import agent_run_context
 def run_agent(state):
     with agent_run_context() as (agent_run_id, _):
         # Agent logic here
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": user_input}]
         )
@@ -258,7 +318,7 @@ def evaluate_agent(state):
 
 ```
 
-#### Using Decorators
+#### Resuming Using Decorators
 
 With decorators, you can access the agent run ID from the function's attributes:
 
@@ -268,7 +328,7 @@ from docent import agent_run
 @agent_run
 def run_agent(user_input: str):
     # Agent logic here
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": user_input}]
     )

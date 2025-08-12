@@ -27,7 +27,7 @@ from sqlalchemy.orm import selectinload
 
 from docent._log_util import get_logger
 from docent.data_models.agent_run import AgentRun
-from docent.data_models.transcript import Transcript
+from docent.data_models.transcript import Transcript, TranscriptGroup
 from docent_core._db_service.contexts import ViewContext
 from docent_core._db_service.db import DocentDB
 from docent_core._db_service.filters import ComplexFilter
@@ -58,6 +58,7 @@ from docent_core._db_service.schemas.tables import (
     SQLATelemetryLog,
     SQLATranscript,
     SQLATranscriptEmbedding,
+    SQLATranscriptGroup,
     SQLAUser,
     SQLAView,
 )
@@ -330,6 +331,88 @@ class MonoService:
                 session.add(sqla_transcript)
 
         logger.info(f"Inserted {len(agent_runs)} agent runs and {len(transcript_data)} transcripts")
+
+    async def update_agent_runs(self, ctx: ViewContext, agent_runs: Sequence[AgentRun]):
+        """
+        Update agent runs - create if they don't exist, update if they do exist.
+        For transcripts, delete existing ones and recreate them.
+        """
+        # Convert AgentRun objects to SQLAlchemy objects using existing conversion functions
+        agent_run_data: list[SQLAAgentRun] = []
+        transcript_data: list[SQLATranscript] = []
+        agent_run_ids = [ar.id for ar in agent_runs]
+
+        # Check collection size limit
+        async with self.db.session() as session:
+            query = select(func.count()).where(SQLAAgentRun.collection_id == ctx.collection_id)
+            result = await session.execute(query)
+            existing_count = result.scalar_one()
+
+            # Count how many new agent runs we'll be adding (not updating)
+            existing_agent_run_query = select(SQLAAgentRun.id).where(
+                SQLAAgentRun.collection_id == ctx.collection_id, SQLAAgentRun.id.in_(agent_run_ids)
+            )
+            existing_agent_run_result = await session.execute(existing_agent_run_query)
+            existing_agent_run_ids = set(existing_agent_run_result.scalars().all())
+            new_agent_run_count = len(agent_run_ids) - len(existing_agent_run_ids)
+
+            if existing_count + new_agent_run_count > 100_000:
+                raise ValueError("Number of agent runs in the current collection is too large")
+
+        # Process all agent runs and transcripts first
+        for ar in agent_runs:
+            # Use the existing from_agent_run method to get all fields properly
+            sqla_agent_run = SQLAAgentRun.from_agent_run(ar, ctx.collection_id)
+            agent_run_data.append(sqla_agent_run)
+
+            # Process transcripts for this agent run
+            for dk, t in ar.transcripts.items():
+                # Use the existing from_transcript method to get all fields properly
+                sqla_transcript = SQLATranscript.from_transcript(t, dk, ctx.collection_id, ar.id)
+                transcript_data.append(sqla_transcript)
+
+        # Handle agent runs - upsert (insert or update)
+        async with self.db.session() as session:
+            for sqla_agent_run in agent_run_data:
+                # Use merge to handle both insert and update
+                await session.merge(sqla_agent_run)
+
+        # Handle transcripts - delete existing and recreate
+        async with self.db.session() as session:
+            # Delete existing transcripts for these agent runs
+            delete_transcript_query = delete(SQLATranscript).where(
+                SQLATranscript.agent_run_id.in_(agent_run_ids)
+            )
+            await session.execute(delete_transcript_query)
+
+            # Insert new transcripts
+            for sqla_transcript in transcript_data:
+                session.add(sqla_transcript)
+
+        logger.info(f"Updated {len(agent_runs)} agent runs and {len(transcript_data)} transcripts")
+
+    async def store_transcript_groups(
+        self, ctx: ViewContext, transcript_groups: Sequence[TranscriptGroup]
+    ):
+        """
+        Store transcript groups in the database.
+        Creates new transcript groups if they don't exist, updates them if they do exist.
+        """
+        # Convert TranscriptGroup objects to SQLAlchemy objects
+        transcript_group_data: list[SQLATranscriptGroup] = []
+
+        for tg in transcript_groups:
+            # Use the existing from_transcript_group method to get all fields properly
+            sqla_transcript_group = SQLATranscriptGroup.from_transcript_group(tg, ctx.collection_id)
+            transcript_group_data.append(sqla_transcript_group)
+
+        # Handle transcript groups - upsert (insert or update)
+        async with self.db.session() as session:
+            for sqla_transcript_group in transcript_group_data:
+                # Use merge to handle both insert and update
+                await session.merge(sqla_transcript_group)
+
+        logger.info(f"Stored {len(transcript_groups)} transcript groups")
 
     async def add_and_enqueue_embedding_job(self, ctx: ViewContext):
         collection_id = ctx.collection_id
@@ -1527,7 +1610,13 @@ class MonoService:
     ######################
 
     async def store_telemetry_log(
-        self, user_id: str, json_data: dict[str, Any], collection_id: str | None = None
+        self,
+        user_id: str,
+        type: str,
+        version: str,
+        json_data: dict[str, Any],
+        *,
+        collection_id: str | None = None,
     ) -> str:
         """Store telemetry log data in the database."""
         telemetry_id = str(uuid4())
@@ -1537,6 +1626,8 @@ class MonoService:
                     id=telemetry_id,
                     user_id=user_id,
                     collection_id=collection_id,
+                    type=type,
+                    version=version,
                     json_data=json_data,
                 )
             )

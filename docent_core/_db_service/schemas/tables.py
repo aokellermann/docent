@@ -25,7 +25,7 @@ from sqlalchemy.schema import UniqueConstraint
 
 from docent._log_util import get_logger
 from docent.data_models.agent_run import AgentRun
-from docent.data_models.transcript import Transcript, fake_model_dump
+from docent.data_models.transcript import Transcript, TranscriptGroup, fake_model_dump
 from docent_core._ai_tools.search import SearchResult
 from docent_core._db_service.filters import ComplexFilter, parse_filter_dict
 from docent_core._db_service.schemas.auth_models import Organization, Permission, User
@@ -43,6 +43,7 @@ TABLE_FILTER = "filters"
 TABLE_JUDGMENT = "judgments"
 TABLE_JOB = "jobs"
 TABLE_TRANSCRIPT = "transcripts"
+TABLE_TRANSCRIPT_GROUP = "transcript_groups"
 TABLE_USER = "users"
 TABLE_SESSION = "sessions"
 TABLE_VIEW = "views"
@@ -138,8 +139,11 @@ class SQLATranscript(SQLABase):
     dict_key = mapped_column(Text, nullable=False)
 
     id = mapped_column(String(36), primary_key=True)
-    name = mapped_column(Text)
-    description = mapped_column(Text)
+    name = mapped_column(Text, nullable=True)
+    description = mapped_column(Text, nullable=True)
+    transcript_group_id = mapped_column(
+        String(36), ForeignKey(f"{TABLE_TRANSCRIPT_GROUP}.id"), nullable=True, index=True
+    )
 
     # Core messages data field
     # Content/metadata might contain invalid chars, so store as raw bytes
@@ -159,6 +163,7 @@ class SQLATranscript(SQLABase):
             id=transcript.id,
             name=transcript.name,
             description=transcript.description,
+            transcript_group_id=transcript.transcript_group_id,
             collection_id=collection_id,
             agent_run_id=agent_run_id,
             messages=messages_binary,
@@ -174,9 +179,55 @@ class SQLATranscript(SQLABase):
             Transcript(
                 id=self.id,
                 name=self.name,
+                description=self.description,
+                transcript_group_id=self.transcript_group_id,
                 messages=messages,
                 metadata=cast(dict[str, Any], metadata),
             ),
+        )
+
+
+class SQLATranscriptGroup(SQLABase):
+    __tablename__ = TABLE_TRANSCRIPT_GROUP
+
+    id = mapped_column(String(36), primary_key=True)
+
+    collection_id = mapped_column(
+        String(36), ForeignKey(f"{TABLE_COLLECTION}.id"), nullable=False, index=True
+    )
+
+    name = mapped_column(Text, nullable=True)
+    description = mapped_column(Text, nullable=True)
+    parent_transcript_group_id = mapped_column(
+        String(36), ForeignKey(f"{TABLE_TRANSCRIPT_GROUP}.id"), nullable=True, index=True
+    )
+
+    # Core metadata data field
+    metadata_json = mapped_column(JSONB, nullable=False)
+
+    @classmethod
+    def from_transcript_group(
+        cls, transcript_group: TranscriptGroup, collection_id: str
+    ) -> "SQLATranscriptGroup":
+        # Convert metadata to JSON-serializable dict for JSONB column
+        metadata_json = to_jsonable_python(transcript_group.metadata)
+
+        return cls(
+            id=transcript_group.id,
+            name=transcript_group.name,
+            description=transcript_group.description,
+            parent_transcript_group_id=transcript_group.parent_transcript_group_id,
+            collection_id=collection_id,
+            metadata_json=metadata_json,
+        )
+
+    def to_transcript_group(self) -> TranscriptGroup:
+        return TranscriptGroup(
+            id=self.id,
+            name=self.name,
+            description=self.description,
+            parent_transcript_group_id=self.parent_transcript_group_id,
+            metadata=self.metadata_json,
         )
 
 
@@ -682,6 +733,9 @@ class SQLATelemetryLog(SQLABase):
     collection_id = mapped_column(
         String(36), ForeignKey(f"{TABLE_COLLECTION}.id"), nullable=True, index=True
     )
+    # Explicit type/category for this telemetry entry (e.g., "traces", "scores", "metadata", "trace-done")
+    type = mapped_column(Text, nullable=True)
+    version = mapped_column(Text, nullable=True)
     json_data = mapped_column(JSONB, nullable=False)
     created_at = mapped_column(
         DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False
