@@ -26,11 +26,11 @@ from docent_core._db_service.schemas.rubric import (
     SQLARubricCentroid,
 )
 from docent_core._db_service.schemas.tables import JobStatus, SQLAAgentRun, SQLAJob
-from docent_core._db_service.service import MonoService
 from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES
 from docent_core._server._broker.redis_client import enqueue_job
 from docent_core._worker.constants import WorkerFunction
 from docent_core.docent.services.job import JobService
+from docent_core.docent.services.monoservice import MonoService
 
 logger = get_logger(__name__)
 

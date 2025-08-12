@@ -19,7 +19,6 @@ from docent_core._db_service.schemas.rubric import (
 from docent_core._db_service.schemas.tables import (
     SQLAAgentRun,
 )
-from docent_core._db_service.service import MonoService
 
 logger = get_logger(__name__)
 
@@ -224,9 +223,8 @@ static_measures = [
 
 
 class ChartsService:
-    def __init__(self, session: AsyncSession, service: MonoService):
+    def __init__(self, session: AsyncSession):
         self.session = session
-        self.service = service
         # Request-scoped cache for chart keys
         self._chart_keys_cache: dict[str, list[ChartDimension]] = {}
 
