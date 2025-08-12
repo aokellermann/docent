@@ -8,9 +8,7 @@ from docent_core._db_service.filters import ComplexFilter
 from docent_core._db_service.schemas.auth_models import (
     Permission,
 )
-from docent_core._db_service.schemas.tables import EndpointType
 from docent_core._server._analytics.posthog import AnalyticsClient
-from docent_core._server._analytics.tracker import track_endpoint_with_user
 from docent_core._server._dependencies.analytics import use_posthog_user_context
 from docent_core._server._dependencies.permissions import (
     require_collection_permission,
@@ -132,9 +130,6 @@ async def delete_chart(
         chart_service = ChartsService(session)
         async with mono_svc.advisory_lock(collection_id, action_id="mutation"):
             await chart_service.delete_chart(ctx, chart_id)
-
-    # Track analytics
-    await track_endpoint_with_user(mono_svc, EndpointType.DELETE_CHART, ctx.user, collection_id)
 
     return {"status": "ok"}
 

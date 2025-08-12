@@ -54,7 +54,6 @@ from docent_core._db_service.schemas.auth_models import (
 )
 from docent_core._db_service.schemas.collab_models import CollectionCollaborator
 from docent_core._db_service.schemas.tables import (
-    EndpointType,
     JobStatus,
     SQLAAccessControlEntry,
     SQLAChatSession,
@@ -64,7 +63,6 @@ from docent_core._llm_util.data_models.llm_output import LLMOutput
 from docent_core._llm_util.prod_llms import get_llm_completions_async
 from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES
 from docent_core._server._analytics.posthog import AnalyticsClient
-from docent_core._server._analytics.tracker import track_endpoint_with_user
 from docent_core._server._auth.session import (
     COOKIE_KEY,
     create_user_session,
@@ -148,9 +146,6 @@ async def signup(
     # Create a session for the new user
     session_id = await create_user_session(user.id, response, mono_svc)
 
-    # Track analytics
-    await track_endpoint_with_user(mono_svc, EndpointType.SIGNUP, user)
-
     # Need to return session id in body so that Next.js app can set a cookie for its own domain
     return {"user": user, "session_id": session_id}
 
@@ -206,9 +201,6 @@ async def create_anonymous_session(
 
     # Create a session for the anonymous user
     session_id = await create_user_session(anonymous_user.id, response, mono_svc)
-
-    # Track analytics
-    await track_endpoint_with_user(mono_svc, EndpointType.CREATE_ANONYMOUS_SESSION, anonymous_user)
 
     # Need to return session id in body so that Next.js app can set a cookie for its own domain
     return {"user": anonymous_user, "session_id": session_id}
@@ -328,9 +320,6 @@ async def create_collection(
         name=request.name,
         description=request.description,
     )
-
-    # Track analytics
-    # await track_endpoint_with_user(mono_svc, EndpointType.CREATE_FG, user, collection_id)
 
     # Track with PostHog
     analytics.track_event(
@@ -545,9 +534,6 @@ async def import_runs_from_file(
     async with mono_svc.advisory_lock(collection_id, action_id="mutation"):
         await mono_svc.add_agent_runs(ctx, agent_runs)
 
-    # Track analytics
-    # await track_endpoint_with_user(mono_svc, EndpointType.POST_AGENT_RUNS, ctx.user, collection_id)
-
     # Track with PostHog
     analytics.track_event(
         "agent_runs_ingested",
@@ -604,11 +590,6 @@ async def get_agent_run(
         The agent run.
     """
 
-    # Track analytics
-    await track_endpoint_with_user(
-        mono_svc, EndpointType.GET_AGENT_RUN, ctx.user, ctx.collection_id
-    )
-
     return await mono_svc.get_agent_run(ctx, agent_run_id, apply_base_where_clause)
 
 
@@ -652,9 +633,6 @@ async def post_agent_runs(
     async with mono_svc.advisory_lock(collection_id, action_id="mutation"):
         await mono_svc.add_agent_runs(ctx, request.agent_runs)
 
-    # Track analytics - we need to get the user from the context
-    # await track_endpoint_with_user(mono_svc, EndpointType.POST_AGENT_RUNS, ctx.user, collection_id)
-
     # Track with PostHog
     analytics.track_event(
         "agent_runs_ingested",
@@ -679,9 +657,6 @@ async def join(
 ):
     if not await mono_svc.collection_exists(collection_id):
         raise HTTPException(status_code=404, detail=f"Collection with ID {collection_id} not found")
-
-    # Track analytics
-    await track_endpoint_with_user(mono_svc, EndpointType.JOIN, ctx.user, collection_id)
 
     return {"collection_id": collection_id, "view_id": ctx.view_id}
 
@@ -714,9 +689,6 @@ async def post_base_filter(
             new_ctx = await mono_svc.clear_view_base_filter(ctx)
         else:
             new_ctx = await mono_svc.set_view_base_filter(ctx, request.filter)
-
-    # Track analytics
-    # await track_endpoint_with_user(mono_svc, EndpointType.POST_BASE_FILTER, ctx.user, collection_id)
 
     # Track with PostHog
     analytics.track_event(
@@ -778,9 +750,6 @@ async def get_base_filter(
 #         return {}
 
 #     agent_runs = await mono_svc.get_agent_runs(ctx, agent_run_ids=request.agent_run_ids)
-
-#     # Track analytics
-#     await track_endpoint_with_user(mono_svc, EndpointType.GET_REGEX_SNIPPETS_ENDPOINT, ctx.user, ctx.collection_id)
 
 #     return {
 #         d.id: [item for p in patterns for item in get_regex_snippets(d.text, p)] for d in agent_runs
@@ -895,9 +864,6 @@ async def upsert_collaborator(
         permission=request.permission_level,
     )
 
-    # Track analytics
-    await track_endpoint_with_user(mono_svc, EndpointType.UPSERT_COLLABORATOR, user, collection_id)
-
     return collaborator
 
 
@@ -995,11 +961,6 @@ async def make_collection_public(
         permission=Permission.READ,
     )
 
-    # Track analytics
-    await track_endpoint_with_user(
-        mono_svc, EndpointType.MAKE_COLLECTION_PUBLIC, user, collection_id
-    )
-
     return {"status": "success", "message": "Collection is now public"}
 
 
@@ -1024,11 +985,6 @@ async def share_collection_with_email(
         permission=Permission.READ,
     )
 
-    # Track analytics
-    await track_endpoint_with_user(
-        mono_svc, EndpointType.SHARE_COLLECTION_WITH_EMAIL, user, collection_id
-    )
-
     return {"status": "success", "message": f"Collection shared with {request.email}"}
 
 
@@ -1051,9 +1007,6 @@ async def share_collection_with_email(
 # ):
 #     await publish_binnable_keys(mono_svc, ctx)
 #     await publish_searches(mono_svc, ctx)
-
-#     # Track analytics
-#     await track_endpoint_with_user(mono_svc, EndpointType.POST_DIMENSION, ctx.user, ctx.collection_id)
 
 #     return request.dim
 
@@ -1107,9 +1060,6 @@ async def share_collection_with_email(
 #     async with mono_svc.advisory_lock(collection_id, action_id="mutation"):
 #         await mono_svc.delete_filter(filter_id)
 
-#     # Track analytics
-#     await track_endpoint_with_user(mono_svc, EndpointType.DELETE_FILTER, ctx.user, collection_id)
-
 
 # class PostFilterRequest(BaseModel):
 #     dim_id: str | None = None
@@ -1137,9 +1087,6 @@ async def share_collection_with_email(
 
 #         if request.dim_id:
 #             raise ValueError("dim_ids are not supported")
-
-#     # Track analytics
-#     await track_endpoint_with_user(mono_svc, EndpointType.POST_FILTER, ctx.user, collection_id)
 
 #     return new_filter.id
 
@@ -1629,11 +1576,6 @@ async def get_ta_message(
         # Close the stream
         await send_stream.aclose()
 
-    # Track analytics
-    await track_endpoint_with_user(
-        mono_svc, EndpointType.GET_TA_MESSAGE, ctx.user, ctx.collection_id
-    )
-
     return StreamingResponse(
         sse_event_stream(_execute, send_stream, recv_stream), media_type="text/event-stream"
     )
@@ -1673,9 +1615,6 @@ class StreamedDiffSearchResult(TypedDict):
 #     _: None = Depends(require_view_permission(Permission.READ)),
 # ):
 #     report = await mono_svc.get_diffs_report(diffs_report_id)
-
-#     # Track analytics
-#     await track_endpoint_with_user(mono_svc, EndpointType.GET_DIFFS_REPORT, ctx.user, ctx.collection_id)
 
 #     return report.to_pydantic().model_dump()
 
@@ -1726,9 +1665,6 @@ class StreamedDiffSearchResult(TypedDict):
 #             "diffs_report_id": report.id,
 #         },
 #     )
-
-#     # Track analytics
-#     await track_endpoint_with_user(mono_svc, EndpointType.START_COMPUTE_DIFFS, ctx.user, collection_id)
 
 #     return {
 #         "job_id": job_id,
@@ -1868,9 +1804,6 @@ class StreamedDiffSearchResult(TypedDict):
 #         ctx,
 #         claims,
 #     )
-
-#     # Track analytics
-#     await track_endpoint_with_user(mono_svc, EndpointType.COMPUTE_DIFF_CLUSTERS, ctx.user, collection_id)
 
 #     return clusters
 
@@ -2028,9 +1961,5 @@ class ComputeDiffSearchRequest(BaseModel):
 #     if not transcript_diff:
 #         return None
 
-#     # Track analytics
-#     await track_endpoint_with_user(
-#         mono_svc, EndpointType.GET_TRANSCRIPT_DIFF, ctx.user, ctx.collection_id
-#     )
 
 #     return transcript_diff.to_pydantic().model_dump()
