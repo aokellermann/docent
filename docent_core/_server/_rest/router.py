@@ -32,7 +32,7 @@ from docent.data_models.citation import (
 )
 from docent.data_models.transcript import fake_model_dump
 from docent.loaders.load_inspect import load_inspect_log
-from docent_core._ai_tools.search import SearchResult, SearchResultWithCitations
+from docent_core._ai_tools.search import SearchResultWithCitations
 from docent_core._db_service.contexts import ViewContext
 from docent_core._db_service.filters import (
     ComplexFilter,
@@ -75,7 +75,6 @@ from docent_core._server._auth.session import (
     invalidate_user_session,
 )
 from docent_core._server._broker.redis_client import (
-    enqueue_search_job,
     get_redis_client,
 )
 from docent_core._server._dependencies.analytics import use_posthog_user_context
@@ -1290,135 +1289,135 @@ class GetClusterMatchesRequest(BaseModel):
     centroid: str
 
 
-@user_router.post("/{collection_id}/start_compute_search")
-async def start_compute_search(
-    collection_id: str,
-    request: ComputeSearchRequest,
-    mono_svc: MonoService = Depends(get_mono_svc),
-    ctx: ViewContext = Depends(get_default_view_ctx),
-    user: User = Depends(get_user_anonymous_ok),
-    _: None = Depends(require_collection_permission(Permission.READ)),
-):
-    query_id = await mono_svc.add_search_query(ctx, request.search_query)
-    new, job_id = await mono_svc.add_search_job(query_id)
-    if new:
-        # When we enqueue the job, check if the user has write perms
-        # write_allowed = await mono_svc.has_permission(
-        #     user=user,
-        #     resource_type=ResourceType.COLLECTION,
-        #     resource_id=collection_id,
-        #     permission=Permission.WRITE,
-        # )
-        # await enqueue_search_job(ctx, job_id, read_only=not write_allowed)
-        await enqueue_search_job(ctx, job_id)
+# @user_router.post("/{collection_id}/start_compute_search")
+# async def start_compute_search(
+#     collection_id: str,
+#     request: ComputeSearchRequest,
+#     mono_svc: MonoService = Depends(get_mono_svc),
+#     ctx: ViewContext = Depends(get_default_view_ctx),
+#     user: User = Depends(get_user_anonymous_ok),
+#     _: None = Depends(require_collection_permission(Permission.READ)),
+# ):
+#     query_id = await mono_svc.add_search_query(ctx, request.search_query)
+#     new, job_id = await mono_svc.add_search_job(query_id)
+#     if new:
+#         # When we enqueue the job, check if the user has write perms
+#         # write_allowed = await mono_svc.has_permission(
+#         #     user=user,
+#         #     resource_type=ResourceType.COLLECTION,
+#         #     resource_id=collection_id,
+#         #     permission=Permission.WRITE,
+#         # )
+#         # await enqueue_search_job(ctx, job_id, read_only=not write_allowed)
+#         await enqueue_search_job(ctx, job_id)
 
-    # Track analytics
-    await track_endpoint_with_user(
-        mono_svc, EndpointType.START_COMPUTE_SEARCH, ctx.user, collection_id
-    )
+#     # Track analytics
+#     await track_endpoint_with_user(
+#         mono_svc, EndpointType.START_COMPUTE_SEARCH, ctx.user, collection_id
+#     )
 
-    return job_id
+#     return job_id
 
 
-@user_router.get("/{collection_id}/listen_compute_search")
-async def listen_compute_search(
-    collection_id: str,
-    job_id: str,
-    max_results: int | None = None,
-    mono_svc: MonoService = Depends(get_mono_svc),
-    ctx: ViewContext = Depends(get_default_view_ctx),
-    _: None = Depends(require_view_permission(Permission.READ)),
-):
-    # Retrieve job arguments
-    job = await mono_svc.get_job(job_id)
-    if job is None:
-        raise ValueError(f"Job {job_id} not found")
+# @user_router.get("/{collection_id}/listen_compute_search")
+# async def listen_compute_search(
+#     collection_id: str,
+#     job_id: str,
+#     max_results: int | None = None,
+#     mono_svc: MonoService = Depends(get_mono_svc),
+#     ctx: ViewContext = Depends(get_default_view_ctx),
+#     _: None = Depends(require_view_permission(Permission.READ)),
+# ):
+#     # Retrieve job arguments
+#     job = await mono_svc.get_job(job_id)
+#     if job is None:
+#         raise ValueError(f"Job {job_id} not found")
 
-    # Create AnyIO queue that we can write intermediate results to
-    # At the max size of the queue, the producer will block
-    send_stream, recv_stream = anyio.create_memory_object_stream[StreamedSearchResult](
-        max_buffer_size=100_000
-    )
+#     # Create AnyIO queue that we can write intermediate results to
+#     # At the max size of the queue, the producer will block
+#     send_stream, recv_stream = anyio.create_memory_object_stream[StreamedSearchResult](
+#         max_buffer_size=100_000
+#     )
 
-    # Track intermediate progress
-    num_errors = 0
-    num_results = 0
-    num_done, num_total = 0, await mono_svc.count_base_agent_runs(ctx)
+#     # Track intermediate progress
+#     num_errors = 0
+#     num_results = 0
+#     num_done, num_total = 0, await mono_svc.count_base_agent_runs(ctx)
 
-    async def _execute():
-        # Send initial 0% state message
-        init_data = StreamedSearchResult(
-            data_dict={},
-            num_agent_runs_done=0,
-            num_agent_runs_total=num_total,
-            num_search_hits=0,
-        )
-        await send_stream.send(init_data)
-        nonlocal num_done, num_errors, num_results
+#     async def _execute():
+#         # Send initial 0% state message
+#         init_data = StreamedSearchResult(
+#             data_dict={},
+#             num_agent_runs_done=0,
+#             num_agent_runs_total=num_total,
+#             num_search_hits=0,
+#         )
+#         await send_stream.send(init_data)
+#         nonlocal num_done, num_errors, num_results
 
-        REDIS = await get_redis_client()
+#         REDIS = await get_redis_client()
 
-        try:
-            last_id = 0
-            while True:
-                results_batch = await REDIS.xread({f"results_{job_id}": last_id}, block=0)
+#         try:
+#             last_id = 0
+#             while True:
+#                 results_batch = await REDIS.xread({f"results_{job_id}": last_id}, block=0)
 
-                # xread can handle multiple streams and returns a list of (stream, results) pairs; we
-                # only have one, so just index by 0 and then 1 to go directly to the results we want.
-                results_batch = results_batch[0][1]
+#                 # xread can handle multiple streams and returns a list of (stream, results) pairs; we
+#                 # only have one, so just index by 0 and then 1 to go directly to the results we want.
+#                 results_batch = results_batch[0][1]
 
-                last_id = results_batch[-1][0]
+#                 last_id = results_batch[-1][0]
 
-                for _, sub_batch in results_batch:
-                    results = json.loads(sub_batch["results"])
-                    if results is None:
-                        num_errors += 1
-                        if num_done + num_errors == num_total:
-                            return
-                        continue
+#                 for _, sub_batch in results_batch:
+#                     results = json.loads(sub_batch["results"])
+#                     if results is None:
+#                         num_errors += 1
+#                         if num_done + num_errors == num_total:
+#                             return
+#                         continue
 
-                    results = [SearchResult.model_validate(r) for r in results]
-                    # Only count results that have a hit
-                    num_results += len([result for result in results if result.value is not None])
+#                     results = [SearchResult.model_validate(r) for r in results]
+#                     # Only count results that have a hit
+#                     num_results += len([result for result in results if result.value is not None])
 
-                    # Construct a map from agent_run_id -> search query -> list of SearchResultWithCitations
-                    data_dict: dict[str, dict[str, list[SearchResultWithCitations]]] = {}
-                    for result in results:
-                        # TODO(ryanbloom): this is wasteful
-                        result_search_query = await mono_svc.get_search_query(
-                            result.search_query_id
-                        )
-                        data_dict.setdefault(result.agent_run_id, {}).setdefault(
-                            result_search_query.search_query, []
-                        ).append(SearchResultWithCitations.from_search_result(result))
+#                     # Construct a map from agent_run_id -> search query -> list of SearchResultWithCitations
+#                     data_dict: dict[str, dict[str, list[SearchResultWithCitations]]] = {}
+#                     for result in results:
+#                         # TODO(ryanbloom): this is wasteful
+#                         result_search_query = await mono_svc.get_search_query(
+#                             result.search_query_id
+#                         )
+#                         data_dict.setdefault(result.agent_run_id, {}).setdefault(
+#                             result_search_query.search_query, []
+#                         ).append(SearchResultWithCitations.from_search_result(result))
 
-                    # Each agent_run is only included in one callback
-                    num_done += len(data_dict.keys())
+#                     # Each agent_run is only included in one callback
+#                     num_done += len(data_dict.keys())
 
-                    payload = StreamedSearchResult(
-                        data_dict=data_dict,
-                        num_agent_runs_done=num_done,
-                        num_agent_runs_total=num_total,
-                        num_search_hits=num_results,
-                    )
+#                     payload = StreamedSearchResult(
+#                         data_dict=data_dict,
+#                         num_agent_runs_done=num_done,
+#                         num_agent_runs_total=num_total,
+#                         num_search_hits=num_results,
+#                     )
 
-                    # Send to event_stream so it can be sent back to the client
-                    await send_stream.send(payload)
+#                     # Send to event_stream so it can be sent back to the client
+#                     await send_stream.send(payload)
 
-                    # Check if we've reached max_results
-                    if max_results is not None and num_results >= max_results:
-                        q = f"commands_{job_id}"
-                        await REDIS.rpush(q, "cancel")  # type: ignore
+#                     # Check if we've reached max_results
+#                     if max_results is not None and num_results >= max_results:
+#                         q = f"commands_{job_id}"
+#                         await REDIS.rpush(q, "cancel")  # type: ignore
 
-                    if num_done + num_errors == num_total:
-                        return
-        finally:
-            # Terminate the stream so the event_stream stops waiting
-            await send_stream.aclose()
+#                     if num_done + num_errors == num_total:
+#                         return
+#         finally:
+#             # Terminate the stream so the event_stream stops waiting
+#             await send_stream.aclose()
 
-    return StreamingResponse(
-        sse_event_stream(_execute, send_stream, recv_stream), media_type="text/event-stream"
-    )
+#     return StreamingResponse(
+#         sse_event_stream(_execute, send_stream, recv_stream), media_type="text/event-stream"
+#     )
 
 
 @user_router.post("/{job_id}/cancel_compute_search")
@@ -1428,33 +1427,33 @@ async def cancel_compute_search(job_id: str):
     await REDIS.rpush(q, "cancel")  # type: ignore
 
 
-@user_router.post("/{query_id}/resume_compute_search")
-async def resume_compute_search(
-    query_id: str,
-    mono_svc: MonoService = Depends(get_mono_svc),
-    user: User = Depends(get_user_anonymous_ok),
-    ctx: ViewContext = Depends(get_default_view_ctx),
-    _: None = Depends(require_collection_permission(Permission.READ)),
-):
-    new, job_id = await mono_svc.add_search_job(query_id)
-    query = await mono_svc.get_search_query(query_id)
-    if new:
-        # When we enqueue the job, check if the user has write perms
-        # write_allowed = await mono_svc.has_permission(
-        #     user=user,
-        #     resource_type=ResourceType.COLLECTION,
-        #     resource_id=query.collection_id,
-        #     permission=Permission.WRITE,
-        # )
-        # await enqueue_search_job(ctx, job_id, read_only=not write_allowed)
-        await enqueue_search_job(ctx, job_id)
+# @user_router.post("/{query_id}/resume_compute_search")
+# async def resume_compute_search(
+#     query_id: str,
+#     mono_svc: MonoService = Depends(get_mono_svc),
+#     user: User = Depends(get_user_anonymous_ok),
+#     ctx: ViewContext = Depends(get_default_view_ctx),
+#     _: None = Depends(require_collection_permission(Permission.READ)),
+# ):
+#     new, job_id = await mono_svc.add_search_job(query_id)
+#     query = await mono_svc.get_search_query(query_id)
+#     if new:
+#         # When we enqueue the job, check if the user has write perms
+#         # write_allowed = await mono_svc.has_permission(
+#         #     user=user,
+#         #     resource_type=ResourceType.COLLECTION,
+#         #     resource_id=query.collection_id,
+#         #     permission=Permission.WRITE,
+#         # )
+#         # await enqueue_search_job(ctx, job_id, read_only=not write_allowed)
+#         await enqueue_search_job(ctx, job_id)
 
-    # Track analytics
-    await track_endpoint_with_user(
-        mono_svc, EndpointType.RESUME_COMPUTE_SEARCH, ctx.user, query.collection_id
-    )
+#     # Track analytics
+#     await track_endpoint_with_user(
+#         mono_svc, EndpointType.RESUME_COMPUTE_SEARCH, ctx.user, query.collection_id
+#     )
 
-    return job_id
+#     return job_id
 
 
 @user_router.post("/{collection_id}/has_embedding_job")

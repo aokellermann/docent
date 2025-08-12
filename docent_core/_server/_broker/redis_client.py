@@ -9,7 +9,7 @@ from fastapi.encoders import jsonable_encoder
 from docent._log_util import get_logger
 from docent_core._db_service.contexts import ViewContext
 from docent_core._env_util import ENV
-from docent_core._worker.constants import WORKER_QUEUE_NAME
+from docent_core._worker.worker_config import WORKER_QUEUE_NAME
 
 logger = get_logger(__name__)
 
