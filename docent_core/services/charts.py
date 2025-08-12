@@ -22,6 +22,10 @@ from docent_core.docent.services.charts import ChartDimension
 
 logger = get_logger(__name__)
 
+raise Exception(
+    "Do not edit or import this file! Instead, you should work with ChartsService from docent_core.docent.services.charts"
+)
+
 
 class ChartSpec(BaseModel):
     """Response model for chart data, matching TypeScript ChartSpec interface."""
