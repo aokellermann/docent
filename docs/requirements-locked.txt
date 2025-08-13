@@ -999,8 +999,8 @@ tqdm==4.67.1
     #   docent-python
     #   huggingface-hub
     #   openai
-traceloop-sdk==0.44.1
-    # via docent-python
+# traceloop-sdk==0.44.1
+#     # via docent-python
 traitlets==5.14.3
     # via
     #   comm
