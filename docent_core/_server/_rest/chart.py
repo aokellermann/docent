@@ -9,16 +9,16 @@ from docent_core._db_service.schemas.auth_models import (
     Permission,
 )
 from docent_core._server._analytics.posthog import AnalyticsClient
-from docent_core._server._dependencies.analytics import use_posthog_user_context
-from docent_core._server._dependencies.permissions import (
+from docent_core.docent.server.dependencies.analytics import use_posthog_user_context
+from docent_core.docent.server.dependencies.permissions import (
     require_collection_permission,
 )
-from docent_core._server._dependencies.services import (
+from docent_core.docent.server.dependencies.services import (
     get_chart_service,
     get_mono_svc,
     get_rubric_service,
 )
-from docent_core._server._dependencies.user import (
+from docent_core.docent.server.dependencies.user import (
     get_default_view_ctx,
 )
 from docent_core.docent.services.charts import ChartSpec, ChartsService

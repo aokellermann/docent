@@ -68,21 +68,21 @@ from docent_core._server._auth.session import (
     create_user_session,
     invalidate_user_session,
 )
-from docent_core._server._dependencies.analytics import use_posthog_user_context
-from docent_core._server._dependencies.database import (
+from docent_core._server.util import sse_event_stream
+from docent_core.docent.server.dependencies.analytics import use_posthog_user_context
+from docent_core.docent.server.dependencies.database import (
     get_mono_svc,
     require_collection_exists,
 )
-from docent_core._server._dependencies.permissions import (
+from docent_core.docent.server.dependencies.permissions import (
     require_collection_permission,
     require_view_permission,
 )
-from docent_core._server._dependencies.user import (
+from docent_core.docent.server.dependencies.user import (
     get_authenticated_user,
     get_default_view_ctx,
     get_user_anonymous_ok,
 )
-from docent_core._server.util import sse_event_stream
 from docent_core.docent.services.monoservice import MonoService
 
 logger = get_logger(__name__)
