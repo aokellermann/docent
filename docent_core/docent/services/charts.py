@@ -7,16 +7,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.types import Numeric
 
 from docent._log_util import get_logger
-from docent_core._db_service.contexts import ViewContext
-from docent_core._db_service.filters import ComplexFilter
-from docent_core._db_service.schemas.chart import SQLAChart
-from docent_core._db_service.schemas.rubric import (
+from docent_core.docent.db.contexts import ViewContext
+from docent_core.docent.db.filters import ComplexFilter
+from docent_core.docent.db.schemas.chart import SQLAChart
+from docent_core.docent.db.schemas.rubric import (
     SQLAJudgeResult,
     SQLAJudgeResultCentroid,
     SQLARubric,
     SQLARubricCentroid,
 )
-from docent_core._db_service.schemas.tables import (
+from docent_core.docent.db.schemas.tables import (
     SQLAAgentRun,
 )
 
@@ -544,7 +544,7 @@ class ChartsService:
     async def get_chart_data(self, ctx: ViewContext, chart: ChartSpec) -> dict[str, Any]:
         """Get chart data (binStats) for a specific chart."""
         # Import here to avoid circular imports
-        from docent_core._db_service.chart_sql import generate_chart_query
+        from docent_core.docent.db.chart_sql import generate_chart_query
 
         # Extract dimensions and measures from chart specification
         chart_dimensions: list[ChartDimension] = []

@@ -59,10 +59,6 @@ TABLE_CHAT_SESSION = "chat_sessions"
 TABLE_API_KEY = "api_keys"
 TABLE_TELEMETRY_LOG = "telemetry_logs"
 
-raise Exception(
-    "This file is deprecated. Import and apply changes to docent_core.docent.db.schemas.tables instead."
-)
-
 
 def sanitize_pg_text(text: str) -> str:
     """
@@ -90,7 +86,7 @@ class SQLAAgentRun(SQLABase):
     name = mapped_column(Text)
     description = mapped_column(Text)
 
-    # Metdata columns as JSONB so they can be keyed into
+    # Metadata columns as JSONB so they can be keyed into
     # A scan is fine for ~1e4 transcripts; if larger we might want to index
     metadata_json = mapped_column(JSONB, nullable=False)
 
@@ -284,7 +280,7 @@ class SQLAView(SQLABase):
 
     base_filter_dict = mapped_column(JSONB, nullable=True)
     # These keys reference metadata fields
-    # TOOD(mengk,gregor): can we get explicit FK relations?
+    # TODO(mengk,gregor): can we get explicit FK relations?
     inner_bin_key = mapped_column(Text, nullable=True)
     outer_bin_key = mapped_column(Text, nullable=True)
 
