@@ -127,7 +127,7 @@ async def _enqueue_job(queue_name: str, func_name: str, *args: Any, **kwargs: An
 
 
 async def enqueue_job(view_ctx: ViewContext, job_id: str) -> None:
-    """Enqueue a centroid assignment job to the worker."""
+    """Enqueue a job to the worker."""
     await _enqueue_job(WORKER_QUEUE_NAME, "run_job", view_ctx, job_id)
 
 
