@@ -13,7 +13,7 @@ fi
 
 # Add remote if it doesn't exist already
 if ! git remote | grep -q "^docent-public$"; then
-  git remote add docent-public https://github.com/TransluceAI/docent-public.git
+  git remote add docent-public https://github.com/TransluceAI/docent.git
 fi
 
 # Fetch the latest changes from the docent-public remote
