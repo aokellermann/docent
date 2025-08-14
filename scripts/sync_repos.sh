@@ -5,46 +5,58 @@ set -e
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." &> /dev/null && pwd )"
 cd $SCRIPT_DIR
 
-# Assert current branch is docent-sync-2
-if [ "$(git branch --show-current)" != "docent-sync-2" ]; then
-    echo "Current branch is not docent-sync-2"
+# Assert current branch is main
+if [ "$(git branch --show-current)" != "main" ]; then
+    echo "Current branch is not main"
     exit 1
 fi
 
 # Add remote if it doesn't exist already
-if ! git remote | grep -q "^docent-remote$"; then
-  git remote add docent-remote https://github.com/TransluceAI/docent.git
+if ! git remote | grep -q "^docent-public$"; then
+  git remote add docent-public https://github.com/TransluceAI/docent-public.git
 fi
 
-# Fetch the latest changes from the remote
-git fetch docent-remote
+# Fetch the latest changes from the docent-public remote
+git fetch docent-public
 
-# Check if docent-sync-2-compress branch exists
-if git branch | grep -q "docent-sync-2-compress"; then
-    # Checkout to existing branch
-    git checkout docent-sync-2-compress
-    # Make sure it's up to date with remote main
-    git reset --hard docent-remote/main
-else
-    # Create a new branch tracking the remote
-    git checkout -b docent-sync-2-compress docent-remote/main
+# Check if docent-public-sync branch exists, if so delete it
+if git branch | grep -q "docent-public-sync"; then
+    git branch -D docent-public-sync
 fi
 
-# Apply changes from docent-sync-2 to docent-sync-2-compress
-# Empty the index/work-tree (this stages deletions)
-git rm -r --cached .     # tracked files
-git clean -fdx           # untracked junk; optional but nice
-# Populate with docent-sync-2’s snapshot
-git checkout docent-sync-2 -- .
-# Stage and commit
+# Create a new branch tracking the remote docent-public main
+git checkout -b docent-public-sync docent-public/main
+
+# Copy files from main branch, excluding specified folders
+echo "Syncing files from main branch (excluding: .aws, .github, data, personal, scripts)..."
+
+# Remove all current files except .git
+find . -maxdepth 1 -not -name '.git' -not -name '.' -exec rm -rf {} +
+
+# Copy files from main branch, excluding the specified folders
+git checkout main -- .
+rm -rf .aws .github data personal scripts
+
+# Stage all changes
 git add -A
-git commit -m "Sync changes from docent-sync-2 $(date +%Y-%m-%d)" --no-verify || echo "No changes to commit"
 
-# Create a timestamp branch name with milliseconds to avoid conflicts
-TIMESTAMP_BRANCH="sync-$(date +%Y%m%d-%H%M%S.%3N)"
-echo "Creating branch: $TIMESTAMP_BRANCH"
+# Check if there are any changes to commit
+if git diff --staged --quiet; then
+    echo "No changes to sync"
+    git checkout main
+    git branch -D docent-public-sync
+else
+    # Commit the changes
+    git commit -m "Sync from main branch $(date +%Y-%m-%d)" --no-verify
 
-# Push the changes to remote with the timestamped branch instead of main
-git push docent-remote docent-sync-2-compress:$TIMESTAMP_BRANCH
+    # Push to docent-public main branch
+    git push docent-public docent-public-sync:main
 
-echo "Changes pushed to branch: $TIMESTAMP_BRANCH on remote repository"
+    echo "Changes synced and pushed to docent-public repository"
+
+    # Return to main branch and clean up
+    git checkout main
+    git branch -D docent-public-sync
+fi
+
+echo "Sync complete"
