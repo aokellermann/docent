@@ -47,7 +47,7 @@ if git diff --staged --quiet; then
     git branch -D docent-public-sync
 else
     # Commit the changes
-    git commit -m "Sync from main branch $(date +%Y-%m-%d)" --no-verify
+    git commit -m "Update $(date +%Y-%m-%d)" --no-verify
 
     # Push to docent-public main branch
     git push docent-public docent-public-sync:main
