@@ -99,7 +99,7 @@ export default function AgentRunPage() {
         <AgentRunViewer ref={agentRunViewerRef} secondary={false} />
 
         <Card className="h-full overflow-y-auto flex-1 p-3">
-          <Tabs defaultValue="agent" className="h-full flex flex-col">
+          <Tabs defaultValue="chat" className="h-full flex flex-col">
             <TabsList className="grid w-full grid-cols-2 h-8">
               <TabsTrigger value="agent" className="text-xs">
                 Agent Summary
