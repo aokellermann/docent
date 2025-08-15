@@ -135,4 +135,5 @@ To destroy the infrastructure:
 terraform destroy
 ```
 
+
 **Warning**: This will permanently delete all resources including databases. Make sure to backup any important data first.
