@@ -1,5 +1,5 @@
 import { ModeToggle } from '@/components/ui/theme-toggle';
-import { BookText, ChevronRight, Layers } from 'lucide-react';
+import { BookText, ChevronRight, Layers, MessageCircle } from 'lucide-react';
 import Link from 'next/link';
 import {
   useRouter,
@@ -134,6 +134,21 @@ const Breadcrumbs: React.FC = () => {
           >
             <BookText size={14} />
             Docs
+          </Link>
+        </Button>
+
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-x-2 h-7 cursor-default px-2"
+        >
+          <Link
+            href="https://transluce.slack.com/archives/C086LDW1DMX/p1751435895202329"
+            target="_blank"
+            className="flex items-center gap-x-2"
+          >
+            <MessageCircle size={14} />
+            Slack
           </Link>
         </Button>
 

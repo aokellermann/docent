@@ -753,6 +753,12 @@ class SQLAUserProfile(SQLABase):
     institution = mapped_column(Text, nullable=True)
     task = mapped_column(Text, nullable=True)
     help_type = mapped_column(Text, nullable=True)
+    frameworks = mapped_column(
+        JSONB, nullable=True
+    )  # {"selected": ["LangChain", "Inspect"], "other": ["MyCustomFramework"]}
+    providers = mapped_column(
+        JSONB, nullable=True
+    )  # {"selected": ["OpenAI", "Anthropic"], "other": ["MyCustomProvider"]}
     discovery_source = mapped_column(Text, nullable=True)
 
     # Timestamps

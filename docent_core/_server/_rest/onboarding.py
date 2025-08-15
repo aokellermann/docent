@@ -12,10 +12,17 @@ logger = get_logger(__name__)
 onboarding_router = APIRouter(dependencies=[Depends(get_authenticated_user)])
 
 
+class MultiSelectData(BaseModel):
+    selected: list[str] = []
+    other: list[str] = []
+
+
 class OnboardingData(BaseModel):
     institution: str | None = None
     task: str | None = None
     help_type: str | None = None
+    frameworks: MultiSelectData | None = None
+    providers: MultiSelectData | None = None
     discovery_source: str | None = None
 
 
@@ -32,6 +39,8 @@ async def save_onboarding_data(
             institution=data.institution,
             task=data.task,
             help_type=data.help_type,
+            frameworks=data.frameworks.model_dump() if data.frameworks else None,
+            providers=data.providers.model_dump() if data.providers else None,
             discovery_source=data.discovery_source,
         )
 
@@ -64,6 +73,8 @@ async def get_onboarding_data(
                 "institution": result.institution,
                 "task": result.task,
                 "help_type": result.help_type,
+                "frameworks": result.frameworks,
+                "providers": result.providers,
                 "discovery_source": result.discovery_source,
                 "created_at": result.created_at.isoformat() if result.created_at else None,
                 "updated_at": result.updated_at.isoformat() if result.updated_at else None,

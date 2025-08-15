@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -33,10 +33,46 @@ import {
 import { toast } from '@/hooks/use-toast';
 import { apiRestClient } from '@/app/services/apiService';
 
+const FRAMEWORK_OPTIONS = [
+  { id: 'langchain', label: 'LangChain' },
+  { id: 'inspect', label: 'Inspect' },
+  { id: 'llamaindex', label: 'LlamaIndex' },
+  { id: 'autogen', label: 'AutoGen' },
+  { id: 'crewai', label: 'CrewAI' },
+  { id: 'haystack', label: 'Haystack' },
+  { id: 'semantic_kernel', label: 'Semantic Kernel' },
+  { id: 'openai_assistants', label: 'OpenAI Assistants' },
+  { id: 'custom', label: 'Custom Framework' },
+  { id: 'none', label: 'None' },
+  { id: 'other', label: 'Other' },
+];
+
+const PROVIDER_OPTIONS = [
+  { id: 'openai', label: 'OpenAI' },
+  { id: 'anthropic', label: 'Anthropic' },
+  { id: 'google', label: 'Google' },
+  { id: 'azure', label: 'Azure' },
+  { id: 'bedrock', label: 'Bedrock' },
+  { id: 'xai', label: 'xAI' },
+  { id: 'mistral', label: 'Mistral' },
+  { id: 'perplexity', label: 'Perplexity' },
+  { id: 'cerebras', label: 'Cerebras' },
+  { id: 'vllm', label: 'vLLM Self-Host' },
+  { id: 'together', label: 'Together' },
+  { id: 'groq', label: 'Groq' },
+  { id: 'cohere', label: 'Cohere' },
+  { id: 'huggingface', label: 'Hugging Face' },
+  { id: 'other', label: 'Other' },
+];
+
 interface OnboardingData {
   institution: string;
   task: string;
   helpType: string;
+  frameworks: string[];
+  otherFrameworkText: string;
+  providers: string[];
+  otherProviderText: string;
   discoverySource: string;
 }
 
@@ -45,14 +81,19 @@ export default function OnboardingPage() {
   const searchParams = useSearchParams();
   const redirectParam = searchParams.get('redirect') || '';
   const [currentStep, setCurrentStep] = useState(1);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [onboardingData, setOnboardingData] = useState<OnboardingData>({
     institution: '',
     task: '',
     helpType: '',
+    frameworks: [],
+    otherFrameworkText: '',
+    providers: [],
+    otherProviderText: '',
     discoverySource: '',
   });
 
-  const totalSteps = 3;
+  const totalSteps = 5;
 
   const handleNext = () => {
     if (currentStep < totalSteps) {
@@ -69,13 +110,36 @@ export default function OnboardingPage() {
     }
   };
 
+  // Reset scroll to top when step changes
+  useEffect(() => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [currentStep]);
+
   const handleCompleteOnboarding = async () => {
     try {
+      const frameworksData = {
+        selected: onboardingData.frameworks,
+        other: onboardingData.otherFrameworkText
+          ? [onboardingData.otherFrameworkText]
+          : [],
+      };
+
+      const providersData = {
+        selected: onboardingData.providers,
+        other: onboardingData.otherProviderText
+          ? [onboardingData.otherProviderText]
+          : [],
+      };
+
       // Save onboarding data to backend
       await apiRestClient.post('/onboarding', {
         institution: onboardingData.institution || null,
         task: onboardingData.task || null,
         help_type: onboardingData.helpType || null,
+        frameworks: frameworksData,
+        providers: providersData,
         discovery_source: onboardingData.discoverySource || null,
       });
 
@@ -95,12 +159,148 @@ export default function OnboardingPage() {
     }
   };
 
-  const updateOnboardingData = (field: keyof OnboardingData, value: string) => {
+  const updateOnboardingData = (
+    field: keyof OnboardingData,
+    value: string | string[]
+  ) => {
     setOnboardingData((prev) => ({
       ...prev,
       [field]: value,
     }));
   };
+
+  // Reusable component for multi-select steps
+  const renderMultiSelectStep = (
+    title: string,
+    description: string,
+    options: Array<{ id: string; label: string }>,
+    selectedItems: string[],
+    otherText: string,
+    otherTextField: keyof OnboardingData,
+    itemsField: keyof OnboardingData,
+    icon: React.ReactNode
+  ) => (
+    <div className="space-y-8">
+      {/* Header */}
+      <div className="text-center space-y-4">
+        <div className="flex justify-center mb-4">
+          <div className="bg-gray-100 dark:bg-gray-800 rounded-full p-3">
+            {icon}
+          </div>
+        </div>
+        <h2 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
+          {title}
+        </h2>
+        <p className="text-lg text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
+          {description}
+        </p>
+      </div>
+
+      {/* Options Grid */}
+      <div className="grid grid-cols-2 gap-3 max-w-2xl mx-auto">
+        {options.map((option) => {
+          // Special handling for "Other" option
+          if (option.id === 'other') {
+            return (
+              <Card
+                key={option.id}
+                className={`cursor-pointer transition-all hover:shadow-md border col-span-2 ${
+                  selectedItems.includes(option.label)
+                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                    : 'border-gray-200 dark:border-gray-700'
+                }`}
+                onClick={() => {
+                  if (selectedItems.includes(option.label)) {
+                    // Remove if already selected - preserve custom text
+                    const updatedItems = selectedItems.filter(
+                      (f) => f !== option.label
+                    );
+                    updateOnboardingData(itemsField, updatedItems);
+                    // Keep the custom text for later restoration
+                  } else {
+                    // Add if not selected
+                    const updatedItems = [...selectedItems, option.label];
+                    updateOnboardingData(itemsField, updatedItems);
+                  }
+                }}
+              >
+                <CardContent className="p-3">
+                  {selectedItems.includes(option.label) ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-medium text-gray-900 dark:text-white text-sm">
+                          {option.label}
+                        </h3>
+                        <div className="w-4 h-4 bg-blue-500 rounded-full flex items-center justify-center">
+                          <div className="w-1.5 h-1.5 bg-white rounded-full"></div>
+                        </div>
+                      </div>
+                      <Input
+                        placeholder="Please specify..."
+                        value={otherText}
+                        onChange={(e) => {
+                          updateOnboardingData(otherTextField, e.target.value);
+                        }}
+                        className="bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-600"
+                        autoFocus
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-medium text-gray-900 dark:text-white text-sm">
+                        {option.label}
+                      </h3>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          }
+
+          // Regular options
+          return (
+            <Card
+              key={option.id}
+              className={`cursor-pointer transition-all hover:shadow-md border ${
+                selectedItems.includes(option.label)
+                  ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                  : 'border-gray-200 dark:border-gray-700'
+              }`}
+              onClick={() => {
+                if (selectedItems.includes(option.label)) {
+                  // Remove if already selected
+                  const updatedItems = selectedItems.filter(
+                    (f) => f !== option.label
+                  );
+                  updateOnboardingData(itemsField, updatedItems);
+                } else {
+                  // Add if not selected
+                  const updatedItems = [...selectedItems, option.label];
+                  updateOnboardingData(itemsField, updatedItems);
+                }
+              }}
+            >
+              <CardContent className="p-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-medium text-gray-900 dark:text-white text-sm">
+                      {option.label}
+                    </h3>
+                  </div>
+                  {selectedItems.includes(option.label) && (
+                    <div className="w-4 h-4 bg-blue-500 rounded-full flex items-center justify-center">
+                      <div className="w-1.5 h-1.5 bg-white rounded-full"></div>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
 
   const renderStep1 = () => (
     <div className="space-y-8">
@@ -163,7 +363,7 @@ export default function OnboardingPage() {
             id="helpType"
             value={onboardingData.helpType}
             onChange={(e) => updateOnboardingData('helpType', e.target.value)}
-            placeholder="e.g., Automated evaluation, Manual review tools, Data analysis, Research insights"
+            placeholder="e.g., Judge refinement, Behavior discovery, Automated evaluation"
             rows={4}
             className="text-base border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-gray-500 focus:border-gray-500 resize-none"
           />
@@ -182,7 +382,7 @@ export default function OnboardingPage() {
             onChange={(e) =>
               updateOnboardingData('discoverySource', e.target.value)
             }
-            placeholder="e.g., Social media, Conference, Colleague recommendation, Search"
+            placeholder="e.g., Colleague recommendation, Search, Social media, Conference"
             className="h-12 text-base border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
           />
         </div>
@@ -305,7 +505,31 @@ export default function OnboardingPage() {
     </div>
   );
 
-  const renderStep3 = () => (
+  const renderStep3 = () =>
+    renderMultiSelectStep(
+      'Which frameworks do you use?',
+      "Select any frameworks you're currently using",
+      FRAMEWORK_OPTIONS,
+      onboardingData.frameworks,
+      onboardingData.otherFrameworkText,
+      'otherFrameworkText',
+      'frameworks',
+      <Sparkles className="h-6 w-6 text-gray-600 dark:text-gray-400" />
+    );
+
+  const renderStep4 = () =>
+    renderMultiSelectStep(
+      'Which providers do you use?',
+      "Select any AI providers you're currently using",
+      PROVIDER_OPTIONS,
+      onboardingData.providers,
+      onboardingData.otherProviderText,
+      'otherProviderText',
+      'providers',
+      <Lightbulb className="h-6 w-6 text-gray-600 dark:text-gray-400" />
+    );
+
+  const renderStep5 = () => (
     <div className="space-y-8">
       {/* Simple Header */}
       <div className="text-center space-y-4">
@@ -484,7 +708,10 @@ client.add_agent_runs(collection_id, [agent_run])`}
   );
 
   return (
-    <div className="h-screen bg-gray-50 dark:bg-gray-950 overflow-y-auto">
+    <div
+      ref={scrollContainerRef}
+      className="h-screen bg-gray-50 dark:bg-gray-950 overflow-y-auto"
+    >
       <div className="container mx-auto py-12 px-4 max-w-3xl h-full">
         <div className="space-y-12 pb-8">
           {/* Simple Progress Bar */}
@@ -492,9 +719,6 @@ client.add_agent_runs(collection_id, [agent_run])`}
             <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
               <span>
                 Step {currentStep} of {totalSteps}
-              </span>
-              <span>
-                {Math.round((currentStep / totalSteps) * 100)}% Complete
               </span>
             </div>
             <div className="relative h-2 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
@@ -510,6 +734,8 @@ client.add_agent_runs(collection_id, [agent_run])`}
             {currentStep === 1 && renderStep1()}
             {currentStep === 2 && renderStep2()}
             {currentStep === 3 && renderStep3()}
+            {currentStep === 4 && renderStep4()}
+            {currentStep === 5 && renderStep5()}
           </div>
 
           {/* Navigation Buttons */}

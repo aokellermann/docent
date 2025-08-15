@@ -35,6 +35,8 @@ class OnboardingService:
         institution: str | None = None,
         task: str | None = None,
         help_type: str | None = None,
+        frameworks: dict[str, list[str]] | None = None,
+        providers: dict[str, list[str]] | None = None,
         discovery_source: str | None = None,
     ) -> SQLAUserProfile:
         """Save or update onboarding data for a user."""
@@ -46,6 +48,8 @@ class OnboardingService:
             existing.institution = institution
             existing.task = task
             existing.help_type = help_type
+            existing.frameworks = frameworks
+            existing.providers = providers
             existing.discovery_source = discovery_source
             existing.updated_at = datetime.now(UTC).replace(tzinfo=None)
             await self.session.commit()
@@ -57,6 +61,8 @@ class OnboardingService:
                 institution=institution,
                 task=task,
                 help_type=help_type,
+                frameworks=frameworks,
+                providers=providers,
                 discovery_source=discovery_source,
             )
             self.session.add(user_profile)
