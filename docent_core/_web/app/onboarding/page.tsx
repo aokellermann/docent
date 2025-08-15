@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import {
   ArrowLeft,
   ArrowRight,
@@ -9,7 +11,6 @@ import {
   Calendar,
   Mail,
   MessageCircle,
-  Phone,
   Slack,
   Sparkles,
   Users,
@@ -225,7 +226,10 @@ export default function OnboardingPage() {
               variant="outline"
               className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
               onClick={() =>
-                window.open('https://slack.com/invite/docent', '_blank')
+                window.open(
+                  'https://transluce.slack.com/archives/C086LDW1DMX/p1751435895202329',
+                  '_blank'
+                )
               }
             >
               Join Docent Community Slack
@@ -249,7 +253,10 @@ export default function OnboardingPage() {
               variant="outline"
               className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
               onClick={() =>
-                window.open('https://calendly.com/docent/demo', '_blank')
+                window.open(
+                  'https://calendly.com/kevin-transluce/30min',
+                  '_blank'
+                )
               }
             >
               Schedule Call
@@ -261,7 +268,7 @@ export default function OnboardingPage() {
           <CardHeader>
             <CardTitle className="text-gray-900 dark:text-white flex items-center gap-2">
               <MessageCircle className="h-5 w-5 text-gray-600 dark:text-gray-400" />
-              Get in touch
+              Email our team
             </CardTitle>
             <CardDescription className="text-gray-600 dark:text-gray-400">
               Have questions or need support? Our team is here to help you
@@ -272,20 +279,22 @@ export default function OnboardingPage() {
             <div className="flex items-center gap-2">
               <Mail className="h-4 w-4 text-gray-500 dark:text-gray-400" />
               <span className="text-sm text-gray-700 dark:text-gray-300">
-                hello@docent.ai
+                info@transluce.org
               </span>
             </div>
-            <div className="flex items-center gap-2">
+            {/* <div className="flex items-center gap-2">
               <Phone className="h-4 w-4 text-gray-500 dark:text-gray-400" />
               <span className="text-sm text-gray-700 dark:text-gray-300">
                 +1 (555) 123-4567
               </span>
-            </div>
+            </div> */}
             <div className="flex justify-end">
               <Button
                 variant="outline"
                 className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-                onClick={() => window.open('mailto:hello@docent.ai', '_blank')}
+                onClick={() =>
+                  window.open('mailto:info@transluce.org', '_blank')
+                }
               >
                 Send Email
               </Button>
@@ -323,17 +332,25 @@ export default function OnboardingPage() {
               Option 1: Trace your agents
             </CardTitle>
             <CardDescription className="text-gray-600 dark:text-gray-400">
-              Add tracing to your AI agents to automatically capture
-              conversations and metadata
+              Add tracing to your agents to automatically capture conversations
+              and metadata
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
-              <pre className="text-sm text-gray-700 dark:text-gray-300 overflow-x-auto">
+            <div className="rounded-lg">
+              <SyntaxHighlighter
+                language="python"
+                style={oneDark}
+                customStyle={{
+                  margin: 0,
+                  fontSize: '0.875rem',
+                }}
+                className="text-sm"
+              >
                 {`from docent.trace import initialize_tracing, agent_run
 
 # Initialize tracing
-initialize_tracing("my-application")
+initialize_tracing("my-collection")
 
 # Use the decorator
 @agent_run
@@ -343,14 +360,17 @@ def analyze_document(document_text: str):
         messages=[{"role": "user", "content": f"Analyze: {document_text}"}]
     )
     return response.choices[0].message.content`}
-              </pre>
+              </SyntaxHighlighter>
             </div>
             <div className="flex justify-end">
               <Button
                 variant="outline"
                 className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
                 onClick={() =>
-                  window.open('/docs/tracing/introduction', '_blank')
+                  window.open(
+                    'https://docs.transluce.org/en/latest/tracing/introduction/',
+                    '_blank'
+                  )
                 }
               >
                 View Tracing Docs
@@ -372,13 +392,23 @@ def analyze_document(document_text: str):
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-8 text-center">
-              <div className="text-gray-500 dark:text-gray-400 text-sm">
-                [Animation placeholder - drag and drop interface will be added
-                here]
-              </div>
+            <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 text-center">
+              <video
+                className="w-full h-auto rounded-lg shadow-sm"
+                autoPlay
+                loop
+                muted
+                playsInline
+                controls={false}
+              >
+                <source
+                  src="https://transluce-videos.s3.us-east-1.amazonaws.com/docent-landing-page/inspect-drag-drop.mp4"
+                  type="video/mp4"
+                />
+                Your browser does not support the video tag.
+              </video>
             </div>
-            <div className="flex justify-end">
+            {/* <div className="flex justify-end">
               <Button
                 variant="outline"
                 className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
@@ -386,7 +416,7 @@ def analyze_document(document_text: str):
               >
                 Learn More
               </Button>
-            </div>
+            </div> */}
           </CardContent>
         </Card>
 
@@ -403,8 +433,16 @@ def analyze_document(document_text: str):
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
-              <pre className="text-sm text-gray-700 dark:text-gray-300 overflow-x-auto">
+            <div className="rounded-lg">
+              <SyntaxHighlighter
+                language="python"
+                style={oneDark}
+                customStyle={{
+                  margin: 0,
+                  fontSize: '0.875rem',
+                }}
+                className="text-sm"
+              >
                 {`from docent import Docent
 from docent.data_models import AgentRun, Transcript
 from docent.data_models.chat import parse_chat_message
@@ -426,13 +464,15 @@ agent_run = AgentRun(
 
 # Upload to Docent
 client.add_agent_runs(collection_id, [agent_run])`}
-              </pre>
+              </SyntaxHighlighter>
             </div>
             <div className="flex justify-end">
               <Button
                 variant="outline"
                 className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-                onClick={() => window.open('/docs/quickstart', '_blank')}
+                onClick={() =>
+                  window.open('https://docs.transluce.org/en/latest/', '_blank')
+                }
               >
                 View SDK Docs
               </Button>
