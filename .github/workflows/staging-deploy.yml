@@ -71,7 +71,7 @@ jobs:
             exit 1
           fi
 
-      - name: Force ECS deployment (only if migrations succeeded)
+      - name: Force ECS deployment
         run: |
           aws ecs update-service \
             --cluster ${{ env.PROJECT_NAME }}-${{ env.DEPLOYMENT_ID }}-cluster \
