@@ -56,3 +56,16 @@ jobs:
             --cluster ${{ env.PROJECT_NAME }}-${{ env.DEPLOYMENT_ID }}-cluster \
             --service ${{ env.PROJECT_NAME }}-${{ env.DEPLOYMENT_ID }}-worker \
             --force-new-deployment
+
+      - name: Deploy App Runner API (manual trigger, only if ECS succeeded)
+        env:
+          AWS_PAGER: ""
+        run: |
+          set -euo pipefail
+          SERVICE_ARN=$(aws apprunner list-services --query "ServiceSummaryList[?ServiceName=='${{ env.PROJECT_NAME }}-${{ env.DEPLOYMENT_ID }}-api'].ServiceArn | [0]" --output text)
+          if [ -z "$SERVICE_ARN" ] || [ "$SERVICE_ARN" == "None" ]; then
+            echo "App Runner service not found" >&2
+            exit 1
+          fi
+          echo "Triggering manual App Runner deployment for $SERVICE_ARN"
+          aws apprunner start-deployment --service-arn "$SERVICE_ARN"
