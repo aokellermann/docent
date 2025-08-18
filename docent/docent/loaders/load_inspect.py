@@ -164,12 +164,12 @@ def get_total_samples(file_path: Path, format: str = "json") -> int:
 
 def _runs_from_eval_file(
     file: BinaryIO,
-) -> Tuple[dict[str, Any], Generator[AgentRun, None]]:
+) -> Tuple[dict[str, Any], Generator[AgentRun, None, None]]:
     zip = ZipFile(file, mode="r")
     header: dict[str, Any] = json.load(zip.open("header.json", "r"))
     header_metadata = _run_metadata_from_header(header)
 
-    def _iter_runs() -> Generator[AgentRun, None]:
+    def _iter_runs() -> Generator[AgentRun, None, None]:
         try:
             for sample_file in zip.namelist():
                 if not (sample_file.startswith("samples/") and sample_file.endswith(".json")):
@@ -186,11 +186,11 @@ def _runs_from_eval_file(
 
 def _runs_from_json_file(
     file: BinaryIO,
-) -> Tuple[dict[str, Any], Generator[AgentRun, None]]:
+) -> Tuple[dict[str, Any], Generator[AgentRun, None, None]]:
     data = json.load(file)
     header_metadata = _run_metadata_from_header(data)
 
-    def _iter_runs() -> Generator[AgentRun, None]:
+    def _iter_runs() -> Generator[AgentRun, None, None]:
         for sample in data["samples"]:
             run: AgentRun = _read_sample_as_run(sample, header_metadata)
             yield run
@@ -200,7 +200,7 @@ def _runs_from_json_file(
 
 def runs_from_file(
     file: BinaryIO, format: str = "json"
-) -> Tuple[dict[str, Any], Generator[AgentRun, None]]:
+) -> Tuple[dict[str, Any], Generator[AgentRun, None, None]]:
     if format == "json":
         result = _runs_from_json_file(file)
     elif format == "eval":
