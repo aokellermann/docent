@@ -5,7 +5,7 @@ import React, { Suspense } from 'react';
 import ExperimentViewer from '../../components/ExperimentViewer';
 import AgentRunPreview from '../../components/AgentRunPreview';
 import { useAppSelector } from '../../store/hooks';
-import RubricArea from '@/app/components/RubricArea';
+import RubricArea from '@/app/dashboard/[collection_id]/components/RubricArea';
 
 export default function DocentDashboard() {
   const dashboardHasRunPreview = useAppSelector(

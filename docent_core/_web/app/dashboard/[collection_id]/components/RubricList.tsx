@@ -1,9 +1,11 @@
 'use client';
 
-import { Plus, Pencil, Play, FileText, Trash2, Pause } from 'lucide-react';
+import { Plus, Play, FileText, Trash2, Pause } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
-import { setEditingRubricId, type Rubric } from '@/app/store/rubricSlice';
+import { type Rubric } from '@/app/store/rubricSlice';
 import { Button } from '@/components/ui/button';
+import { useRouter } from 'next/navigation';
+import { useCreateOrGetSessionMutation } from '@/app/api/refinementApi';
 import {
   useGetRubricsQuery,
   useCreateRubricMutation,
@@ -15,32 +17,21 @@ import {
 import { toast } from '@/hooks/use-toast';
 import { useHasCollectionWritePermission } from '@/lib/permissions/hooks';
 
-interface RubricListProps {
-  handleEvaluate: (rubricId: string, activateUi?: boolean) => Promise<void>;
-}
-
 interface RubricCardProps {
   rubric: Rubric;
   collectionId: string;
-  isEditing: boolean;
-  isActive: boolean;
-  handleEvaluate: (rubricId: string, activateUi?: boolean) => Promise<void>;
-  handleDelete: (rubricId: string) => Promise<void>;
-  isDeletingRubric: boolean;
   hasWritePermission: boolean;
 }
 
 function RubricCard({
   rubric,
   collectionId,
-  isEditing,
-  isActive,
-  handleEvaluate,
-  handleDelete,
-  isDeletingRubric,
   hasWritePermission,
 }: RubricCardProps) {
   const dispatch = useAppDispatch();
+  const router = useRouter();
+  const [createOrGetSession, { isLoading: isCreatingSession }] =
+    useCreateOrGetSessionMutation();
 
   // Get job status for this rubric
   const { data: jobDetails } = useGetRubricJobStatusQuery({
@@ -51,7 +42,6 @@ function RubricCard({
   // Each card has its own cancellation mutation
   const [cancelEvaluation, { isLoading: isCancellingJob }] =
     useCancelEvaluationMutation();
-
   const handleCancelJob = async (jobId: string) => {
     try {
       await cancelEvaluation({
@@ -64,6 +54,26 @@ function RubricCard({
       toast({
         title: 'Error',
         description: 'Failed to cancel job',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const [deleteRubric, { isLoading: isDeletingRubric }] =
+    useDeleteRubricMutation();
+  const handleDelete = async (rubricId: string) => {
+    if (!collectionId) return;
+
+    try {
+      await deleteRubric({
+        collectionId,
+        rubricId,
+      }).unwrap();
+    } catch (error) {
+      console.error('Failed to delete rubric:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to delete rubric',
         variant: 'destructive',
       });
     }
@@ -88,18 +98,36 @@ function RubricCard({
   const hasActiveJob =
     jobDetails?.status === 'pending' || jobDetails?.status === 'running';
 
+  const handleClickRefine = async () => {
+    if (!collectionId) return;
+    try {
+      const res = await createOrGetSession({
+        collectionId,
+        rubricId: rubric.id,
+      }).unwrap();
+      console.log('res', res);
+      router.push(`/dashboard/${collectionId}/refine/${res.id}`);
+    } catch (error) {
+      console.error('Failed to start refinement session:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to start refinement session',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleClick = () => {
+    router.push(`/dashboard/${collectionId}?rubricId=${rubric.id}`);
+  };
+
+  const [startEvaluation] = useStartEvaluationMutation();
+
   return (
     <div
       key={rubric.id}
-      className={`group relative border rounded-md transition-all duration-200 cursor-pointer
-        ${
-          isActive
-            ? 'border-indigo-border bg-indigo-bg/30 shadow-sm'
-            : isEditing
-              ? 'border-blue-border bg-blue-bg/30 shadow-sm'
-              : 'border-border bg-secondary/50 hover:bg-secondary hover:shadow-sm'
-        }`}
-      onClick={() => handleEvaluate(rubric.id)}
+      className="group relative border rounded-md transition-all duration-200 cursor-pointer border-border bg-secondary/50 hover:bg-secondary hover:shadow-sm"
+      onClick={handleClick}
     >
       <div className={`p-2.5 ${hasWritePermission ? 'pr-28' : 'pr-12'}`}>
         {/* Icon and Description */}
@@ -140,38 +168,34 @@ function RubricCard({
 
       {/* Action buttons */}
       <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-        {hasWritePermission && (
+        {/* {hasWritePermission && (
           <button
-            className={`p-1.5 rounded transition-colors
-              ${
-                isEditing
-                  ? 'bg-blue-bg text-blue-text'
-                  : 'hover:bg-secondary text-muted-foreground hover:text-primary'
-              }`}
+            className={`p-1.5 rounded transition-colors hover:bg-secondary text-muted-foreground hover:text-primary`}
             onClick={(e) => {
               e.stopPropagation();
-              dispatch(setEditingRubricId(rubric.id));
+              handleClickRefine();
             }}
-            title="Edit rubric"
+            title="Refine rubric"
           >
-            <Pencil className="h-3 w-3" />
+            <PickaxeIcon className="h-3 w-3" />
           </button>
-        )}
+        )} */}
         <button
           className={`p-1.5 rounded transition-colors
             ${
               hasActiveJob
                 ? 'bg-orange-bg text-orange-text'
-                : isActive
-                  ? 'bg-indigo-bg text-indigo-text'
-                  : 'hover:bg-green-bg/50 text-muted-foreground hover:text-green-text'
+                : 'hover:bg-green-bg/50 text-muted-foreground hover:text-green-text'
             }`}
           onClick={(e) => {
             e.stopPropagation();
             if (hasActiveJob && jobDetails) {
               handleCancelJob(jobDetails.id);
             } else {
-              handleEvaluate(rubric.id, false);
+              startEvaluation({
+                collectionId,
+                rubricId: rubric.id,
+              });
             }
           }}
           title={hasActiveJob ? 'Cancel job' : 'Evaluate with this rubric'}
@@ -201,15 +225,11 @@ function RubricCard({
   );
 }
 
-export default function RubricList({ handleEvaluate }: RubricListProps) {
+export default function RubricList() {
   const dispatch = useAppDispatch();
 
   const collectionId = useAppSelector((state) => state.collection.collectionId);
   const rubricsMap = useAppSelector((state) => state.rubric.latestRubricsMap);
-  const editingRubricId = useAppSelector(
-    (state) => state.rubric.editingRubricId
-  );
-  const activeRubricId = useAppSelector((state) => state.rubric.activeRubricId);
 
   // Check write permissions
   const hasWritePermission = useHasCollectionWritePermission();
@@ -223,8 +243,6 @@ export default function RubricList({ handleEvaluate }: RubricListProps) {
 
   const [createRubric, { isLoading: isCreatingRubric }] =
     useCreateRubricMutation();
-  const [deleteRubric, { isLoading: isDeletingRubric }] =
-    useDeleteRubricMutation();
   const [startEvaluation] = useStartEvaluationMutation();
 
   const rubrics = Object.values(rubricsMap);
@@ -251,24 +269,6 @@ export default function RubricList({ handleEvaluate }: RubricListProps) {
       toast({
         title: 'Error',
         description: 'Failed to create rubric',
-        variant: 'destructive',
-      });
-    }
-  };
-
-  const handleDelete = async (rubricId: string) => {
-    if (!collectionId) return;
-
-    try {
-      await deleteRubric({
-        collectionId,
-        rubricId,
-      }).unwrap();
-    } catch (error) {
-      console.error('Failed to delete rubric:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to delete rubric',
         variant: 'destructive',
       });
     }
@@ -314,11 +314,6 @@ export default function RubricList({ handleEvaluate }: RubricListProps) {
               key={rubric.id}
               rubric={rubric}
               collectionId={collectionId!}
-              isEditing={editingRubricId === rubric.id}
-              isActive={activeRubricId === rubric.id}
-              handleEvaluate={handleEvaluate}
-              handleDelete={handleDelete}
-              isDeletingRubric={isDeletingRubric}
               hasWritePermission={hasWritePermission}
             />
           ))

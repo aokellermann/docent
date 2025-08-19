@@ -186,7 +186,7 @@ export const collectionApi = createApi({
           () => {
             // no-op; cached data is already up to date, and cacheEntryRemoved below will finalize
           },
-          dispatch as any
+          dispatch
         );
 
         await cacheEntryRemoved;

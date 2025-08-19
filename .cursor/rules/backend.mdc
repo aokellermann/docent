@@ -30,4 +30,10 @@ class DiffService:
 ```
 
 Other notes:
-- Flushing and committing are the responsibility of the service *callers* (e.g., workers, HTTP handlers), not the service itself.
+- Flushing and committing are the responsibility of the service *callers* (e.g., workers, HTTP handlers), not the service itself, except in rare cases.
+- Methods in services should accept SQLAlchemy model instances as input, *not* IDs. The caller is responsible for pulling the instance from the database and validating its existence. When used together with dependency injection, this also reduces calls to the database.
+- In services, make sure to distinguish variables pointing to SQLAlchemy model instances from Pydantic objects. Prefix variables pointing to SQLAlchemy model instances with `sq_`.
+
+# Polling vs pushing
+
+TODO(mengk)

@@ -4,8 +4,8 @@ WORKER_QUEUE_NAME = "docent_worker_queue"
 
 
 class WorkerFunction(str, Enum):
-    """TODO(mengk): this is dumb but required because of a circular import. ugh."""
-
     COMPUTE_EMBEDDINGS = "compute_embeddings"
     RUBRIC_JOB = "rubric_job"
-    CENTROID_ASSIGNMENT_JOB = "centroid_assignment_job"
+    CENTROID_ASSIGNMENT_JOB = "centroid_assignment_job"  # Deprecated
+    REFINEMENT_AGENT_JOB = "refinement_agent_job"
+    CLUSTERING_JOB = "clustering_job"

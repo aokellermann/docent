@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
@@ -15,6 +16,9 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+if TYPE_CHECKING:
+    from docent_core.docent.db.schemas.refinement import SQLARefinementAgentSession
+
 from docent_core._db_service.schemas.base import SQLABase
 from docent_core.docent.ai_tools.rubric.rubric import JudgeResult, ResultType, Rubric
 from docent_core.docent.db.schemas.tables import TABLE_AGENT_RUN, TABLE_COLLECTION
@@ -28,17 +32,17 @@ TABLE_JUDGE_RESULT_CENTROIDS = "judge_result_centroids"
 class SQLARubric(SQLABase):
     __tablename__ = TABLE_RUBRIC
 
-    id = mapped_column(String(36), nullable=False)
-    version = mapped_column(Integer, nullable=False, default=1)
-    collection_id = mapped_column(
+    id: Mapped[str] = mapped_column(String(36), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    collection_id: Mapped[str] = mapped_column(
         String(36), ForeignKey(f"{TABLE_COLLECTION}.id"), nullable=False, index=True
     )
 
-    high_level_description = mapped_column(Text, nullable=False)
-    inclusion_rules = mapped_column(JSONB, nullable=False)
-    exclusion_rules = mapped_column(JSONB, nullable=False)
+    high_level_description: Mapped[str] = mapped_column(Text, nullable=False)
+    inclusion_rules: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    exclusion_rules: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
 
-    created_at = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False
     )
 
@@ -54,6 +58,13 @@ class SQLARubric(SQLABase):
     # Relationship to judge results with cascade delete
     judge_results: Mapped[list["SQLAJudgeResult"]] = relationship(
         "SQLAJudgeResult",
+        back_populates="rubric",
+        cascade="all, delete-orphan",
+    )
+
+    # Relationship to refinement sessions with cascade delete
+    refinement_sessions: Mapped[list["SQLARefinementAgentSession"]] = relationship(
+        "SQLARefinementAgentSession",
         back_populates="rubric",
         cascade="all, delete-orphan",
     )
@@ -82,14 +93,14 @@ class SQLARubric(SQLABase):
 class SQLAJudgeResult(SQLABase):
     __tablename__ = TABLE_JUDGE_RESULT
 
-    id = mapped_column(String(36), primary_key=True)
-    agent_run_id = mapped_column(
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    agent_run_id: Mapped[str] = mapped_column(
         String(36), ForeignKey(f"{TABLE_AGENT_RUN}.id"), nullable=False, index=True
     )
-    rubric_id = mapped_column(String(36), nullable=False, index=True)
-    rubric_version = mapped_column(Integer, nullable=False, index=True)
-    value = mapped_column(Text, nullable=True)
-    result_type = mapped_column(Enum(ResultType), nullable=False)
+    rubric_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    rubric_version: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_type: Mapped[ResultType] = mapped_column(Enum(ResultType), nullable=False)
 
     # Composite foreign key constraint
     __table_args__ = (
@@ -137,14 +148,14 @@ class SQLAJudgeResult(SQLABase):
 class SQLARubricCentroid(SQLABase):
     __tablename__ = TABLE_RUBRIC_CENTROID
 
-    id = mapped_column(String(36), primary_key=True)
-    collection_id = mapped_column(
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    collection_id: Mapped[str] = mapped_column(
         String(36), ForeignKey(f"{TABLE_COLLECTION}.id"), nullable=False, index=True
     )
-    rubric_id = mapped_column(String(36), nullable=False, index=True)
-    rubric_version = mapped_column(Integer, nullable=False, index=True)
+    rubric_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    rubric_version: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     centroid: Mapped[str] = mapped_column(Text, nullable=False)
-    result_type = mapped_column(Enum(ResultType), nullable=False)
+    result_type: Mapped[ResultType] = mapped_column(Enum(ResultType), nullable=False)
 
     # Composite foreign key constraint
     __table_args__ = (
@@ -173,16 +184,16 @@ class SQLAJudgeResultCentroid(SQLABase):
 
     __tablename__ = TABLE_JUDGE_RESULT_CENTROIDS
 
-    id = mapped_column(String(36), primary_key=True)
-    judge_result_id = mapped_column(
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    judge_result_id: Mapped[str] = mapped_column(
         String(36), ForeignKey(f"{TABLE_JUDGE_RESULT}.id"), nullable=False, index=True
     )
-    centroid_id = mapped_column(
+    centroid_id: Mapped[str] = mapped_column(
         String(36), ForeignKey(f"{TABLE_RUBRIC_CENTROID}.id"), nullable=False, index=True
     )
-    decision = mapped_column(Boolean, nullable=False)
-    reason = mapped_column(Text, nullable=False)
-    result_type = mapped_column(Enum(ResultType), nullable=False)
+    decision: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    result_type: Mapped[ResultType] = mapped_column(Enum(ResultType), nullable=False)
 
     # Relationships
     judge_result: Mapped["SQLAJudgeResult"] = relationship(

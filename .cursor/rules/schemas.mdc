@@ -4,6 +4,10 @@ globs: docent_core/_db_service/schemas/*.py,
 alwaysApply: false
 ---
 
+# Misc rules
+
+- Always use `Mapped[T]` for type hints. This helps pyright understand the type of the column and raise type errors.
+
 # SQLA table specification
 
 ## Foreign Keys and Relationships

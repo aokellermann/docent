@@ -3,9 +3,9 @@ from typing import TypedDict
 from fastapi import APIRouter
 
 from docent_core._server._rest.onboarding import onboarding_router
-from docent_core._server._rest.refinement import refinement_router
 from docent_core.docent.server.rest.chart import chart_router
 from docent_core.docent.server.rest.diff import diff_router
+from docent_core.docent.server.rest.refinement import refinement_router
 from docent_core.docent.server.rest.router import public_router, user_router
 from docent_core.docent.server.rest.rubric import rubric_router
 from docent_core.docent.server.rest.telemetry import telemetry_router

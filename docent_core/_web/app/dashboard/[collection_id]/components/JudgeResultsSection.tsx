@@ -7,7 +7,7 @@ import { openAgentRunInDashboard } from '@/app/store/transcriptSlice';
 import { cn } from '@/lib/utils';
 import {
   JudgeResultWithCitations,
-  toggleShowUniqueAgentRuns,
+  RubricCentroid,
 } from '@/app/store/rubricSlice';
 import { useCallback, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
@@ -19,6 +19,7 @@ interface CollapsibleResultsSectionProps {
   judgeResultIds: string[];
   judgeResultsMap: Record<string, JudgeResultWithCitations>;
   usePreview: boolean;
+  isPollingAssignments: boolean;
   isExpanded?: boolean;
   onToggle?: () => void;
 }
@@ -28,13 +29,16 @@ const CollapsibleResultsSection = ({
   judgeResultIds,
   judgeResultsMap,
   usePreview,
+  isPollingAssignments,
   isExpanded = true,
   onToggle,
 }: CollapsibleResultsSectionProps) => {
-  const dispatch = useAppDispatch();
-  const showUniqueAgentRuns = useAppSelector(
-    (state) => state.rubric.showUniqueAgentRuns
-  );
+  const [showUniqueAgentRuns, setShowUniqueAgentRuns] = useState(false);
+
+  const toggleShowUniqueAgentRuns = () => {
+    setShowUniqueAgentRuns(!showUniqueAgentRuns);
+  };
+
   // Count only judge results with non-null values (what actually gets displayed)
   const resultHits = useMemo(() => {
     return judgeResultIds
@@ -58,10 +62,6 @@ const CollapsibleResultsSection = ({
   }, [resultHits]);
 
   const uniqueAgentRunCount = Object.keys(groupedResults).length;
-
-  const isPollingAssignments = useAppSelector(
-    (state) => state.rubric.isPollingAssignments
-  );
 
   const AgentRunGroupHeader = ({
     agentRunId,
@@ -101,7 +101,7 @@ const CollapsibleResultsSection = ({
         <div className="flex-shrink-0 flex items-center">
           <span
             className="text-xs px-1.5 py-0.5 rounded-sm bg-muted text-muted-foreground cursor-pointer flex items-center min-w-[2rem] justify-center hover:bg-muted/80 transition-colors"
-            onClick={() => dispatch(toggleShowUniqueAgentRuns())}
+            onClick={toggleShowUniqueAgentRuns}
           >
             {showUniqueAgentRuns
               ? `${uniqueAgentRunCount} runs`
@@ -146,19 +146,19 @@ const CollapsibleResultsSection = ({
 
 interface JudgeResultsListProps {
   usePreview?: boolean; // Whether to use the agent run preview
+  judgeResultsMap: Record<string, JudgeResultWithCitations>;
+  centroidsMap: Record<string, RubricCentroid>;
+  centroidAssignments: Record<string, string[]>;
+  isPollingAssignments: boolean;
 }
 
 export const JudgeResultsList = ({
   usePreview = true,
+  judgeResultsMap,
+  centroidsMap,
+  centroidAssignments,
+  isPollingAssignments,
 }: JudgeResultsListProps) => {
-  const judgeResultsMap = useAppSelector(
-    (state) => state.rubric.judgeResultsMap
-  );
-  const centroidsMap = useAppSelector((state) => state.rubric.centroidsMap);
-  const centroidAssignments = useAppSelector(
-    (state) => state.rubric.centroidAssignments
-  );
-
   // Lazy initialization - expand all sections by default
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set(['residuals'])
@@ -217,6 +217,7 @@ export const JudgeResultsList = ({
             judgeResultIds={judgeResultIds}
             judgeResultsMap={judgeResultsMap}
             usePreview={usePreview}
+            isPollingAssignments={isPollingAssignments}
             isExpanded={expandedSections.has(centroidId)}
             onToggle={() => toggleSectionExpansion(centroidId)}
           />
@@ -230,6 +231,7 @@ export const JudgeResultsList = ({
           judgeResultIds={residualResultIds}
           judgeResultsMap={judgeResultsMap}
           usePreview={usePreview}
+          isPollingAssignments={isPollingAssignments}
           isExpanded={expandedSections.has('residuals')}
           onToggle={() => toggleSectionExpansion('residuals')}
         />

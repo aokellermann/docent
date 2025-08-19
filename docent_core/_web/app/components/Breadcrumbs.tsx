@@ -31,28 +31,18 @@ const Breadcrumbs: React.FC = () => {
     (state: RootState) => state.collection.collectionId
   );
 
+  // check if we are "home", i.e. at /dashboard/[collection_id]
+  const effectiveCollectionId =
+    collectionId || (params?.collection_id as string | undefined);
+  const normalizePath = (p?: string | null) => (p ? p.replace(/\/+$/, '') : '');
+  const isHome =
+    !!effectiveCollectionId &&
+    normalizePath(pathname) ===
+      normalizePath(`${BASE_DOCENT_PATH}/${effectiveCollectionId}`);
+
   // Get the current page information
   const agentRunId = params?.agent_run_id as string | undefined;
-  const sampleId = params?.sample_id as string | undefined;
-  const isDiffPage = pathname?.includes('/paired_transcript');
-  const isForestPage = pathname?.includes('/forest');
-
-  // For diff page
-  const datapoint1 = searchParams?.get('datapoint1');
-  const datapoint2 = searchParams?.get('datapoint2');
-
-  // Listen for connection status changes
-  // useEffect(() => {
-  //   const handleConnectionStatus = (status: boolean) => {
-  //     setIsConnected(status);
-  //   };
-
-  //   addConnectionStatusListener(handleConnectionStatus);
-
-  //   return () => {
-  //     removeConnectionStatusListener(handleConnectionStatus);
-  //   };
-  // }, []);
+  const refinementSessionId = params?.session_id as string | undefined;
 
   return (
     <div className="_Breadcrumbs text-sm flex items-center justify-between w-full">
@@ -77,16 +67,15 @@ const Breadcrumbs: React.FC = () => {
         {/* Breadcrumbs */}
         <div className="flex gap-x-1 items-center">
           {/* Home link */}
-          {collectionId &&
-          (agentRunId || sampleId || isDiffPage || isForestPage) ? (
+          {isHome ? (
+            <span className="text-muted-foreground">All agent runs</span>
+          ) : (
             <Link
-              href={`${BASE_DOCENT_PATH}/${collectionId}`}
+              href={`${BASE_DOCENT_PATH}/${effectiveCollectionId}`}
               className="text-blue-text hover:underline"
             >
               All agent runs
             </Link>
-          ) : (
-            <span className="text-muted-foreground">All agent runs</span>
           )}
 
           {/* Transcript page */}
@@ -99,22 +88,11 @@ const Breadcrumbs: React.FC = () => {
             </>
           )}
 
-          {/* Forest page */}
-          {isForestPage && sampleId && (
+          {refinementSessionId && (
             <>
               <ChevronRight size={18} />
               <span className="text-muted-foreground">
-                Sample {sampleId} tree
-              </span>
-            </>
-          )}
-
-          {/* Diff page */}
-          {isDiffPage && datapoint1 && datapoint2 && (
-            <>
-              <ChevronRight size={18} />
-              <span className="text-muted-foreground">
-                Compare: {datapoint1} vs {datapoint2}
+                Refinement session {refinementSessionId}
               </span>
             </>
           )}

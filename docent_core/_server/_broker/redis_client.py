@@ -17,6 +17,9 @@ logger = get_logger(__name__)
 _redis_client: ArqRedis | None = None
 _redis_lock = anyio.Lock()
 
+STREAM_KEY_FORMAT = "stream_{job_id}"
+STATE_KEY_FORMAT = "state_{job_id}"
+
 
 async def get_redis_client():
     global _redis_client

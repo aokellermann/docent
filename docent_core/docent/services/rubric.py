@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from docent._log_util import get_logger
 from docent_core._db_service.batched_writer import BatchedWriter
-from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES
 from docent_core._server._broker.redis_client import enqueue_job
 from docent_core._worker.constants import WorkerFunction
 from docent_core.docent.ai_tools.clustering.cluster_assigner import (
@@ -25,7 +24,6 @@ from docent_core.docent.ai_tools.rubric.rubric import (
     ResultType,
     Rubric,
     evaluate_rubric,
-    evaluate_rubric_near_misses,
 )
 from docent_core.docent.db.contexts import ViewContext
 from docent_core.docent.db.schemas.rubric import (
@@ -142,7 +140,7 @@ class RubricService:
 
         # First cancel any jobs involving this rubric
         await self.cancel_active_rubric_eval_job(rubric_id)
-        await self.cancel_active_centroid_assignment_job(rubric_id)
+        await self.cancel_active_clustering_job(rubric_id)
 
         all_rubrics = await self.get_all_rubric_versions(rubric_id)
         for rubric in all_rubrics:
@@ -180,15 +178,7 @@ class RubricService:
         """Start a job to evaluate the rubric."""
 
         # Is there already a job for this rubric?
-        result = await self.session.execute(
-            select(SQLAJob)
-            .where(SQLAJob.type == WorkerFunction.RUBRIC_JOB.value)
-            .where(SQLAJob.job_json["rubric_id"].astext == rubric_id)
-            .where((SQLAJob.status == JobStatus.PENDING) | (SQLAJob.status == JobStatus.RUNNING))
-            .order_by(SQLAJob.created_at.desc())
-            .limit(1)
-        )
-        existing_job: SQLAJob | None = result.scalar_one_or_none()
+        existing_job = await self._get_active_rubric_job(self.session, rubric_id)
         if existing_job:
             return existing_job.id
 
@@ -205,7 +195,9 @@ class RubricService:
             )
         )
 
-        # Enqueue the job
+        # Exception to rule of not committing inside the service:
+        #   commit so that the enqueued job is visible to the worker
+        await self.session.commit()
         await enqueue_job(ctx, job_id)
 
         return job_id
@@ -323,61 +315,56 @@ class RubricService:
                     await evaluate_rubric(
                         agent_runs,
                         rubric.to_pydantic(),
-                        model_options=(
-                            PROVIDER_PREFERENCES.execute_search
-                            if max_results is not None
-                            else PROVIDER_PREFERENCES.execute_full_search
-                        ),
                         callback=_callback,
                     )
                 except anyio.get_cancelled_exc_class():
                     logger.info(f"Rubric evaluation cancelled after reaching {num_results} results")
 
-            # TODO(vincent): for now we assume refinement <-> has max results, full eval <-> no max results
-            if max_results is None:
-                return
+            # # TODO(vincent): for now we assume refinement <-> has max results, full eval <-> no max results
+            # if max_results is None:
+            #     return
 
-            num_new_results = 0
-            rubric_indices = [i for i, result in enumerate(rubric_results) if result is not None]
+            # num_new_results = 0
+            # rubric_indices = [i for i, result in enumerate(rubric_results) if result is not None]
 
-            # TODO(vincent): optimize this later, don't need to wait on first run to finish before starting second run
+            # # TODO(vincent): optimize this later, don't need to wait on first run to finish before starting second run
 
-            async with anyio.create_task_group() as tg:
-                cancel_scope = tg.cancel_scope
+            # async with anyio.create_task_group() as tg:
+            #     cancel_scope = tg.cancel_scope
 
-                async def _new_callback(batch_index: int, judge_results: list[JudgeResult] | None):
-                    if judge_results is None:
-                        return
+            #     async def _new_callback(batch_index: int, judge_results: list[JudgeResult] | None):
+            #         if judge_results is None:
+            #             return
 
-                    nonlocal num_new_results
-                    num_new_results += sum(1 for j in judge_results if j.value is not None)
+            #         nonlocal num_new_results
+            #         num_new_results += sum(1 for j in judge_results if j.value is not None)
 
-                    if (
-                        num_new_results >= job.job_json.get("max_results", 0)
-                        and not cancel_scope.cancel_called
-                    ):
-                        cancel_scope.cancel()
+            #         if (
+            #             num_new_results >= job.job_json.get("max_results", 0)
+            #             and not cancel_scope.cancel_called
+            #         ):
+            #             cancel_scope.cancel()
 
-                    # Use the session_cm_factory to get a session that commits immediately
-                    await writer.add_all(
-                        [
-                            SQLAJudgeResult.from_pydantic(judge_result)
-                            for judge_result in judge_results
-                        ]
-                    )
+            #         # Use the session_cm_factory to get a session that commits immediately
+            #         await writer.add_all(
+            #             [
+            #                 SQLAJudgeResult.from_pydantic(judge_result)
+            #                 for judge_result in judge_results
+            #             ]
+            #         )
 
-                try:
-                    await evaluate_rubric_near_misses(
-                        [agent_runs[i] for i in rubric_indices],
-                        rubric.to_pydantic(),
-                        [cast(list[str], rubric_results[i]) for i in rubric_indices],
-                        model_options=PROVIDER_PREFERENCES.execute_search,
-                        callback=_new_callback,
-                    )
-                except anyio.get_cancelled_exc_class():
-                    logger.info(
-                        f"Near misses evaluation cancelled after reaching {num_new_results} new results"
-                    )
+            #     try:
+            #         await evaluate_rubric_near_misses(
+            #             [agent_runs[i] for i in rubric_indices],
+            #             rubric.to_pydantic(),
+            #             [cast(list[str], rubric_results[i]) for i in rubric_indices],
+            #             model_options=PROVIDER_PREFERENCES.execute_search,
+            #             callback=_new_callback,
+            #         )
+            #     except anyio.get_cancelled_exc_class():
+            #         logger.info(
+            #             f"Near misses evaluation cancelled after reaching {num_new_results} new results"
+            #         )
 
     async def get_active_job_for_rubric(self, rubric_id: str) -> SQLAJob | None:
         return await self._get_active_rubric_job(self.session, rubric_id)
@@ -422,23 +409,6 @@ class RubricService:
         if job:
             await self.job_svc.cancel_job(job.id)
 
-    async def poll_for_judge_results(self, rubric_id: str):
-        """While there is a running job for this rubric, poll."""
-
-        async def _get_job():
-            """Requires a new session; otherwise, the poller will never see the updates to SQLAJob."""
-            async with self.session_cm_factory() as session:
-                return await self._get_active_rubric_job(session, rubric_id)
-
-        while (job := await _get_job()) is not None:
-            results = await self.get_rubric_results(rubric_id)
-            yield job.id, results, job.job_json.get("total_agent_runs", None)
-            await anyio.sleep(1)
-
-        # Final yield, just in case the above was never run (do-while)
-        results = await self.get_rubric_results(rubric_id)
-        yield None, results, None
-
     # async def clear_rubric_results(self, rubric_id: str):
     #     """Clear all results for a rubric."""
     #     # First cancel any jobs involving this rubric
@@ -455,17 +425,81 @@ class RubricService:
     # Clustering rubric results #
     #############################
 
+    async def start_or_get_clustering_job(
+        self,
+        ctx: ViewContext,
+        sq_rubric: SQLARubric,
+        clustering_feedback: str | None = None,
+        recluster: bool = False,
+    ):
+        """Start a job to cluster rubric results."""
+
+        # Is there already a job for this rubric?
+        existing_job = await self.get_active_clustering_job(sq_rubric.id)
+        if existing_job:
+            return existing_job.id
+
+        # There is no running job, create a new one
+        job_id = str(uuid4())
+        self.session.add(
+            SQLAJob(
+                id=job_id,
+                type=WorkerFunction.CLUSTERING_JOB.value,
+                job_json={
+                    "rubric_id": sq_rubric.id,
+                    "clustering_feedback": clustering_feedback,
+                    "recluster": recluster,
+                },
+            )
+        )
+
+        # Enqueue the job
+        await enqueue_job(ctx, job_id)
+
+        return job_id
+
+    async def cancel_active_clustering_job(self, rubric_id: str):
+        job = await self.get_active_clustering_job(rubric_id)
+        if job:
+            await self.job_svc.cancel_job(job.id)
+
+    async def get_active_clustering_job(self, rubric_id: str) -> SQLAJob | None:
+        result = await self.session.execute(
+            select(SQLAJob)
+            .where(SQLAJob.type == WorkerFunction.CLUSTERING_JOB.value)
+            .where(SQLAJob.job_json["rubric_id"].astext == rubric_id)
+            .where((SQLAJob.status == JobStatus.PENDING) | (SQLAJob.status == JobStatus.RUNNING))
+            .order_by(SQLAJob.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def run_clustering_job(self, ctx: ViewContext, job: SQLAJob):
+        """Run a clustering job. Should only be called by the worker."""
+        rubric_id = job.job_json["rubric_id"]
+        sq_rubric = await self.get_rubric(rubric_id, version=None)
+        if sq_rubric is None:
+            raise ValueError(f"Rubric {rubric_id} not found")
+        centroids_feedback = job.job_json.get("clustering_feedback", None)
+        recluster = bool(job.job_json.get("recluster", False))
+
+        # Propose centroids
+        await self.propose_centroids(sq_rubric, recluster, centroids_feedback)
+        # Assign centroids
+        await self.assign_centroids(sq_rubric)
+
     async def propose_centroids(
         self,
-        sqla_rubric: SQLARubric,
+        sq_rubric: SQLARubric,
+        recluster: bool,
         feedback: str | None = None,
     ) -> Sequence[SQLARubricCentroid]:
         """Cluster judge results and store cluster information with the judge results.
-        If feedback is not None, current centroids will be overwritten."""
-        rubric = sqla_rubric.to_pydantic()
+        If recluster, current centroids will be overwritten."""
+        rubric = sq_rubric.to_pydantic()
 
         # Get all non-null judge results for this rubric
-        judge_results = await self.get_rubric_results(rubric.id, sqla_rubric.version)
+        judge_results = await self.get_rubric_results(rubric.id, sq_rubric.version)
         judge_results = [jr for jr in judge_results if jr.value is not None]
         if not judge_results:
             logger.info(f"No judge results with values found for rubric {rubric.id}")
@@ -476,17 +510,21 @@ class RubricService:
         # TODO(vincent): figure out how to give type-specific feedback. broken rn
 
         # If we need to regenerate, save centroids and then delete from db
-        cur_sqla_centroids = await self.get_centroids(sqla_rubric.id, sqla_rubric.version)
+        cur_sqla_centroids = await self.get_centroids(sq_rubric.id, sq_rubric.version)
         centroid_result_types = set(c.result_type for c in cur_sqla_centroids)
 
-        if judge_result_types != centroid_result_types or feedback is not None:
-            await self.clear_centroids(sqla_rubric.id, sqla_rubric.version)
+        if judge_result_types != centroid_result_types or feedback is not None or recluster:
+            await self.clear_centroids(sq_rubric.id, sq_rubric.version)
             await self.session.flush()
 
         async def _cluster_for_type(result_type: ResultType) -> list[SQLARubricCentroid]:
-            if feedback is None and any(c.result_type == result_type for c in cur_sqla_centroids):
+            if (
+                feedback is None
+                and not recluster
+                and any(c.result_type == result_type for c in cur_sqla_centroids)
+            ):
                 logger.info(
-                    f"Skipping centroid generation for rubric {sqla_rubric.id} because it already has {len(cur_sqla_centroids)} centroids"
+                    f"Skipping centroid generation for rubric {sq_rubric.id} because it already has {len(cur_sqla_centroids)} centroids"
                 )
                 return [c for c in cur_sqla_centroids if c.result_type == result_type]
 
@@ -515,9 +553,9 @@ class RubricService:
             sqla_centroids: list[SQLARubricCentroid] = [
                 SQLARubricCentroid(
                     id=str(uuid4()),
-                    collection_id=sqla_rubric.collection_id,
+                    collection_id=sq_rubric.collection_id,
                     rubric_id=rubric.id,
-                    rubric_version=sqla_rubric.version,
+                    rubric_version=sq_rubric.version,
                     centroid=centroid,
                     result_type=result_type,
                 )
@@ -552,46 +590,12 @@ class RubricService:
     async def clear_centroids(self, rubric_id: str, rubric_version: int):
         """Clear all centroids for a rubric along with their assignments (cascaded)."""
 
-        # First cancel the job so it doesn't try to assign non-existent centroids
-        await self.cancel_active_centroid_assignment_job(rubric_id)
-
         # Delete each centroid using ORM to trigger cascade deletion
         centroids = await self.get_centroids(rubric_id, rubric_version)
         for centroid in centroids:
             await self.session.delete(centroid)
 
         logger.info(f"Cleared {len(centroids)} centroids for rubric {rubric_id}")
-
-    async def start_or_get_centroid_assignment_job(self, ctx: ViewContext, rubric_id: str):
-        """Start a job to assign centroids to judge results."""
-
-        # Is there already a job for this rubric?
-        result = await self.session.execute(
-            select(SQLAJob)
-            .where(SQLAJob.type == WorkerFunction.CENTROID_ASSIGNMENT_JOB.value)
-            .where(SQLAJob.job_json["rubric_id"].astext == rubric_id)
-            .where((SQLAJob.status == JobStatus.PENDING) | (SQLAJob.status == JobStatus.RUNNING))
-            .order_by(SQLAJob.created_at.desc())
-            .limit(1)
-        )
-        existing_job: SQLAJob | None = result.scalar_one_or_none()
-        if existing_job:
-            return existing_job.id
-
-        # There is no running job, create a new one
-        job_id = str(uuid4())
-        self.session.add(
-            SQLAJob(
-                id=job_id,
-                type=WorkerFunction.CENTROID_ASSIGNMENT_JOB.value,
-                job_json={"rubric_id": rubric_id},
-            )
-        )
-
-        # Enqueue the job
-        await enqueue_job(ctx, job_id)
-
-        return job_id
 
     async def assign_centroids(
         self,
@@ -721,45 +725,3 @@ class RubricService:
             result[assignment.centroid_id].append(assignment.judge_result_id)
 
         return result
-
-    @staticmethod
-    async def _get_active_centroid_assignment_job(
-        session: AsyncSession, rubric_id: str
-    ) -> SQLAJob | None:
-        """Has weird type signature because of the polling loop"""
-        result = await session.execute(
-            select(SQLAJob)
-            .where(SQLAJob.type == WorkerFunction.CENTROID_ASSIGNMENT_JOB.value)
-            .where(SQLAJob.job_json["rubric_id"].astext == rubric_id)
-            .where((SQLAJob.status == JobStatus.PENDING) | (SQLAJob.status == JobStatus.RUNNING))
-            .limit(1)
-        )
-        return result.scalar_one_or_none()
-
-    async def poll_for_centroid_assignments(self, rubric_id: str):
-        """While there is a running job for this rubric, poll."""
-
-        async def _get_job():
-            """Requires a new session; otherwise, the poller will never see the updates to SQLAJob."""
-            async with self.session_cm_factory() as session:
-                return await self._get_active_centroid_assignment_job(session, rubric_id)
-
-        while (job := await _get_job()) is not None:
-            results = await self.get_centroid_assignments(rubric_id)
-            yield job.id, results
-            await anyio.sleep(1)
-
-        # Final yield, just in case the above was never run (do-while)
-        results = await self.get_centroid_assignments(rubric_id)
-        yield None, results
-
-    async def get_active_assignment_job_for_rubric(self, rubric_id: str) -> SQLAJob | None:
-        """Get the active centroid assignment job for a rubric if it exists."""
-        return await self._get_active_centroid_assignment_job(self.session, rubric_id)
-
-    async def cancel_active_centroid_assignment_job(self, rubric_id: str):
-        """Cancel all running and pending centroid assignment jobs."""
-
-        job = await self._get_active_centroid_assignment_job(self.session, rubric_id)
-        if job:
-            await self.job_svc.cancel_job(job.id)

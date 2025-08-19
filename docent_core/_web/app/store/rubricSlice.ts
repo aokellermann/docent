@@ -32,32 +32,12 @@ export interface RubricState {
   activeRubricId: string | null;
   editingRubricId: string | null;
   latestRubricsMap: Record<string, Rubric>; // rubric_id -> latest version of Rubric
-  activeRubricJobId: string | null;
-  judgeResultsMap: Record<string, JudgeResultWithCitations>; // judge_result_id -> JudgeResult
-  isPollingResults: boolean;
-  totalAgentRuns: number | null;
-  showUniqueAgentRuns: boolean; // Toggle between total results and unique agent run count
-  // Clustering state
-  centroidsMap: Record<string, RubricCentroid>; // centroid_id -> centroid
-  centroidAssignments: Record<string, string[]>; // centroid_id -> judge_result_ids
-  isPollingAssignments: boolean;
-  activeCentroidAssignmentJobId: string | null;
 }
 
 const initialState: RubricState = {
   activeRubricId: null,
   editingRubricId: null,
   latestRubricsMap: {},
-  judgeResultsMap: {},
-  isPollingResults: false,
-  totalAgentRuns: null,
-  activeRubricJobId: null,
-  showUniqueAgentRuns: false,
-  // Clustering state
-  centroidsMap: {},
-  centroidAssignments: {},
-  isPollingAssignments: false,
-  activeCentroidAssignmentJobId: null,
 };
 
 // Helper function to convert rubrics array to map
@@ -101,49 +81,6 @@ export const rubricSlice = createSlice({
     setRubric(state, action) {
       state.latestRubricsMap[action.payload.id] = action.payload;
     },
-    setJudgeResults(state, action) {
-      const judgeResultsList: JudgeResultWithCitations[] = action.payload;
-      state.judgeResultsMap = judgeResultsList.reduce(
-        (acc, result) => {
-          acc[result.id] = result;
-          return acc;
-        },
-        {} as Record<string, JudgeResultWithCitations>
-      );
-    },
-    clearJudgeResults(state) {
-      state.judgeResultsMap = {};
-      state.totalAgentRuns = null;
-    },
-    setIsPollingResults(state, action) {
-      state.isPollingResults = action.payload;
-    },
-    setTotalAgentRuns(state, action) {
-      state.totalAgentRuns = action.payload;
-    },
-    setActiveRubricJobId(state, action) {
-      state.activeRubricJobId = action.payload;
-    },
-    // Clustering actions
-    setCentroids(state, action) {
-      state.centroidsMap = convertCentroidsArrayToMap(action.payload.centroids);
-    },
-    clearCentroids(state) {
-      state.centroidsMap = {};
-      state.centroidAssignments = {};
-    },
-    setCentroidAssignments(state, action) {
-      state.centroidAssignments = action.payload;
-    },
-    setIsPollingAssignments(state, action) {
-      state.isPollingAssignments = action.payload;
-    },
-    setActiveCentroidAssignmentJob(state, action) {
-      state.activeCentroidAssignmentJobId = action.payload;
-    },
-    toggleShowUniqueAgentRuns(state) {
-      state.showUniqueAgentRuns = !state.showUniqueAgentRuns;
-    },
   },
   extraReducers: (builder) => {
     builder
@@ -160,49 +97,6 @@ export const rubricSlice = createSlice({
         (state, action) => {
           state.activeRubricId = null;
         }
-      )
-      // Handle startEvaluation fulfilled
-      .addMatcher(
-        rubricApi.endpoints.startEvaluation.matchFulfilled,
-        (state, action) => {
-          state.activeRubricJobId = action.payload.job_id;
-        }
-      )
-      // Handle clustering endpoints
-      .addMatcher(
-        rubricApi.endpoints.proposeCentroids.matchFulfilled,
-        (state, action) => {
-          state.centroidsMap = convertCentroidsArrayToMap(
-            action.payload.centroids
-          );
-        }
-      )
-      .addMatcher(
-        rubricApi.endpoints.getCentroids.matchFulfilled,
-        (state, action) => {
-          state.centroidsMap = convertCentroidsArrayToMap(
-            action.payload.centroids
-          );
-        }
-      )
-      .addMatcher(
-        rubricApi.endpoints.clearCentroids.matchFulfilled,
-        (state) => {
-          state.centroidsMap = {};
-          state.centroidAssignments = {};
-        }
-      )
-      .addMatcher(
-        rubricApi.endpoints.startCentroidAssignment.matchFulfilled,
-        (state, action) => {
-          state.activeCentroidAssignmentJobId = action.payload.job_id;
-        }
-      )
-      .addMatcher(
-        rubricApi.endpoints.getCentroidAssignments.matchFulfilled,
-        (state, action) => {
-          state.centroidAssignments = action.payload.assignments;
-        }
       );
   },
 });
@@ -212,17 +106,6 @@ export const {
   setEditingRubricId,
   setRubricsMap,
   setRubric,
-  setJudgeResults,
-  clearJudgeResults,
-  setIsPollingResults,
-  setTotalAgentRuns,
-  setActiveRubricJobId,
-  setCentroids,
-  clearCentroids,
-  setCentroidAssignments,
-  setIsPollingAssignments,
-  setActiveCentroidAssignmentJob,
-  toggleShowUniqueAgentRuns,
 } = rubricSlice.actions;
 
 export default rubricSlice.reducer;

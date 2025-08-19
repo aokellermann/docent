@@ -1,7 +1,4 @@
-import json
-
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,8 +6,9 @@ from docent._log_util.logger import get_logger
 from docent_core._server._analytics.posthog import AnalyticsClient
 from docent_core.docent.ai_tools.rubric.rubric import JudgeResultWithCitations, Rubric
 from docent_core.docent.db.contexts import ViewContext
+from docent_core.docent.db.schemas.rubric import SQLARubric
 from docent_core.docent.server.dependencies.analytics import use_posthog_user_context
-from docent_core.docent.server.dependencies.database import get_db, get_mono_svc, get_session
+from docent_core.docent.server.dependencies.database import get_session
 from docent_core.docent.server.dependencies.permissions import (
     Permission,
     require_collection_permission,
@@ -18,12 +16,26 @@ from docent_core.docent.server.dependencies.permissions import (
 from docent_core.docent.server.dependencies.services import get_job_service, get_rubric_service
 from docent_core.docent.server.dependencies.user import get_default_view_ctx, get_user_anonymous_ok
 from docent_core.docent.services.job import JobService
-from docent_core.docent.services.monoservice import DocentDB, MonoService
 from docent_core.docent.services.rubric import RubricService
 
 rubric_router = APIRouter(dependencies=[Depends(get_user_anonymous_ok)])
 
 logger = get_logger(__name__)
+
+
+################
+# Dependencies #
+################
+
+
+async def get_rubric(
+    rubric_id: str,
+    rubric_svc: RubricService = Depends(get_rubric_service),
+):
+    sqla_rubric = await rubric_svc.get_rubric(rubric_id, version=None)
+    if sqla_rubric is None:
+        raise HTTPException(status_code=404, detail=f"Rubric {rubric_id} not found")
+    return sqla_rubric
 
 
 ###############
@@ -47,7 +59,7 @@ async def create_rubric(
 
 
 @rubric_router.get("/{collection_id}/rubric/{rubric_id}")
-async def get_rubric(
+async def get_rubric_endpoint(
     collection_id: str,
     rubric_id: str,
     version: int | None = None,
@@ -72,9 +84,18 @@ async def add_rubric_version(
     session: AsyncSession = Depends(get_session),
     rubric_svc: RubricService = Depends(get_rubric_service),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
+    analytics: AnalyticsClient = Depends(use_posthog_user_context),
 ):
     """Update an existing rubric."""
     await rubric_svc.add_rubric_version(rubric_id, request.rubric)
+    analytics.track_event(
+        "update_rubric",
+        properties={
+            "collection_id": collection_id,
+            "rubric_id": rubric_id,
+            "rubric_version": request.rubric.version,
+        },
+    )
 
 
 @rubric_router.get("/{collection_id}/rubrics")
@@ -117,6 +138,17 @@ class DeleteFutureVersionsResponse(BaseModel):
     deleted_count: int
 
 
+@rubric_router.delete("/{collection_id}/jobs/{job_id}")
+async def cancel_job(
+    collection_id: str,
+    job_id: str,
+    job_svc: JobService = Depends(get_job_service),
+    _: None = Depends(require_collection_permission(Permission.WRITE)),
+):
+    await job_svc.cancel_job(job_id)
+    return {"message": "Job cancelled successfully"}
+
+
 #####################
 # Rubric evaluation #
 #####################
@@ -138,6 +170,11 @@ async def delete_future_versions(
 
 class StartEvalJobResponse(BaseModel):
     job_id: str
+
+
+class StartClusteringJobRequest(BaseModel):
+    clustering_feedback: str | None = None
+    recluster: bool
 
 
 @rubric_router.post("/{collection_id}/{rubric_id}/evaluate")
@@ -175,70 +212,25 @@ async def start_eval_rubric_job(
     return {"job_id": job_id}
 
 
-@rubric_router.delete("/{collection_id}/jobs/{job_id}")
-async def cancel_eval_job(
-    collection_id: str,
-    job_id: str,
-    job_svc: JobService = Depends(get_job_service),
-    _: None = Depends(require_collection_permission(Permission.WRITE)),
-):
-    await job_svc.cancel_job(job_id)
-    return {"message": "Job cancelled successfully"}
-
-
-@rubric_router.get("/{collection_id}/{rubric_id}/results/poll")
-async def poll_judge_results(
-    rubric_id: str,
-    db: DocentDB = Depends(get_db),
-    mono_svc: MonoService = Depends(get_mono_svc),
-    _: None = Depends(require_collection_permission(Permission.READ)),
-):
-    """Poll for judge results from a rubric evaluation (Server-Sent Events).
-    NOTE: using dependency injection here will cause a silent failure.
-        DI is supposed to clean up the session when the function exits. With SSEs,
-        the function exits immediately. So the session must be owned by the generator.
-    """
-
-    async def generate():
-        async with db.session() as session:
-            rubric_svc = RubricService(session, db.session, mono_svc)
-
-            async for job_id, results, total_agent_runs in rubric_svc.poll_for_judge_results(
-                rubric_id
-            ):
-                # Convert JudgeResult objects to dictionaries for JSON serialization
-                payload = {
-                    "job_id": job_id,
-                    "results": [
-                        JudgeResultWithCitations.from_judge_result(result).model_dump()
-                        for result in results
-                    ],
-                    "total_agent_runs": total_agent_runs,
-                }
-                yield f"data: {json.dumps(payload)}\n\n"
-
-            yield "data: [DONE]\n\n"
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-    )
-
-
-@rubric_router.get("/{collection_id}/{rubric_id}/results")
-async def get_rubric_results(
+@rubric_router.get("/{collection_id}/{rubric_id}/rubric_run_state")
+async def get_rubric_run_state(
     collection_id: str,
     rubric_id: str,
-    rubric_version: int,
     rubric_svc: RubricService = Depends(get_rubric_service),
     _: None = Depends(require_collection_permission(Permission.READ)),
 ):
-    """Get the judge results for a rubric."""
-    results = await rubric_svc.get_rubric_results(rubric_id, rubric_version)
+    # What's the ID of the job that's currently running, if any?
+    cur_job = await rubric_svc.get_active_job_for_rubric(rubric_id)
+    # Get current results
+    results = await rubric_svc.get_rubric_results(rubric_id)
+    results_parsed = [JudgeResultWithCitations.from_judge_result(result) for result in results]
+    # Get the total number of agent runs
+    total_agent_runs = cur_job.job_json.get("total_agent_runs") if cur_job else None
+
     return {
-        "results": [
-            JudgeResultWithCitations.from_judge_result(result).model_dump() for result in results
-        ]
+        "results": results_parsed,
+        "job_id": cur_job.id if cur_job else None,
+        "total_agent_runs": total_agent_runs,
     }
 
 
@@ -266,145 +258,68 @@ async def get_rubric_job_details(
 ##############
 
 
-class ProposeCentroidsRequest(BaseModel):
-    feedback: str | None = None
-
-
-@rubric_router.post("/{collection_id}/{rubric_id}/propose-centroids")
-async def propose_centroids(
+@rubric_router.post("/{collection_id}/{rubric_id}/cluster")
+async def start_clustering_job(
     collection_id: str,
-    rubric_id: str,
-    request: ProposeCentroidsRequest,
-    rubric_svc: RubricService = Depends(get_rubric_service),
-    _: None = Depends(require_collection_permission(Permission.WRITE)),
-    analytics: AnalyticsClient = Depends(use_posthog_user_context),
-):
-    """Propose centroids for a rubric and return them as dictionaries."""
-    sqla_rubric = await rubric_svc.get_rubric(rubric_id, version=None)
-    if sqla_rubric is None:
-        raise HTTPException(status_code=404, detail=f"Rubric {rubric_id} not found")
-
-    sqla_centroids = await rubric_svc.propose_centroids(sqla_rubric, request.feedback)
-
-    analytics.track_event(
-        "propose_centroids",
-        properties={
-            "collection_id": collection_id,
-            "rubric_id": rubric_id,
-            "feedback": request.feedback,
-        },
-    )
-
-    return {"centroids": [centroid.dict() for centroid in sqla_centroids]}
-
-
-@rubric_router.get("/{collection_id}/{rubric_id}/centroids")
-async def get_centroids(
-    collection_id: str,
-    rubric_id: str,
-    rubric_version: int | None = None,
-    rubric_svc: RubricService = Depends(get_rubric_service),
-    _: None = Depends(require_collection_permission(Permission.READ)),
-    analytics: AnalyticsClient = Depends(use_posthog_user_context),
-):
-    """Get existing centroids for a rubric."""
-    sqla_centroids = await rubric_svc.get_centroids(rubric_id, rubric_version)
-
-    analytics.track_event(
-        "get_centroids", properties={"collection_id": collection_id, "rubric_id": rubric_id}
-    )
-
-    return {"centroids": [centroid.dict() for centroid in sqla_centroids]}
-
-
-@rubric_router.delete("/{collection_id}/{rubric_id}/centroids")
-async def clear_centroids(
-    collection_id: str,
-    rubric_id: str,
-    rubric_version: int,
-    session: AsyncSession = Depends(get_session),
-    rubric_svc: RubricService = Depends(get_rubric_service),
-    _: None = Depends(require_collection_permission(Permission.WRITE)),
-):
-    """Clear all centroids for a rubric."""
-    await rubric_svc.clear_centroids(rubric_id, rubric_version)
-
-
-@rubric_router.post("/{collection_id}/{rubric_id}/assign-centroids")
-async def start_centroid_assignment_job(
-    collection_id: str,
-    rubric_id: str,
+    request: StartClusteringJobRequest,
+    sq_rubric: SQLARubric = Depends(get_rubric),
     rubric_svc: RubricService = Depends(get_rubric_service),
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
     analytics: AnalyticsClient = Depends(use_posthog_user_context),
 ):
-    """Start or get an existing centroid assignment job for the specified rubric."""
-    job_id = await rubric_svc.start_or_get_centroid_assignment_job(ctx, rubric_id)
+    """Start or get an existing clustering job for the specified rubric."""
+    clustering_feedback = request.clustering_feedback
+    recluster = request.recluster
+
+    if not recluster and clustering_feedback is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="clustering_feedback must be null when recluster is false",
+        )
+
+    job_id = await rubric_svc.start_or_get_clustering_job(
+        ctx, sq_rubric, clustering_feedback, recluster
+    )
 
     analytics.track_event(
-        "start_centroid_assignment_job",
-        properties={"collection_id": collection_id, "rubric_id": rubric_id},
+        "start_clustering_job",
+        properties={
+            "collection_id": collection_id,
+            "rubric_id": sq_rubric.id,
+            "clustering_feedback": clustering_feedback,
+            "recluster": recluster,
+        },
     )
 
     return {"job_id": job_id}
 
 
-@rubric_router.get("/{collection_id}/{rubric_id}/assignments/poll")
-async def poll_centroid_assignments(
-    rubric_id: str,
-    db: DocentDB = Depends(get_db),
-    mono_svc: MonoService = Depends(get_mono_svc),
-    _: None = Depends(require_collection_permission(Permission.READ)),
-):
-    """Poll for centroid assignment results (Server-Sent Events).
-    NOTE: using dependency injection here will cause a silent failure.
-        DI is supposed to clean up the session when the function exits. With SSEs,
-        the function exits immediately. So the session must be owned by the generator.
-    """
-
-    async def generate():
-        async with db.session() as session:
-            rubric_svc = RubricService(session, db.session, mono_svc)
-
-            async for job_id, assignments in rubric_svc.poll_for_centroid_assignments(rubric_id):
-                payload = {"job_id": job_id, "assignments": assignments}
-                yield f"data: {json.dumps(payload)}\n\n"
-
-            yield "data: [DONE]\n\n"
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-    )
-
-
-@rubric_router.get("/{collection_id}/{rubric_id}/assignments")
-async def get_centroid_assignments(
+@rubric_router.get("/{collection_id}/{rubric_id}/clustering_job")
+async def get_clustering_state(
     collection_id: str,
-    rubric_id: str,
-    rubric_version: int,
+    sq_rubric: SQLARubric = Depends(get_rubric),
     rubric_svc: RubricService = Depends(get_rubric_service),
     _: None = Depends(require_collection_permission(Permission.READ)),
 ):
-    """Get centroid assignments for a rubric."""
-    assignments = await rubric_svc.get_centroid_assignments(rubric_id, rubric_version)
-    return {"assignments": assignments}
+    """Get the state of the clustering job for a rubric."""
+    sq_job = await rubric_svc.get_active_clustering_job(sq_rubric.id)
+    sq_centroids = await rubric_svc.get_centroids(sq_rubric.id, sq_rubric.version)
+    assignments = await rubric_svc.get_centroid_assignments(sq_rubric.id, sq_rubric.version)
+
+    return {
+        "job_id": sq_job.id if sq_job else None,
+        "centroids": [centroid.dict() for centroid in sq_centroids],
+        "assignments": assignments,
+    }
 
 
-@rubric_router.get("/{collection_id}/{rubric_id}/assignment-job")
-async def get_assignment_job_details(
+@rubric_router.delete("/{collection_id}/{rubric_id}/clear_clusters")
+async def clear_clusters(
     collection_id: str,
-    rubric_id: str,
+    sq_rubric: SQLARubric = Depends(get_rubric),
     rubric_svc: RubricService = Depends(get_rubric_service),
-    _: None = Depends(require_collection_permission(Permission.READ)),
+    _: None = Depends(require_collection_permission(Permission.WRITE)),
 ):
-    """Get the complete job details for a centroid assignment job if it exists, otherwise None."""
-    job = await rubric_svc.get_active_assignment_job_for_rubric(rubric_id)
-    if job:
-        return {
-            "id": job.id,
-            "status": job.status.value,
-            "created_at": job.created_at,
-        }
-    return None
+    """Clear all centroids (and cascaded assignments) for the latest version of a rubric."""
+    await rubric_svc.clear_centroids(sq_rubric.id, sq_rubric.version)

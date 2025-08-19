@@ -497,13 +497,15 @@ class JobStatus(enum.Enum):
 class SQLAJob(SQLABase):
     __tablename__ = TABLE_JOB
 
-    id = mapped_column(String(36), primary_key=True)
-    type = mapped_column(Text)
-    created_at = mapped_column(
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, nullable=False)
+    type: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False
     )
-    job_json = mapped_column(JSONB, nullable=False)
-    status = mapped_column(Enum(JobStatus), default=JobStatus.PENDING)
+    job_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    status: Mapped[JobStatus] = mapped_column(
+        Enum(JobStatus), default=JobStatus.PENDING, nullable=False
+    )
 
 
 class SQLAUser(SQLABase):

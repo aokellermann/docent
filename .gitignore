@@ -6,6 +6,7 @@
 .DS_Store
 # *.sql  (neil: disabled for ursid)
 *.gz
+*.tgz
 
 *.tfstate
 *.tfstate.backup

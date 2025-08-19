@@ -194,6 +194,31 @@ class ProviderPreferences(BaseModel):
         ]
 
     @cached_property
+    def refine_agent(self) -> list[ModelOption]:
+        """Get model options for the refinement agent
+
+        Returns:
+            List of configured model options for this function.
+        """
+        return [
+            ModelOption(
+                provider="openai",
+                model_name="gpt-5",
+                reasoning_effort="medium",
+            ),
+            ModelOption(
+                provider="anthropic",
+                model_name="claude-sonnet-4-20250514",
+                reasoning_effort="medium",
+            ),
+            ModelOption(
+                provider="openai",
+                model_name="o3",
+                reasoning_effort="medium",
+            ),
+        ]
+
+    @cached_property
     def execute_search(self) -> list[ModelOption]:
         """Get model options for the execute_search function.
 
@@ -215,6 +240,56 @@ class ProviderPreferences(BaseModel):
                 provider="openai",
                 model_name="o1",
                 reasoning_effort="low",
+            ),
+        ]
+
+    @cached_property
+    def evaluate_rubric(self) -> list[ModelOption]:
+        """Get model options for the evaluate_rubric function.
+
+        Returns:
+            List of configured model options for this function.
+        """
+        return [
+            ModelOption(
+                provider="openai",
+                model_name="o3",
+                reasoning_effort="medium",
+            ),
+            ModelOption(
+                provider="anthropic",
+                model_name="claude-3-7-sonnet-20250219",
+                reasoning_effort="medium",
+            ),
+        ]
+
+    @cached_property
+    def evaluate_rubric_max_recall(self) -> list[ModelOption]:
+        """Get model options for the evaluate_rubric_max_recall function.
+
+        Returns:
+            List of configured model options for this function.
+        """
+        return [
+            ModelOption(
+                provider="openai",
+                model_name="o3",
+                reasoning_effort="medium",
+            ),
+        ]
+
+    @cached_property
+    def generate_clarifications(self) -> list[ModelOption]:
+        """Get model options for the generate_clarifications function.
+
+        Returns:
+            List of configured model options for this function.
+        """
+        return [
+            ModelOption(
+                provider="anthropic",
+                model_name="claude-sonnet-4-20250514",
+                reasoning_effort="medium",
             ),
         ]
 

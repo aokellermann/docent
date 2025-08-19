@@ -1,3 +1,7 @@
+"""
+Make sure to clean up any Redis streams and state keys after the job is finished!
+"""
+
 import traceback
 from typing import Any
 
@@ -24,6 +28,8 @@ async def run_job(_: Any, ctx: ViewContext, job_id: str):
     canceled = False
 
     REDIS = await get_redis_client()
+    commands_queue = f"commands_{job_id}"
+    response_queue = f"cancel_response_{job_id}"
 
     async def _run(tg: TaskGroup):
         nonlocal canceled
@@ -80,18 +86,20 @@ async def run_job(_: Any, ctx: ViewContext, job_id: str):
 
                 # Send immediate cancellation confirmation to caller
                 if canceled:
-                    response_queue = f"cancel_response_{job_id}"
                     await REDIS.rpush(response_queue, "cancelled")  # type: ignore
                     logger.info(
                         f"Sent cancellation confirmation for job {job_id} to {response_queue}"
                     )
 
+                # Cleanup
+                await REDIS.expire(response_queue, 600)  # type: ignore
+                await REDIS.delete(commands_queue)  # type: ignore
+
     async def await_commands(tg: TaskGroup):
         nonlocal canceled
-        q = f"commands_{job_id}"
 
         while True:
-            _queue, command = await REDIS.blpop(q)  # type: ignore
+            _queue, command = await REDIS.blpop(commands_queue)  # type: ignore
             logger.info(f"{job_id} received {command}")
             assert isinstance(command, str)
 

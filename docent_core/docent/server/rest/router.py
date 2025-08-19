@@ -42,7 +42,7 @@ from docent_core._server._auth.session import (
     create_user_session,
     invalidate_user_session,
 )
-from docent_core._server.util import sse_event_stream
+from docent_core._server.util import sse_stream
 from docent_core.docent.ai_tools.assistant.chat import make_single_tasst_system_prompt
 from docent_core.docent.ai_tools.assistant.summarizer import (
     HighLevelAction,
@@ -557,7 +557,7 @@ async def import_runs_from_file(
                 pass
 
     return StreamingResponse(
-        sse_event_stream(_execute, send_stream, recv_stream), media_type="text/event-stream"
+        sse_stream(_execute, send_stream, recv_stream), media_type="text/event-stream"
     )
 
 
@@ -1216,7 +1216,7 @@ async def get_actions_summary(
         await send_stream.aclose()
 
     return StreamingResponse(
-        sse_event_stream(_execute, send_stream, recv_stream), media_type="text/event-stream"
+        sse_stream(_execute, send_stream, recv_stream), media_type="text/event-stream"
     )
 
 
@@ -1448,7 +1448,7 @@ async def get_ta_message(
         await send_stream.aclose()
 
     return StreamingResponse(
-        sse_event_stream(_execute, send_stream, recv_stream), media_type="text/event-stream"
+        sse_stream(_execute, send_stream, recv_stream), media_type="text/event-stream"
     )
 
 

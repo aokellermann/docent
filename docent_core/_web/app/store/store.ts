@@ -15,6 +15,8 @@ import { diffApi } from '../api/diffApi';
 import { rubricApi } from '../api/rubricApi';
 import rubricReducer from './rubricSlice';
 import { collectionApi } from '../api/collectionApi';
+import { refinementApi } from '../api/refinementApi';
+import refinementReducer from './refinementSlice';
 
 // Create a custom error logger middleware
 const errorLogger = () => (next: any) => (action: any) => {
@@ -40,11 +42,13 @@ const store = configureStore({
     collection: collectionReducer,
     transcript: transcriptReducer,
     toast: toastReducer,
+    refinement: refinementReducer,
     [collabApi.reducerPath]: collabApi.reducer,
     [chartApi.reducerPath]: chartApi.reducer,
     [diffApi.reducerPath]: diffApi.reducer,
     [rubricApi.reducerPath]: rubricApi.reducer,
     [collectionApi.reducerPath]: collectionApi.reducer,
+    [refinementApi.reducerPath]: refinementApi.reducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware()
@@ -54,7 +58,8 @@ const store = configureStore({
       .concat(chartApi.middleware)
       .concat(diffApi.middleware)
       .concat(rubricApi.middleware)
-      .concat(collectionApi.middleware),
+      .concat(collectionApi.middleware)
+      .concat(refinementApi.middleware),
 });
 
 export type RootState = ReturnType<typeof store.getState>;

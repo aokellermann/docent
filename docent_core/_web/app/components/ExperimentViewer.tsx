@@ -172,7 +172,7 @@ export default function ExperimentViewer() {
   );
 
   return (
-    <Card className="flex-1 p-3 flex flex-col h-full min-w-0 space-y-3">
+    <Card className="flex-1 flex flex-col h-full min-w-0">
       {/* Header with organization dropdown - always visible */}
       <div className="flex justify-between items-center shrink-0">
         <div className="flex flex-col">

@@ -217,7 +217,8 @@ class DocentDB:
             logger.error("Rolled back database transaction")
             raise
         finally:
-            await session.close()
+            with anyio.CancelScope(shield=True):
+                await session.close()
 
     async def _get_test_session(self) -> AsyncSession:
         logger.warning("Using test session. This is not recommended for production.")

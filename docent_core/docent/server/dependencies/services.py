@@ -12,9 +12,9 @@ from docent_core.docent.services.charts import ChartsService
 from docent_core.docent.services.diff import DiffService
 from docent_core.docent.services.job import JobService
 from docent_core.docent.services.monoservice import MonoService
+from docent_core.docent.services.refinement import RefinementService
 from docent_core.docent.services.rubric import RubricService
 from docent_core.services.onboarding import OnboardingService
-from docent_core.services.refinement import RefinementService
 
 
 def get_diff_service(
@@ -39,12 +39,13 @@ def get_rubric_service(
 
 def get_refinement_service(
     mono_svc: MonoService = Depends(get_mono_svc),
+    rubric_svc: RubricService = Depends(get_rubric_service),
     session: AsyncSession = Depends(get_session),
     session_cm_factory: Callable[[], AsyncContextManager[AsyncSession]] = Depends(
         get_session_cm_factory
     ),
 ) -> RefinementService:
-    return RefinementService(session, session_cm_factory, mono_svc)
+    return RefinementService(session, session_cm_factory, mono_svc, rubric_svc)
 
 
 def get_job_service(
@@ -56,9 +57,7 @@ def get_job_service(
     return JobService(session, session_cm_factory)
 
 
-def get_chart_service(
-    session: AsyncSession = Depends(get_session),
-) -> ChartsService:
+def get_chart_service(session: AsyncSession = Depends(get_session)) -> ChartsService:
     return ChartsService(session)
 
 
