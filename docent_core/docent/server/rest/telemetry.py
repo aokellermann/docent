@@ -1943,6 +1943,11 @@ def _extract_messages_from_gen_ai_data(
         for key in sorted(
             gen_ai["prompt"].keys(), key=lambda k: (0, int(k)) if k.isdigit() else (1, k)
         ):
+            # Skip keys that aren't digits
+            if not key.isdigit():
+                logger.info(f"Skipping non-digit key: {key}")
+                continue
+
             prompt_data: dict[str, Any] = gen_ai["prompt"][key]
 
             message = _create_message_from_data(prompt_data, span_id, f"prompt_{key}")
@@ -1955,6 +1960,11 @@ def _extract_messages_from_gen_ai_data(
         for key in sorted(
             gen_ai["completion"].keys(), key=lambda k: (0, int(k)) if k.isdigit() else (1, k)
         ):
+            # Skip keys that aren't digits
+            if not key.isdigit():
+                logger.info(f"Skipping non-digit key: {key}")
+                continue
+
             completion_data: dict[str, Any] = gen_ai["completion"][key]
 
             message = _create_message_from_data(
