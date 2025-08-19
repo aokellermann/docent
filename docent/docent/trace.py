@@ -39,6 +39,11 @@ DEFAULT_ENDPOINT = "https://api.docent.transluce.org/rest/telemetry"
 DEFAULT_COLLECTION_NAME = "default-collection-name"
 
 
+def _is_tracing_disabled() -> bool:
+    """Check if tracing is disabled via environment variable."""
+    return os.environ.get("DOCENT_DISABLE_TRACING", "").lower() == "true"
+
+
 class Instruments(Enum):
     """Enumeration of available instrument types."""
 
@@ -89,6 +94,13 @@ class DocentTracer:
             instruments: Set of instruments to enable (None = all instruments)
             block_instruments: Set of instruments to explicitly disable
         """
+        self._initialized: bool = False
+        # Check if tracing is disabled via environment variable
+        if _is_tracing_disabled():
+            self._disabled = True
+            logger.info("Docent tracing disabled via DOCENT_DISABLE_TRACING environment variable")
+            return
+
         self.collection_name: str = collection_name
         self.collection_id: str = collection_id if collection_id else str(uuid.uuid4())
         self.default_agent_run_id: str = agent_run_id if agent_run_id else str(uuid.uuid4())
@@ -123,7 +135,6 @@ class DocentTracer:
         self._tracer_provider: Optional[TracerProvider] = None
         self._root_context: Optional[Context] = Context()
         self._tracer: Optional[trace.Tracer] = None
-        self._initialized: bool = False
         self._cleanup_registered: bool = False
         self._disabled: bool = False
         self._spans_processors: List[Union[BatchSpanProcessor, SimpleSpanProcessor]] = []
@@ -236,7 +247,12 @@ class DocentTracer:
 
     def initialize(self):
         """Initialize Docent tracing setup."""
-        if self._initialized or self._disabled:
+        if self._initialized:
+            return
+
+        # If tracing is disabled, mark as initialized but don't set up anything
+        if self._disabled:
+            self._initialized = True
             return
 
         try:
@@ -403,6 +419,9 @@ class DocentTracer:
 
     def cleanup(self):
         """Clean up Docent tracing resources and signal trace completion to backend."""
+        if self._disabled:
+            return
+
         try:
             # Notify backend that trace is done (no span creation)
             try:
@@ -421,6 +440,9 @@ class DocentTracer:
 
     def close(self):
         """Explicitly close the Docent tracing manager."""
+        if self._disabled:
+            return
+
         try:
             self.cleanup()
             if self._cleanup_registered:
@@ -431,6 +453,9 @@ class DocentTracer:
 
     def flush(self) -> None:
         """Force flush all spans to exporters."""
+        if self._disabled:
+            return
+
         try:
             for processor in self._spans_processors:
                 if hasattr(processor, "force_flush"):
@@ -446,8 +471,6 @@ class DocentTracer:
 
     def verify_initialized(self) -> bool:
         """Verify if the manager is properly initialized."""
-        if self._disabled:
-            return False
         return self._initialized
 
     def __enter__(self) -> "DocentTracer":
@@ -493,6 +516,15 @@ class DocentTracer:
         Yields:
             Tuple of (agent_run_id, transcript_id)
         """
+        if self._disabled:
+            # Return dummy IDs when tracing is disabled
+            if agent_run_id is None:
+                agent_run_id = str(uuid.uuid4())
+            if transcript_id is None:
+                transcript_id = str(uuid.uuid4())
+            yield agent_run_id, transcript_id
+            return
+
         if not self._initialized:
             self.initialize()
 
@@ -541,6 +573,15 @@ class DocentTracer:
         Yields:
             Tuple of (agent_run_id, transcript_id)
         """
+        if self._disabled:
+            # Return dummy IDs when tracing is disabled
+            if agent_run_id is None:
+                agent_run_id = str(uuid.uuid4())
+            if transcript_id is None:
+                transcript_id = str(uuid.uuid4())
+            yield agent_run_id, transcript_id
+            return
+
         if not self._initialized:
             self.initialize()
 
@@ -606,6 +647,9 @@ class DocentTracer:
             score: Numeric score value
             attributes: Optional additional attributes
         """
+        if self._disabled:
+            return
+
         collection_id = self.collection_id
         payload: Dict[str, Any] = {
             "collection_id": collection_id,
@@ -619,6 +663,9 @@ class DocentTracer:
         self._post_json("/v1/scores", payload)
 
     def send_agent_run_metadata(self, agent_run_id: str, metadata: Dict[str, Any]) -> None:
+        if self._disabled:
+            return
+
         collection_id = self.collection_id
         payload: Dict[str, Any] = {
             "collection_id": collection_id,
@@ -646,6 +693,9 @@ class DocentTracer:
             transcript_group_id: Optional transcript group ID
             metadata: Optional metadata to send
         """
+        if self._disabled:
+            return
+
         collection_id = self.collection_id
         payload: Dict[str, Any] = {
             "collection_id": collection_id,
@@ -711,6 +761,13 @@ class DocentTracer:
         Yields:
             The transcript ID
         """
+        if self._disabled:
+            # Return dummy ID when tracing is disabled
+            if transcript_id is None:
+                transcript_id = str(uuid.uuid4())
+            yield transcript_id
+            return
+
         if not self._initialized:
             raise RuntimeError(
                 "Tracer is not initialized. Call initialize_tracing() before using transcript context."
@@ -766,6 +823,13 @@ class DocentTracer:
         Yields:
             The transcript ID
         """
+        if self._disabled:
+            # Return dummy ID when tracing is disabled
+            if transcript_id is None:
+                transcript_id = str(uuid.uuid4())
+            yield transcript_id
+            return
+
         if not self._initialized:
             raise RuntimeError(
                 "Tracer is not initialized. Call initialize_tracing() before using transcript context."
@@ -817,6 +881,9 @@ class DocentTracer:
             parent_transcript_group_id: Optional parent transcript group ID
             metadata: Optional metadata to send
         """
+        if self._disabled:
+            return
+
         collection_id = self.collection_id
 
         # Get agent_run_id from current context
@@ -867,6 +934,13 @@ class DocentTracer:
         Yields:
             The transcript group ID
         """
+        if self._disabled:
+            # Return dummy ID when tracing is disabled
+            if transcript_group_id is None:
+                transcript_group_id = str(uuid.uuid4())
+            yield transcript_group_id
+            return
+
         if not self._initialized:
             raise RuntimeError(
                 "Tracer is not initialized. Call initialize_tracing() before using transcript group context."
@@ -924,6 +998,13 @@ class DocentTracer:
         Yields:
             The transcript group ID
         """
+        if self._disabled:
+            # Return dummy ID when tracing is disabled
+            if transcript_group_id is None:
+                transcript_group_id = str(uuid.uuid4())
+            yield transcript_group_id
+            return
+
         if not self._initialized:
             raise RuntimeError(
                 "Tracer is not initialized. Call initialize_tracing() before using transcript group context."
@@ -960,6 +1041,9 @@ class DocentTracer:
             self._transcript_group_id_var.reset(transcript_group_id_token)
 
     def _send_trace_done(self) -> None:
+        if self._disabled:
+            return
+
         collection_id = self.collection_id
         payload: Dict[str, Any] = {
             "collection_id": collection_id,
