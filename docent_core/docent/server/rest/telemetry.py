@@ -1971,14 +1971,25 @@ def _create_message_from_data(
 ) -> ChatMessage | None:
     """Create a ChatMessage from structured data."""
     try:
+        # Determine role
         if "role" in data:
             role = str(data["role"])
             if role == "developer":
                 role = "system"
         elif assume_role:
             role = assume_role
+        elif "user" in data:
+            role = "user"
+        elif "assistant" in data:
+            role = "assistant"
+        elif "system" in data:
+            role = "system"
+        elif "developer" in data:
+            role = "system"
         else:
-            logger.error(f"Invalid role '{data.get('role')}' in {context} for span {span_id}")
+            logger.error(
+                f"No valid role found in {context} for span {span_id}. Available keys: {list(data.keys())}"
+            )
             return None
 
         # Build content from available fields
@@ -1991,23 +2002,50 @@ def _create_message_from_data(
                 reasoning = "\n".join(str(item) for item in reasoning)  # type: ignore
             content_parts.append(str(reasoning))
 
-        # Add content if present
-        if "content" in data:
-            content_parts.append(str(data["content"]))
+        # Find the content key to use
+        content_key = None
+        possible_content_keys = [
+            "content",
+            "user",
+            "assistant",
+            "system",
+            "developer",
+        ]
+        for possible_content_key in possible_content_keys:
+            if possible_content_key in data:
+                content_key = possible_content_key
+                break
+
+        # Extract tool calls embedded in content, return the cleaned content
+        tool_calls: List[ToolCall] = []
+        if content_key in data:
+            try:
+                extracted_content, content_tool_calls = _extract_tool_calls_from_content(
+                    data[content_key]
+                )
+                if content_tool_calls:
+                    tool_calls.extend(content_tool_calls)
+                content_parts.append(extracted_content)
+
+            except Exception as e:
+                logger.warning(
+                    f"Failed to extract tool calls from content in {context} for span {span_id}: {e}"
+                )
+                # Continue without tool calls from content
 
         content = "\n".join(content_parts) if content_parts else ""
 
-        # Handle tool calls embedded in content
-        if content:
-            content, tool_calls = _extract_tool_calls_from_content(data["content"])
-        else:
-            tool_calls = None
-
         # Handle structured tool calls
-        if not tool_calls and "tool_calls" in data:
-            structured_tool_calls = _extract_tool_calls_from_span_data(data["tool_calls"])
-            if structured_tool_calls:
-                tool_calls = structured_tool_calls
+        if "tool_calls" in data:
+            try:
+                structured_tool_calls = _extract_tool_calls_from_span_data(data["tool_calls"])
+                if structured_tool_calls:
+                    tool_calls.extend(structured_tool_calls)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to extract structured tool calls in {context} for span {span_id}: {e}"
+                )
+                # Continue without structured tool calls
 
         message_data: Dict[str, Any] = {
             "role": role,
@@ -2022,8 +2060,18 @@ def _create_message_from_data(
         logger.debug(f"Successfully created {context} message: role={message.role}")
         return message
 
+    except KeyError as e:
+        logger.error(
+            f"Missing required field {e} in {context} for span {span_id}. Available keys: {list(data.keys())}"
+        )
+        return None
+    except ValueError as e:
+        logger.error(f"Invalid value in {context} for span {span_id}: {e}")
+        return None
     except Exception as e:
-        logger.error(f"Failed to parse {context} message for span {span_id}: {e}")
+        logger.error(
+            f"Unexpected error creating {context} message for span {span_id}: {e}", exc_info=True
+        )
         return None
 
 
