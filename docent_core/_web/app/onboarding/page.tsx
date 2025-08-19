@@ -457,7 +457,7 @@ export default function OnboardingPage() {
               className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
               onClick={() =>
                 window.open(
-                  'https://transluce.slack.com/archives/C086LDW1DMX/p1751435895202329',
+                  'https://join.slack.com/t/docentcommunity/shared_invite/zt-39uln1o3q-DObXadOIKN_IGc73ZOjgnA',
                   '_blank'
                 )
               }

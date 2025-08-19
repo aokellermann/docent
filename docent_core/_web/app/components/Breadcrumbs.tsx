@@ -128,7 +128,7 @@ const Breadcrumbs: React.FC = () => {
           className="gap-x-2 h-7 cursor-default px-2"
         >
           <Link
-            href="https://transluce-docent.readthedocs-hosted.com/en/latest/"
+            href="https://docs.transluce.org"
             target="_blank"
             className="flex items-center gap-x-2"
           >
@@ -143,7 +143,7 @@ const Breadcrumbs: React.FC = () => {
           className="gap-x-2 h-7 cursor-default px-2"
         >
           <Link
-            href="https://transluce.slack.com/archives/C086LDW1DMX/p1751435895202329"
+            href="https://join.slack.com/t/docentcommunity/shared_invite/zt-39uln1o3q-DObXadOIKN_IGc73ZOjgnA"
             target="_blank"
             className="flex items-center gap-x-2"
           >
