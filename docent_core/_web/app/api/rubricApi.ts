@@ -1,6 +1,10 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import { BASE_URL } from '@/app/constants';
-import { Rubric, JudgeResultWithCitations } from '@/app/store/rubricSlice';
+import {
+  Rubric,
+  JudgeResultWithCitations,
+  JudgeModel,
+} from '@/app/store/rubricSlice';
 
 // Types based on the backend models
 export interface CreateRubricRequest {
@@ -17,6 +21,7 @@ export interface UpdateRubricRequest {
     high_level_description: string;
     inclusion_rules: string[];
     exclusion_rules: string[];
+    judge_model: JudgeModel;
   };
 }
 
@@ -184,6 +189,12 @@ export const rubricApi = createApi({
       }),
       invalidatesTags: ['Rubric'],
     }),
+    getJudgeModels: build.query<JudgeModel[], void>({
+      query: () => ({
+        url: `/judge-models`,
+        method: 'GET',
+      }),
+    }),
     startEvaluation: build.mutation<
       StartRubricJobResponse,
       { collectionId: string; rubricId: string }
@@ -299,6 +310,7 @@ export const {
   useGetRubricsQuery,
   useGetRubricQuery,
   useGetLatestRubricVersionQuery,
+  useGetJudgeModelsQuery,
   useCreateRubricMutation,
   useUpdateRubricMutation,
   useDeleteRubricMutation,

@@ -8,7 +8,11 @@ from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from docent._log_util import get_logger
+from docent.data_models.agent_run import AgentRun
 from docent_core._db_service.batched_writer import BatchedWriter
+from docent_core._llm_util.providers.preferences import (
+    PROVIDER_PREFERENCES,
+)
 from docent_core._server._broker.redis_client import enqueue_job
 from docent_core._worker.constants import WorkerFunction
 from docent_core.docent.ai_tools.clustering.cluster_assigner import (
@@ -21,18 +25,25 @@ from docent_core.docent.ai_tools.clustering.cluster_generator import (
 )
 from docent_core.docent.ai_tools.rubric.rubric import (
     JudgeResult,
+    JudgeResultStreamingCallback,
     ResultType,
     Rubric,
     evaluate_rubric,
+    evaluate_rubric_max_recall,
 )
 from docent_core.docent.db.contexts import ViewContext
+from docent_core.docent.db.schemas.auth_models import User
 from docent_core.docent.db.schemas.rubric import (
     SQLAJudgeResult,
     SQLAJudgeResultCentroid,
     SQLARubric,
     SQLARubricCentroid,
 )
-from docent_core.docent.db.schemas.tables import JobStatus, SQLAAgentRun, SQLAJob
+from docent_core.docent.db.schemas.tables import (
+    JobStatus,
+    SQLAAgentRun,
+    SQLAJob,
+)
 from docent_core.docent.services.job import JobService
 from docent_core.docent.services.monoservice import MonoService
 
@@ -228,6 +239,46 @@ class RubricService:
         )
         return result.scalars().all()
 
+    async def evaluate_rubric_for_user(
+        self,
+        agent_runs: list[AgentRun],
+        rubric: Rubric,
+        user: User | None = None,
+        callback: JudgeResultStreamingCallback | None = None,
+        max_recall: bool = False,
+    ) -> list[list[str] | None]:
+        """
+        Helper to evaluate a rubric with the appropriate API keys for a user.
+        Raises an error if trying to call a non-default model without a custom API key.
+        """
+        if user is None:
+            api_key_overrides = {}
+        else:
+            api_key_overrides = await self.service.get_api_key_overrides(user.id)
+
+        if rubric.judge_model is not None:
+            is_default = rubric.judge_model in PROVIDER_PREFERENCES.default_judge_models
+            if not is_default and not api_key_overrides.get(rubric.judge_model.provider):
+                raise ValueError(
+                    f"Rubric {rubric.id} uses a non-default model {rubric.judge_model.model_name} "
+                    f"but no API key override was provided for provider {rubric.judge_model.provider}"
+                )
+
+        if max_recall:
+            return await evaluate_rubric_max_recall(
+                agent_runs,
+                rubric,
+                callback=callback,
+                api_key_overrides=api_key_overrides,
+            )
+        else:
+            return await evaluate_rubric(
+                agent_runs,
+                rubric,
+                callback=callback,
+                api_key_overrides=api_key_overrides,
+            )
+
     async def run_rubric_job(self, ctx: ViewContext, job: SQLAJob):
         """Run a rubric job. Should only be called by the worker."""
 
@@ -312,9 +363,10 @@ class RubricService:
 
                 # Run the search, saving data to the database as we go
                 try:
-                    await evaluate_rubric(
+                    await self.evaluate_rubric_for_user(
                         agent_runs,
                         rubric.to_pydantic(),
+                        user=ctx.user,
                         callback=_callback,
                     )
                 except anyio.get_cancelled_exc_class():

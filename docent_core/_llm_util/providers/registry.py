@@ -124,7 +124,7 @@ class ProviderConfig(TypedDict):
         single_streaming_output_getter: Function to get a streaming completion.
     """
 
-    async_client_getter: Callable[[], Any]
+    async_client_getter: Callable[[str | None], Any]
     single_output_getter: SingleOutputGetter
     single_streaming_output_getter: SingleStreamingOutputGetter
 

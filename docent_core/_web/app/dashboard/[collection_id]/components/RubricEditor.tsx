@@ -21,7 +21,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 
-import { type Rubric } from '@/app/store/rubricSlice';
+import { JudgeModel, type Rubric } from '@/app/store/rubricSlice';
 
 import {
   useGetRubricQuery,
@@ -29,6 +29,15 @@ import {
   rubricApi,
 } from '@/app/api/rubricApi';
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
+import { useGetJudgeModelsQuery } from '@/app/api/rubricApi';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { KeyRound } from 'lucide-react';
 
 function DescriptionInlineDiff({
   previous,
@@ -117,6 +126,16 @@ function DescriptionInlineDiff({
   );
 }
 
+function nameJudgeModel(jm: JudgeModel | null) {
+  if (!jm) {
+    return 'Default';
+  }
+  if (jm.reasoning_effort) {
+    return `${jm.provider}/${jm.model_name} (${jm.reasoning_effort} reasoning effort)`;
+  }
+  return `${jm.provider}/${jm.model_name}`;
+}
+
 interface RubricEditorProps {
   rubricId: string;
   rubricVersion: number | null;
@@ -179,6 +198,8 @@ export default function RubricEditor({
   useEffect(() => {
     dispatch(rubricApi.util.invalidateTags([{ type: 'Rubric', id: rubricId }]));
   }, [rubricVersion, rubricId, dispatch]);
+
+  const { data: availableJudgeModels } = useGetJudgeModelsQuery();
 
   // The rubric to display is either the local or remote rubric, depending on the editable flag
   const rubric = useMemo(() => {
@@ -379,7 +400,9 @@ export default function RubricEditor({
       JSON.stringify(rubric?.inclusion_rules ?? []) !==
         JSON.stringify(remoteRubric?.inclusion_rules ?? []) ||
       JSON.stringify(rubric?.exclusion_rules ?? []) !==
-        JSON.stringify(remoteRubric?.exclusion_rules ?? [])
+        JSON.stringify(remoteRubric?.exclusion_rules ?? []) ||
+      JSON.stringify(rubric?.judge_model) !==
+        JSON.stringify(remoteRubric?.judge_model)
     );
   }, [rubric, remoteRubric, editable]);
   useEffect(() => {
@@ -671,6 +694,53 @@ export default function RubricEditor({
             )}
           </div>
         </div>
+
+        {rubric && (
+          <div className="pt-4">
+            <label className="block text-xs font-medium text-muted-foreground mb-1">
+              Judge Model
+            </label>
+            <Select
+              value={nameJudgeModel(rubric.judge_model)}
+              onValueChange={(value) => {
+                if (!editable) return;
+                const selected = availableJudgeModels?.find(
+                  (jm) => nameJudgeModel(jm) === value
+                );
+                updateRubric({
+                  judge_model: selected || null,
+                });
+              }}
+              disabled={isDisabled}
+            >
+              <SelectTrigger className="w-full h-7 text-xs border bg-background px-2 font-normal">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Default" className="text-xs">
+                  Default
+                </SelectItem>
+                {availableJudgeModels?.map((jm) => (
+                  <SelectItem
+                    key={nameJudgeModel(jm)}
+                    value={nameJudgeModel(jm)}
+                    className="text-xs"
+                  >
+                    <span className="flex flex-row items-center gap-1">
+                      <span className="flex-1">{nameJudgeModel(jm)}</span>
+                      {jm.uses_byok && <KeyRound className="h-3 w-3" />}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {rubric.judge_model?.uses_byok && (
+              <div className="text-xs text-muted-foreground mt-1">
+                This model uses your own API key.
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Save Button */}
         <div className="flex justify-end pt-2 gap-2">

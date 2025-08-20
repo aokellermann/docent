@@ -3,9 +3,11 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from docent._log_util.logger import get_logger
+from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES, ModelOption
 from docent_core._server._analytics.posthog import AnalyticsClient
 from docent_core.docent.ai_tools.rubric.rubric import JudgeResultWithCitations, Rubric
 from docent_core.docent.db.contexts import ViewContext
+from docent_core.docent.db.schemas.auth_models import User
 from docent_core.docent.db.schemas.rubric import SQLARubric
 from docent_core.docent.server.dependencies.analytics import use_posthog_user_context
 from docent_core.docent.server.dependencies.database import get_session
@@ -13,8 +15,13 @@ from docent_core.docent.server.dependencies.permissions import (
     Permission,
     require_collection_permission,
 )
-from docent_core.docent.server.dependencies.services import get_job_service, get_rubric_service
+from docent_core.docent.server.dependencies.services import (
+    get_job_service,
+    get_mono_svc,
+    get_rubric_service,
+)
 from docent_core.docent.server.dependencies.user import get_default_view_ctx, get_user_anonymous_ok
+from docent_core.docent.services import monoservice
 from docent_core.docent.services.job import JobService
 from docent_core.docent.services.rubric import RubricService
 
@@ -206,6 +213,7 @@ async def start_eval_rubric_job(
             "high_level_description": sqla_rubric.high_level_description,
             "inclusion_rules": sqla_rubric.inclusion_rules,
             "exclusion_rules": sqla_rubric.exclusion_rules,
+            "judge_model": sqla_rubric.judge_model,
         },
     )
 
@@ -251,6 +259,32 @@ async def get_rubric_job_details(
             "total_agent_runs": job.job_json.get("total_agent_runs"),
         }
     return None
+
+
+@rubric_router.get("/judge-models")
+async def get_judge_models(
+    mono_svc: monoservice.MonoService = Depends(get_mono_svc),
+    user: User = Depends(get_user_anonymous_ok),
+):
+    # Start with default judge models
+    models: list[ModelOption] = PROVIDER_PREFERENCES.default_judge_models.copy()
+
+    # Append user-available BYOK models
+    api_keys: dict[str, str] = {}
+    if not user.is_anonymous:
+        api_keys = await mono_svc.get_api_key_overrides(user.id)
+        models += [m for m in PROVIDER_PREFERENCES.byok_judge_models if m.provider in api_keys]
+
+    # Return annotated list with whether each model requires a user-provided API key
+    return [
+        {
+            "provider": m.provider,
+            "model_name": m.model_name,
+            "reasoning_effort": m.reasoning_effort,
+            "uses_byok": m.provider in api_keys,
+        }
+        for m in models
+    ]
 
 
 ##############

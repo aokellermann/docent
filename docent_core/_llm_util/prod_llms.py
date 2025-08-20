@@ -214,6 +214,7 @@ class LLMManager:
     def __init__(
         self,
         model_options: list[ModelOption],
+        api_key_overrides: dict[str, str] | None = None,
         use_cache: bool = False,
     ):
         # TODO(mengk): make this more robust, possibly move to a NoSQL database or something
@@ -225,6 +226,7 @@ class LLMManager:
 
         self.model_options = model_options
         self.current_model_option_index = 0
+        self.api_key_overrides = api_key_overrides or {}
 
     async def get_completions(
         self,
@@ -251,7 +253,10 @@ class LLMManager:
                 cur_option.model_name,
                 cur_option.reasoning_effort,
             )
-            client = PROVIDERS[provider]["async_client_getter"]()
+
+            override_key = self.api_key_overrides.get(provider)
+
+            client = PROVIDERS[provider]["async_client_getter"](override_key)
             single_output_getter = PROVIDERS[provider]["single_output_getter"]
             single_streaming_output_getter = PROVIDERS[provider]["single_streaming_output_getter"]
 
@@ -399,6 +404,7 @@ async def get_llm_completions_async(
     completion_callback: AsyncLLMOutputStreamingCallback | None = None,
     use_cache: bool = False,
     fill_cache: str | None = None,
+    api_key_overrides: dict[str, str] | None = None,
 ) -> list[LLMOutput]:
     # We don't support logprobs for Anthropic yet
     if logprobs:
@@ -411,6 +417,7 @@ async def get_llm_completions_async(
     # Create the LLM manager
     llm_manager = LLMManager(
         model_options=model_options,
+        api_key_overrides=api_key_overrides,
         use_cache=use_cache,
     )
 

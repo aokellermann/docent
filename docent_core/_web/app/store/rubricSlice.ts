@@ -2,12 +2,20 @@ import { createSlice } from '@reduxjs/toolkit';
 import { rubricApi } from '../api/rubricApi';
 import { Citation } from '../types/experimentViewerTypes';
 
+export interface JudgeModel {
+  provider: string;
+  model_name: string;
+  reasoning_effort: 'low' | 'medium' | 'high' | null;
+  uses_byok?: boolean;
+}
+
 export interface Rubric {
   id: string;
   version: number;
   high_level_description: string;
   inclusion_rules: string[];
   exclusion_rules: string[];
+  judge_model: JudgeModel | null;
 }
 
 export interface JudgeResult {

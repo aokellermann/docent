@@ -30,7 +30,6 @@ from docent_core.docent.ai_tools.rubric.refine import (
     create_set_rubric_tool,
     execute_set_rubric,
 )
-from docent_core.docent.ai_tools.rubric.rubric import evaluate_rubric_max_recall
 from docent_core.docent.db.contexts import ViewContext
 from docent_core.docent.db.schemas.refinement import (
     RefinementAgentSession,
@@ -308,8 +307,11 @@ class RefinementService:
                     random.seed(0)
                     agent_runs = random.sample(agent_runs, N_SAMPLE)
 
-                max_recall_examples = await evaluate_rubric_max_recall(
-                    agent_runs, sq_rubric.to_pydantic()
+                max_recall_examples = await self.rubric_svc.evaluate_rubric_for_user(
+                    agent_runs,
+                    sq_rubric.to_pydantic(),
+                    user=ctx.user,
+                    max_recall=True,
                 )
 
                 # Append as a new user message

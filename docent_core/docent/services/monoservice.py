@@ -53,6 +53,7 @@ from docent_core.docent.db.schemas.tables import (
     SQLAChatSession,
     SQLACollection,
     SQLAJob,
+    SQLAModelApiKey,
     SQLASearchCluster,
     SQLASearchQuery,
     SQLASearchResult,
@@ -1727,3 +1728,16 @@ class MonoService:
                 .limit(limit)
             )
             return list(result.scalars().all())
+
+    async def get_api_key_overrides(self, user_id: str | None) -> dict[str, str]:
+        """Return a dictionary of API key overrides for a user."""
+        if not user_id:
+            return {}
+
+        async with self.db.session() as session:
+            result = await session.execute(
+                select(SQLAModelApiKey.provider, SQLAModelApiKey.api_key).where(
+                    SQLAModelApiKey.user_id == user_id
+                )
+            )
+            return {row[0]: row[1] for row in result.all()}

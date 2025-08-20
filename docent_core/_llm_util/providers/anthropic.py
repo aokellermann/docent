@@ -370,12 +370,12 @@ async def get_anthropic_chat_completion_async(
         raise RateLimitException(e) from e
 
 
-def get_anthropic_client_async() -> AsyncAnthropic:
+def get_anthropic_client_async(api_key: str | None = None) -> AsyncAnthropic:
     # Ensure environment variables are loaded.
     # Technically you don't have to run this, but just makes clear where the envvars are used
     _ = ENV
 
-    return AsyncAnthropic()
+    return AsyncAnthropic(api_key=api_key) if api_key else AsyncAnthropic()
 
 
 def parse_anthropic_completion(message: Message | None, model: str) -> LLMOutput:

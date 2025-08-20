@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from pydantic import ValidationError
 from sqlalchemy import (
     Boolean,
     DateTime,
@@ -16,6 +17,9 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from docent._log_util.logger import get_logger
+from docent_core._llm_util.providers.preferences import ModelOption
+
 if TYPE_CHECKING:
     from docent_core.docent.db.schemas.refinement import SQLARefinementAgentSession
 
@@ -27,6 +31,8 @@ TABLE_RUBRIC = "rubrics"
 TABLE_JUDGE_RESULT = "judge_results"
 TABLE_RUBRIC_CENTROID = "rubric_centroids"
 TABLE_JUDGE_RESULT_CENTROIDS = "judge_result_centroids"
+
+logger = get_logger(__name__)
 
 
 class SQLARubric(SQLABase):
@@ -41,6 +47,8 @@ class SQLARubric(SQLABase):
     high_level_description: Mapped[str] = mapped_column(Text, nullable=False)
     inclusion_rules: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
     exclusion_rules: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+
+    judge_model: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False
@@ -78,15 +86,22 @@ class SQLARubric(SQLABase):
             high_level_description=rubric.high_level_description,
             inclusion_rules=rubric.inclusion_rules,
             exclusion_rules=rubric.exclusion_rules,
+            judge_model=rubric.judge_model.model_dump() if rubric.judge_model else None,
         )
 
     def to_pydantic(self) -> Rubric:
+        try:
+            jm = ModelOption.model_validate(self.judge_model)
+        except ValidationError:
+            logger.warning(f"Unable to parse judge model from database: {self.judge_model}")
+            jm = None
         return Rubric(
             id=self.id,
             version=self.version,
             high_level_description=self.high_level_description,
             inclusion_rules=self.inclusion_rules,
             exclusion_rules=self.exclusion_rules,
+            judge_model=jm,
         )
 
 

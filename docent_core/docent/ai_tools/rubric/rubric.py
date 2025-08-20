@@ -11,7 +11,7 @@ from docent.data_models.citation import Citation, parse_citations_single_run
 from docent.data_models.transcript import SINGLE_RUN_CITE_INSTRUCTION
 from docent_core._llm_util.data_models.llm_output import LLMOutput
 from docent_core._llm_util.prod_llms import get_llm_completions_async
-from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES
+from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES, ModelOption
 
 logger = get_logger(__name__)
 
@@ -54,6 +54,7 @@ class Rubric(BaseModel):
     high_level_description: str
     inclusion_rules: list[str]
     exclusion_rules: list[str]
+    judge_model: ModelOption | None = None
 
     @property
     def text(self) -> str:
@@ -156,6 +157,7 @@ def _get_llm_callback(
 async def evaluate_rubric(
     agent_runs: list[AgentRun],
     rubric: Rubric,
+    api_key_overrides: dict[str, str] | None = None,
     callback: JudgeResultStreamingCallback | None = None,
 ):
     ids = [ar.id for ar in agent_runs]
@@ -172,10 +174,11 @@ async def evaluate_rubric(
             ]
             for prompt in prompts
         ],
-        PROVIDER_PREFERENCES.evaluate_rubric,
+        get_model_options_for_rubric(rubric),
         max_new_tokens=8192,
         timeout=180.0,
         use_cache=True,
+        api_key_overrides=api_key_overrides,
         completion_callback=(
             _get_llm_callback(rubric.id, rubric.version, ids, callback, ResultType.DIRECT_RESULT)
             if callback is not None
@@ -220,9 +223,18 @@ Return all relevant instances of the rubric in the following exact format:
 """
 
 
+def get_model_options_for_rubric(rubric: Rubric) -> list[ModelOption]:
+    if rubric.judge_model is not None:
+        # If the user asked for a specific model, we shouldn't silently fall back to another one
+        return [rubric.judge_model]
+    else:
+        return PROVIDER_PREFERENCES.evaluate_rubric
+
+
 async def evaluate_rubric_max_recall(
     agent_runs: list[AgentRun],
     rubric: Rubric,
+    api_key_overrides: dict[str, str] | None = None,
     callback: JudgeResultStreamingCallback | None = None,
 ):
     ids = [ar.id for ar in agent_runs]
@@ -249,10 +261,11 @@ async def evaluate_rubric_max_recall(
             ]
             for prompt in prompts
         ],
-        PROVIDER_PREFERENCES.evaluate_rubric_max_recall,
+        get_model_options_for_rubric(rubric),
         max_new_tokens=8192,
         timeout=180.0,
         use_cache=True,
+        api_key_overrides=api_key_overrides,
         completion_callback=(
             _get_llm_callback(rubric.id, rubric.version, ids, callback, ResultType.NEAR_MISS)
             if callback is not None

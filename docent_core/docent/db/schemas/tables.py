@@ -59,6 +59,7 @@ TABLE_CHAT_SESSION = "chat_sessions"
 TABLE_API_KEY = "api_keys"
 TABLE_TELEMETRY_LOG = "telemetry_logs"
 TABLE_USER_PROFILE = "user_profiles"
+TABLE_MODEL_API_KEYS = "model_api_keys"
 
 
 def sanitize_pg_text(text: str) -> str:
@@ -809,3 +810,12 @@ class SQLAUserProfile(SQLABase):
     )
 
     user: Mapped["SQLAUser"] = relationship("SQLAUser", backref="user_profile")
+
+
+class SQLAModelApiKey(SQLABase):
+    __tablename__ = TABLE_MODEL_API_KEYS
+
+    id = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id = mapped_column(String(36), ForeignKey(f"{TABLE_USER}.id"), nullable=False, index=True)
+    provider = mapped_column(Text, nullable=False)
+    api_key = mapped_column(Text, nullable=False)

@@ -450,6 +450,32 @@ class ProviderPreferences(BaseModel):
             # ),
         ]
 
+    @cached_property
+    def default_judge_models(self) -> list[ModelOption]:
+        """Judge models that any user can access without providing their own API key"""
+
+        return [
+            ModelOption(
+                provider="anthropic",
+                model_name="claude-sonnet-4",
+                reasoning_effort="medium",
+            ),
+            ModelOption(provider="openai", model_name="gpt-5", reasoning_effort="medium"),
+        ]
+
+    @cached_property
+    def byok_judge_models(self) -> list[ModelOption]:
+        """Judge models that require a user to provide their own API key, e.g. because they're
+        expensive, or our rate limits are low"""
+
+        return [
+            ModelOption(
+                provider="google",
+                model_name="gemini-2.5-flash",
+                reasoning_effort="medium",
+            ),
+        ]
+
 
 # Initialize the singleton preferences object
 PROVIDER_PREFERENCES = ProviderPreferences()

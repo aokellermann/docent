@@ -393,20 +393,20 @@ async def get_openai_chat_completion_async(
         raise RateLimitException(e) from e
 
 
-def get_openai_client_async() -> AsyncOpenAI:
+def get_openai_client_async(api_key: str | None = None) -> AsyncOpenAI:
     # Ensure environment variables are loaded.
     # Technically you don't have to run this, but just makes clear where the envvars are used
     _ = ENV
 
-    return AsyncOpenAI()
+    return AsyncOpenAI(api_key=api_key) if api_key else AsyncOpenAI()
 
 
-def get_azure_openai_client_async() -> AsyncAzureOpenAI:
+def get_azure_openai_client_async(api_key: str | None = None) -> AsyncAzureOpenAI:
     # Ensure environment variables are loaded.
     # Technically you don't have to run this, but just makes clear where the envvars are used
     _ = ENV
 
-    return AsyncAzureOpenAI()
+    return AsyncAzureOpenAI(api_key=api_key) if api_key else AsyncAzureOpenAI()
 
 
 def chunk_and_tokenize(

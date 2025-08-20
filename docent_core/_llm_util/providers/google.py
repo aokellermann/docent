@@ -22,11 +22,13 @@ from docent_core._llm_util.data_models.llm_output import (
 )
 
 
-def get_google_client_async() -> AsyncGoogle:
+def get_google_client_async(api_key: str | None = None) -> AsyncGoogle:
     # Ensure environment variables are loaded.
     # Technically you don't have to run this, but just makes clear where the envvars are used
     _ = ENV
 
+    if api_key:
+        return genai.Client(api_key=api_key).aio
     return genai.Client().aio
 
 
