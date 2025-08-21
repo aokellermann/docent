@@ -232,6 +232,14 @@ class MonoService:
                 delete(SQLATranscript).where(SQLATranscript.collection_id == collection_id)
             )
 
+        # Delete all transcript groups
+        async with self.db.session() as session:
+            await session.execute(
+                delete(SQLATranscriptGroup).where(
+                    SQLATranscriptGroup.collection_id == collection_id
+                )
+            )
+
         # Delete all agent runs
         async with self.db.session() as session:
             await session.execute(
