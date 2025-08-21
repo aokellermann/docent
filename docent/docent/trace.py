@@ -463,6 +463,10 @@ class DocentTracer:
         except Exception as e:
             logger.error(f"Error during flush: {e}")
 
+    def is_disabled(self) -> bool:
+        """Check if tracing is disabled."""
+        return self._disabled
+
     def set_disabled(self, disabled: bool) -> None:
         """Enable or disable tracing."""
         self._disabled = disabled
@@ -616,9 +620,10 @@ class DocentTracer:
         Returns:
             Dictionary of headers including Authorization
         """
+
         return {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.headers.get('Authorization', '').replace('Bearer ', '')}",
+            "Authorization": self.headers.get("Authorization", ""),
         }
 
     def _post_json(self, path: str, data: Dict[str, Any]) -> None:
@@ -1163,6 +1168,13 @@ def verify_initialized() -> bool:
     return _global_tracer.verify_initialized()
 
 
+def is_disabled() -> bool:
+    """Check if global tracing is disabled."""
+    if _global_tracer:
+        return _global_tracer.is_disabled()
+    return True
+
+
 def set_disabled(disabled: bool) -> None:
     """Enable or disable global tracing."""
     if _global_tracer:
@@ -1180,6 +1192,8 @@ def agent_run_score(name: str, score: float, attributes: Optional[Dict[str, Any]
     """
     try:
         tracer: DocentTracer = get_tracer()
+        if tracer.is_disabled():
+            return
         agent_run_id = tracer.get_current_agent_run_id()
 
         if not agent_run_id:
@@ -1216,6 +1230,8 @@ def agent_run_metadata(metadata: Dict[str, Any]) -> None:
     """
     try:
         tracer = get_tracer()
+        if tracer.is_disabled():
+            return
         agent_run_id = tracer.get_current_agent_run_id()
         if not agent_run_id:
             logger.warning("No active agent run context. Metadata will not be sent.")
@@ -1248,6 +1264,8 @@ def transcript_metadata(
     """
     try:
         tracer = get_tracer()
+        if tracer.is_disabled():
+            return
         transcript_id = tracer.get_current_transcript_id()
         if not transcript_id:
             logger.warning("No active transcript context. Metadata will not be sent.")
