@@ -1,5 +1,6 @@
 import { ArrowLeftRight, FunnelPlus, Download } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
+import posthog from 'posthog-js';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -185,6 +186,15 @@ export default function ChartSettings({ chart, onChange }: ChartSettingsProps) {
 
   const handleDownloadPng = async () => {
     try {
+      posthog.capture('chart_download_png', {
+        chart_id: chart.id,
+        chart_name: chart.name || 'untitled',
+        chart_type: chart.chart_type,
+        x_key: chart.x_key,
+        y_key: chart.y_key,
+        series_key: chart.series_key,
+      });
+
       await exportChartToPng(chart.id, chart.name || 'chart');
     } catch (e) {
       console.error('Failed to export chart PNG', e);
@@ -195,6 +205,16 @@ export default function ChartSettings({ chart, onChange }: ChartSettingsProps) {
     try {
       const binStats = chartDataResponse?.result?.binStats;
       if (isFetchingChartData || !binStats) return;
+
+      posthog.capture('chart_download_csv', {
+        chart_id: chart.id,
+        chart_name: chart.name || 'untitled',
+        chart_type: chart.chart_type,
+        x_key: chart.x_key,
+        y_key: chart.y_key,
+        series_key: chart.series_key,
+      });
+
       exportChartToCsv(chart, binStats, chart.name || 'chart');
     } catch (e) {
       console.error('Failed to export chart CSV', e);
