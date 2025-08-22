@@ -7,7 +7,7 @@ from docent.data_models.chat.message import (
     UserMessage,
     parse_chat_message,
 )
-from docent.data_models.chat.tool import ToolCall, ToolInfo, ToolParams
+from docent.data_models.chat.tool import ToolCall, ToolCallContent, ToolInfo, ToolParams
 
 __all__ = [
     "ChatMessage",
@@ -19,6 +19,7 @@ __all__ = [
     "ContentReasoning",
     "ContentText",
     "ToolCall",
+    "ToolCallContent",
     "ToolInfo",
     "ToolParams",
     "parse_chat_message",
