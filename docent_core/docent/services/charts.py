@@ -467,10 +467,10 @@ class ChartsService:
         return static_dimensions + chart_keys
 
     async def get_available_measures(self, ctx: ViewContext) -> List[ChartDimension]:
-        """Get available measures for a table type, including dynamic numerical fields."""
+        """Get available measures for a table type, including dynamic numerical and boolean fields."""
         chart_keys = await self._get_chart_keys(ctx)
-        numeric_keys = [key for key in chart_keys if key.is_numeric]
-        return static_measures + numeric_keys
+        valid_measure_keys = [key for key in chart_keys if key.is_valid_measure]
+        return static_measures + valid_measure_keys
 
     async def _validate_and_correct_chart_keys(
         self,
