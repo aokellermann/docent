@@ -1755,3 +1755,48 @@ class MonoService:
                 )
             )
             return {row[0]: row[1] for row in result.all()}
+
+    async def get_model_api_keys(self, user_id: str) -> list[SQLAModelApiKey]:
+        """Get all model API keys for a user."""
+        async with self.db.session() as session:
+            result = await session.execute(
+                select(SQLAModelApiKey).where(SQLAModelApiKey.user_id == user_id)
+            )
+            return list(result.scalars().all())
+
+    async def upsert_model_api_key(
+        self, user_id: str, provider: str, api_key: str
+    ) -> SQLAModelApiKey:
+        """Create or update a model API key for a user and provider."""
+        async with self.db.session() as session:
+            # Check if key already exists for this user and provider
+            result = await session.execute(
+                select(SQLAModelApiKey).where(
+                    SQLAModelApiKey.user_id == user_id, SQLAModelApiKey.provider == provider
+                )
+            )
+            existing_key = result.scalar_one_or_none()
+
+            if existing_key:
+                # Update existing key
+                existing_key.api_key = api_key
+                await session.commit()
+                return existing_key
+            else:
+                # Create new key
+                new_key = SQLAModelApiKey(user_id=user_id, provider=provider, api_key=api_key)
+                session.add(new_key)
+                await session.commit()
+                await session.refresh(new_key)
+                return new_key
+
+    async def delete_model_api_key(self, user_id: str, provider: str) -> bool:
+        """Delete a model API key for a user and provider. Returns True if deleted, False if not found."""
+        async with self.db.session() as session:
+            result = await session.execute(
+                delete(SQLAModelApiKey).where(
+                    SQLAModelApiKey.user_id == user_id, SQLAModelApiKey.provider == provider
+                )
+            )
+            await session.commit()
+            return result.rowcount > 0

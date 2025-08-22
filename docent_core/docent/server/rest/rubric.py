@@ -23,6 +23,7 @@ from docent_core.docent.server.dependencies.services import (
 from docent_core.docent.server.dependencies.user import get_default_view_ctx, get_user_anonymous_ok
 from docent_core.docent.services import monoservice
 from docent_core.docent.services.job import JobService
+from docent_core.docent.services.monoservice import MonoService
 from docent_core.docent.services.rubric import RubricService
 
 rubric_router = APIRouter(dependencies=[Depends(get_user_anonymous_ok)])
@@ -189,6 +190,7 @@ async def start_eval_rubric_job(
     collection_id: str,
     rubric_id: str,
     max_results: int | None = None,
+    mono_svc: MonoService = Depends(get_mono_svc),
     rubric_svc: RubricService = Depends(get_rubric_service),
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
@@ -204,6 +206,17 @@ async def start_eval_rubric_job(
     logger.info(f"Starting evaluation job for rubric {rubric_id} with max results {max_results}")
     job_id = await rubric_svc.start_or_get_eval_rubric_job(ctx, rubric_id, max_results)
 
+    # Check if user has a custom API key (just for analytics purposes)
+    is_byok = False
+    if jm := sqla_rubric.judge_model:
+        if ctx.user:
+            overrides = await mono_svc.get_api_key_overrides(ctx.user.id)
+            is_byok = jm.get("provider") in overrides
+        else:
+            is_byok = False
+    else:
+        is_byok = False
+
     analytics.track_event(
         "start_eval_rubric_job",
         properties={
@@ -214,6 +227,7 @@ async def start_eval_rubric_job(
             "inclusion_rules": sqla_rubric.inclusion_rules,
             "exclusion_rules": sqla_rubric.exclusion_rules,
             "judge_model": sqla_rubric.judge_model,
+            "is_byok": is_byok,
         },
     )
 

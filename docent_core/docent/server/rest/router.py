@@ -1097,6 +1097,99 @@ async def disable_api_key(
     return {"message": "API key disabled successfully"}
 
 
+###########################
+# Model API Key endpoints #
+###########################
+
+
+class ModelApiKeyResponse(BaseModel):
+    id: str
+    provider: str
+    masked_api_key: str
+
+
+class UpsertModelApiKeyRequest(BaseModel):
+    provider: str
+    api_key: str
+
+
+def _mask_api_key(key: str):
+    if len(key) <= 8:
+        return "••••••••"
+    return key[:4] + "••••••••" + key[-4:]
+
+
+@user_router.get("/model-api-keys", response_model=list[ModelApiKeyResponse])
+async def list_model_api_keys(
+    user: User = Depends(get_authenticated_user),
+    mono_svc: MonoService = Depends(get_mono_svc),
+):
+    """List all model API keys for the authenticated user."""
+    model_api_keys = await mono_svc.get_model_api_keys(user.id)
+    return [
+        ModelApiKeyResponse(
+            id=key.id,
+            provider=key.provider,
+            masked_api_key=_mask_api_key(key.api_key),
+        )
+        for key in model_api_keys
+    ]
+
+
+@user_router.put("/model-api-keys", response_model=ModelApiKeyResponse)
+async def upsert_model_api_key(
+    request: UpsertModelApiKeyRequest,
+    user: User = Depends(get_authenticated_user),
+    mono_svc: MonoService = Depends(get_mono_svc),
+    analytics: AnalyticsClient = Depends(use_posthog_user_context),
+):
+    """Create or update a model API key for the authenticated user."""
+    # Validate provider
+    valid_providers = ["openai", "anthropic", "google"]
+    if request.provider not in valid_providers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid provider. Must be one of: {', '.join(valid_providers)}",
+        )
+
+    model_api_key = await mono_svc.upsert_model_api_key(user.id, request.provider, request.api_key)
+
+    # Track with PostHog
+    analytics.track_event(
+        "model_api_key_saved",
+        properties={
+            "provider": model_api_key.provider,
+        },
+    )
+
+    return ModelApiKeyResponse(
+        id=model_api_key.id,
+        provider=model_api_key.provider,
+        masked_api_key=_mask_api_key(model_api_key.api_key),
+    )
+
+
+@user_router.delete("/model-api-keys/{provider}")
+async def delete_model_api_key(
+    provider: str,
+    user: User = Depends(get_authenticated_user),
+    mono_svc: MonoService = Depends(get_mono_svc),
+    analytics: AnalyticsClient = Depends(use_posthog_user_context),
+):
+    """Delete a model API key for the authenticated user and provider."""
+    success = await mono_svc.delete_model_api_key(user.id, provider)
+    if not success:
+        raise HTTPException(status_code=404, detail="Model API key not found")
+    # Track with PostHog
+    analytics.track_event(
+        "model_api_key_deleted",
+        properties={
+            "provider": provider,
+        },
+    )
+    return {"message": "Model API key deleted successfully"}
+
+
 @user_router.post("/{collection_id}/fg_has_embeddings")
 async def fg_has_embeddings(
     collection_id: str,

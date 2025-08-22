@@ -72,10 +72,10 @@ export const UserProfile = () => {
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem
-          onClick={() => (window.location.href = '/settings/api_keys')}
+          onClick={() => (window.location.href = '/settings')}
           className="text-sm"
         >
-          API Keys
+          Settings
         </DropdownMenuItem>
         <DropdownMenuItem onClick={handleLogout} className="text-sm">
           Log out
