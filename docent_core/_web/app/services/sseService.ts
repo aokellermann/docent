@@ -1,7 +1,6 @@
 import { BASE_URL } from '../constants';
+import { v4 as uuidv4 } from 'uuid';
 import { setToastNotification } from '../store/toastSlice';
-// Remove the store import to avoid circular dependency
-// import store from '../store/store';
 
 // Map to store active EventSource instances
 const eventSourcesMap: Record<string, EventSource> = {};
@@ -10,7 +9,7 @@ const eventSourcesMap: Record<string, EventSource> = {};
  * Generate a unique task ID for SSE requests
  */
 const generateTaskId = (): string => {
-  return `sse-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+  return uuidv4();
 };
 
 /**

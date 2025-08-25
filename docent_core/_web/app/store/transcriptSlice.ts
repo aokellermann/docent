@@ -10,8 +10,8 @@ import {
 } from '@reduxjs/toolkit';
 
 import { apiRestClient } from '../services/apiService';
-import socketService from '../services/socketService';
 import sseService from '../services/sseService';
+import { v4 as uuidv4 } from 'uuid';
 import {
   ActionsSummary,
   AgentRun,
@@ -86,7 +86,7 @@ export const getActionsSummary = createAsyncThunk(
 
     try {
       // Generate a task ID for cancellation
-      const taskId = socketService.generateTaskId();
+      const taskId = uuidv4();
       dispatch(setActionsSummaryTaskId(taskId));
 
       // Create SSE connection using the service
@@ -156,7 +156,7 @@ export const getSolutionSummary = createAsyncThunk(
 
     try {
       // Generate a task ID for cancellation
-      const taskId = socketService.generateTaskId();
+      const taskId = uuidv4();
       dispatch(setSolutionSummaryTaskId(taskId));
 
       // Create SSE connection using the service
@@ -449,7 +449,7 @@ export const sendTaMessage = createAsyncThunk(
 
     try {
       // Generate a task ID for cancellation
-      const taskId = socketService.generateTaskId();
+      const taskId = uuidv4();
       dispatch(setTaMessageTaskId(taskId));
 
       // Create SSE connection

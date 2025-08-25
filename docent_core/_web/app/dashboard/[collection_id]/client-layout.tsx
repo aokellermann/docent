@@ -5,7 +5,7 @@ import React, { useEffect, Suspense } from 'react';
 
 import Breadcrumbs from '../../components/Breadcrumbs';
 import ResponsiveCheck from '../../components/ResponsiveCheck';
-import { initSession } from '../../store/collectionSlice';
+import { setCollectionId } from '../../store/collectionSlice';
 import { useAppDispatch } from '../../store/hooks';
 import { Button } from '@/components/ui/button';
 import { useUserContext } from '@/app/contexts/UserContext';
@@ -19,14 +19,11 @@ export default function DocentDashboardClientLayout({
   const params = useParams();
   const collectionId = params.collection_id as string;
 
-  // Fetch state from the server
-  const fetchRef = React.useRef(false); // Prevent double fetch
+  // Set the collection ID in the store
   useEffect(() => {
-    if (!collectionId || fetchRef.current) {
-      return;
+    if (collectionId) {
+      dispatch(setCollectionId(collectionId));
     }
-    fetchRef.current = true;
-    dispatch(initSession(collectionId));
   }, [collectionId, dispatch]);
 
   return (

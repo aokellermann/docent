@@ -47,12 +47,9 @@ export default function ExperimentViewer() {
   const experimentViewerScrollPosition = useAppSelector(
     (state) => state.experimentViewer.experimentViewerScrollPosition
   );
-  const rawAgentRunIds = useAppSelector(
-    (state) => state.collection.agentRunIds
-  );
 
   // Fetch agent run IDs
-  useGetAgentRunIdsQuery(
+  const { data: rawAgentRunIds } = useGetAgentRunIdsQuery(
     {
       collectionId: collectionId!,
     },

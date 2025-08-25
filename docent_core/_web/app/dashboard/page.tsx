@@ -28,10 +28,8 @@ import { toast } from '@/hooks/use-toast';
 
 import { CollectionsTable } from '../components/CollectionsTable';
 import { UserProfile } from '../components/auth/UserProfile';
-import socketService from '../services/socketService';
-import { resetExperimentViewerSlice } from '../store/experimentViewerSlice';
 import { resetCollectionSlice } from '../store/collectionSlice';
-import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { useAppDispatch } from '../store/hooks';
 import { resetTranscriptSlice } from '../store/transcriptSlice';
 import { useRequireUserContext } from '../contexts/UserContext';
 import {
@@ -43,7 +41,6 @@ export default function HomePage() {
   // User is guaranteed to be present in authenticated pages
   const { user } = useRequireUserContext();
 
-  const collections = useAppSelector((state) => state.collection.collections);
   const dispatch = useAppDispatch();
 
   // New collection dialog state
@@ -53,15 +50,17 @@ export default function HomePage() {
   const [newCollectionDescription, setNewCollectionDescription] = useState('');
 
   // RTK Query hooks
-  const { isLoading: isLoadingCollections } = useGetCollectionsQuery();
+  const { data: collections, isLoading: isLoadingCollections } =
+    useGetCollectionsQuery();
   const [createCollection, { isLoading: isCreatingCollection }] =
     useCreateCollectionMutation();
 
+  /**
+   * TODO(mengk): get rid of this!!!
+   */
   useEffect(() => {
     // Clear out old state
-    socketService.closeSocket();
     dispatch(resetCollectionSlice());
-    dispatch(resetExperimentViewerSlice());
     dispatch(resetTranscriptSlice());
     // TODO(mengk): call thunks to cancel the transcript requests too
   }, [dispatch]);

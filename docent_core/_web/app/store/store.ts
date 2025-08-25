@@ -8,7 +8,6 @@ import toastReducer from './toastSlice';
 import transcriptReducer from './transcriptSlice';
 import { diffReducer } from './diffSlice';
 import embedReducer from './embedSlice';
-import createWebSocketMiddleware from './webSocketMiddleware';
 import { collabApi } from '@/lib/permissions/collabSlice';
 import { chartApi } from '../api/chartApi';
 import { diffApi } from '../api/diffApi';
@@ -52,7 +51,6 @@ const store = configureStore({
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware()
-      .concat(createWebSocketMiddleware())
       .concat(errorLogger)
       .concat(collabApi.middleware)
       .concat(chartApi.middleware)

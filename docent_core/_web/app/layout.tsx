@@ -4,7 +4,6 @@ import { Open_Sans, JetBrains_Mono } from 'next/font/google';
 import { cn } from '@/lib/utils';
 
 import { ReduxProvider, CSPostHogProvider } from './providers';
-import WebsocketProvider from './contexts/WebsocketContext';
 import { Toaster } from '@/components/ui/toaster';
 import ReduxToastHandler from '@/components/ReduxToastHandler';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -51,15 +50,13 @@ export default async function RootLayout({
         >
           <CSPostHogProvider>
             <ReduxProvider>
-              <WebsocketProvider>
-                <UserProvider user={user}>
-                  <TooltipProvider>
-                    {children}
-                    <Toaster />
-                    <ReduxToastHandler />
-                  </TooltipProvider>
-                </UserProvider>
-              </WebsocketProvider>
+              <UserProvider user={user}>
+                <TooltipProvider>
+                  {children}
+                  <Toaster />
+                  <ReduxToastHandler />
+                </TooltipProvider>
+              </UserProvider>
             </ReduxProvider>
           </CSPostHogProvider>
         </ThemeProvider>

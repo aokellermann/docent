@@ -10,18 +10,12 @@ import {
 } from '@reduxjs/toolkit';
 import { v4 as uuid4 } from 'uuid';
 
-import { apiRestClient } from '../services/apiService';
 import {
   ComplexFilter,
   CollectionFilter,
-  Collection,
-  Bins,
   PrimitiveFilter,
 } from '../types/collectionTypes';
-import { BaseAgentRunMetadata } from '../types/transcriptTypes';
 import { collectionApi } from '../api/collectionApi';
-
-import { setToastNotification } from './toastSlice';
 
 export interface Job {
   id: string;
@@ -32,60 +26,18 @@ export interface Job {
 }
 
 export interface CollectionState {
-  agentRunIds?: string[];
   // Jank state necessary to auto-scroll correctly:
   //   If there is an initial search query, then we wait until the search has loaded
   //   before we scroll to the specified transcript block
   hasInitSearchQuery?: boolean;
-  // Available collections
-  collections?: Collection[];
   // Collection state
-  filtersMap?: Record<string, CollectionFilter>;
   baseFilter?: ComplexFilter;
-  // Metadata
-  agentRunMetadata?: Record<string, Record<string, BaseAgentRunMetadata>>;
   // Global variables
   collectionId?: string;
   viewId?: string;
-  bins?: Bins;
 }
 
 const initialState: CollectionState = {};
-
-export const initSession = createAsyncThunk(
-  'collection/initSession',
-  async (collectionId: string, { dispatch }) => {
-    try {
-      const response = await apiRestClient.post(`/${collectionId}/join`);
-      const { collection_id, view_id } = response.data;
-
-      if (collection_id !== collectionId) {
-        throw new Error('Collection ID mismatch');
-      }
-
-      // Set various IDs
-      dispatch(setCollectionId(collectionId));
-      dispatch(setViewId(view_id));
-
-      // dispatch(getAgentRunMetadataFields());
-      // Start a broker socket to listen for state updates with dual-channel support
-      // await socketService.initSocket(collection_id, view_id);
-    } catch (error) {
-      // Cleanup on error
-      // socketService.closeSocket();
-      dispatch(setCollectionId(undefined));
-      dispatch(setViewId(undefined));
-      dispatch(
-        setToastNotification({
-          title: 'Error connecting to server',
-          description: 'Please try again in a moment',
-          variant: 'destructive',
-        })
-      );
-      throw error;
-    }
-  }
-);
 
 export const postFilter = createAsyncThunk(
   'collection/postFilter',
@@ -149,15 +101,6 @@ function createFilter(filters: CollectionFilter[], baseFilter?: ComplexFilter) {
   return newBaseFilter;
 }
 
-export const addFilters = createAsyncThunk(
-  'collection/addFilters',
-  async (filters: CollectionFilter[], { dispatch, getState }) => {
-    const state = getState() as { collection: CollectionState };
-    const newFilter = createFilter(filters, state.collection.baseFilter);
-    dispatch(postFilter(newFilter));
-  }
-);
-
 export const replaceFilters = createAsyncThunk(
   'collection/replaceFilters',
   async (filters: CollectionFilter[], { dispatch, getState }) => {
@@ -166,55 +109,10 @@ export const replaceFilters = createAsyncThunk(
   }
 );
 
-export const removeFilter = createAsyncThunk(
-  'collection/removeFilter',
-  async (filterId: string, { dispatch, getState }) => {
-    const state = getState() as { collection: CollectionState };
-    const baseFilter = state.collection.baseFilter;
-
-    if (!baseFilter) return;
-
-    // Clone the current filter
-    let newBaseFilter: ComplexFilter | null = {
-      ...baseFilter,
-      filters: [...baseFilter.filters],
-    };
-
-    // Remove the internal filter from the base filter
-    const newSubFilters = newBaseFilter.filters.filter(
-      (f) => f.id !== filterId
-    );
-
-    // If there are still subfilters, update the base filter
-    // Otherwise, remove the base filter completely
-    if (newSubFilters && newSubFilters.length > 0) {
-      newBaseFilter.filters = newSubFilters;
-    } else {
-      newBaseFilter = null;
-    }
-
-    dispatch(postFilter(newBaseFilter));
-  }
-);
-
 export const collectionSlice = createSlice({
   name: 'collection',
   initialState,
   reducers: {
-    setBins: (state, action: PayloadAction<Bins>) => {
-      state.bins = action.payload;
-    },
-    updateAgentRunMetadata: (
-      state,
-      action: PayloadAction<
-        Record<string, Record<string, BaseAgentRunMetadata>>
-      >
-    ) => {
-      state.agentRunMetadata = {
-        ...state.agentRunMetadata,
-        ...action.payload,
-      };
-    },
     setCollectionId: (state, action: PayloadAction<string | undefined>) => {
       state.collectionId = action.payload;
     },
@@ -225,20 +123,10 @@ export const collectionSlice = createSlice({
       state.hasInitSearchQuery = action.payload;
     },
     resetCollectionSlice: (state) => {
-      const collectionsToKeep = state.collections;
-      return {
-        ...initialState,
-        collections: collectionsToKeep,
-      };
+      return initialState;
     },
   },
   extraReducers: (builder) => {
-    builder.addMatcher(
-      collectionApi.endpoints.getCollections.matchFulfilled,
-      (state, action) => {
-        state.collections = action.payload;
-      }
-    );
     builder.addMatcher(
       collectionApi.endpoints.getBaseFilter.matchFulfilled,
       (state, action) => {
@@ -251,18 +139,10 @@ export const collectionSlice = createSlice({
         state.baseFilter = action.payload ?? undefined;
       }
     );
-    builder.addMatcher(
-      collectionApi.endpoints.getAgentRunIds.matchFulfilled,
-      (state, action) => {
-        state.agentRunIds = action.payload;
-      }
-    );
   },
 });
 
 export const {
-  setBins,
-  updateAgentRunMetadata,
   setCollectionId,
   setViewId,
   setHasInitSearchQuery,
