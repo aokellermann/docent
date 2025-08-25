@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useWindowSize, useLocalStorage } from 'usehooks-ts';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
-import { ArrowDown, ArrowUpIcon } from 'lucide-react';
+import { ArrowDown, ArrowUpIcon, Loader2 } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 
@@ -12,10 +12,12 @@ export default function InputArea({
   className,
   onSendMessage,
   disabled,
+  isLoading,
 }: {
   className?: string;
   onSendMessage: (message: string) => void;
   disabled: boolean;
+  isLoading?: boolean;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { width } = useWindowSize();
@@ -142,9 +144,13 @@ export default function InputArea({
             event.preventDefault();
             submitForm();
           }}
-          disabled={input.length === 0 || disabled}
+          disabled={input.length === 0 || disabled || isLoading}
         >
-          <ArrowUpIcon size={14} />
+          {isLoading ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : (
+            <ArrowUpIcon size={14} />
+          )}
         </Button>
         {/* {status === 'submitted' ? (
           <Button

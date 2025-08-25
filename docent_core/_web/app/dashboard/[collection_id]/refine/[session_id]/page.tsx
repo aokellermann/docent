@@ -3,9 +3,9 @@
 import { Card } from '@/components/ui/card';
 import ChatArea from '../../components/chat/ChatArea';
 import { useParams } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { skipToken } from '@reduxjs/toolkit/query';
-import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
+import { useAppDispatch } from '@/app/store/hooks';
 import {
   useStartRefinementSessionMutation,
   usePostMessageToRefinementSessionMutation,
@@ -13,16 +13,26 @@ import {
   usePostRubricUpdateToRefinementSessionMutation,
 } from '@/app/api/refinementApi';
 import RubricEditor from '../../components/RubricEditor';
-import { Rubric } from '@/app/store/rubricSlice';
-import { setMessages } from '@/app/store/refinementSlice';
+import { JudgeResultWithCitations, Rubric } from '@/app/store/rubricSlice';
+import { RefinementAgentSession } from '@/app/store/refinementSlice';
+import RefinementTimeline from '../../components/RefinementTimeline';
+import { JudgeResultsList } from '../../components/JudgeResultsSection';
+import { Button } from '@/components/ui/button';
+import { useRouter } from 'next/navigation';
+import { ProgressBar } from '@/app/components/ProgressBar';
 
 export default function RefinePage() {
   const params = useParams();
   const dispatch = useAppDispatch();
+  const router = useRouter();
   const collectionId = (params as any)?.collection_id as string | undefined;
   const sessionId = (params as any)?.session_id as string | undefined;
 
-  const messages = useAppSelector((s) => s.refinement.messages);
+  const [curRsession, setCurRsession] = useState<RefinementAgentSession | null>(
+    null
+  );
+
+  // const messages = useAppSelector((s) => s.refinement.messages);
   const [jobId, setJobId] = useState<string | null>(null);
   const [rubricId, setRubricId] = useState<string | null>(null);
 
@@ -50,6 +60,7 @@ export default function RefinePage() {
         .unwrap()
         .then((res) => {
           if (res?.job_id) setJobId(res.job_id);
+          if (res?.rsession) setCurRsession(res.rsession);
         })
         .catch(() => {});
     },
@@ -57,10 +68,17 @@ export default function RefinePage() {
   );
 
   // Start listening to the job state via SSE when we have a jobId
-  const { data: { isSSEConnected } = { isSSEConnected: false } } =
-    useListenToRefinementJobQuery(
-      jobId && collectionId ? { collectionId, jobId } : skipToken
-    );
+  const {
+    data: { isSSEConnected, rsession } = {
+      isSSEConnected: false,
+      rsession: null,
+    },
+  } = useListenToRefinementJobQuery(
+    jobId && collectionId ? { collectionId, jobId } : skipToken
+  );
+  useEffect(() => {
+    if (rsession) setCurRsession(rsession);
+  }, [rsession]);
 
   // Post-process the messages a little bit, determine when to increment rubric version
   const [showDiff, setShowDiff] = useState<boolean>(false);
@@ -68,6 +86,15 @@ export default function RefinePage() {
     number | null
   >(null);
 
+  // Keep a ref in sync so effects depending only on messages can read latest version
+  const refinementRubricVersionRef = useRef<number | null>(
+    refinementRubricVersion
+  );
+  useEffect(() => {
+    refinementRubricVersionRef.current = refinementRubricVersion;
+  }, [refinementRubricVersion]);
+
+  const messages = curRsession?.messages ?? [];
   const processedMessages = useMemo(() => {
     const ans = messages.filter((message) => {
       if (
@@ -85,7 +112,7 @@ export default function RefinePage() {
     return ans;
   }, [messages]);
 
-  // Move state updates out of useMemo and into an effect
+  // Update the rubric version when we receive a set_rubric message
   useEffect(() => {
     let maxVersion: number | null = null;
     for (const message of messages) {
@@ -101,16 +128,15 @@ export default function RefinePage() {
 
     if (maxVersion === null) return;
     // Only update when the version actually increases or changes
+    const currentVersion = refinementRubricVersionRef.current;
     if (
-      refinementRubricVersion !== maxVersion &&
-      !(
-        refinementRubricVersion !== null && maxVersion < refinementRubricVersion
-      )
+      currentVersion !== maxVersion &&
+      !(currentVersion !== null && maxVersion < currentVersion)
     ) {
       setRefinementRubricVersion(maxVersion);
-      setShowDiff(true);
+      if (maxVersion > 2) setShowDiff(true);
     }
-  }, [messages, refinementRubricVersion]);
+  }, [messages]);
 
   const [hasChanges, setHasChanges] = useState<boolean>(false);
 
@@ -124,36 +150,98 @@ export default function RefinePage() {
       .unwrap()
       .then((res) => {
         if (res?.job_id) setJobId(res.job_id);
-        if (res?.rsession) {
-          dispatch(setMessages(res.rsession.messages));
-        }
+        if (res?.rsession) setCurRsession(res.rsession);
         setRefinementRubricVersion(rubric.version);
       })
       .catch(() => {});
   };
 
+  /**
+   * Judge results
+   */
+  const judgeResultsMap = useMemo(() => {
+    const judgeResultsList = curRsession?.judge_results ?? [];
+    return judgeResultsList.reduce(
+      (acc, judgeResult) => {
+        acc[judgeResult.id] = judgeResult;
+        return acc;
+      },
+      {} as Record<string, JudgeResultWithCitations>
+    );
+  }, [curRsession]);
+
+  const uniqueAgentRunsInJudgeResults = useMemo(
+    () => new Set(Object.values(judgeResultsMap).map((r) => r.agent_run_id)),
+    [judgeResultsMap]
+  );
+
   return (
     <Card className="flex-1 flex h-full min-h-0 space-x-3 space-y-0">
-      <ChatArea
-        isReadonly={hasChanges}
-        messages={processedMessages}
-        onSendMessage={onSendMessage}
-        isLoading={isSSEConnected}
-      />
-      <div className="flex-1 flex flex-col custom-scrollbar overflow-y-scroll">
+      <div className="flex-1 flex flex-col space-y-3">
+        {curRsession?.status && (
+          <>
+            <RefinementTimeline status={curRsession.status} />
+            <div className="border-b border-border" />
+          </>
+        )}
+        <ChatArea
+          isReadonly={hasChanges}
+          messages={processedMessages}
+          onSendMessage={onSendMessage}
+          isLoading={isSSEConnected}
+          byoFlexDiv={true}
+        />
+      </div>
+      <div className="border-r border-border" />
+      <div className="flex-1 flex flex-col custom-scrollbar overflow-y-scroll space-y-3">
         {rubricId && (
-          <RubricEditor
-            rubricId={rubricId}
-            rubricVersion={refinementRubricVersion}
-            setRubricVersion={setRefinementRubricVersion}
-            showDiff={showDiff}
-            setShowDiff={setShowDiff}
-            editable={!isSSEConnected} // Cannot edit if SSE is connected
-            onSave={handleRubricSave}
-            onCloseWithoutSave={() => {}}
-            onHasUnsavedChangesUpdated={setHasChanges}
+          <div className="space-y-3">
+            <RubricEditor
+              rubricId={rubricId}
+              rubricVersion={refinementRubricVersion}
+              setRubricVersion={setRefinementRubricVersion}
+              showDiff={showDiff}
+              setShowDiff={setShowDiff}
+              editable={!isSSEConnected} // Cannot edit if SSE is connected
+              onSave={handleRubricSave}
+              onCloseWithoutSave={() => {}}
+              onHasUnsavedChangesUpdated={setHasChanges}
+            />
+            <div className="flex justify-end">
+              <Button
+                className="w-full"
+                size="sm"
+                disabled={isSSEConnected}
+                onClick={() =>
+                  router.push(`/dashboard/${collectionId}?rubricId=${rubricId}`)
+                }
+              >
+                Finalize and run rubric
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Results section */}
+        <div>
+          <div className="text-sm font-semibold">Sample results</div>
+          <div className="text-xs text-muted-foreground">
+            These datapoints are used to inform the refinement process. They are{' '}
+            <b>not</b> final judgements.
+          </div>
+        </div>
+        {isSSEConnected && curRsession?.status === 'reading_data' && (
+          <ProgressBar
+            current={uniqueAgentRunsInJudgeResults.size}
+            total={null}
           />
         )}
+        <JudgeResultsList
+          judgeResultsMap={judgeResultsMap}
+          centroidsMap={{}}
+          centroidAssignments={{}}
+          isPollingAssignments={false}
+        />
       </div>
     </Card>
   );

@@ -12,9 +12,7 @@ export interface JudgeModel {
 export interface Rubric {
   id: string;
   version: number;
-  high_level_description: string;
-  inclusion_rules: string[];
-  exclusion_rules: string[];
+  rubric_text: string;
   judge_model: JudgeModel | null;
 }
 

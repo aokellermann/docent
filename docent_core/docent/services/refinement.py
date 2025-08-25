@@ -1,15 +1,19 @@
+import json
 import traceback
-from copy import deepcopy
 from datetime import UTC, datetime
-from typing import Any, AsyncContextManager, AsyncIterator, Callable, Protocol, cast
+from typing import AsyncContextManager, AsyncIterator, Callable, Protocol, cast
 from uuid import uuid4
 
+import anyio
+from anyio.abc import TaskGroup
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from docent._log_util import get_logger
 from docent.data_models.chat.message import (
     AssistantMessage,
+    ChatMessage,
     SystemMessage,
     ToolMessage,
     UserMessage,
@@ -27,12 +31,17 @@ from docent_core._worker.constants import WorkerFunction
 from docent_core.docent.ai_tools.rubric.refine import (
     FIRST_USER_MESSAGE_TEMPLATE,
     REFINE_AGENT_SYS_PROMPT,
+    WELCOME_MESSAGE,
     create_set_rubric_tool,
+    create_set_status_tool,
     execute_set_rubric,
+    execute_set_status,
 )
+from docent_core.docent.ai_tools.rubric.rubric import JudgeResult
 from docent_core.docent.db.contexts import ViewContext
 from docent_core.docent.db.schemas.refinement import (
     RefinementAgentSession,
+    RefinementStatus,
     SQLARefinementAgentSession,
 )
 from docent_core.docent.db.schemas.tables import JobStatus, SQLAJob
@@ -40,6 +49,68 @@ from docent_core.docent.services.monoservice import MonoService
 from docent_core.docent.services.rubric import RubricService, SQLARubric
 
 logger = get_logger(__name__)
+
+
+OPENERS = {"{": "}", "[": "]"}
+CLOSERS = OPENERS.values()
+
+
+def _optimistic_close_json(partial: str) -> str | None:
+    """
+    Returns a closed JSON string if the result is valid JSON,
+    otherwise returns None.
+    """
+    s = partial
+    stack: list[str] = []  # expected closers
+    in_string = False
+    escape = False
+
+    # Track structural state
+    for ch in s:
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+        else:
+            if ch == '"':
+                in_string = True
+            elif ch in OPENERS:
+                stack.append(OPENERS[ch])
+            elif ch in CLOSERS and stack and ch == stack[-1]:
+                stack.pop()
+
+    buf = s
+
+    # Close dangling string
+    if in_string and not escape:
+        buf += '"'
+
+    def last_sig(text: str) -> str:
+        for c in reversed(text):
+            if not c.isspace():
+                return c
+        return ""
+
+    ls = last_sig(buf)
+
+    if ls == ":":
+        buf += " null"
+    elif ls == ",":
+        buf += " null"
+
+    # Close unmatched braces/brackets
+    if stack:
+        buf += "".join(reversed(stack))
+
+    # Validate
+    try:
+        json.loads(buf)
+        return buf
+    except Exception:
+        return None
 
 
 class RefineAgentEventCallback(Protocol):
@@ -50,7 +121,7 @@ class RefineAgentEventCallback(Protocol):
 def trim_messages_from_state(state: RefinementAgentSession):
     return state.model_copy(
         update={
-            "messages": state.messages[2:],
+            "messages": state.messages[1:2] + state.messages[3:],
         }
     )
 
@@ -95,25 +166,42 @@ class RefinementService:
             sq_rsession = await self.get_session_by_rubric(sq_rubric)
             if sq_rsession is None:
                 # Ensure required fields are initialized so the instance is usable pre-flush
-                sq_rsession = SQLARefinementAgentSession(
+                rsession = RefinementAgentSession(
                     id=str(uuid4()),
                     rubric_id=sq_rubric.id,
                     rubric_version=sq_rubric.version,
-                    messages=[SystemMessage(content=REFINE_AGENT_SYS_PROMPT).model_dump()],
+                    messages=[SystemMessage(content=REFINE_AGENT_SYS_PROMPT)],
+                    status=RefinementStatus.DEFAULT_STATUS,
+                    judge_results=[],
                 )
+                sq_rsession = SQLARefinementAgentSession.from_pydantic(rsession)
                 self.session.add(sq_rsession)
             return sq_rsession
 
-    async def _update_session(
-        self, sq_rsession: SQLARefinementAgentSession, messages: list[dict[str, Any]]
+    async def _update_session_messages(
+        self, sq_rsession: SQLARefinementAgentSession, messages: list[ChatMessage]
     ):
-        # Update the instance directly so its in-memory state is current
-        sq_rsession.messages = messages
+        sq_rsession.content["messages"] = [m.model_dump() for m in messages]
         sq_rsession.updated_at = datetime.now(UTC).replace(tzinfo=None)
+        flag_modified(sq_rsession, "content")  # Required to trigger a DB update
+
+    async def _update_session_judge_results(
+        self, sq_rsession: SQLARefinementAgentSession, judge_results: list[JudgeResult]
+    ):
+        sq_rsession.content["judge_results"] = [j.model_dump() for j in judge_results]
+        sq_rsession.updated_at = datetime.now(UTC).replace(tzinfo=None)
+        flag_modified(sq_rsession, "content")  # Required to trigger a DB update
+
+    async def _update_session_status(
+        self, sq_rsession: SQLARefinementAgentSession, status: RefinementStatus
+    ):
+        sq_rsession.content["status"] = status.value
+        sq_rsession.updated_at = datetime.now(UTC).replace(tzinfo=None)
+        flag_modified(sq_rsession, "content")  # Required to trigger a DB update
 
     async def add_user_message(self, sq_rsession: SQLARefinementAgentSession, message: str):
-        await self._update_session(
-            sq_rsession, sq_rsession.messages + [UserMessage(content=message).model_dump()]
+        await self._update_session_messages(
+            sq_rsession, sq_rsession.to_pydantic().messages + [UserMessage(content=message)]
         )
 
     async def get_current_state(
@@ -256,25 +344,51 @@ class RefinementService:
             raise ValueError(f"Rubric {sq_rsession.rubric_id} not found")
 
         rsession = sq_rsession.to_pydantic()
-        messages = deepcopy(rsession.messages)
+        lock = anyio.Lock()
 
-        async def _streaming_callback(batch_index: int, llm_output: LLMOutput):
+        def _make_cancellable_judge_results_callback(tg: TaskGroup, cancel_at_num_results: int):
+            async def _judge_results_callback(
+                batch_index: int, judge_results: list[JudgeResult] | None
+            ):
+                """This *does* store judge results in the session state."""
+                if callback and judge_results:
+                    async with lock:
+                        rsession.judge_results.extend(judge_results)
+                        await callback(trim_messages_from_state(rsession))
+
+                        if len(rsession.judge_results) >= cancel_at_num_results:
+                            tg.cancel_scope.cancel()
+
+            return _judge_results_callback
+
+        async def _llm_callback(batch_index: int, llm_output: LLMOutput):
+            """This *does NOT* store messages in the session state.
+            The message is added at the end to avoid polluting the history with a bunch of partials.
+            """
             if callback and (completion := llm_output.first):
-                await callback(
-                    rsession.model_copy(
-                        update={
-                            "messages": messages[
-                                2:
-                            ]  # Don't show the first system and user messages
-                            + [
-                                AssistantMessage(
-                                    content=completion.text or "",
-                                    tool_calls=completion.tool_calls,
-                                )
-                            ]
-                        }
+                for tool_call in completion.tool_calls or []:
+                    # Try to optimistically close the arguments for streaming
+                    raw_args = tool_call.arguments.get("__parse_error_raw_args")
+                    if raw_args is not None:
+                        if parsed_args := _optimistic_close_json(raw_args):
+                            tool_call.arguments = json.loads(parsed_args)
+
+                async with lock:
+                    await callback(
+                        trim_messages_from_state(
+                            rsession.model_copy(
+                                update={
+                                    "messages": rsession.messages
+                                    + [
+                                        AssistantMessage(
+                                            content=completion.text or "",
+                                            tool_calls=completion.tool_calls,
+                                        )
+                                    ]
+                                }
+                            )
+                        )
                     )
-                )
 
         logger.info(f"Running one turn of refinement session: {sq_rsession}")
 
@@ -286,62 +400,74 @@ class RefinementService:
         # 3. Tool call messages: need to have the agent decide what to do next given the responses
         # In other words, skip when the last message is an assistant message with no tool calls
         for _ in range(MAX_ITERS_PER_TURN):
-            # If the last message is an assistant message with no tool calls, break
-            if len(messages) > 0:
-                last_message = messages[-1]
-                if last_message.role == "assistant" and not last_message.tool_calls:
-                    break
+            assert len(rsession.messages) > 0, "this should never fail"
 
             # Now handle the message sequence based on the last message
-            last_message = messages[-1]
+            last_message = rsession.messages[-1]
+
+            # If the last message is an assistant message with no tool calls, break
+            if last_message.role == "assistant" and not last_message.tool_calls:
+                break
 
             # If system: generate the first user message with sample data
             if last_message.role == "system":
+                # Add a welcome message
+                rsession.messages.append(AssistantMessage(content=WELCOME_MESSAGE))
+                if callback:
+                    await callback(trim_messages_from_state(rsession))
+
                 # Compute the max recall examples
                 agent_runs = await self.mono_svc.get_agent_runs(ctx)
 
-                N_SAMPLE = 100
-                if len(agent_runs) > N_SAMPLE:
+                N_SAMPLE_AGENT_RUNS, N_TARGET_RESULTS = 100, 100
+                if len(agent_runs) > N_SAMPLE_AGENT_RUNS:
                     import random
 
                     random.seed(0)
-                    agent_runs = random.sample(agent_runs, N_SAMPLE)
+                    agent_runs = random.sample(agent_runs, N_SAMPLE_AGENT_RUNS)
 
-                max_recall_examples = await self.rubric_svc.evaluate_rubric_for_user(
-                    agent_runs,
-                    sq_rubric.to_pydantic(),
-                    user=ctx.user,
-                    max_recall=True,
-                )
+                # Get judge results
+                async with anyio.create_task_group() as tg:
+                    await self.rubric_svc.evaluate_rubric_for_user(
+                        agent_runs,
+                        sq_rubric.to_pydantic(),
+                        user=ctx.user,
+                        callback=_make_cancellable_judge_results_callback(tg, N_TARGET_RESULTS),
+                        max_recall=True,
+                    )
 
                 # Append as a new user message
-                messages.append(
+                rsession.messages.append(
                     UserMessage(
                         content=FIRST_USER_MESSAGE_TEMPLATE.format(
-                            rubric=sq_rubric.high_level_description,
+                            rubric=sq_rubric.rubric_text,
                             examples="\n".join(
                                 [
-                                    ex
-                                    for sublist in max_recall_examples
-                                    if sublist is not None
-                                    for ex in sublist
+                                    result.value
+                                    for result in rsession.judge_results
+                                    if result.value is not None
                                 ]
                             ),
                         )
                     )
                 )
 
+                # Set status to initial feedback and notify callback
+                rsession.status = RefinementStatus.INITIAL_FEEDBACK
+                if callback:
+                    await callback(trim_messages_from_state(rsession))
+
             # If user or tool: generate asst continuation
             if last_message.role == "user" or last_message.role == "tool":
                 outputs = await get_llm_completions_async(
-                    [messages],
+                    [rsession.messages],
                     PROVIDER_PREFERENCES.refine_agent,
-                    tools=[create_set_rubric_tool()],
+                    tools=[create_set_rubric_tool(), create_set_status_tool()],
                     tool_choice="auto",
                     max_new_tokens=8192,
                     timeout=180.0,
                     use_cache=True,
-                    streaming_callback=_streaming_callback,
+                    streaming_callback=_llm_callback,
                 )
 
                 # Parse completion and append to messages
@@ -350,7 +476,7 @@ class RefinementService:
                 assistant_msg = AssistantMessage(
                     content=completion.text or "", tool_calls=completion.tool_calls
                 )
-                messages.append(assistant_msg)
+                rsession.messages.append(assistant_msg)
 
             # If assistant with tool calls: execute tool calls
             elif last_message.role == "assistant" and (tool_calls := last_message.tool_calls):
@@ -369,7 +495,7 @@ class RefinementService:
                             # Apply tool update and message
                             updated_rubric = current_sq_rubric.to_pydantic().model_copy(deep=True)
                             tool_result_msg = execute_set_rubric(updated_rubric, tc)
-                            messages.append(tool_result_msg)
+                            rsession.messages.append(tool_result_msg)
 
                             # Persist new rubric as a new version
                             await self.rubric_svc.add_rubric_version(
@@ -377,10 +503,13 @@ class RefinementService:
                             )
                             # Point session's rubric_version pointer to the new version
                             sq_rsession.rubric_version = updated_rubric.version
+                        elif tc.function == "set_status":
+                            tool_result_msg = execute_set_status(rsession, tc)
+                            rsession.messages.append(tool_result_msg)
                         else:
                             raise ValueError(f"Unsupported tool call: {tc.function}")
                     except Exception as e:
-                        messages.append(
+                        rsession.messages.append(
                             ToolMessage(
                                 content=f"Error executing tool call: {e}",
                                 tool_call_id=tc.id,
@@ -388,7 +517,10 @@ class RefinementService:
                         )
 
             # Update session
-            await self._update_session(sq_rsession, [m.model_dump() for m in messages])
+            await self._update_session_messages(sq_rsession, rsession.messages)
+            await self._update_session_judge_results(sq_rsession, rsession.judge_results)
+            await self._update_session_status(sq_rsession, rsession.status)
+
             if callback:
                 await callback(trim_messages_from_state(sq_rsession.to_pydantic()))
 

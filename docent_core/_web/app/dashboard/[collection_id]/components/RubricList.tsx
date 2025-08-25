@@ -1,11 +1,11 @@
 'use client';
 
-import { Plus, Play, FileText, Trash2, Pause } from 'lucide-react';
+import { Plus, Play, FileText, Trash2, Pause, PickaxeIcon } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
 import { type Rubric } from '@/app/store/rubricSlice';
 import { Button } from '@/components/ui/button';
 import { useRouter } from 'next/navigation';
-import { useCreateOrGetSessionMutation } from '@/app/api/refinementApi';
+import { useCreateOrGetRefinementSessionMutation } from '@/app/api/refinementApi';
 import {
   useGetRubricsQuery,
   useCreateRubricMutation,
@@ -30,8 +30,10 @@ function RubricCard({
 }: RubricCardProps) {
   const dispatch = useAppDispatch();
   const router = useRouter();
-  const [createOrGetSession, { isLoading: isCreatingSession }] =
-    useCreateOrGetSessionMutation();
+  const [
+    createOrGetRefinementSession,
+    { isLoading: isCreatingRefinementSession },
+  ] = useCreateOrGetRefinementSessionMutation();
 
   // Get job status for this rubric
   const { data: jobDetails } = useGetRubricJobStatusQuery({
@@ -79,29 +81,13 @@ function RubricCard({
     }
   };
 
-  const getRubricPreview = (rubric: Rubric) => {
-    const description = rubric.high_level_description || 'No description';
-    const inclusionCount = rubric.inclusion_rules.length;
-    const exclusionCount = rubric.exclusion_rules.length;
-
-    return {
-      description:
-        description.length > 100
-          ? description.substring(0, 100) + '...'
-          : description,
-      inclusionCount,
-      exclusionCount,
-    };
-  };
-
-  const preview = getRubricPreview(rubric);
   const hasActiveJob =
     jobDetails?.status === 'pending' || jobDetails?.status === 'running';
 
   const handleClickRefine = async () => {
     if (!collectionId) return;
     try {
-      const res = await createOrGetSession({
+      const res = await createOrGetRefinementSession({
         collectionId,
         rubricId: rubric.id,
       }).unwrap();
@@ -135,40 +121,17 @@ function RubricCard({
           <FileText className="h-3.5 w-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
           <div className="flex-1 min-w-0">
             <p className="text-xs font-mono text-primary line-clamp-2">
-              {preview.description}
+              {rubric.rubric_text.length > 100
+                ? rubric.rubric_text.substring(0, 100) + '...'
+                : rubric.rubric_text}
             </p>
-
-            {/* Rule counts */}
-            <div className="flex items-center gap-3 mt-1">
-              {preview.inclusionCount > 0 && (
-                <div className="flex items-center gap-1">
-                  <div className="w-1.5 h-1.5 rounded-full bg-green-text"></div>
-                  <span className="text-[10px] text-green-text">
-                    {preview.inclusionCount} inclusion
-                  </span>
-                </div>
-              )}
-              {preview.exclusionCount > 0 && (
-                <div className="flex items-center gap-1">
-                  <div className="w-1.5 h-1.5 rounded-full bg-red-text"></div>
-                  <span className="text-[10px] text-red-text">
-                    {preview.exclusionCount} exclusion
-                  </span>
-                </div>
-              )}
-              {preview.inclusionCount === 0 && preview.exclusionCount === 0 && (
-                <span className="text-[10px] text-muted-foreground">
-                  No rules defined
-                </span>
-              )}
-            </div>
           </div>
         </div>
       </div>
 
       {/* Action buttons */}
       <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-        {/* {hasWritePermission && (
+        {hasWritePermission && (
           <button
             className={`p-1.5 rounded transition-colors hover:bg-secondary text-muted-foreground hover:text-primary`}
             onClick={(e) => {
@@ -176,10 +139,11 @@ function RubricCard({
               handleClickRefine();
             }}
             title="Refine rubric"
+            disabled={isCreatingRefinementSession}
           >
             <PickaxeIcon className="h-3 w-3" />
           </button>
-        )} */}
+        )}
         <button
           className={`p-1.5 rounded transition-colors
             ${
@@ -252,18 +216,12 @@ export default function RubricList() {
 
     try {
       // Create a new rubric using the API
-      const newRubric = {
-        high_level_description: '',
-        inclusion_rules: [],
-        exclusion_rules: [],
-      };
+      const newRubric = { rubric_text: '' };
 
       await createRubric({
         collectionId,
         rubric: newRubric,
       }).unwrap();
-
-      // The rubric will be automatically added to the store via extraReducers
     } catch (error) {
       console.error('Failed to create rubric:', error);
       toast({

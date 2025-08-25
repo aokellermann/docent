@@ -1,15 +1,8 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import { BASE_URL } from '@/app/constants';
 import sseService from '../services/sseService';
-import { ChatMessage } from '@/app/types/transcriptTypes';
-import { setMessages } from '@/app/store/refinementSlice';
+import { RefinementAgentSession } from '@/app/store/refinementSlice';
 import { Rubric } from '@/app/store/rubricSlice';
-
-export interface RefinementAgentSession {
-  id: string;
-  rubric_id: string;
-  messages: ChatMessage[];
-}
 
 export const refinementApi = createApi({
   reducerPath: 'refinementApi',
@@ -19,17 +12,7 @@ export const refinementApi = createApi({
   }),
   tagTypes: ['RefinementSession'],
   endpoints: (build) => ({
-    getCurrentState: build.query<
-      RefinementAgentSession,
-      { collectionId: string; sessionId: string }
-    >({
-      query: ({ collectionId, sessionId }) =>
-        `/${collectionId}/refinement-session/${sessionId}/state`,
-      providesTags: (result) =>
-        result ? [{ type: 'RefinementSession' as const, id: result.id }] : [],
-    }),
-
-    createOrGetSession: build.mutation<
+    createOrGetRefinementSession: build.mutation<
       { id: string },
       { collectionId: string; rubricId: string }
     >({
@@ -56,10 +39,15 @@ export const refinementApi = createApi({
     }),
 
     listenToRefinementJob: build.query<
-      { isSSEConnected: boolean },
+      { isSSEConnected: boolean; rsession: RefinementAgentSession | null },
       { collectionId: string; jobId: string }
     >({
-      queryFn: () => ({ data: { isSSEConnected: true } }),
+      queryFn: () => ({
+        data: {
+          isSSEConnected: true,
+          rsession: null,
+        },
+      }),
       keepUnusedDataFor: 0,
       async onCacheEntryAdded(
         { collectionId, jobId },
@@ -70,7 +58,9 @@ export const refinementApi = createApi({
         const { onCancel } = sseService.createEventSource(
           url,
           (data: RefinementAgentSession) => {
-            dispatch(setMessages(data.messages));
+            updateCachedData((draft) => {
+              draft.rsession = data;
+            });
           },
           () => {
             updateCachedData((draft) => {
@@ -117,9 +107,7 @@ export const refinementApi = createApi({
 });
 
 export const {
-  useGetCurrentStateQuery,
-  useLazyGetCurrentStateQuery,
-  useCreateOrGetSessionMutation,
+  useCreateOrGetRefinementSessionMutation,
   useStartRefinementSessionMutation,
   usePostMessageToRefinementSessionMutation,
   usePostRubricUpdateToRefinementSessionMutation,

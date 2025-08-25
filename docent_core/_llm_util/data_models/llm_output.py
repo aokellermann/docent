@@ -180,6 +180,7 @@ def finalize_llm_output_partial(partial: LLMOutputPartial) -> LLMOutput:
             parse_error = None
         # If the tool call arguments are not valid JSON, return an empty dict with the error
         except Exception as e:
+            arguments = {"__parse_error_raw_args": tc_partial.arguments_raw}
             parse_error = f"Couldn't parse tool call arguments as JSON: {e}. Original input: {tc_partial.arguments_raw}"
 
         return ToolCall(

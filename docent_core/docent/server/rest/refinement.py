@@ -50,8 +50,19 @@ async def get_refinement_session(
 async def create_refinement_session(
     sq_rubric: SQLARubric = Depends(get_rubric),
     refinement_svc: RefinementService = Depends(get_refinement_service),
+    analytics: AnalyticsClient = Depends(use_posthog_user_context),
 ):
     sq_rsession = await refinement_svc.get_or_create_session(sq_rubric)
+
+    analytics.track_event(
+        "refinement_session_created",
+        properties={
+            "collection_id": sq_rubric.collection_id,
+            "rubric_id": sq_rubric.id,
+            "rubric_text": sq_rubric.to_pydantic().rubric_text,
+        },
+    )
+
     return sq_rsession
 
 
@@ -150,7 +161,7 @@ async def post_rubric_update_to_refinement_session(
         sq_rsession,
         (
             f"The user updated the rubric (now v{rubric.version}) content to:\n\n"
-            f"{rubric.high_level_description}"
+            f"{rubric.rubric_text}"
         ),
     )
 
@@ -164,9 +175,7 @@ async def post_rubric_update_to_refinement_session(
             "collection_id": ctx.collection_id,
             "session_id": session_id,
             "rubric_id": rubric.id,
-            "high_level_description": rubric.high_level_description,
-            "inclusion_rules": rubric.inclusion_rules,
-            "exclusion_rules": rubric.exclusion_rules,
+            "text": rubric.rubric_text,
         },
     )
 

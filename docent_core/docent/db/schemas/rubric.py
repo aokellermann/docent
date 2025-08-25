@@ -44,11 +44,14 @@ class SQLARubric(SQLABase):
         String(36), ForeignKey(f"{TABLE_COLLECTION}.id"), nullable=False, index=True
     )
 
-    high_level_description: Mapped[str] = mapped_column(Text, nullable=False)
-    inclusion_rules: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
-    exclusion_rules: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
-
+    rubric_text: Mapped[str] = mapped_column(Text, nullable=False)
     judge_model: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+
+    # --- START DEPRECATED ---
+    high_level_description: Mapped[str] = mapped_column(Text, nullable=True)
+    inclusion_rules: Mapped[list[str]] = mapped_column(JSONB, nullable=True)
+    exclusion_rules: Mapped[list[str]] = mapped_column(JSONB, nullable=True)
+    # --- END DEPRECATED ---
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False
@@ -83,9 +86,7 @@ class SQLARubric(SQLABase):
             id=rubric.id,
             version=rubric.version,
             collection_id=collection_id,
-            high_level_description=rubric.high_level_description,
-            inclusion_rules=rubric.inclusion_rules,
-            exclusion_rules=rubric.exclusion_rules,
+            rubric_text=rubric.rubric_text,
             judge_model=rubric.judge_model.model_dump() if rubric.judge_model else None,
         )
 
@@ -102,9 +103,7 @@ class SQLARubric(SQLABase):
         return Rubric(
             id=self.id,
             version=self.version,
-            high_level_description=self.high_level_description,
-            inclusion_rules=self.inclusion_rules,
-            exclusion_rules=self.exclusion_rules,
+            rubric_text=self.rubric_text,
             judge_model=jm,
         )
 

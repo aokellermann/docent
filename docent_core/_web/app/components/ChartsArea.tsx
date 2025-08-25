@@ -172,7 +172,7 @@ export function ChartsArea() {
   if (isLoading) {
     return (
       <div className="flex flex-col resize-y overflow-y-auto min-h-[200px] h-[35%]">
-        <div className="flex items-center justify-center p-4">
+        <div className="flex items-center justify-center p-4 text-sm">
           Loading charts...
         </div>
       </div>
@@ -182,7 +182,7 @@ export function ChartsArea() {
   if (error) {
     return (
       <div className="flex flex-col resize-y overflow-y-auto min-h-[200px] h-[35%]">
-        <div className="flex items-center justify-center p-4 text-red-500">
+        <div className="flex items-center justify-center p-4 text-red-500 text-sm">
           Error loading charts
         </div>
       </div>

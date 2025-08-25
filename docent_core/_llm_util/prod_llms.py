@@ -103,7 +103,10 @@ async def _parallelize_calls(
 
     responses: list[LLMOutput | None] = [None for _ in messages_list]
     pbar = (
-        tqdm(total=len(messages_list), desc=f"Calling {model_name} API")
+        tqdm(
+            total=len(messages_list),
+            desc=f"Calling {model_name} (reasoning_effort={reasoning_effort}) API",
+        )
         if len(messages_list) > 1
         else None
     )

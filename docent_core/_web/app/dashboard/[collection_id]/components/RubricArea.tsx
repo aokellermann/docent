@@ -10,7 +10,7 @@ import {
   useStartEvaluationMutation,
   useCreateRubricMutation,
 } from '../../../api/rubricApi';
-import { useCreateOrGetSessionMutation } from '../../../api/refinementApi';
+import { useCreateOrGetRefinementSessionMutation } from '../../../api/refinementApi';
 import { toast } from '@/hooks/use-toast';
 import QuickSearchBox from './QuickSearchBox';
 import SingleRubricArea from './SingleRubricArea';
@@ -44,17 +44,15 @@ const RubricArea = () => {
   const [createRubric, { isLoading: isCreatingRubric }] =
     useCreateRubricMutation();
   const [createOrGetSession, { isLoading: isCreatingOrGettingSession }] =
-    useCreateOrGetSessionMutation();
-  const handleAddNewRubric = async (highLevelDescription: string) => {
+    useCreateOrGetRefinementSessionMutation();
+  const handleAddNewRubric = async (rubricText: string) => {
     if (!collectionId) return undefined;
 
     try {
       // Create a new rubric using the API
       const rubricId = uuidv4();
       const newRubric = {
-        high_level_description: highLevelDescription,
-        inclusion_rules: [],
-        exclusion_rules: [],
+        rubric_text: rubricText,
         id: rubricId,
       };
 

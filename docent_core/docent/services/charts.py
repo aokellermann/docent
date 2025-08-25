@@ -167,8 +167,8 @@ static_dimensions = [
         short_name="Centroid",
     ),
     ChartDimension(
-        key="r.high_level_description",
-        expression=SQLARubric.high_level_description,
+        key="r.rubric_text",
+        expression=SQLARubric.rubric_text,
         name="Rubric description",
         short_name="Rubric",
     ),

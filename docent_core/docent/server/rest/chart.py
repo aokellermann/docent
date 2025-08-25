@@ -204,7 +204,7 @@ async def get_chart_metadata(
             {
                 "id": rubric.id,
                 "version": rubric.version,
-                "description": rubric.high_level_description,
+                "description": rubric.rubric_text,
             }
             for rubric in rubrics
         ]

@@ -1,42 +1,32 @@
-import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
-import { refinementApi } from '@/app/api/refinementApi';
+import { createSlice } from '@reduxjs/toolkit';
 import { ChatMessage } from '@/app/types/transcriptTypes';
+import { JudgeResultWithCitations } from './rubricSlice';
 
-interface RefinementState {
+export type RefinementStatus =
+  | 'reading_data'
+  | 'initial_feedback'
+  | 'asking_questions'
+  | 'done';
+
+export interface RefinementAgentSession {
+  id: string;
+  rubric_id: string;
+  rubric_version: number;
   messages: ChatMessage[];
+  status: RefinementStatus;
+  judge_results: JudgeResultWithCitations[];
 }
 
-const initialState: RefinementState = {
-  messages: [],
-};
+interface RefinementState {}
+
+const initialState: RefinementState = {};
 
 const refinementSlice = createSlice({
   name: 'refinement',
   initialState,
-  reducers: {
-    setMessages: (state, action: PayloadAction<ChatMessage[]>) => {
-      state.messages = action.payload;
-    },
-    appendMessage: (state, action: PayloadAction<ChatMessage>) => {
-      state.messages.push(action.payload);
-    },
-  },
-  extraReducers: (builder) => {
-    builder.addMatcher(
-      refinementApi.endpoints.getCurrentState.matchFulfilled,
-      (state, { payload }) => {
-        state.messages = payload.messages;
-      }
-    );
-    // match the rsession in the postmessage mutation
-    builder.addMatcher(
-      refinementApi.endpoints.postMessageToRefinementSession.matchFulfilled,
-      (state, { payload }) => {
-        state.messages = payload?.rsession?.messages ?? [];
-      }
-    );
-  },
+  reducers: {},
+  extraReducers: (builder) => {},
 });
 
-export const { setMessages, appendMessage } = refinementSlice.actions;
+// export const {} = refinementSlice.actions;
 export default refinementSlice.reducer;

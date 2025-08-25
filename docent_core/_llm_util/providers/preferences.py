@@ -204,16 +204,11 @@ class ProviderPreferences(BaseModel):
             ModelOption(
                 provider="openai",
                 model_name="gpt-5",
-                reasoning_effort="medium",
+                reasoning_effort="low",
             ),
             ModelOption(
                 provider="anthropic",
                 model_name="claude-sonnet-4-20250514",
-                reasoning_effort="medium",
-            ),
-            ModelOption(
-                provider="openai",
-                model_name="o3",
                 reasoning_effort="medium",
             ),
         ]
@@ -252,13 +247,13 @@ class ProviderPreferences(BaseModel):
         """
         return [
             ModelOption(
-                provider="anthropic",
-                model_name="claude-sonnet-4-20250514",
+                provider="openai",
+                model_name="gpt-5",
                 reasoning_effort="medium",
             ),
             ModelOption(
-                provider="openai",
-                model_name="gpt-5",
+                provider="anthropic",
+                model_name="claude-sonnet-4-20250514",
                 reasoning_effort="medium",
             ),
         ]
@@ -273,8 +268,8 @@ class ProviderPreferences(BaseModel):
         return [
             ModelOption(
                 provider="openai",
-                model_name="o3",
-                reasoning_effort="medium",
+                model_name="gpt-5-mini",
+                reasoning_effort="low",
             ),
         ]
 

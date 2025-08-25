@@ -223,9 +223,7 @@ async def start_eval_rubric_job(
             "collection_id": collection_id,
             "rubric_id": rubric_id,
             # Log the rubric content
-            "high_level_description": sqla_rubric.high_level_description,
-            "inclusion_rules": sqla_rubric.inclusion_rules,
-            "exclusion_rules": sqla_rubric.exclusion_rules,
+            "text": sqla_rubric.rubric_text,
             "judge_model": sqla_rubric.judge_model,
             "is_byok": is_byok,
         },

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 
 import { Button } from '@/components/ui/button';
@@ -31,6 +31,7 @@ import {
   useClearClustersMutation,
 } from '../../../api/rubricApi';
 import { toast } from '@/hooks/use-toast';
+import { useCreateOrGetRefinementSessionMutation } from '@/app/api/refinementApi';
 
 interface SingleRubricAreaProps {
   rubricId: string;
@@ -274,6 +275,23 @@ export default function SingleRubricArea({ rubricId }: SingleRubricAreaProps) {
     });
   };
 
+  const [
+    createOrGetRefinementSession,
+    { isLoading: isCreatingRefinementSession },
+  ] = useCreateOrGetRefinementSessionMutation();
+  const handleStartRefinement = async () => {
+    const result = await createOrGetRefinementSession({
+      collectionId,
+      rubricId,
+    }).unwrap();
+    router.push(`/dashboard/${collectionId}/refine/${result.id}`);
+  };
+
+  const uniqueAgentRunsInJudgeResults = useMemo(
+    () => new Set(Object.values(judgeResultsMap).map((r) => r.agent_run_id)),
+    [judgeResultsMap]
+  );
+
   return (
     <div className="space-y-2">
       <RubricEditor
@@ -290,7 +308,7 @@ export default function SingleRubricArea({ rubricId }: SingleRubricAreaProps) {
       {/* Progress bar */}
       {activeRubricJobId && (
         <ProgressBar
-          current={Object.keys(judgeResultsMap ?? {}).length}
+          current={uniqueAgentRunsInJudgeResults.size}
           total={totalAgentRuns}
           paused={false}
         />
@@ -317,6 +335,19 @@ export default function SingleRubricArea({ rubricId }: SingleRubricAreaProps) {
         >
           Share
         </Button>
+
+        {/* Refinement controls - available when nothing else is running */}
+        {!activeRubricJobId && !activeClusteringJobId && hasWritePermission && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={handleStartRefinement}
+            disabled={isCreatingRefinementSession}
+          >
+            Refine
+          </Button>
+        )}
 
         {/* Clustering controls */}
         {!activeRubricJobId && hasWritePermission && (

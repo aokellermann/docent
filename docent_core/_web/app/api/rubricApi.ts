@@ -9,18 +9,15 @@ import {
 // Types based on the backend models
 export interface CreateRubricRequest {
   rubric: {
-    high_level_description: string;
-    inclusion_rules: string[];
-    exclusion_rules: string[];
+    id?: string;
+    rubric_text: string;
   };
 }
 
 export interface UpdateRubricRequest {
   rubric: {
     id: string;
-    high_level_description: string;
-    inclusion_rules: string[];
-    exclusion_rules: string[];
+    rubric_text: string;
     judge_model: JudgeModel | null;
   };
 }

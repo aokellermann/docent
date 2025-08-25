@@ -2,8 +2,20 @@ import { useState } from 'react';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 
-import { Search, AlertTriangle, Earth, HelpCircle } from 'lucide-react';
+import {
+  Search,
+  AlertTriangle,
+  Earth,
+  HelpCircle,
+  FileSearch,
+} from 'lucide-react';
 import { useHasCollectionWritePermission } from '@/lib/permissions/hooks';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 const DEFAULT_PLACEHOLDER_TEXT =
   'Describe an agent behavior you want to explore...';
@@ -66,7 +78,7 @@ export default function QuickSearchBox({
   /**
    * Search mode
    */
-  const [searchMode, setSearchMode] = useState<'explore' | 'full'>('explore');
+  const [searchMode, setSearchMode] = useState<'explore' | 'full'>('full');
 
   const hasWritePermission = useHasCollectionWritePermission();
 
@@ -116,16 +128,6 @@ export default function QuickSearchBox({
             <Button
               type="button"
               size="sm"
-              className="gap-2 h-7 text-xs"
-              onClick={() => onSubmit(searchQueryTextboxValue, 'full')}
-              disabled={!hasWritePermission || emptyInput || isLoading}
-            >
-              <Search className="size-3 -ml-0.5" />
-              Search
-            </Button>
-            {/* <Button
-              type="button"
-              size="sm"
               className="gap-2 h-7 text-xs rounded-r-none border-r-0"
               onClick={() => onSubmit(searchQueryTextboxValue, searchMode)}
               disabled={!hasWritePermission || emptyInput || isLoading}
@@ -162,29 +164,29 @@ export default function QuickSearchBox({
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuItem
-                  onClick={() => setSearchMode('explore')}
-                  className="text-xs"
-                >
-                  <div className="flex flex-col">
-                    <span>Explore</span>
-                    <span className="text-muted-foreground text-[11px]">
-                      Refine a rubric with an agent
-                    </span>
-                  </div>
-                </DropdownMenuItem>
-                <DropdownMenuItem
                   onClick={() => setSearchMode('full')}
                   className="text-xs"
                 >
                   <div className="flex flex-col">
                     <span>Direct Search</span>
                     <span className="text-muted-foreground text-[11px]">
-                      Run a search across all data
+                      Run a quick search across all data
+                    </span>
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setSearchMode('explore')}
+                  className="text-xs"
+                >
+                  <div className="flex flex-col">
+                    <span>Create a rubric (Preview)</span>
+                    <span className="text-muted-foreground text-[11px]">
+                      Refine a rubric with our agent
                     </span>
                   </div>
                 </DropdownMenuItem>
               </DropdownMenuContent>
-            </DropdownMenu> */}
+            </DropdownMenu>
           </div>
         </fieldset>
       </div>

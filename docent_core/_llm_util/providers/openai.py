@@ -628,6 +628,7 @@ def _parse_openai_tool_call(tc: ChatCompletionMessageToolCall) -> ToolCall:
         parse_error = None
     # If the tool call arguments are not valid JSON, return an empty dict with the error
     except Exception as e:
+        arguments = {"__parse_error_raw_args": tc.function.arguments}
         parse_error = f"Couldn't parse tool call arguments as JSON: {e}. Original input: {tc.function.arguments}"
 
     return ToolCall(

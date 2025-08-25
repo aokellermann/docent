@@ -372,52 +372,6 @@ class RubricService:
                 except anyio.get_cancelled_exc_class():
                     logger.info(f"Rubric evaluation cancelled after reaching {num_results} results")
 
-            # # TODO(vincent): for now we assume refinement <-> has max results, full eval <-> no max results
-            # if max_results is None:
-            #     return
-
-            # num_new_results = 0
-            # rubric_indices = [i for i, result in enumerate(rubric_results) if result is not None]
-
-            # # TODO(vincent): optimize this later, don't need to wait on first run to finish before starting second run
-
-            # async with anyio.create_task_group() as tg:
-            #     cancel_scope = tg.cancel_scope
-
-            #     async def _new_callback(batch_index: int, judge_results: list[JudgeResult] | None):
-            #         if judge_results is None:
-            #             return
-
-            #         nonlocal num_new_results
-            #         num_new_results += sum(1 for j in judge_results if j.value is not None)
-
-            #         if (
-            #             num_new_results >= job.job_json.get("max_results", 0)
-            #             and not cancel_scope.cancel_called
-            #         ):
-            #             cancel_scope.cancel()
-
-            #         # Use the session_cm_factory to get a session that commits immediately
-            #         await writer.add_all(
-            #             [
-            #                 SQLAJudgeResult.from_pydantic(judge_result)
-            #                 for judge_result in judge_results
-            #             ]
-            #         )
-
-            #     try:
-            #         await evaluate_rubric_near_misses(
-            #             [agent_runs[i] for i in rubric_indices],
-            #             rubric.to_pydantic(),
-            #             [cast(list[str], rubric_results[i]) for i in rubric_indices],
-            #             model_options=PROVIDER_PREFERENCES.execute_search,
-            #             callback=_new_callback,
-            #         )
-            #     except anyio.get_cancelled_exc_class():
-            #         logger.info(
-            #             f"Near misses evaluation cancelled after reaching {num_new_results} new results"
-            #         )
-
     async def get_active_job_for_rubric(self, rubric_id: str) -> SQLAJob | None:
         return await self._get_active_rubric_job(self.session, rubric_id)
 
@@ -585,7 +539,7 @@ class RubricService:
             ]
 
             # Propose centroids
-            guidance = f"These are results for the rubric: {rubric.text}"
+            guidance = f"These are results for the rubric: {rubric.rubric_text}"
             centroids: list[str] = await propose_clusters(
                 [str(j.value) for j in judge_results if j.result_type == result_type],
                 extra_instructions_list=[guidance],

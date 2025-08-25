@@ -1,21 +1,9 @@
 'use client';
 
-import {
-  Pencil,
-  Trash,
-  Square,
-  Check,
-  ArrowDown,
-  ArrowUp,
-  Plus,
-  Save,
-  ChevronLeft,
-  ChevronRight,
-} from 'lucide-react';
+import { Save, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
 import { skipToken } from '@reduxjs/toolkit/query';
 
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -115,7 +103,7 @@ function DescriptionInlineDiff({
   }
 
   return (
-    <div className="rounded-sm border-0 bg-background p-2">
+    <div className="h-[40vh] rounded-sm border-0 bg-background p-2 overflow-y-auto custom-scrollbar">
       {/* <div className="text-[11px] uppercase text-muted-foreground mb-1">
         Description changes
       </div> */}
@@ -217,16 +205,8 @@ export default function RubricEditor({
       : skipToken
   );
 
-  // Inline word-level diff preview for the high-level description (factored component used below)
-
   // Inline editing state
-  const [editingInclusionRule, setEditingInclusionRule] = useState<
-    number | null
-  >(null);
-  const [editingExclusionRule, setEditingExclusionRule] = useState<
-    number | null
-  >(null);
-  const [editingText, setEditingText] = useState<string>('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Helper function to create a new rubric with updates
   const updateRubric = (updates: Partial<Rubric>) => {
@@ -244,121 +224,7 @@ export default function RubricEditor({
     e: React.ChangeEvent<HTMLTextAreaElement>
   ) => {
     if (!editable) return;
-    updateRubric({ high_level_description: e.target.value });
-  };
-
-  const handleEditInclusionRule = (index: number) => {
-    if (!editable) return;
-    // Cancel any existing edit
-    setEditingExclusionRule(null);
-    setEditingInclusionRule(index);
-    setEditingText(rubric?.inclusion_rules[index] || '');
-  };
-
-  const handleEditExclusionRule = (index: number) => {
-    if (!editable) return;
-    // Cancel any existing edit
-    setEditingInclusionRule(null);
-    setEditingExclusionRule(index);
-    setEditingText(rubric?.exclusion_rules[index] || '');
-  };
-
-  const handleSaveEdit = () => {
-    if (editingInclusionRule !== null) {
-      const newInclusionRules = [...(rubric?.inclusion_rules || [])];
-      newInclusionRules[editingInclusionRule] = editingText;
-      updateRubric({ inclusion_rules: newInclusionRules });
-      setEditingInclusionRule(null);
-    } else if (editingExclusionRule !== null) {
-      const newExclusionRules = [...(rubric?.exclusion_rules || [])];
-      newExclusionRules[editingExclusionRule] = editingText;
-      updateRubric({ exclusion_rules: newExclusionRules });
-      setEditingExclusionRule(null);
-    }
-    setEditingText('');
-  };
-
-  const handleCancelEdit = () => {
-    setEditingInclusionRule(null);
-    setEditingExclusionRule(null);
-    setEditingText('');
-  };
-
-  const handleDeleteInclusionRule = (index: number) => {
-    if (!editable) return;
-    const newInclusionRules = rubric?.inclusion_rules.filter(
-      (_: string, i: number) => i !== index
-    );
-    updateRubric({ inclusion_rules: newInclusionRules });
-  };
-
-  const handleDeleteExclusionRule = (index: number) => {
-    if (!editable) return;
-    const newExclusionRules = rubric?.exclusion_rules.filter(
-      (_: string, i: number) => i !== index
-    );
-    updateRubric({ exclusion_rules: newExclusionRules });
-  };
-
-  const handleMoveInclusionToExclusion = (index: number) => {
-    if (!editable) return;
-    const rule = rubric?.inclusion_rules[index];
-    if (!rule) return;
-
-    const newInclusionRules = rubric.inclusion_rules.filter(
-      (_: string, i: number) => i !== index
-    );
-    const newExclusionRules = [...rubric.exclusion_rules, rule];
-    updateRubric({
-      inclusion_rules: newInclusionRules,
-      exclusion_rules: newExclusionRules,
-    });
-  };
-
-  const handleMoveExclusionToInclusion = (index: number) => {
-    if (!editable) return;
-    const rule = rubric?.exclusion_rules[index];
-    if (!rule) return;
-
-    const newExclusionRules = rubric?.exclusion_rules.filter(
-      (_: string, i: number) => i !== index
-    );
-    const newInclusionRules = [...(rubric?.inclusion_rules || []), rule];
-    updateRubric({
-      inclusion_rules: newInclusionRules,
-      exclusion_rules: newExclusionRules,
-    });
-  };
-
-  const handleAddInclusionRule = () => {
-    if (!editable) return;
-    // Cancel any existing edit
-    setEditingExclusionRule(null);
-    const newInclusionRules = [...(rubric?.inclusion_rules || []), ''];
-    updateRubric({ inclusion_rules: newInclusionRules });
-    const newIndex = newInclusionRules.length - 1;
-    setEditingInclusionRule(newIndex);
-    setEditingText('');
-  };
-
-  const handleAddExclusionRule = () => {
-    if (!editable) return;
-    // Cancel any existing edit
-    setEditingInclusionRule(null);
-    const newExclusionRules = [...(rubric?.exclusion_rules || []), ''];
-    updateRubric({ exclusion_rules: newExclusionRules });
-    const newIndex = newExclusionRules.length - 1;
-    setEditingExclusionRule(newIndex);
-    setEditingText('');
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSaveEdit();
-    } else if (e.key === 'Escape') {
-      handleCancelEdit();
-    }
+    updateRubric({ rubric_text: e.target.value });
   };
 
   // Version control handlers
@@ -396,11 +262,7 @@ export default function RubricEditor({
   const hasChanges = useMemo(() => {
     if (!editable) return false;
     return (
-      rubric?.high_level_description !== remoteRubric?.high_level_description ||
-      JSON.stringify(rubric?.inclusion_rules ?? []) !==
-        JSON.stringify(remoteRubric?.inclusion_rules ?? []) ||
-      JSON.stringify(rubric?.exclusion_rules ?? []) !==
-        JSON.stringify(remoteRubric?.exclusion_rules ?? []) ||
+      rubric?.rubric_text !== remoteRubric?.rubric_text ||
       JSON.stringify(rubric?.judge_model) !==
         JSON.stringify(remoteRubric?.judge_model)
     );
@@ -489,14 +351,14 @@ export default function RubricEditor({
           <div className="relative overflow-hidden rounded-md border bg-background focus-within:ring-1 focus-within:ring-ring">
             {showDiff && prevRubricRemote && rubric ? (
               <DescriptionInlineDiff
-                previous={prevRubricRemote.high_level_description || ''}
-                current={rubric.high_level_description || ''}
+                previous={prevRubricRemote.rubric_text || ''}
+                current={rubric.rubric_text || ''}
               />
             ) : (
               <Textarea
-                className="min-h-[10rem] resize-y border-0 p-2 shadow-none focus-visible:ring-0 text-xs font-mono"
+                className="h-[40vh] max-h-[50vh] resize-y border-0 p-2 shadow-none focus-visible:ring-0 text-xs font-mono"
                 placeholder="Enter a high-level description of what this rubric evaluates..."
-                value={rubric?.high_level_description || ''}
+                value={rubric?.rubric_text || ''}
                 onChange={handleDescriptionChange}
                 disabled={isDisabled}
                 style={
@@ -507,276 +369,102 @@ export default function RubricEditor({
           </div>
         </div>
 
-        {/* Inclusion Rules */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between text-xs text-primary">
-            Inclusion Rules
-          </div>
-          <div className="space-y-0.5">
-            {rubric?.inclusion_rules.map((rule: string, index: number) => (
-              <div
-                key={index}
-                className={`group flex items-center gap-2 py-1.5 px-2 rounded border transition-all duration-200 ${
-                  editingInclusionRule === index
-                    ? 'border-green-border bg-green-bg/60 shadow-md'
-                    : 'border-green-border bg-green-bg/30 hover:bg-green-bg/50 hover:shadow-sm'
-                }`}
-              >
-                <div className="w-1.5 h-1.5 rounded-full bg-green-text flex-shrink-0"></div>
-                {editingInclusionRule === index ? (
-                  <div className="flex-1 flex items-center gap-2">
-                    <Input
-                      className="text-xs font-mono bg-transparent border-0 shadow-none focus-visible:ring-0 p-0 h-auto rounded-none"
-                      value={editingText}
-                      onChange={(e) => setEditingText(e.target.value)}
-                      onKeyDown={handleKeyDown}
-                      onBlur={handleSaveEdit}
-                      autoFocus
-                    />
-                    <div className="flex items-center gap-1">
-                      <button
-                        className="hover:bg-green-bg/60 rounded p-0.5 text-muted-foreground hover:text-primary transition-colors"
-                        onClick={handleSaveEdit}
-                        title="Save"
-                      >
-                        <Check className="h-3 w-3" />
-                      </button>
-                      <button
-                        className="hover:bg-green-bg/60 rounded p-0.5 text-muted-foreground hover:text-red-text transition-colors"
-                        onClick={handleCancelEdit}
-                        title="Cancel"
-                      >
-                        <Square className="h-3 w-3" />
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex-1 text-xs text-primary font-mono">
-                      {rule}
-                    </div>
-                    {editable && (
-                      <div className="flex items-center gap-1">
-                        <button
-                          className="hover:bg-green-bg/60 rounded p-0.5 text-muted-foreground hover:text-primary transition-colors"
-                          disabled={isDisabled}
-                          onClick={() => handleEditInclusionRule(index)}
-                          title="Edit rule"
-                        >
-                          <Pencil className="h-3 w-3" />
-                        </button>
-                        <button
-                          className="hover:bg-green-bg/60 rounded p-0.5 text-muted-foreground hover:text-red-text transition-colors"
-                          disabled={isDisabled}
-                          onClick={() => handleMoveInclusionToExclusion(index)}
-                          title="Move to exclusion rules"
-                        >
-                          <ArrowDown className="h-3 w-3" />
-                        </button>
-                        <button
-                          className="hover:bg-green-bg/60 rounded p-0.5 text-muted-foreground hover:text-red-text transition-colors"
-                          disabled={isDisabled}
-                          onClick={() => handleDeleteInclusionRule(index)}
-                          title="Delete rule"
-                        >
-                          <Trash className="h-3 w-3" />
-                        </button>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            ))}
-            {editable && (
-              <button
-                className="flex items-center gap-1 py-1 px-2 text-[11px] text-muted-foreground hover:text-green-text transition-colors"
-                disabled={isDisabled}
-                onClick={handleAddInclusionRule}
-                title="Add inclusion rule"
-              >
-                <Plus className="h-3 w-3" />
-                <span>Add rule</span>
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Exclusion Rules */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between text-xs text-primary">
-            Exclusion Rules
-          </div>
-          <div className="space-y-0.5">
-            {rubric?.exclusion_rules.map((rule: string, index: number) => (
-              <div
-                key={index}
-                className={`group flex items-center gap-2 py-1.5 px-2 rounded border transition-all duration-200 ${
-                  editingExclusionRule === index
-                    ? 'border-red-border bg-red-bg/60 shadow-md'
-                    : 'border-red-border bg-red-bg/30 hover:bg-red-bg/50 hover:shadow-sm'
-                }`}
-              >
-                <div className="w-1.5 h-1.5 rounded-full bg-red-text flex-shrink-0"></div>
-                {editingExclusionRule === index ? (
-                  <div className="flex-1 flex items-center gap-2">
-                    <Input
-                      className="text-xs font-mono bg-transparent border-0 shadow-none focus-visible:ring-0 p-0 h-auto rounded-none"
-                      value={editingText}
-                      onChange={(e) => setEditingText(e.target.value)}
-                      onKeyDown={handleKeyDown}
-                      onBlur={handleSaveEdit}
-                      autoFocus
-                    />
-                    <div className="flex items-center gap-1">
-                      <button
-                        className="hover:bg-red-bg/60 rounded p-0.5 text-muted-foreground hover:text-primary transition-colors"
-                        onClick={handleSaveEdit}
-                        title="Save"
-                      >
-                        <Check className="h-3 w-3" />
-                      </button>
-                      <button
-                        className="hover:bg-red-bg/60 rounded p-0.5 text-muted-foreground hover:text-red-text transition-colors"
-                        onClick={handleCancelEdit}
-                        title="Cancel"
-                      >
-                        <Square className="h-3 w-3" />
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex-1 text-xs text-primary font-mono">
-                      {rule}
-                    </div>
-                    {editable && (
-                      <div className="flex items-center gap-1">
-                        <button
-                          className="hover:bg-red-bg/60 rounded p-0.5 text-muted-foreground hover:text-primary transition-colors"
-                          disabled={isDisabled}
-                          onClick={() => handleEditExclusionRule(index)}
-                          title="Edit rule"
-                        >
-                          <Pencil className="h-3 w-3" />
-                        </button>
-                        <button
-                          className="hover:bg-red-bg/60 rounded p-0.5 text-muted-foreground hover:text-green-text transition-colors"
-                          disabled={isDisabled}
-                          onClick={() => handleMoveExclusionToInclusion(index)}
-                          title="Move to inclusion rules"
-                        >
-                          <ArrowUp className="h-3 w-3" />
-                        </button>
-                        <button
-                          className="hover:bg-red-bg/60 rounded p-0.5 text-muted-foreground hover:text-red-text transition-colors"
-                          disabled={isDisabled}
-                          onClick={() => handleDeleteExclusionRule(index)}
-                          title="Delete rule"
-                        >
-                          <Trash className="h-3 w-3" />
-                        </button>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            ))}
-            {editable && (
-              <button
-                className="flex items-center gap-1 py-1 px-2 text-[11px] text-muted-foreground hover:text-red-text transition-colors"
-                disabled={isDisabled}
-                onClick={handleAddExclusionRule}
-                title="Add exclusion rule"
-              >
-                <Plus className="h-3 w-3" />
-                <span>Add rule</span>
-              </button>
-            )}
-          </div>
-        </div>
-
         {rubric && (
-          <div className="pt-4">
-            <label className="block text-xs font-medium text-muted-foreground mb-1">
-              Judge Model
-            </label>
-            <Select
-              value={nameJudgeModel(rubric.judge_model)}
-              onValueChange={(value) => {
-                if (!editable) return;
-                const selected = availableJudgeModels?.find(
-                  (jm) => nameJudgeModel(jm) === value
-                );
-                updateRubric({
-                  judge_model: selected || null,
-                });
-              }}
-              disabled={isDisabled}
+          <div className="space-y-1">
+            <button
+              type="button"
+              className="w-full flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
+              onClick={() => setShowAdvanced((v) => !v)}
             >
-              <SelectTrigger className="w-full h-7 text-xs border bg-background px-2 font-normal">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Default" className="text-xs">
-                  Default
-                </SelectItem>
-                {availableJudgeModels?.map((jm) => (
-                  <SelectItem
-                    key={nameJudgeModel(jm)}
-                    value={nameJudgeModel(jm)}
-                    className="text-xs"
+              {showAdvanced ? (
+                <ChevronDown className="h-3 w-3" />
+              ) : (
+                <ChevronRight className="h-3 w-3" />
+              )}
+              <span className="font-medium">Additional settings</span>
+            </button>
+            {showAdvanced && (
+              <div className="ml-4 border-l p-2 rounded-sm space-y-2">
+                {/* Judge model */}
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">
+                    Judge Model
+                  </label>
+                  <Select
+                    value={nameJudgeModel(rubric.judge_model)}
+                    onValueChange={(value) => {
+                      if (!editable) return;
+                      const selected = availableJudgeModels?.find(
+                        (jm) => nameJudgeModel(jm) === value
+                      );
+                      updateRubric({
+                        judge_model: selected || null,
+                      });
+                    }}
+                    disabled={isDisabled}
                   >
-                    <span className="flex flex-row items-center gap-1">
-                      <span className="flex-1">{nameJudgeModel(jm)}</span>
-                      {jm.uses_byok && <KeyRound className="h-3 w-3" />}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {rubric.judge_model?.uses_byok && (
-              <div className="text-xs text-muted-foreground mt-1">
-                This model uses your own API key.
+                    <SelectTrigger className="w-full h-7 text-xs border bg-background px-2 font-normal">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Default" className="text-xs">
+                        Default
+                      </SelectItem>
+                      {availableJudgeModels?.map((jm) => (
+                        <SelectItem
+                          key={nameJudgeModel(jm)}
+                          value={nameJudgeModel(jm)}
+                          className="text-xs"
+                        >
+                          <span className="flex flex-row items-center gap-1">
+                            <span className="flex-1">{nameJudgeModel(jm)}</span>
+                            {jm.uses_byok && <KeyRound className="h-3 w-3" />}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {rubric.judge_model?.uses_byok && (
+                    <div className="text-xs text-muted-foreground mt-1">
+                      This model uses your own API key.
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
         )}
 
         {/* Save Button */}
-        <div className="flex justify-end pt-2 gap-2">
-          {hasChanges && (
-            <>
-              {onCloseWithoutSave && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    // Reset local changes to the latest remote rubric
-                    if (remoteRubric) {
-                      setLocalRubric(remoteRubric);
-                    }
-                    // Clear any inline edit state
-                    setEditingInclusionRule(null);
-                    setEditingExclusionRule(null);
-                    setEditingText('');
-                    onCloseWithoutSave();
-                  }}
-                >
-                  Cancel
-                </Button>
-              )}
+        {hasChanges && (
+          <div className="flex justify-end gap-2">
+            {onCloseWithoutSave && (
               <Button
                 size="sm"
-                disabled={isDisabled}
-                onClick={handleSave}
-                className="gap-1.5"
+                variant="outline"
+                onClick={() => {
+                  // Reset local changes to the latest remote rubric
+                  if (remoteRubric) {
+                    setLocalRubric(remoteRubric);
+                  }
+                  // Clear any inline edit state
+                  onCloseWithoutSave();
+                }}
               >
-                <Save className="h-4 w-4" />
-                Save changes
+                Cancel
               </Button>
-            </>
-          )}
-        </div>
+            )}
+            <Button
+              size="sm"
+              disabled={isDisabled}
+              onClick={handleSave}
+              className="gap-1.5"
+            >
+              <Save className="h-4 w-4" />
+              Save changes
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

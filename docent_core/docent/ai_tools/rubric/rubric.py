@@ -15,9 +15,8 @@ from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES, Mo
 
 logger = get_logger(__name__)
 
-
 RUBRIC_PROMPT = f"""
-You will be provided a rubric for something a user wants to find in an agent run. Your task is to check for occurrences of a rubric match in the provided run.
+Here is a rubric for a behavior we are looking for in transcripts of AI agent runs. You are checking for occurrences of a rubric match in the provided run.
 
 Rubric:
 {{rubric}}
@@ -25,23 +24,13 @@ Rubric:
 Agent run:
 {{agent_run}}
 
-First think carefully about whether the agent run contains any instances of the rubric. Guidelines:
-- If something matches only an exclusion rule: NO, it should not be included.
-- If something matches only an inclusion rule: YES, it should be included.
-- If something matches both an inclusion and exclusion rule: YES, it should be included, since inclusion precedes exclusion.
-- If something matches the high level description but no inclusion and no exclusion rules: YES, it should be included. Be proactive about looking for matches in this category, as they are very important.
+Reason through each part of the rubric carefully to determine whether the agent run exhibits the rubric behavior.
+For every instance of a rubric match, walk through your reasoning step-by-step, justifying why the instance is a match.
+It is possible that the agent does not exhibit the rubric behavior. If so, return "N/A" and nothing else; do not explain why there are no matches.
 
-It is possible that the agent does not exhibit the rubric behavior. If so, return N/A and nothing else; do not explain why there are no matches.
-
-Otherwise, for every instance of a rubric match, describe how the agent run pertains to the rubric. Be concise but specific; I should be able to mentally reconstruct the pertinent parts of the run from your description. The list should also be exhaustive.
-
-Return all instances of the rubric in the following exact format:
+Return all justifications for each rubric match instance in the following exact format:
 <instance>
-description
-</instance>
 ...
-<instance>
-description
 </instance>
 
 {SINGLE_RUN_CITE_INSTRUCTION}
@@ -51,16 +40,8 @@ description
 class Rubric(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     version: int = 1
-    high_level_description: str
-    inclusion_rules: list[str]
-    exclusion_rules: list[str]
+    rubric_text: str
     judge_model: ModelOption | None = None
-
-    @property
-    def text(self) -> str:
-        inclusion_text = "\n".join(f"- {rule}" for rule in self.inclusion_rules)
-        exclusion_text = "\n".join(f"- {rule}" for rule in self.exclusion_rules)
-        return f"(v{self.version}) High level description:\n{self.high_level_description}\n\nInclusion rules:\n{inclusion_text}\n\nExclusion rules:\n{exclusion_text}"
 
 
 def _parse_rubric_outputs(output: LLMOutput) -> list[str] | None:
@@ -160,10 +141,16 @@ async def evaluate_rubric(
     api_key_overrides: dict[str, str] | None = None,
     callback: JudgeResultStreamingCallback | None = None,
 ):
-    ids = [ar.id for ar in agent_runs]
-    texts = [ar.text for ar in agent_runs]
+    from time import time
 
-    prompts = [RUBRIC_PROMPT.format(rubric=rubric.text, agent_run=agent_run) for agent_run in texts]
+    ids = [ar.id for ar in agent_runs]
+    ct = time()
+    texts = [ar.text for ar in agent_runs]
+    logger.highlight(f"Time taken to get texts: {time() - ct} seconds. TODO(mengk): pipeline.")
+
+    prompts = [
+        RUBRIC_PROMPT.format(rubric=rubric.rubric_text, agent_run=agent_run) for agent_run in texts
+    ]
     outputs = await get_llm_completions_async(
         [
             [
@@ -211,13 +198,12 @@ Here is one specific agent run:
 Your job is to find concrete examples of behavior in this agent run that might be clarifying or illuminating for the user to see.
 - Instances that you would consider to match the rubric are excellent choices to show, so you can confirm that the user agrees with your judgments.
 - Instances that you are uncertain about but think could plausibly match are also excellent because the user may find it useful to clarify ambiguous examples and see things that they may not have thought of themselves.
-- It is also possible that you may not see anything that could plausibly be conceived of as the rubric. In that case, you should just return N/A and do not include a final explanation.
+- It is also possible that you may not see anything that could plausibly be conceived of as the rubric. In that case, you should just return "N/A" only and do not include a final explanation.
 
 Return all relevant instances of the rubric in the following exact format:
 <instance>
 ...
 </instance>
-...
 
 {SINGLE_RUN_CITE_INSTRUCTION}
 """
@@ -240,13 +226,9 @@ async def evaluate_rubric_max_recall(
     ids = [ar.id for ar in agent_runs]
     texts = [ar.text for ar in agent_runs]
 
-    new_rubric = rubric.model_copy(deep=True)
-    new_rubric.exclusion_rules = rubric.inclusion_rules + rubric.exclusion_rules
-    new_rubric.inclusion_rules = []
-
     prompts = [
         RUBRIC_MAX_RECALL_PROMPT.format(
-            rubric=new_rubric.text,
+            rubric=rubric.rubric_text,
             agent_run=agent_run,
         )
         for agent_run in texts
@@ -261,7 +243,7 @@ async def evaluate_rubric_max_recall(
             ]
             for prompt in prompts
         ],
-        get_model_options_for_rubric(rubric),
+        PROVIDER_PREFERENCES.evaluate_rubric_max_recall,
         max_new_tokens=8192,
         timeout=180.0,
         use_cache=True,

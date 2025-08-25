@@ -5,7 +5,9 @@ Steps of refinement:
 - Generate a v1 rubric proposal
 """
 
+from copy import deepcopy
 from datetime import UTC, datetime
+from enum import Enum
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -16,7 +18,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from docent.data_models.chat.message import ChatMessage, parse_chat_message
 from docent_core._db_service.schemas.base import SQLABase
-from docent_core.docent.ai_tools.rubric.rubric import Rubric
+from docent_core.docent.ai_tools.rubric.rubric import JudgeResult
 from docent_core.docent.db.schemas.rubric import TABLE_RUBRIC
 
 if TYPE_CHECKING:
@@ -25,12 +27,23 @@ if TYPE_CHECKING:
 TABLE_REFINEMENT_AGENT_SESSION = "refinement_agent_sessions"
 
 
+class RefinementStatus(str, Enum):
+    READING_DATA = "reading_data"
+    INITIAL_FEEDBACK = "initial_feedback"
+    ASKING_QUESTIONS = "asking_questions"
+    DONE = "done"
+
+    # Default
+    DEFAULT_STATUS = "reading_data"
+
+
 class RefinementAgentSession(BaseModel):
     id: str
     rubric_id: str
     rubric_version: int
     messages: list[ChatMessage]
-    pending_rubric: Rubric | None = None
+    status: RefinementStatus
+    judge_results: list[JudgeResult]
 
 
 class SQLARefinementAgentSession(SQLABase):
@@ -49,9 +62,11 @@ class SQLARefinementAgentSession(SQLABase):
         ),
     )
 
-    # JSON field to store all messages
-    messages: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
-    pending_rubric: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # messages: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    # status: Mapped[RefinementStatus] = mapped_column(
+    #     SQLAEnum(RefinementStatus), nullable=False, default=RefinementStatus.INITIAL_FEEDBACK
+    # )
+    content: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False, index=True
@@ -64,15 +79,9 @@ class SQLARefinementAgentSession(SQLABase):
     )
 
     def to_pydantic(self) -> RefinementAgentSession:
-        return RefinementAgentSession(
-            id=self.id,
-            rubric_id=self.rubric_id,
-            rubric_version=self.rubric_version,
-            messages=[parse_chat_message(m) for m in self.messages],
-            pending_rubric=(
-                Rubric.model_validate(self.pending_rubric) if self.pending_rubric else None
-            ),
-        )
+        content = deepcopy(self.content)
+        content["messages"] = [parse_chat_message(m) for m in content["messages"]]
+        return RefinementAgentSession.model_validate(content)
 
     @classmethod
     def from_pydantic(cls, session: RefinementAgentSession) -> "SQLARefinementAgentSession":
@@ -80,6 +89,5 @@ class SQLARefinementAgentSession(SQLABase):
             id=session.id,
             rubric_id=session.rubric_id,
             rubric_version=session.rubric_version,
-            messages=[m.model_dump() for m in session.messages],
-            pending_rubric=session.pending_rubric.model_dump() if session.pending_rubric else None,
+            content=session.model_dump(),
         )

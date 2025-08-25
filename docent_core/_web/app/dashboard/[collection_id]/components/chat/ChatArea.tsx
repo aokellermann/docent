@@ -18,6 +18,7 @@ interface ChatAreaProps {
   messages: ChatMessage[];
   onSendMessage: (message: string) => void;
   isLoading?: boolean;
+  byoFlexDiv: boolean;
 }
 
 export default function ChatArea({
@@ -25,6 +26,7 @@ export default function ChatArea({
   messages,
   onSendMessage,
   isLoading = false,
+  byoFlexDiv = false,
 }: ChatAreaProps) {
   const {
     containerRef,
@@ -35,7 +37,10 @@ export default function ChatArea({
   } = useScrollToBottom();
 
   const lastMessage = messages[messages.length - 1];
-  const showThinkingSpacer = lastMessage?.role !== 'assistant' && isLoading;
+  const showThinkingSpacer =
+    lastMessage?.role !== 'assistant' &&
+    lastMessage?.role !== 'tool' &&
+    isLoading;
 
   useEffect(() => {
     if (lastMessage?.role === 'user' && isLoading) {
@@ -43,10 +48,10 @@ export default function ChatArea({
     }
   }, [scrollToBottom, lastMessage?.role, isLoading]);
 
-  return (
-    <div className="flex-1 flex flex-col min-w-0 bg-background">
+  const coreComponent = (
+    <>
       <div
-        className="flex flex-col min-w-0 gap-6 flex-1 overflow-y-scroll relative custom-scrollbar pt-3"
+        className="flex-1 flex flex-col min-w-0 gap-6 overflow-y-scroll relative custom-scrollbar pt-3"
         // Explaining the pt-3: The card has padding 3, and the gap is 6, so 6-3=3
         ref={containerRef}
       >
@@ -87,10 +92,21 @@ export default function ChatArea({
         <InputArea
           onSendMessage={onSendMessage}
           disabled={isLoading || isReadonly}
+          isLoading={isLoading}
         />
       </form>
-    </div>
+    </>
   );
+
+  if (byoFlexDiv) {
+    return coreComponent;
+  } else {
+    return (
+      <div className="flex-1 flex flex-col min-w-0 bg-background">
+        {coreComponent}
+      </div>
+    );
+  }
 }
 
 interface MessageProps {

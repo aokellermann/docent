@@ -56,11 +56,19 @@ export default function Chart({ chart }: { chart: ChartSpec }) {
 
   // Handle loading and error states after all hooks
   if (isLoading) {
-    return <div>Loading chart data...</div>;
+    return (
+      <div className="flex items-center justify-center p-4 text-sm">
+        Loading chart...
+      </div>
+    );
   }
 
   if (error) {
-    return <div>Error loading chart data</div>;
+    return (
+      <div className="flex items-center justify-center p-4 text-sm">
+        Error loading chart
+      </div>
+    );
   }
 
   if (chart.chart_type === 'bar') {
