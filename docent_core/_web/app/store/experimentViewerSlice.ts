@@ -1,3 +1,8 @@
+/**
+ * Note(mengk): the patterns in this file are highly deprecated!
+ * This is not very "React-ive" - having global state like this and using async thunks is highly discouraged.
+ */
+
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import {
   RegexSnippet,

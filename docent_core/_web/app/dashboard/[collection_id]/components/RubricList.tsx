@@ -190,26 +190,20 @@ function RubricCard({
 }
 
 export default function RubricList() {
-  const dispatch = useAppDispatch();
-
   const collectionId = useAppSelector((state) => state.collection.collectionId);
-  const rubricsMap = useAppSelector((state) => state.rubric.latestRubricsMap);
 
   // Check write permissions
   const hasWritePermission = useHasCollectionWritePermission();
 
   // Fetch rubrics using the new API
-  const { data: fetchedRubrics, isLoading: isLoadingRubrics } =
-    useGetRubricsQuery(
-      { collectionId: collectionId! },
-      { skip: !collectionId }
-    );
+  const { data: rubrics, isLoading: isLoadingRubrics } = useGetRubricsQuery(
+    { collectionId: collectionId! },
+    { skip: !collectionId }
+  );
 
   const [createRubric, { isLoading: isCreatingRubric }] =
     useCreateRubricMutation();
   const [startEvaluation] = useStartEvaluationMutation();
-
-  const rubrics = Object.values(rubricsMap);
 
   const handleAddNew = async () => {
     if (!collectionId) return;
@@ -262,12 +256,12 @@ export default function RubricList() {
           <div className="text-xs text-muted-foreground text-center py-4">
             Loading rubrics...
           </div>
-        ) : rubrics.length === 0 ? (
+        ) : rubrics?.length === 0 ? (
           <div className="text-xs text-muted-foreground text-center py-4">
             No rubrics created yet
           </div>
         ) : (
-          rubrics.map((rubric) => (
+          rubrics?.map((rubric) => (
             <RubricCard
               key={rubric.id}
               rubric={rubric}
