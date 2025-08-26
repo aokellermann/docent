@@ -222,7 +222,7 @@ function SignupPageContent() {
         </div>
 
         {/* Buttons */}
-        <div className="flex items-center justify-center gap-2">
+        <div className="flex flex-wrap items-center justify-center gap-2">
           <Button asChild variant="outline">
             <a
               href="https://docs.transluce.org/en/latest/quickstart"
@@ -234,7 +234,7 @@ function SignupPageContent() {
           </Button>
           <Button asChild variant="outline">
             <a
-              href="https://join.slack.com/t/docentcommunity/shared_invite/zt-39uln1o3q-DObXadOIKN_IGc73ZOjgnA"
+              href="https://transluce.org/docent/slack"
               target="_blank"
               rel="noopener noreferrer"
             >

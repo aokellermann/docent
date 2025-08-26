@@ -4,7 +4,6 @@ import { useParams, useRouter } from 'next/navigation';
 import React, { useEffect, Suspense } from 'react';
 
 import Breadcrumbs from '../../components/Breadcrumbs';
-import ResponsiveCheck from '../../components/ResponsiveCheck';
 import { setCollectionId } from '../../store/collectionSlice';
 import { useAppDispatch } from '../../store/hooks';
 import { Button } from '@/components/ui/button';
@@ -31,7 +30,7 @@ export default function DocentDashboardClientLayout({
       <Suspense fallback={<div className="h-7">Loading breadcrumbs...</div>}>
         <Breadcrumbs />
       </Suspense>
-      <ResponsiveCheck>{children}</ResponsiveCheck>
+      {children}
     </div>
   );
 }

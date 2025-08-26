@@ -157,6 +157,15 @@ export default function HomePage() {
                   Read the quickstart guide
                 </a>
               </Button>
+              <Button variant="outline" size="sm" asChild>
+                <a
+                  href="https://docent.transluce.org/dashboard/8831255a-249e-46cc-a600-c27c3d3cbd28?rubricId=e32d434f-168b-4708-af77-095a936ccaf0"
+                  target="_blank"
+                  className="inline-flex items-center gap-1 ml-1"
+                >
+                  Check out a sample collection
+                </a>
+              </Button>
             </div>
           </div>
         </div>

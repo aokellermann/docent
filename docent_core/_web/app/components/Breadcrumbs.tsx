@@ -121,7 +121,7 @@ const Breadcrumbs: React.FC = () => {
           className="gap-x-2 h-7 cursor-default px-2"
         >
           <Link
-            href="https://join.slack.com/t/docentcommunity/shared_invite/zt-39uln1o3q-DObXadOIKN_IGc73ZOjgnA"
+            href="https://transluce.org/docent/slack"
             target="_blank"
             className="flex items-center gap-x-2"
           >
