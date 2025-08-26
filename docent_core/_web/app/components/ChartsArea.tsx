@@ -21,24 +21,17 @@ import {
   chartApi,
 } from '../api/chartApi';
 import { ChartSpec } from '../types/collectionTypes';
+import { skipToken } from '@reduxjs/toolkit/query';
 import { cn } from '@/lib/utils';
 
 export function ChartsArea() {
   const collectionId = useAppSelector((state) => state.collection.collectionId);
-  const viewId = useAppSelector((state) => state.collection.viewId);
 
   const {
     data: charts = [],
     isLoading,
     error,
-  } = useGetChartsQuery(
-    {
-      collectionId: collectionId!,
-    },
-    {
-      skip: !collectionId || !viewId,
-    }
-  );
+  } = useGetChartsQuery(collectionId ? { collectionId } : skipToken);
 
   const [createChart] = useCreateChartMutation();
   const [updateChart] = useUpdateChartMutation();
@@ -101,6 +94,7 @@ export function ChartsArea() {
         rubricFilter: currentChart?.rubric_filter || undefined,
       }).unwrap();
       updateActiveTabId(response.id);
+      console.log('response', response);
     } catch (error) {
       console.error('Failed to create chart:', error);
     }

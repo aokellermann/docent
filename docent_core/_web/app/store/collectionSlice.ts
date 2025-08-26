@@ -34,7 +34,6 @@ export interface CollectionState {
   baseFilter?: ComplexFilter;
   // Global variables
   collectionId?: string;
-  viewId?: string;
 }
 
 const initialState: CollectionState = {};
@@ -116,9 +115,6 @@ export const collectionSlice = createSlice({
     setCollectionId: (state, action: PayloadAction<string | undefined>) => {
       state.collectionId = action.payload;
     },
-    setViewId: (state, action: PayloadAction<string | undefined>) => {
-      state.viewId = action.payload;
-    },
     setHasInitSearchQuery: (state, action: PayloadAction<boolean>) => {
       state.hasInitSearchQuery = action.payload;
     },
@@ -142,11 +138,7 @@ export const collectionSlice = createSlice({
   },
 });
 
-export const {
-  setCollectionId,
-  setViewId,
-  setHasInitSearchQuery,
-  resetCollectionSlice,
-} = collectionSlice.actions;
+export const { setCollectionId, setHasInitSearchQuery, resetCollectionSlice } =
+  collectionSlice.actions;
 
 export default collectionSlice.reducer;
