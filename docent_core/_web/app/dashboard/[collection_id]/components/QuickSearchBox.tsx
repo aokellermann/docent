@@ -78,7 +78,7 @@ export default function QuickSearchBox({
   /**
    * Search mode
    */
-  const [searchMode, setSearchMode] = useState<'explore' | 'full'>('full');
+  const [searchMode, setSearchMode] = useState<'explore' | 'full'>('explore');
 
   const hasWritePermission = useHasCollectionWritePermission();
 
