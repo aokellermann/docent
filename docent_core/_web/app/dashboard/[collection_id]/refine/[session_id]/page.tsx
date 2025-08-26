@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/button';
 import { useRouter } from 'next/navigation';
 import { ProgressBar } from '@/app/components/ProgressBar';
 import posthog from 'posthog-js';
+import { useHasCollectionWritePermission } from '@/lib/permissions/hooks';
 
 export default function RefinePage() {
   const params = useParams();
@@ -28,6 +29,8 @@ export default function RefinePage() {
   const router = useRouter();
   const collectionId = (params as any)?.collection_id as string | undefined;
   const sessionId = (params as any)?.session_id as string | undefined;
+
+  const hasWritePermission = useHasCollectionWritePermission();
 
   const [curRsession, setCurRsession] = useState<RefinementAgentSession | null>(
     null
@@ -186,7 +189,7 @@ export default function RefinePage() {
           </>
         )}
         <ChatArea
-          isReadonly={hasChanges}
+          isReadonly={hasChanges || !hasWritePermission}
           messages={processedMessages}
           onSendMessage={onSendMessage}
           isLoading={isSSEConnected}
@@ -204,7 +207,7 @@ export default function RefinePage() {
               setRubricVersion={setRefinementRubricVersion}
               showDiff={showDiff}
               setShowDiff={setShowDiff}
-              editable={!isSSEConnected} // Cannot edit if SSE is connected
+              editable={!isSSEConnected && hasWritePermission} // Cannot edit if SSE is connected or user lacks write permission
               onSave={handleRubricSave}
               onCloseWithoutSave={() => {}}
               onHasUnsavedChangesUpdated={setHasChanges}
@@ -213,7 +216,7 @@ export default function RefinePage() {
               <Button
                 className="w-full"
                 size="sm"
-                disabled={isSSEConnected}
+                disabled={isSSEConnected || !hasWritePermission}
                 onClick={() => {
                   // Log PostHog event with rubric details
                   posthog.capture('refinement_finalized', {

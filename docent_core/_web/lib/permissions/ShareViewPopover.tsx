@@ -179,20 +179,23 @@ const ShareViewPopover = ({ collectionId }: { collectionId: string }) => {
   );
 
   const hasAdminPermission = useHasCollectionAdminPermission();
+  const hasWritePermission = useHasCollectionWritePermission();
+  const accessButtonLabel = hasWritePermission ? 'Read-write' : 'Read-only';
+
+  if (!hasAdminPermission) {
+    return (
+      <Button variant="outline" size="sm" className="gap-x-2 h-7 px-2" disabled>
+        <Share2 size={14} /> {accessButtonLabel}
+      </Button>
+    );
+  }
 
   return (
     <Popover>
       <PopoverTrigger asChild>
-        {hasAdminPermission && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-x-2 h-7 px-2"
-            disabled={!hasAdminPermission}
-          >
-            <Share2 size={14} /> Share
-          </Button>
-        )}
+        <Button variant="outline" size="sm" className="gap-x-2 h-7 px-2">
+          <Share2 size={14} /> Share
+        </Button>
       </PopoverTrigger>
       <PopoverContent className="_SharePopover w-[640px] p-3 space-y-3 rounded-lg">
         {/* Section 1: Add collaborators */}
