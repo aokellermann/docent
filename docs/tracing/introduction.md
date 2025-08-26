@@ -108,7 +108,7 @@ from docent.trace import agent_run
 def analyze_document(document_text: str):
     # This entire function will be wrapped in an agent run
     response = client.chat.completions.create(
-        model="5",
+        model="gpt-5",
         messages=[{"role": "user", "content": f"Analyze this document: {document_text}"}]
     )
     return response.choices[0].message.content

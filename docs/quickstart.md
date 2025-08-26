@@ -3,17 +3,70 @@
 This guide helps you ingest agent runs into Docent.
 <!-- Feel free to explore some sample agent runs in the dashboard. -->
 
-### Ingesting transcripts
-
 Before starting, navigate to [docent.transluce.org](https://docent.transluce.org){target=_blank} and sign up for an account.
 
-Then install Docent's Python SDK:
+### Ingesting transcripts
+
+
+Docent provides three main ways to ingest transcripts:
+
+1. **Tracing** - Automatically capture LLM interactions in real-time using Docent's tracing SDK
+2. **Upload Inspect Evaluations** - Upload existing Inspect AI evaluation logs through the web interface
+3. **SDK Ingestion** - Programmatically ingest transcripts using the Python SDK
+
+## Option 1: Tracing (Recommended)
+
+Docent's tracing system automatically captures LLM interactions, organizes them into agent runs.
+
+Tracing allows you to:
+
+- Automatically instrument LLM provider calls (OpenAI, Anthropic)
+- Organize code into logical agent runs with metadata and scores
+- Track chat conversations and tool calls
+- Analyze performance and quality metrics
+- Resume agent runs across different parts of your codebase
+
+### Getting Started with Tracing
+
+```python
+from docent.trace import initialize_tracing
+
+# Basic initialization
+initialize_tracing("my-collection-name")
+
+# Your existing LLM code will now be automatically traced
+response = client.chat.completions.create(
+    model="gpt-5",
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+```
+
+For detailed tracing documentation, see [Tracing Introduction](tracing/introduction.md).
+
+## Option 2: Upload Inspect Evaluations
+
+You can upload Inspect AI evaluation files directly through the Docent web interface:
+
+1. Create a collection on the Docent website
+2. Click "Add Data"
+3. Select "Upload Inspect Log"
+4. Upload your Inspect evaluation file
+
+This is the quickest way to get started if you already have Inspect evaluation logs.
+
+## Option 3: SDK Ingestion
+
+For programmatic ingestion or custom data formats, use the Python SDK:
+
+### Installation
 
 ```bash
 pip install docent-python
 ```
 
-Next, go to the [API keys page](https://docent.transluce.org/settings/api_keys){target=_blank}, create a key, and instantiate a client object with that key:
+### Setup
+
+Go to the [API keys page](https://docent.transluce.org/settings/api_keys){target=_blank}, create a key, and instantiate a client object with that key:
 
 ```python
 import os
