@@ -19,14 +19,19 @@ interface ChatAreaProps {
   onSendMessage: (message: string) => void;
   isLoading?: boolean;
   byoFlexDiv: boolean;
+  __showThinkingSpacerAfterFirstMessage?: boolean;
 }
 
+/**
+ * TODO(mengk): fix the thinking spacer logic, very hacky right now
+ */
 export default function ChatArea({
   isReadonly,
   messages,
   onSendMessage,
   isLoading = false,
   byoFlexDiv = false,
+  __showThinkingSpacerAfterFirstMessage = false,
 }: ChatAreaProps) {
   const {
     containerRef,
@@ -38,9 +43,10 @@ export default function ChatArea({
 
   const lastMessage = messages[messages.length - 1];
   const showThinkingSpacer =
-    lastMessage?.role !== 'assistant' &&
-    lastMessage?.role !== 'tool' &&
-    isLoading;
+    (isLoading &&
+      lastMessage?.role !== 'assistant' &&
+      lastMessage?.role !== 'tool') ||
+    (messages.length === 1 && __showThinkingSpacerAfterFirstMessage);
 
   useEffect(() => {
     if (lastMessage?.role === 'user' && isLoading) {
@@ -62,7 +68,9 @@ export default function ChatArea({
             isLoadingPlaceholder={false}
             isReadonly={isReadonly}
             requiresScrollPadding={
-              index === messages.length - 1 && message.role === 'assistant'
+              !showThinkingSpacer &&
+              index === messages.length - 1 &&
+              message.role === 'assistant'
             }
           />
         ))}

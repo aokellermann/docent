@@ -190,6 +190,7 @@ export default function RefinePage() {
           onSendMessage={onSendMessage}
           isLoading={isSSEConnected}
           byoFlexDiv={true}
+          __showThinkingSpacerAfterFirstMessage={true}
         />
       </div>
       <div className="border-r border-border" />
