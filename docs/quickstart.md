@@ -10,11 +10,11 @@ Before starting, navigate to [docent.transluce.org](https://docent.transluce.org
 
 Docent provides three main ways to ingest transcripts:
 
-1. **Tracing** - Automatically capture LLM interactions in real-time using Docent's tracing SDK
-2. **Upload Inspect Evaluations** - Upload existing Inspect AI evaluation logs through the web interface
-3. **SDK Ingestion** - Programmatically ingest transcripts using the Python SDK
+1. Tracing: Automatically capture LLM interactions in real-time using Docent's tracing SDK
+2. Drag-and-drop Inspect `.eval` files: Upload existing logs through the web UI
+3. SDK Ingestion: Programmatically ingest transcripts using the Python SDK
 
-## Option 1: Tracing (Recommended)
+#### Option 1: Tracing (Recommended)
 
 Docent's tracing system automatically captures LLM interactions, organizes them into agent runs.
 
@@ -25,8 +25,6 @@ Tracing allows you to:
 - Track chat conversations and tool calls
 - Attach metadata to your runs and transcripts
 - Resume agent runs across different parts of your codebase
-
-### Getting Started with Tracing
 
 ```python
 from docent.trace import initialize_tracing
@@ -43,7 +41,7 @@ response = client.chat.completions.create(
 
 For detailed tracing documentation, see [Tracing Introduction](tracing/introduction.md).
 
-## Option 2: Upload Inspect Evaluations
+#### Option 2: Upload Inspect Evaluations
 
 You can upload Inspect AI evaluation files directly through the Docent web interface:
 
@@ -54,19 +52,14 @@ You can upload Inspect AI evaluation files directly through the Docent web inter
 
 This is the quickest way to get started if you already have Inspect evaluation logs.
 
-## Option 3: SDK Ingestion
+#### Option 3: SDK Ingestion
 
 For programmatic ingestion or custom data formats, use the Python SDK:
-
-### Installation
-
 ```bash
 pip install docent-python
 ```
 
-### Setup
-
-Go to the [API keys page](https://docent.transluce.org/settings/api_keys){target=_blank}, create a key, and instantiate a client object with that key:
+First go to the [API keys page](https://docent.transluce.org/settings/api-keys){target=_blank}, create a key, and instantiate a client object with that key:
 
 ```python
 import os
