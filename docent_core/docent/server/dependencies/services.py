@@ -14,6 +14,8 @@ from docent_core.docent.services.job import JobService
 from docent_core.docent.services.monoservice import MonoService
 from docent_core.docent.services.refinement import RefinementService
 from docent_core.docent.services.rubric import RubricService
+from docent_core.docent.services.telemetry import TelemetryService
+from docent_core.docent.services.telemetry_accumulation import TelemetryAccumulationService
 from docent_core.services.onboarding import OnboardingService
 
 
@@ -69,3 +71,16 @@ def get_onboarding_service(
     ),
 ) -> OnboardingService:
     return OnboardingService(session, session_cm_factory, mono_svc)
+
+
+def get_telemetry_accumulation_service(
+    session: AsyncSession = Depends(get_session),
+) -> TelemetryAccumulationService:
+    return TelemetryAccumulationService(session)
+
+
+def get_telemetry_service(
+    session: AsyncSession = Depends(get_session),
+    mono_svc: MonoService = Depends(get_mono_svc),
+) -> TelemetryService:
+    return TelemetryService(session, mono_svc)
