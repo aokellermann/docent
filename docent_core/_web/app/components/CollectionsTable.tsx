@@ -121,7 +121,7 @@ export function CollectionsTable({
           <div className="py-4">
             {deletingCollection && (
               <div className="flex flex-col space-y-2 bg-secondary p-3 rounded-md">
-                <div className="text-sm font-medium">
+                <div className="text-sm font-medium break-all">
                   {deletingCollection.name || 'Unnamed Collection'}
                 </div>
                 <div className="text-xs text-muted-foreground">
