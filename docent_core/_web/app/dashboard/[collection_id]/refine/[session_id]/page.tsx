@@ -12,6 +12,7 @@ import {
   useListenToRefinementJobQuery,
   usePostRubricUpdateToRefinementSessionMutation,
 } from '@/app/api/refinementApi';
+import { useStartEvaluationMutation } from '@/app/api/rubricApi';
 import RubricEditor from '../../components/RubricEditor';
 import { JudgeResultWithCitations, Rubric } from '@/app/store/rubricSlice';
 import { RefinementAgentSession } from '@/app/store/refinementSlice';
@@ -57,6 +58,8 @@ export default function RefinePage() {
   // Handle sending messages to the refinement session
   const [postMessage] = usePostMessageToRefinementSessionMutation();
   const [postRubricUpdate] = usePostRubricUpdateToRefinementSessionMutation();
+  const [startEvaluation, { isLoading: isStartingEvaluation }] =
+    useStartEvaluationMutation();
   const onSendMessage = useCallback(
     (message: string) => {
       if (!collectionId || !sessionId) return;
@@ -160,6 +163,22 @@ export default function RefinePage() {
       .catch(() => {});
   };
 
+  const handleFinalizeAndRunRubric = async () => {
+    if (!collectionId || !rubricId) return;
+
+    posthog.capture('refinement_finalized', {
+      collection_id: collectionId,
+      session_id: sessionId,
+    });
+
+    await startEvaluation({
+      collectionId,
+      rubricId,
+    }).catch(() => {});
+
+    router.push(`/dashboard/${collectionId}?rubricId=${rubricId}`);
+  };
+
   /**
    * Judge results
    */
@@ -216,19 +235,14 @@ export default function RefinePage() {
               <Button
                 className="w-full"
                 size="sm"
-                disabled={isSSEConnected || !hasWritePermission}
-                onClick={() => {
-                  // Log PostHog event with rubric details
-                  posthog.capture('refinement_finalized', {
-                    collection_id: collectionId,
-                    session_id: sessionId,
-                  });
-                  router.push(
-                    `/dashboard/${collectionId}?rubricId=${rubricId}`
-                  );
-                }}
+                disabled={
+                  isSSEConnected || !hasWritePermission || isStartingEvaluation
+                }
+                onClick={handleFinalizeAndRunRubric}
               >
-                Finalize and run rubric
+                {isStartingEvaluation
+                  ? 'Starting evaluation...'
+                  : 'Finalize and run rubric'}
               </Button>
             </div>
           </div>
