@@ -11,7 +11,6 @@ from docent._log_util import get_logger
 from docent_core._server._broker.redis_client import get_redis_client
 from docent_core.docent.db.contexts import ViewContext
 from docent_core.docent.db.schemas.tables import SQLAJob
-from docent_core.docent.server.rest.router import get_user_by_email
 from docent_core.docent.services.monoservice import MonoService
 from docent_core.docent.services.telemetry import TelemetryService
 
@@ -41,8 +40,9 @@ async def telemetry_processing_job(ctx: ViewContext, job: SQLAJob) -> None:
 
         logger.info(f"Starting telemetry processing job for collection {collection_id}")
 
-        # Get user by email using existing function
-        user = await get_user_by_email(user_email)
+        # Initialize MonoService and get user by email
+        mono_svc = await MonoService.init()
+        user = await mono_svc.get_user_by_email(user_email)
         if user is None:
             logger.error(f"User with email {user_email} not found")
             return
@@ -52,7 +52,6 @@ async def telemetry_processing_job(ctx: ViewContext, job: SQLAJob) -> None:
         lock = redis_client.lock(f"telemetry_collection_lock_{collection_id}", timeout=0)
         try:
             async with lock:
-                mono_svc = await MonoService.init()
                 async with mono_svc.db.session() as session:
                     telemetry_svc = TelemetryService(session, mono_svc)
                     await telemetry_svc.process_agent_runs_for_collection(collection_id, user)
