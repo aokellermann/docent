@@ -59,6 +59,7 @@ from docent_core.docent.db.schemas.tables import (
     SQLASearchResult,
     SQLASearchResultCluster,
     SQLASession,
+    SQLATelemetryAgentRunStatus,
     SQLATelemetryLog,
     SQLATranscript,
     SQLATranscriptEmbedding,
@@ -244,6 +245,14 @@ class MonoService:
         async with self.db.session() as session:
             await session.execute(
                 delete(SQLAAgentRun).where(SQLAAgentRun.collection_id == collection_id)
+            )
+
+        # Delete all telemetry agent run status records
+        async with self.db.session() as session:
+            await session.execute(
+                delete(SQLATelemetryAgentRunStatus).where(
+                    SQLATelemetryAgentRunStatus.collection_id == collection_id
+                )
             )
 
         # Delete all Access Control Entries
@@ -1006,6 +1015,83 @@ class MonoService:
             logger.info(f"Added embedding job {job_id}")
 
             return job_id
+
+    async def add_telemetry_processing_job(self, collection_id: str, user: User) -> str | None:
+        """
+        Adds a telemetry processing job for the given collection.
+        Only adds the job if there isn't already a pending or processing job for this collection.
+
+        Args:
+            collection_id: The collection ID to process
+            user: The user who initiated the processing
+
+        Returns:
+            The job ID if created, None if job already exists
+        """
+        async with self.db.session() as session:
+            # Check if there's already a pending or processing job for this collection
+            existing_job_query = select(SQLAJob).where(
+                SQLAJob.type == "telemetry_processing_job",
+                SQLAJob.job_json.contains({"collection_id": collection_id}),
+                SQLAJob.status.in_([JobStatus.PENDING, JobStatus.RUNNING]),
+            )
+
+            existing_job_result = await session.execute(existing_job_query)
+            existing_job = existing_job_result.scalar_one_or_none()
+
+            if existing_job:
+                logger.debug(
+                    f"Telemetry processing job already exists for collection {collection_id}: {existing_job.id} (status: {existing_job.status})"
+                )
+                return None
+
+            # Create new job with user information
+            job_id = str(uuid4())
+            session.add(
+                SQLAJob(
+                    id=job_id,
+                    type="telemetry_processing_job",
+                    job_json={
+                        "collection_id": collection_id,
+                        "user_id": user.id,
+                        "user_email": user.email,
+                        "user_organization_ids": user.organization_ids,
+                    },
+                )
+            )
+            logger.info(f"Added telemetry processing job {job_id} for collection {collection_id}")
+
+            return job_id
+
+    async def add_and_enqueue_telemetry_processing_job(
+        self, collection_id: str, user: User
+    ) -> str | None:
+        """
+        Adds a telemetry processing job for the given collection and enqueues it to Redis.
+        Only adds the job if there isn't already a pending or processing job for this collection.
+
+        Args:
+            collection_id: The collection ID to process
+            user: The user who initiated the processing
+
+        Returns:
+            The job ID if created and enqueued, None if job already exists
+        """
+        # Create the job in the database
+        job_id = await self.add_telemetry_processing_job(collection_id, user)
+
+        if job_id is None:
+            return None
+
+        # Create a ViewContext for the collection
+        ctx = await self.get_default_view_ctx(collection_id, user)
+
+        # Enqueue the job to Redis
+        await enqueue_job(ctx, job_id)  # type: ignore
+
+        logger.info(f"Enqueued telemetry processing job {job_id} for collection {collection_id}")
+
+        return job_id
 
     async def get_job(self, job_id: str) -> SQLAJob | None:
         """

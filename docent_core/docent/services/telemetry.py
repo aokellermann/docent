@@ -1,4 +1,3 @@
-import asyncio
 import base64
 import json
 import uuid
@@ -8,7 +7,6 @@ from uuid import uuid4
 
 from google.protobuf.json_format import MessageToDict
 from opentelemetry.proto.collector.trace.v1 import trace_service_pb2
-from redis.exceptions import LockError
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,21 +19,21 @@ from docent.data_models import (
 from docent.data_models.chat import ChatMessage, parse_chat_message
 from docent.data_models.chat.tool import ToolCall
 from docent_core._server._analytics.posthog import AnalyticsClient
-from docent_core._server._broker.redis_client import get_redis_client
 from docent_core.docent.db.contexts import ViewContext
 from docent_core.docent.db.schemas.auth_models import User
 from docent_core.docent.db.schemas.tables import (
     SQLAAgentRun,
+    SQLATelemetryAgentRunStatus,
     SQLATelemetryLog,
     SQLATranscript,
     SQLATranscriptGroup,
+    TelemetryAgentRunStatus,
+    sanitize_pg_text,
 )
 from docent_core.docent.services.monoservice import MonoService
 from docent_core.docent.services.telemetry_accumulation import TelemetryAccumulationService
 
 logger = get_logger(__name__)
-# Redis lock prefix for store_spans operations
-_STORE_SPANS_LOCK_PREFIX = "store_spans:"
 
 
 class TelemetryService:
@@ -57,6 +55,12 @@ class TelemetryService:
         collection_id: str | None = None,
     ) -> str:
         """Store telemetry log data in the database."""
+        # Sanitize the JSON data to remove null characters and other problematic Unicode sequences
+        # Convert to JSON string, sanitize, then parse back to dict
+        json_str = json.dumps(json_data)
+        sanitized_json_str = sanitize_pg_text(json_str)
+        sanitized_json_data = json.loads(sanitized_json_str)
+
         telemetry_id = str(uuid4())
         self.session.add(
             SQLATelemetryLog(
@@ -65,7 +69,7 @@ class TelemetryService:
                 collection_id=collection_id,
                 type=type,
                 version=version,
-                json_data=json_data,
+                json_data=sanitized_json_data,
             )
         )
         return telemetry_id
@@ -113,62 +117,175 @@ class TelemetryService:
     # Trace Processing   #
     ######################
 
-    async def handle_new_trace_data(
-        self,
-        trace_data: Dict[str, Any],
-        user: User,
-        accumulation_service: TelemetryAccumulationService,
-    ) -> int:
-        # Extract spans from trace data
-        spans = await self.extract_spans(trace_data)
+    async def process_agent_runs_for_collection(self, collection_id: str, user: User) -> None:
+        """
+        Process all agent runs that need processing for a collection.
 
-        # Extract unique collection IDs and names from spans
-        collection_ids, collection_names = self.extract_collection_info_from_spans(spans)
+        This method handles the complete processing workflow for a collection,
+        processing each agent run individually by pulling its accumulated data
+        and creating the necessary database objects.
 
-        # Check permissions for all collections mentioned in spans
-        await self.ensure_write_permission_for_collections(collection_ids, user)
+        Args:
+            collection_id: The collection ID to process
+            user: The user who initiated the processing
+        """
+        # Atomically get agent runs that need processing and mark them as processing
+        agent_runs_needing_processing = await self.get_and_mark_agent_runs_for_processing(
+            collection_id
+        )
 
-        await self.ensure_collections_exist(collection_ids, collection_names, user)
+        if not agent_runs_needing_processing:
+            logger.info(f"No agent runs need processing for collection {collection_id}")
+            return
 
-        # Accumulate spans into database
-        await self.accumulate_spans(spans, user.id, accumulation_service)
+        logger.info(
+            f"Found and marked {len(agent_runs_needing_processing)} agent runs for processing in collection {collection_id}"
+        )
 
-        for collection_id in collection_ids:
-            redis_client = await get_redis_client()
-            lock_key = f"{_STORE_SPANS_LOCK_PREFIX}{collection_id}"
+        # Process each agent run individually
+        processed_count = 0
 
+        for agent_run_id in agent_runs_needing_processing:
             try:
-                # Use lock to prevent concurrent processing of the same collection
-                async with redis_client.lock(lock_key, blocking=False):
-                    # Lock acquired, process spans
-                    accumulated_spans = await accumulation_service.get_accumulated_spans(
-                        collection_id
+                logger.info(f"Processing agent run {agent_run_id} in collection {collection_id}")
+
+                # Process this agent run (handles both new and existing agent runs)
+                success = await self._process_single_agent_run(
+                    agent_run_id,
+                    collection_id,
+                    user,
+                )
+
+                if success:
+                    processed_count += 1
+                    logger.info(f"Successfully processed agent run {agent_run_id}")
+                    # Mark agent run as completed only on success
+                    await self._mark_agent_runs_as_completed(collection_id, {agent_run_id})
+                else:
+                    logger.error(f"Failed to process agent run {agent_run_id}")
+                    # Mark agent run as errored on failure
+                    await self._mark_agent_runs_as_errored(
+                        collection_id, {agent_run_id}, "Processing failed"
                     )
 
-                    if accumulated_spans:
-                        logger.info(
-                            f"Processing collection {collection_id} with {len(accumulated_spans)} spans"
-                        )
-                        count_agent_runs = await self.store_spans(
-                            accumulated_spans, user, accumulation_service
-                        )
-                        logger.info(
-                            f"Successfully processed collection {collection_id} with {count_agent_runs} agent runs"
-                        )
-                    else:
-                        logger.info(f"No accumulated spans for collection {collection_id}")
-            except LockError:
-                logger.info(
-                    f"Collection {collection_id} is already being processed by another request"
-                )
-                # Continue processing other collections even if one fails
-                continue
             except Exception as e:
-                logger.error(f"Error processing collection {collection_id}: {str(e)}")
-                # Continue processing other collections even if one fails
+                # Mark agent run as needs_processing again if processing failed
+                await self._mark_agent_runs_as_errored(collection_id, {agent_run_id}, str(e))
+                logger.error(f"Error processing agent run {agent_run_id}: {str(e)}")
                 continue
 
-        return len(spans)
+        logger.info(
+            f"Successfully processed {processed_count} out of {len(agent_runs_needing_processing)} agent runs in collection {collection_id}"
+        )
+
+        # Track with analytics if available
+        try:
+            analytics = AnalyticsClient()
+            analytics.track_event(
+                "telemetry_processing_completed",
+                properties={
+                    "collection_id": collection_id,
+                    "agent_runs_attempted": len(agent_runs_needing_processing),
+                    "agent_runs_processed": processed_count,
+                },
+            )
+        except Exception as e:
+            logger.warning(f"Failed to track analytics event: {str(e)}")
+
+    async def _process_single_agent_run(
+        self,
+        agent_run_id: str,
+        collection_id: str,
+        user: User,
+    ) -> bool:
+        """
+        Process a single agent run by creating all necessary database objects.
+
+        Args:
+            agent_run_id: The agent run ID to process
+            collection_id: The collection ID
+            user: The user creating the agent run
+
+        Returns:
+            bool: True if processing was successful, False otherwise
+        """
+        try:
+            from docent_core.docent.services.telemetry_accumulation import (
+                TelemetryAccumulationService,
+            )
+
+            accumulation_service = TelemetryAccumulationService(self.session)
+
+            agent_run_spans = await accumulation_service.get_agent_run_spans(
+                collection_id, agent_run_id
+            )
+            if not agent_run_spans:
+                logger.info(f"No spans found for agent run {agent_run_id}")
+                return True  # Consider this a success even with no spans
+
+            agent_run_scores = await accumulation_service.get_agent_run_scores(
+                collection_id, agent_run_id
+            )
+            agent_run_metadata = await accumulation_service.get_agent_run_metadata(
+                collection_id, agent_run_id
+            )
+            agent_run_transcript_group_metadata = (
+                await accumulation_service.get_agent_run_transcript_group_metadata(
+                    collection_id, agent_run_id
+                )
+            )
+
+            # Organize spans by transcript_id -> spans[]
+            spans_by_transcript: Dict[str, List[Dict[str, Any]]] = {}
+            default_transcript_id = str(uuid4())
+            for span in agent_run_spans:
+                transcript_id = span.get("attributes", {}).get("transcript_id")
+                if not transcript_id:
+                    span["attributes"]["transcript_id"] = default_transcript_id
+                    transcript_id = default_transcript_id
+                if transcript_id:
+                    if transcript_id not in spans_by_transcript:
+                        spans_by_transcript[transcript_id] = []
+                    spans_by_transcript[transcript_id].append(span)
+
+            # Create transcript groups for this agent run
+            transcript_groups = []
+            if agent_run_transcript_group_metadata:
+                transcript_groups = self._create_transcript_groups_from_accumulation_data(
+                    agent_run_transcript_group_metadata
+                )
+
+            # Create agent run from spans
+            agent_run_spans_dict = {agent_run_id: spans_by_transcript}
+            transcript_groups_by_agent_run = {agent_run_id: transcript_groups}
+            collection_scores = {agent_run_id: agent_run_scores}
+            collection_metadata = {agent_run_id: agent_run_metadata}
+
+            # Create agent run from spans
+            collection_agent_runs = await self._create_agent_runs_from_spans(
+                agent_run_spans_dict,
+                transcript_groups_by_agent_run,
+                collection_scores,
+                collection_metadata,
+            )
+
+            if not collection_agent_runs:
+                logger.warning(f"No agent run created from spans for {agent_run_id}")
+                return False
+
+            # Get or create default view context for this collection
+            ctx = await self.mono_svc.get_default_view_ctx(collection_id, user)
+            # Store the agent run in the database
+            await self.update_agent_runs_for_telemetry(ctx, collection_agent_runs)
+
+            logger.info(
+                f"Successfully created agent run {agent_run_id} with {len(spans_by_transcript)} transcripts"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"Error processing single agent run {agent_run_id}: {str(e)}")
+            return False
 
     def extract_collection_info_from_spans(
         self,
@@ -322,7 +439,13 @@ class TelemetryService:
 
             # Convert to dictionary for easier processing
             trace_data = MessageToDict(export_request, preserving_proto_field_name=True)
-            return trace_data
+
+            # Sanitize the trace data to remove null characters and other problematic Unicode sequences
+            # Convert to JSON string, sanitize, then parse back to dict
+            json_str = json.dumps(trace_data)
+            sanitized_json_str = sanitize_pg_text(json_str)
+            sanitized_trace_data = json.loads(sanitized_json_str)
+            return sanitized_trace_data
         except Exception as e:
             logger.error(f"Error parsing protobuf traces: {str(e)}")
             raise ValueError(f"Invalid protobuf format: {str(e)}")
@@ -528,7 +651,12 @@ class TelemetryService:
             }
         )
 
-        return processed_span
+        # Sanitize the processed span to remove null characters and other problematic Unicode sequences
+        # Convert to JSON string, sanitize, then parse back to dict
+        json_str = json.dumps(processed_span)
+        sanitized_json_str = sanitize_pg_text(json_str)
+        sanitized_span = json.loads(sanitized_json_str)
+        return sanitized_span
 
     async def accumulate_spans(
         self,
@@ -537,7 +665,7 @@ class TelemetryService:
         accumulation_service: TelemetryAccumulationService | None = None,
     ) -> None:
         """
-        Accumulate spans by collection_id for later processing.
+        Accumulate spans by collection_id for later processing and mark agent runs as needing processing.
 
         Args:
             spans: List of processed spans to accumulate
@@ -546,13 +674,23 @@ class TelemetryService:
         """
         # Group spans by collection_id for efficient processing
         spans_by_collection: Dict[str, List[Dict[str, Any]]] = {}
+        agent_runs_to_mark: Dict[str, set[str]] = {}  # collection_id -> set of agent_run_ids
+
         for span in spans:
             span_attrs = span.get("attributes", {})
             collection_id = span_attrs.get("collection_id")
+            agent_run_id = span_attrs.get("agent_run_id")
+
             if collection_id:
                 if collection_id not in spans_by_collection:
                     spans_by_collection[collection_id] = []
                 spans_by_collection[collection_id].append(span)
+
+                # Track agent runs that need processing
+                if agent_run_id:
+                    if collection_id not in agent_runs_to_mark:
+                        agent_runs_to_mark[collection_id] = set()
+                    agent_runs_to_mark[collection_id].add(agent_run_id)
 
         # Add spans to accumulation
         for collection_id, collection_spans in spans_by_collection.items():
@@ -561,128 +699,136 @@ class TelemetryService:
             else:
                 logger.error("Accumulation service not found, skipping accumulation")
 
-    async def process_completed_collection(
-        self,
-        collection_id: str,
-        spans: List[Dict[str, Any]],
-        user: User,
-        analytics: AnalyticsClient,
-        accumulation_service: TelemetryAccumulationService,
-    ) -> None:
+    async def get_and_mark_agent_runs_for_processing(self, collection_id: str) -> set[str]:
         """
-        Process a completed collection by creating agent runs, transcripts, and transcript groups.
+        Atomically get agent runs that need processing and mark them as processing.
 
         Args:
-            collection_id: The collection ID that was completed
-            spans: All spans in the completed collection
-        """
-        logger.info(f"Processing completed collection {collection_id} with {len(spans)} spans")
-
-        # Process spans to create agent runs
-        agent_run_count = await self.store_spans(spans, user, accumulation_service)
-
-        # Track with PostHog
-        analytics.track_event(
-            "agent_runs_ingested",
-            properties={
-                "collection_id": collection_id,
-                "num_runs": agent_run_count,
-                "source": "tracing",
-            },
-        )
-
-    async def store_spans(
-        self,
-        spans: List[Dict[str, Any]],
-        user: User,
-        accumulation_service: TelemetryAccumulationService | None = None,
-    ) -> int:
-        """
-        Store spans by creating collections, agent runs, and transcripts.
-
-        Args:
-            spans: List of processed span dictionaries
-            user: The user creating the agent runs
+            collection_id: The collection ID
 
         Returns:
-            int: Number of agent runs created
+            Set of agent run IDs that were successfully marked as processing
         """
-        if not spans:
-            return 0
 
-        # Organize spans by collection_id -> agent_run_id -> transcript_id -> spans[]
-        spans_by_collection = self._organize_spans_by_collection(spans)
+        stmt = (
+            update(SQLATelemetryAgentRunStatus)
+            .where(
+                SQLATelemetryAgentRunStatus.status
+                == TelemetryAgentRunStatus.NEEDS_PROCESSING.value,
+                SQLATelemetryAgentRunStatus.collection_id == collection_id,
+            )
+            .values(status=TelemetryAgentRunStatus.PROCESSING.value)
+            .returning(SQLATelemetryAgentRunStatus.agent_run_id)
+        )
 
-        # Process each collection and its agent runs
-        total_agent_runs = 0
+        # Log the SQL query for debugging
+        logger.info(f"SQL Query: {stmt.compile(compile_kwargs={'literal_binds': True})}")
 
-        for collection_id, spans_by_agent_run in spans_by_collection.items():
-            # Ensure collection exists
-            if not await self.mono_svc.collection_exists(collection_id):
-                from fastapi import HTTPException
+        result = await self.session.execute(stmt)
+        agent_run_ids = set(result.scalars().all())
 
-                logger.error(
-                    f"Collection {collection_id} does not exist but should have been created earlier"
-                )
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Collection {collection_id} not found. It should have been created during trace processing.",
-                )
+        logger.info(
+            f"Atomically marked {len(agent_run_ids)} agent runs as processing in collection {collection_id}"
+        )
+        return agent_run_ids
 
-            # Get or create default view context for this collection
-            ctx = await self.mono_svc.get_default_view_ctx(collection_id, user)
+    async def _mark_agent_runs_as_completed(
+        self, collection_id: str, agent_run_ids: set[str]
+    ) -> None:
+        """
+        Mark agent runs as completed after successful processing.
+        Only mark as completed if currently processing to prevent the case where new data arrives while agent runs are being processed.
 
-            # Get transcript group metadata from database
-            transcript_group_metadata: Dict[str, Dict[str, Any]] = {}
-            if accumulation_service:
-                transcript_group_metadata = (
-                    await accumulation_service.get_transcript_group_metadata(collection_id)
-                )
-            transcript_groups_by_agent_run: Dict[str, List[TranscriptGroup]] = {}
+        Args:
+            collection_id: The collection ID
+            agent_run_ids: Set of agent run IDs to mark as completed
+        """
+        if not agent_run_ids:
+            return
 
-            if transcript_group_metadata:
-                transcript_groups = self._create_transcript_groups_from_accumulation_data(
-                    transcript_group_metadata
-                )
-                if transcript_groups:
-                    # Group transcript groups by agent_run_id
-                    for tg in transcript_groups:
-                        if tg.agent_run_id not in transcript_groups_by_agent_run:
-                            transcript_groups_by_agent_run[tg.agent_run_id] = []
-                        transcript_groups_by_agent_run[tg.agent_run_id].append(tg)
-                    logger.info(
-                        f"Found {len(transcript_groups)} transcript groups for {len(transcript_groups_by_agent_run)} agent runs"
-                    )
+        # Only mark as completed if currently processing
+        update_stmt = (
+            update(SQLATelemetryAgentRunStatus)
+            .where(
+                SQLATelemetryAgentRunStatus.agent_run_id.in_(list(agent_run_ids)),
+                SQLATelemetryAgentRunStatus.collection_id == collection_id,
+                SQLATelemetryAgentRunStatus.status == TelemetryAgentRunStatus.PROCESSING.value,
+            )
+            .values(status=TelemetryAgentRunStatus.COMPLETED.value)
+        )
 
-            # Create agent runs for this collection with stored scores and metadata
-            collection_agent_runs = await self._create_agent_runs_from_spans(
-                spans_by_agent_run,
-                collection_id,
-                transcript_groups_by_agent_run,
-                accumulation_service,
+        result = await self.session.execute(update_stmt)
+        updated_count = result.rowcount
+
+        if updated_count > 0:
+            logger.info(
+                f"Marked {updated_count} agent runs as completed in collection {collection_id}"
+            )
+        else:
+            logger.warning(
+                f"No agent runs were marked as completed in collection {collection_id} (they may have been marked for reprocessing by new data)"
             )
 
-            # Add agent runs to this collection
-            if collection_agent_runs:
-                try:
-                    # Add agent runs using the existing service method
-                    await self.update_agent_runs_for_telemetry(ctx, collection_agent_runs)
-                    logger.info(
-                        f"Added {len(collection_agent_runs)} agent runs to collection {collection_id}"
-                    )
-                    total_agent_runs += len(collection_agent_runs)
-                except Exception as e:
-                    logger.error(f"Error adding agent runs to collection {collection_id}: {str(e)}")
+    async def _mark_agent_runs_as_errored(
+        self, collection_id: str, agent_run_ids: set[str], error_message: str | None = None
+    ) -> None:
+        """
+        Mark agent runs as needs_processing after failed processing.
+        Also tracks error count and error messages.
 
-            else:
-                logger.warning(f"No agent runs created for collection {collection_id}")
-                # Log agent run details for debugging
-                for agent_run_id, transcripts in spans_by_agent_run.items():
-                    logger.debug(f"  Agent run {agent_run_id}: {len(transcripts)} transcripts")
+        Args:
+            collection_id: The collection ID
+            agent_run_ids: Set of agent run IDs to mark as needs_processing
+            error_message: Optional error message to store
+        """
+        if not agent_run_ids:
+            return
 
-        logger.info(f"Processed {len(spans)} spans into {total_agent_runs} agent runs")
+        # Update status and track error information
+        for agent_run_id in agent_run_ids:
+            # Get current metadata to update error count
+            query = select(SQLATelemetryAgentRunStatus.metadata_json).where(
+                SQLATelemetryAgentRunStatus.agent_run_id == agent_run_id,
+                SQLATelemetryAgentRunStatus.collection_id == collection_id,
+            )
+            result = await self.session.execute(query)
+            current_metadata: dict[str, Any] = result.scalar_one_or_none() or {}
 
-        return total_agent_runs
+            # Update error count and message
+            error_count = current_metadata.get("error_count", 0) + 1
+            error_history = current_metadata.get("error_history", [])
+            if error_message:
+                error_history.append({"error": error_message})
+
+            if len(error_history) > 5:
+                error_history = error_history[-5:]
+
+            status = TelemetryAgentRunStatus.NEEDS_PROCESSING.value
+            if error_count > 3:
+                status = TelemetryAgentRunStatus.ERROR.value
+
+            update_stmt = (
+                update(SQLATelemetryAgentRunStatus)
+                .where(
+                    SQLATelemetryAgentRunStatus.agent_run_id == agent_run_id,
+                    SQLATelemetryAgentRunStatus.collection_id == collection_id,
+                )
+                .values(
+                    status=status,
+                    metadata_json={
+                        "error_count": error_count,
+                        "error_history": error_history,
+                    },
+                )
+            )
+
+            await self.session.execute(update_stmt)
+
+        await self.session.commit()
+
+        logger.info(
+            f"Marked {len(agent_run_ids)} agent runs as needs_processing after error in collection {collection_id}"
+        )
 
     async def update_agent_runs_for_telemetry(
         self, ctx: ViewContext, agent_runs: Sequence[AgentRun]
@@ -739,14 +885,23 @@ class TelemetryService:
             # Use merge to handle both insert and update
             await self.session.merge(sqla_agent_run)
 
+        # Validate transcript group parent references before saving transcript groups
+        if transcript_group_data:
+            await self._validate_transcript_group_parent_references(transcript_group_data)
+
         # Handle transcript groups
         if transcript_group_data:
             for sqla_transcript_group in transcript_group_data:
+
                 # Use merge to handle both insert and update
                 await self.session.merge(sqla_transcript_group)
+                logger.debug(
+                    f"Saved transcript group: {sqla_transcript_group.id} with parent {sqla_transcript_group.parent_transcript_group_id}"
+                )
+        await self.session.commit()
 
         # Validate transcript_group_id references before inserting transcripts
-        await self._validate_transcript_group_references(transcript_data)
+        await self._validate_transcript_group_references(transcript_data, transcript_group_data)
 
         # Handle transcripts - delete existing and recreate
         # Delete existing transcripts for these agent runs
@@ -762,15 +917,111 @@ class TelemetryService:
             f"Added {len(agent_runs)} agent runs, {len(transcript_data)} transcripts, and {len(transcript_group_data)} transcript groups"
         )
 
-    async def _validate_transcript_group_references(
-        self, transcript_data: list[SQLATranscript]
+    def _sort_transcript_groups_by_parent_order(
+        self, transcript_group_data: List[SQLATranscriptGroup]
+    ) -> List[SQLATranscriptGroup]:
+        """
+        Sort transcript groups so that parent groups come before their children.
+        This ensures that foreign key constraints are satisfied when saving to the database.
+
+        Args:
+            transcript_group_data: List of SQLATranscriptGroup objects to sort
+
+        Returns:
+            Sorted list of SQLATranscriptGroup objects with parents before children
+        """
+        # Create a mapping of group ID to group object
+        group_map = {group.id: group for group in transcript_group_data}
+
+        # Create a mapping of parent ID to list of child IDs
+        parent_to_children: Dict[str, List[str]] = {}
+        for group in transcript_group_data:
+            if group.parent_transcript_group_id:
+                if group.parent_transcript_group_id not in parent_to_children:
+                    parent_to_children[group.parent_transcript_group_id] = []
+                parent_to_children[group.parent_transcript_group_id].append(group.id)
+
+        # Topological sort: start with groups that have no parents
+        sorted_groups: List[SQLATranscriptGroup] = []
+        visited: set[str] = set()
+
+        def visit(group_id: str) -> None:
+            if group_id in visited:
+                return
+            visited.add(group_id)
+
+            # Add this group to the sorted list first (parents before children)
+            if group_id in group_map:
+                sorted_groups.append(group_map[group_id])
+
+            # Then visit all children
+            if group_id in parent_to_children:
+                for child_id in parent_to_children[group_id]:
+                    if child_id in group_map:  # Only visit if child is in our data
+                        visit(child_id)
+
+        # Visit all groups that have no parents first
+        for group in transcript_group_data:
+            if not group.parent_transcript_group_id:
+                visit(group.id)
+
+        # Visit any remaining groups (shouldn't happen in a valid tree, but just in case)
+        for group in transcript_group_data:
+            if group.id not in visited:
+                visit(group.id)
+
+        return sorted_groups
+
+    async def _validate_transcript_group_parent_references(
+        self, transcript_group_data: List[SQLATranscriptGroup]
     ) -> None:
         """
-        Validate that all transcript_group_id references in transcripts exist in the database.
-        If a reference doesn't exist, set it to None to avoid foreign key violations.
+        Validate that all parent_transcript_group_id references in transcript groups exist in the current batch.
+        If a parent reference doesn't exist in the current batch, set it to None to avoid foreign key violations.
+        This ensures that parent groups are saved before their children.
+
+        Args:
+            transcript_group_data: List of SQLATranscriptGroup objects to validate
+        """
+        # Create a set of all transcript group IDs in the current batch
+        current_group_ids = {group.id for group in transcript_group_data}
+
+        # Check for parent references that don't exist in the current batch
+        invalid_parent_references: List[tuple[str, str]] = []
+        for group in transcript_group_data:
+            if (
+                group.parent_transcript_group_id
+                and group.parent_transcript_group_id not in current_group_ids
+            ):
+                invalid_parent_references.append((group.id, group.parent_transcript_group_id))
+
+        if invalid_parent_references:
+            logger.warning(
+                f"Found {len(invalid_parent_references)} transcript groups with parent references not in current batch"
+            )
+            # Set parent_transcript_group_id to None for groups referencing missing parents
+            for group_id, parent_id in invalid_parent_references:
+                for group in transcript_group_data:
+                    if group.id == group_id:
+                        logger.warning(
+                            f"Removing reference to parent transcript group {parent_id} (not in current batch) from transcript group {group_id}"
+                        )
+                        group.parent_transcript_group_id = None
+                        break
+
+    async def _validate_transcript_group_references(
+        self,
+        transcript_data: list[SQLATranscript],
+        transcript_group_data: list[SQLATranscriptGroup],
+    ) -> None:
+        """
+        Validate that all transcript_group_id references in transcripts exist in either the database
+        or the transcript groups being added in the current batch.
+        If a reference doesn't exist in either place, set it to None to avoid foreign key violations.
 
         Args:
             transcript_data: List of SQLATranscript objects to validate
+            transcript_group_data: List of SQLATranscriptGroup objects being added in the current batch
         """
         # Collect all unique transcript_group_ids that are not None
         referenced_group_ids: set[str] = set()
@@ -781,15 +1032,25 @@ class TelemetryService:
         if not referenced_group_ids:
             return
 
-        # Check which transcript groups exist in the database
-        query = select(SQLATranscriptGroup.id).where(
-            SQLATranscriptGroup.id.in_(list(referenced_group_ids))
-        )
-        result = await self.session.execute(query)
-        existing_group_ids = set(result.scalars().all())
+        # Create a set of transcript group IDs from the current batch
+        current_batch_group_ids = {group.id for group in transcript_group_data}
+
+        # Check which transcript groups exist in the database (excluding those in current batch)
+        db_referenced_ids = referenced_group_ids - current_batch_group_ids
+        existing_group_ids: set[str] = set()
+
+        if db_referenced_ids:
+            query = select(SQLATranscriptGroup.id).where(
+                SQLATranscriptGroup.id.in_(list(db_referenced_ids))
+            )
+            result = await self.session.execute(query)
+            existing_group_ids = set(result.scalars().all())
+
+        # Combine existing database groups with current batch groups
+        all_valid_group_ids = existing_group_ids | current_batch_group_ids
 
         # Find missing transcript groups
-        missing_group_ids = referenced_group_ids - existing_group_ids
+        missing_group_ids = referenced_group_ids - all_valid_group_ids
 
         if missing_group_ids:
             logger.warning(
@@ -826,8 +1087,9 @@ class TelemetryService:
             transcript_id = span_attrs.get("transcript_id")
 
             if not collection_id:
-                span_id = span.get("span_id", "unknown")
-                logger.warning(f"Skipping span {span_id} - missing collection_id")
+                logger.warning(
+                    f"Skipping span - missing collection_id: {self._get_span_debug_info(span)}"
+                )
                 logger.debug(f"Span: {json.dumps(span, indent=2)}")
                 continue
 
@@ -894,16 +1156,18 @@ class TelemetryService:
     async def _create_agent_runs_from_spans(
         self,
         agent_run_spans: Dict[str, Dict[str, List[Dict[str, Any]]]],
-        collection_id: str,
         transcript_groups_by_agent_run: Dict[str, List[TranscriptGroup]] | None = None,
-        accumulation_service: TelemetryAccumulationService | None = None,
+        collection_scores: Dict[str, List[Dict[str, Any]]] | None = None,
+        collection_metadata: Dict[str, List[Dict[str, Any]]] | None = None,
     ) -> List[AgentRun]:
         """
         Create AgentRun objects from organized spans, incorporating stored scores and metadata.
 
         Args:
-            agent_runs: Organized spans by agent_run_id -> transcript_id -> spans[]
-            collection_id: The ID of the collection these spans belong to
+            agent_run_spans: Organized spans by agent_run_id -> transcript_id -> spans[]
+            transcript_groups_by_agent_run: Transcript groups organized by agent run ID
+            collection_scores: Stored scores for the collection, organized by agent run ID
+            collection_metadata: Stored metadata for the collection, organized by agent run ID
 
         Returns:
             List of AgentRun objects
@@ -912,6 +1176,15 @@ class TelemetryService:
 
         for agent_run_id, transcripts in agent_run_spans.items():
             logger.info(f"Processing agent_run_id: {agent_run_id}")
+
+            logger.debug(
+                f"_create_agent_runs_from_spans: agent_run_id={agent_run_id}, "
+                f"num_transcripts={len(transcripts)}, "
+                f"transcript_groups_by_agent_run={len(transcript_groups_by_agent_run[agent_run_id]) if transcript_groups_by_agent_run and agent_run_id in transcript_groups_by_agent_run else 'None'}, "
+                f"collection_scores={len(collection_scores[agent_run_id]) if collection_scores and agent_run_id in collection_scores else 'None'}, "
+                f"collection_metadata={len(collection_metadata[agent_run_id]) if collection_metadata and agent_run_id in collection_metadata else 'None'}"
+            )
+
             agent_run_transcripts: Dict[str, Transcript] = {}
             agent_run_scores: Dict[str, int | float | bool | None] = {}
             agent_run_model: str | None = None
@@ -922,6 +1195,15 @@ class TelemetryService:
                 logger.info(
                     f"  Processing transcript_id: {transcript_id} with {len(transcript_spans)} spans"
                 )
+
+                # Debug: Log span details to understand what's in the spans
+                for i, span in enumerate(transcript_spans):
+                    span_attrs = span.get("attributes", {})
+                    logger.debug(f"    Span {i}: attributes={list(span_attrs.keys())}")
+                    if "gen_ai" in str(span_attrs):
+                        logger.debug(f"    Span {i}: contains gen_ai data")
+                    else:
+                        logger.debug(f"    Span {i}: no gen_ai data found")
 
                 # Extract metadata and scores from spans
                 for span in transcript_spans:
@@ -950,6 +1232,23 @@ class TelemetryService:
 
                 # Create transcripts from spans
                 transcripts_list = self._create_transcripts_from_spans(transcript_spans)
+                logger.debug(
+                    f"    Created {len(transcripts_list)} transcripts from {len(transcript_spans)} spans"
+                )
+
+                if not transcripts_list:
+                    logger.warning(
+                        f"    No transcripts created from {len(transcript_spans)} spans for transcript_id: {transcript_id}"
+                    )
+                    # Log more details about why no transcripts were created
+                    for i, span in enumerate(transcript_spans):
+                        span_attrs = span.get("attributes", {})
+                        gen_ai_keys = [k for k in span_attrs.keys() if k.startswith("gen_ai")]
+                        logger.debug(f"      Span {i} gen_ai keys: {gen_ai_keys}")
+                        if not gen_ai_keys:
+                            logger.debug(
+                                f"      Span {i} has no gen_ai keys. All keys: {list(span_attrs.keys())}"
+                            )
 
                 # Add transcripts to agent run
                 for transcript in transcripts_list:
@@ -957,17 +1256,6 @@ class TelemetryService:
 
             # Create agent run if it has transcripts
             if agent_run_transcripts:
-                # Get stored scores and metadata for this collection
-                collection_scores: Dict[str, List[Dict[str, Any]]] = {}
-                collection_metadata: Dict[str, List[Dict[str, Any]]] = {}
-                if accumulation_service:
-                    collection_scores = await accumulation_service.get_collection_scores(
-                        collection_id
-                    )
-                    collection_metadata = await accumulation_service.get_collection_metadata(
-                        collection_id
-                    )
-
                 # Create metadata with scores, model, and any additional metadata using BaseAgentRunMetadata
                 metadata_dict: Dict[str, Any] = {"scores": agent_run_scores}
                 if agent_run_model:
@@ -979,12 +1267,10 @@ class TelemetryService:
                     logger.info(f"  Added metadata to agent run: {agent_run_metadata_dict}")
 
                 # Add stored scores (these take precedence over span-based scores)
-                if collection_scores.get(agent_run_id):
+                if collection_scores and collection_scores.get(agent_run_id):
                     for score_item in collection_scores[agent_run_id]:
-                        stored_score_name: str | None = score_item.get("score_name")
-                        stored_score_value: int | float | bool | str | None = score_item.get(
-                            "score_value"
-                        )
+                        stored_score_name = score_item.get("score_name")
+                        stored_score_value = score_item.get("score_value")
                         if stored_score_name and stored_score_value is not None:
                             # Add the stored score to the scores dict
                             metadata_dict["scores"][stored_score_name] = stored_score_value
@@ -993,9 +1279,9 @@ class TelemetryService:
                             )
 
                 # Add stored metadata (these take precedence over span-based metadata)
-                if collection_metadata.get(agent_run_id):
+                if collection_metadata and collection_metadata.get(agent_run_id):
                     for metadata_item in collection_metadata[agent_run_id]:
-                        stored_metadata: Dict[str, Any] = metadata_item.get("metadata", {})
+                        stored_metadata = metadata_item.get("metadata", {})
                         if stored_metadata:
                             # Merge stored metadata with span-based metadata, stored metadata takes precedence
                             metadata_dict.update(stored_metadata)
@@ -1077,6 +1363,10 @@ class TelemetryService:
 
         # Create transcripts from chat threads
         transcripts: List[Transcript] = []
+        logger.debug(
+            f"    Created {len(chat_threads)} chat threads from {len(transcript_spans)} spans"
+        )
+
         if chat_threads:
             for i, chat_thread in enumerate(chat_threads):
                 # Create unique transcript ID for each thread
@@ -1104,6 +1394,13 @@ class TelemetryService:
                 )
         else:
             logger.warning(f"    No messages extracted from {len(transcript_spans)} spans")
+            # Log more details about why no chat threads were created
+            total_messages = 0
+            for span_idx, span in enumerate(transcript_spans):
+                span_messages = self._span_to_chat_messages(span)
+                total_messages += len(span_messages)
+                logger.debug(f"      Span {span_idx}: extracted {len(span_messages)} messages")
+            logger.debug(f"    Total messages extracted from all spans: {total_messages}")
 
         return transcripts
 
@@ -1288,30 +1585,58 @@ class TelemetryService:
         messages: List[ChatMessage] = []
 
         # Debug logging
-        span_id = span.get("span_id", "unknown")
-        operation_name = span.get("operation_name", "unknown")
         logger.debug(
-            f"Processing span {span_id} ({operation_name}) with {len(span_attrs)} attributes"
+            f"Processing span with {len(span_attrs)} attributes: {self._get_span_debug_info(span)}"
         )
 
-        llm_request_type = span.get("llm", {}).get("request", {}).get("type", None)
+        llm_request_type = span_attrs.get("llm", {}).get("request", {}).get("type", None)
         if llm_request_type == "embedding":
-            logger.info(f"Skipping embedding span {span_id}")
+            logger.info(f"Skipping embedding span: {self._get_span_debug_info(span)}")
             return []
 
         messages = self._extract_messages_from_span(span)
 
         # Debug logging
         if messages:
-            logger.debug(f"Extracted {len(messages)} messages from span {span_id}")
+            logger.debug(
+                f"Extracted {len(messages)} messages from span: {self._get_span_debug_info(span)}"
+            )
             for i, msg in enumerate(messages):
                 logger.debug(
                     f"  Message {i}: role={msg.role}, content_length={len(msg.text) if hasattr(msg, 'text') else 'N/A'}"
                 )
         else:
-            logger.debug(f"No messages extracted from span {span_id}")
+            logger.debug(f"No messages extracted from span: {self._get_span_debug_info(span)}")
+            # Additional debugging to understand why no messages were extracted
+            span_attrs = span.get("attributes", {})
+            gen_ai_keys = [k for k in span_attrs.keys() if k.startswith("gen_ai")]
+            if gen_ai_keys:
+                logger.debug(f"  Span has gen_ai keys: {gen_ai_keys}")
+            else:
+                logger.debug(
+                    f"  Span has no gen_ai keys. Available keys: {list(span_attrs.keys())}"
+                )
 
         return messages
+
+    def _get_span_debug_info(self, span: Dict[str, Any]) -> str:
+        """
+        Generate helpful debugging information from a span for logging purposes.
+
+        Args:
+            span: The span dictionary
+
+        Returns:
+            String with key identifiers for easy log searching
+        """
+        span_attrs = span.get("attributes", {})
+        collection_id = span_attrs.get("collection_id", "unknown")
+        agent_run_id = span_attrs.get("agent_run_id", "unknown")
+        transcript_group_id = span_attrs.get("transcript_group_id", "unknown")
+        transcript_id = span_attrs.get("transcript_id", "unknown")
+        raw_span_id = span.get("raw_span_id", span.get("span_id", "unknown"))
+
+        return f"collection_id={collection_id}, agent_run_id={agent_run_id}, transcript_group_id={transcript_group_id}, transcript_id={transcript_id}, span_id={raw_span_id}"
 
     def _reformat_gen_ai_attributes(self, span_attrs: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -1383,6 +1708,9 @@ class TelemetryService:
         gen_ai_data = self._reformat_gen_ai_attributes(span_attrs)
 
         if "gen_ai" not in gen_ai_data:
+            logger.debug(
+                f"No gen_ai data found in span. Available keys: {list(gen_ai_data.keys())}"
+            )
             return messages
 
         gen_ai = gen_ai_data["gen_ai"]
@@ -1433,7 +1761,7 @@ class TelemetryService:
         assume_role: Optional[str] = None,
     ) -> ChatMessage | None:
         """Create a ChatMessage from structured data."""
-        span_id = span.get("span_id", "unknown")
+        raw_span_id = span.get("raw_span_id", span.get("span_id", "unknown"))
         try:
             # Determine role
             if "role" in data:
@@ -1452,7 +1780,7 @@ class TelemetryService:
                 role = "system"
             else:
                 logger.error(
-                    f"No valid role found in {context} for span {span_id}. Available keys: {list(data.keys())}"
+                    f"No valid role found in {context} for span {raw_span_id}. Available keys: {list(data.keys())}"
                 )
                 return None
 
@@ -1493,7 +1821,7 @@ class TelemetryService:
 
                 except Exception as e:
                     logger.warning(
-                        f"Failed to extract tool calls from content in {context} for span {span_id}: {e}"
+                        f"Failed to extract tool calls from content in {context} for span {raw_span_id}: {e}"
                     )
                     # Continue without tool calls from content
 
@@ -1509,7 +1837,7 @@ class TelemetryService:
                         tool_calls.extend(structured_tool_calls)
                 except Exception as e:
                     logger.warning(
-                        f"Failed to extract structured tool calls in {context} for span {span_id}: {e}"
+                        f"Failed to extract structured tool calls in {context} for span {raw_span_id}. Available keys: {list(data.keys())}. Error: {e}"
                     )
                     # Continue without structured tool calls
 
@@ -1521,22 +1849,21 @@ class TelemetryService:
             if tool_calls:
                 message_data["tool_calls"] = tool_calls
 
-            logger.debug(f"Creating {context} message with data: {message_data}")
             message = parse_chat_message(message_data)
             logger.debug(f"Successfully created {context} message: role={message.role}")
             return message
 
         except KeyError as e:
             logger.error(
-                f"Missing required field {e} in {context} for span {span_id}. Available keys: {list(data.keys())}"
+                f"Missing required field {e} in {context} for span {raw_span_id}. Available keys: {list(data.keys())}"
             )
             return None
         except ValueError as e:
-            logger.error(f"Invalid value in {context} for span {span_id}: {e}")
+            logger.error(f"Invalid value in {context} for span {raw_span_id}: {e}")
             return None
         except Exception as e:
             logger.error(
-                f"Unexpected error creating {context} message for span {span}: {e}",
+                f"Unexpected error creating {context} message for span {raw_span_id}. Available keys: {list(data.keys())}. Error: {e}",
                 exc_info=True,
             )
             return None
@@ -1607,7 +1934,9 @@ class TelemetryService:
                         tool_calls = extracted_tool_calls
                         logger.info(f"Extracted {len(tool_calls)} tool calls from content")
             except json.JSONDecodeError as e:
-                logger.warning(f"Content is not valid JSON: {e}, treating as regular content")
+                logger.warning(
+                    f"Content is not valid JSON: {e}, treating as regular content. Start of content: {str(content)[:200]}"
+                )
 
         return content, tool_calls
 
@@ -1704,38 +2033,3 @@ class TelemetryService:
             current[parts[-1]] = value
 
         return unflattened
-
-    async def process_trace_done_with_delay(
-        self,
-        collection_id: str,
-        user: User,
-        analytics: AnalyticsClient,
-        accumulation_service: TelemetryAccumulationService,
-    ) -> None:
-        """Process a trace-done event with a delay to allow for late-arriving spans."""
-        # Wait a bit to allow for late-arriving spans
-        await asyncio.sleep(5)  # 5 second delay
-
-        # Get Redis lock for this collection
-        redis_client = await get_redis_client()
-        lock_key = f"{_STORE_SPANS_LOCK_PREFIX}{collection_id}"
-
-        try:
-            # Use lock to prevent concurrent processing of the same collection
-            async with redis_client.lock(lock_key, blocking=False):
-                # Lock acquired, process spans
-                accumulated_spans = await accumulation_service.get_accumulated_spans(collection_id)
-
-                if accumulated_spans:
-                    logger.info(
-                        f"Processing trace-done for collection {collection_id} with {len(accumulated_spans)} spans"
-                    )
-                    await self.process_completed_collection(
-                        collection_id, accumulated_spans, user, analytics, accumulation_service
-                    )
-                else:
-                    logger.warning(f"No spans found for trace-done collection {collection_id}")
-        except LockError:
-            logger.info(f"Collection {collection_id} is already being processed by another request")
-        except Exception as e:
-            logger.error(f"Error processing trace-done for collection {collection_id}: {str(e)}")

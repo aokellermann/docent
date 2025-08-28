@@ -1,5 +1,3 @@
-import asyncio
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
@@ -63,12 +61,37 @@ async def trace_endpoint(
             json_data=trace_data,
         )
 
-        span_count = await telemetry_svc.handle_new_trace_data(
-            trace_data, user, accumulation_service
-        )
+        # Extract spans and accumulate them
+        spans = await telemetry_svc.extract_spans(trace_data)
+
+        # Extract unique collection IDs from spans
+        collection_ids, collection_names = telemetry_svc.extract_collection_info_from_spans(spans)
+
+        # Check permissions for all collections mentioned in spans
+        await telemetry_svc.ensure_write_permission_for_collections(collection_ids, user)
+
+        # Ensure collections exist
+        await telemetry_svc.ensure_collections_exist(collection_ids, collection_names, user)
+
+        # Accumulate spans into database
+        await telemetry_svc.accumulate_spans(spans, user.id, accumulation_service)
+
+        # Trigger background processing jobs for each collection
+        for collection_id in collection_ids:
+            try:
+                await telemetry_svc.mono_svc.add_and_enqueue_telemetry_processing_job(
+                    collection_id, user
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed to trigger telemetry processing job for collection {collection_id}: {str(e)}"
+                )
+                # Continue with other collections even if job creation fails
 
         # Return success response
-        return JSONResponse(status_code=200, content={"status": "success", "processed": span_count})
+        return JSONResponse(
+            status_code=200, content={"status": "success", "spans_accumulated": len(spans)}
+        )
     except Exception as e:
         logger.error(f"Error processing traces: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -117,12 +140,15 @@ async def trace_done_endpoint(
             collection_id=collection_id,
         )
 
-        # Schedule processing with a small delay to allow for late-arriving spans
-        asyncio.create_task(
-            telemetry_svc.process_trace_done_with_delay(
-                collection_id, user, analytics, accumulation_service
+        # Trigger background processing job
+        try:
+            await telemetry_svc.mono_svc.add_and_enqueue_telemetry_processing_job(
+                collection_id, user
             )
-        )
+        except Exception as e:
+            logger.error(
+                f"Failed to trigger telemetry processing job for collection {collection_id}: {str(e)}"
+            )
 
         return JSONResponse(
             status_code=200, content={"status": "success", "collection_id": collection_id}
@@ -182,6 +208,16 @@ async def add_score_endpoint(
             collection_id, agent_run_id, score_name, score_value, timestamp, user.id
         )
 
+        # Trigger background processing job
+        try:
+            await telemetry_svc.mono_svc.add_and_enqueue_telemetry_processing_job(
+                collection_id, user
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to trigger telemetry processing job for collection {collection_id}: {str(e)}"
+            )
+
         return JSONResponse(status_code=200, content={"status": "success"})
 
     except Exception as e:
@@ -233,9 +269,19 @@ async def add_metadata_endpoint(
         )
 
         # Store metadata in database
-        await accumulation_service.add_metadata(
+        await accumulation_service.add_agent_run_metadata(
             collection_id, agent_run_id, metadata, timestamp, user.id
         )
+
+        # Trigger background processing job
+        try:
+            await telemetry_svc.mono_svc.add_and_enqueue_telemetry_processing_job(
+                collection_id, user
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to trigger telemetry processing job for collection {collection_id}: {str(e)}"
+            )
 
         return JSONResponse(status_code=200, content={"status": "success"})
 
@@ -300,6 +346,16 @@ async def add_transcript_metadata_endpoint(
             timestamp,
             user.id,
         )
+
+        # Trigger background processing job
+        try:
+            await telemetry_svc.mono_svc.add_and_enqueue_telemetry_processing_job(
+                collection_id, user
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to trigger telemetry processing job for collection {collection_id}: {str(e)}"
+            )
 
         return JSONResponse(status_code=200, content={"status": "success"})
 
@@ -378,6 +434,16 @@ async def add_transcript_group_metadata_endpoint(
             timestamp,
             user.id,
         )
+
+        # Trigger background processing job
+        try:
+            await telemetry_svc.mono_svc.add_and_enqueue_telemetry_processing_job(
+                collection_id, user
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to trigger telemetry processing job for collection {collection_id}: {str(e)}"
+            )
 
         return JSONResponse(status_code=200, content={"status": "success"})
 

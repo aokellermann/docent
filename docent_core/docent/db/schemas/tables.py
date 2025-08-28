@@ -61,6 +61,7 @@ TABLE_TELEMETRY_LOG = "telemetry_logs"
 TABLE_USER_PROFILE = "user_profiles"
 TABLE_MODEL_API_KEYS = "model_api_keys"
 TABLE_TELEMETRY_ACCUMULATION = "telemetry_accumulation"
+TABLE_TELEMETRY_AGENT_RUN_STATUS = "telemetry_agent_run_status"
 
 
 def sanitize_pg_text(text: str) -> str:
@@ -134,6 +135,56 @@ class SQLAAgentRun(SQLABase):
             transcripts=transcripts,
             transcript_groups=transcript_groups or {},
         )
+
+
+class TelemetryAgentRunStatus(enum.Enum):
+    """Enumeration of telemetry agent run processing statuses."""
+
+    NEEDS_PROCESSING = "needs_processing"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    ERROR = "error"
+
+
+class SQLATelemetryAgentRunStatus(SQLABase):
+    __tablename__ = TABLE_TELEMETRY_AGENT_RUN_STATUS
+
+    # Primary key
+    id = mapped_column(String(36), primary_key=True)
+
+    # Collection ID for grouping agent runs
+    collection_id = mapped_column(
+        String(36), ForeignKey(f"{TABLE_COLLECTION}.id"), nullable=False, index=True
+    )
+
+    # agent run id, intentionally not a foreign key because we use this table to track agent runs that don't exist yet (i.e. that are still being ingested)
+    agent_run_id = mapped_column(String(36), nullable=False, index=True)
+
+    # Processing status: 'needs_processing', 'processing', or 'completed'
+    status = mapped_column(
+        String(20), nullable=False, default=TelemetryAgentRunStatus.NEEDS_PROCESSING.value
+    )
+
+    # Timestamp of creation
+    created_at = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False
+    )
+
+    # Timestamp of last status change
+    updated_at = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(UTC).replace(tzinfo=None),
+        onupdate=lambda: datetime.now(UTC).replace(tzinfo=None),
+        nullable=False,
+    )
+
+    # Optional metadata about the processing (e.g., error messages, processing notes)
+    metadata_json = mapped_column(JSONB, nullable=True)
+
+    __table_args__ = (
+        # Ensure one status record per agent run
+        UniqueConstraint("agent_run_id", name="uq_telemetry_agent_run_status_agent_run_id"),
+    )
 
 
 class SQLATranscript(SQLABase):
