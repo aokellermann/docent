@@ -251,6 +251,18 @@ export const getCurAgentRun = createAsyncThunk(
       const response = await apiRestClient.get(
         `/${collectionId}/agent_run?agent_run_id=${agentRunId}&apply_base_where_clause=false`
       );
+
+      if (!response.data) {
+        dispatch(
+          setToastNotification({
+            title: 'Agent run not found',
+            description: 'The requested agent run could not be found',
+            variant: 'destructive',
+          })
+        );
+        return;
+      }
+
       dispatch(setCurAgentRun(response.data));
     } catch (error) {
       dispatch(
@@ -293,48 +305,6 @@ export const openAgentRunInDashboard = createAsyncThunk(
   }
 );
 
-export const getAltAgentRun = createAsyncThunk(
-  'transcript/getAltAgentRun',
-  async (agentRunId: string, { dispatch, getState }) => {
-    const state = getState() as RootState;
-    const collectionId = state.collection.collectionId;
-
-    // Clear current datapoint
-    const altAgentRun = state.transcript.altAgentRun;
-    if (altAgentRun !== undefined) {
-      dispatch(clearAltAgentRun());
-    }
-
-    if (!collectionId) {
-      dispatch(
-        setToastNotification({
-          title: 'Configuration error',
-          description: 'No collection ID available',
-          variant: 'destructive',
-        })
-      );
-      throw new Error('No collection ID available');
-    }
-
-    try {
-      const response = await apiRestClient.get(
-        `/${collectionId}/agent_run?agent_run_id=${agentRunId}&apply_base_where_clause=false`
-      );
-      console.log('response', response);
-      dispatch(setAltAgentRun(response.data));
-    } catch (error) {
-      dispatch(
-        setToastNotification({
-          title: 'Error getting agent run',
-          description: 'Failed with unknown error',
-          variant: 'destructive',
-        })
-      );
-      throw error;
-    }
-  }
-);
-
 export const handleAgentRunsUpdated = createAsyncThunk(
   'transcript/handleAgentRunsUpdated',
   async (_, { dispatch, getState }) => {
@@ -347,10 +317,10 @@ export const handleAgentRunsUpdated = createAsyncThunk(
     }
 
     // Refresh alternative datapoint
-    const altAgentRun = state.transcript.altAgentRun;
-    if (altAgentRun !== undefined) {
-      dispatch(getAltAgentRun(altAgentRun.id));
-    }
+    // const altAgentRun = state.transcript.altAgentRun;
+    // if (altAgentRun !== undefined) {
+    //   dispatch(getAltAgentRun(altAgentRun.id));
+    // }
 
     // Refresh transcript metadata
     // const transcriptMetadata = state.collection.agentRunMetadata;
