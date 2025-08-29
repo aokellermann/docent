@@ -69,9 +69,9 @@ resource "aws_apprunner_service" "api" {
       image_identifier      = "${aws_ecr_repository.backend.repository_url}:latest"
       image_configuration {
         port = "8000"
+        start_command = "docent_core server --port 8000 --workers ${var.app_runner_num_workers}"
         runtime_environment_variables = {
-          SERVICE              = "server"  # Starts the uvicorn server, not the worker
-          NUM_WORKERS          = var.app_runner_num_workers
+          ENV_RESOLUTION_STRATEGY = "os_environ"
           DEPLOYMENT_ID        = var.deployment
           LLM_CACHE_PATH       = null  # Disable cache
           DOCENT_PG_HOST       = aws_db_instance.postgres.address
@@ -197,7 +197,7 @@ resource "aws_apprunner_service" "frontend" {
 resource "aws_apprunner_auto_scaling_configuration_version" "frontend" {
   count = var.enable_frontend_app_runner ? 1 : 0
 
-  auto_scaling_configuration_name = "${var.project_name}-${var.deployment}-frontend-autoscaling"
+  auto_scaling_configuration_name = "${var.project_name}-${var.deployment}-fe-autoscaling"
 
   max_concurrency = var.frontend_app_runner_max_concurrency
   max_size        = var.frontend_app_runner_max_size
@@ -208,7 +208,7 @@ resource "aws_apprunner_auto_scaling_configuration_version" "frontend" {
   }
 
   tags = {
-    Name        = "${var.project_name}-${var.deployment}-frontend-autoscaling"
+    Name        = "${var.project_name}-${var.deployment}-fe-autoscaling"
     Deployment = var.deployment
   }
 }

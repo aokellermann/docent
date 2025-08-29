@@ -45,6 +45,12 @@ jobs:
         env:
           AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
 
+      - name: Build and push frontend to ECR
+        run: ./scripts/ecr_push_frontend.sh
+        env:
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+          NEXT_PUBLIC_API_HOST: ${{ vars.STAGING_API_HOST }}
+
       - name: Run DB migrations (ECS one-off task)
         env:
           AWS_PAGER: ""

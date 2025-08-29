@@ -36,10 +36,10 @@ if [ -z "$NEXT_PUBLIC_API_HOST" ]; then
   NEXT_PUBLIC_API_HOST="https://api-placeholder.awsapprunner.com"
 fi
 
-# Build the Docker image using Dockerfile.frontend-production for x86_64 platform (AWS App Runner)
+# Build the Docker image using Dockerfile.frontend for x86_64 platform (AWS App Runner)
 docker build --platform linux/amd64 \
   --build-arg NEXT_PUBLIC_API_HOST="$NEXT_PUBLIC_API_HOST" \
-  -f Dockerfile.frontend-production \
+  -f Dockerfile.frontend \
   -t $PROJECT_NAME-$DEPLOYMENT_ID-frontend .
 
 # Tag the image for ECR

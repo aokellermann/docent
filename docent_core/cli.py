@@ -19,9 +19,6 @@ def server(
     timeout_graceful_shutdown: int | None = typer.Option(
         None, help="Timeout in seconds for graceful shutdown when reloading"
     ),
-    start_docent_worker: bool = typer.Option(
-        True, help="Start a worker process along with the server"
-    ),
 ):
     # `cd` to the server directory; this is where we run uvicorn from (helps for autoreload)
     file_path = Path(__file__).parent.absolute()
@@ -40,19 +37,57 @@ def server(
     if timeout_graceful_shutdown is not None:
         cmd.extend(["--timeout-graceful-shutdown", str(timeout_graceful_shutdown)])
 
-    if start_docent_worker:
-        logger.info("Starting Docent worker process along with server")
-        with subprocess.Popen(["docent_core", "worker"]):
-            subprocess.run(cmd, check=True)
-    else:
-        subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True)
 
 
 @app.command(help="Run a background job runner worker")
-def worker():
+def worker(
+    workers: int = typer.Option(1, help="Number of worker processes"),
+):
     from docent_core._worker import worker as docent_worker
 
-    docent_worker.run()
+    if workers == 1:
+        docent_worker.run()
+    else:
+        import signal
+        import sys
+        from multiprocessing import Process
+
+        processes: list[Process] = []
+
+        def signal_handler(signum: int, frame: object):
+            logger.info("Stopping workers")
+            for p in processes:
+                if p.is_alive():
+                    p.terminate()
+            for p in processes:
+                p.join(timeout=5)
+                if p.is_alive():
+                    p.kill()
+            sys.exit(0)
+
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+
+        logger.info(f"Starting {workers} worker processes")
+
+        for i in range(workers):
+            worker_id = i + 1
+
+            def run_worker_with_id(worker_id: int = worker_id):
+                os.environ["WORKER_ID"] = str(worker_id)
+                docent_worker.run()
+
+            p = Process(target=run_worker_with_id)
+            p.start()
+            processes.append(p)
+            logger.info(f"Started worker {worker_id} (PID: {p.pid})")
+
+        try:
+            for p in processes:
+                p.join()
+        except KeyboardInterrupt:
+            signal_handler(signal.SIGINT, None)
 
 
 @app.command(help="Run the website")
