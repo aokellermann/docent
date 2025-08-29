@@ -8,6 +8,32 @@ import IPython
 IPython.get_ipython().run_line_magic("load_ext", "autoreload")
 IPython.get_ipython().run_line_magic("autoreload", "2")
 
+
+# %%
+
+from docent import Docent
+
+DOCENT_API_KEY = "dk_dv2itpQ6xW0cHV6xfdT5YOOUWLUUhZj3qao56XtVkWs"
+docent_client = Docent(api_key=DOCENT_API_KEY, server_url="http://localhost:8890")
+
+docent_client.get_rubric_run_state(
+    # "d760a957-9343-49b0-8be6-535d516e3ef9", "b6c6943b-5095-4e52-b5d8-b30fee0e56ab"
+    "b244d5be-37b9-4797-b746-a664722d540b",
+    "b01f1d44-930f-4c5f-bf4b-a18334146399",
+)
+
+docent_client.get_cluster_centroids(
+    "b244d5be-37b9-4797-b746-a664722d540b",
+    "b01f1d44-930f-4c5f-bf4b-a18334146399",
+)
+
+docent_client.get_cluster_assignments(
+    "b244d5be-37b9-4797-b746-a664722d540b",
+    "b01f1d44-930f-4c5f-bf4b-a18334146399",
+)
+
+# %%
+
 # %%
 
 

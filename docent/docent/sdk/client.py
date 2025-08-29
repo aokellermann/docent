@@ -196,7 +196,7 @@ class Docent:
         response.raise_for_status()
         return response.json()
 
-    def list_searches(self, collection_id: str) -> list[dict[str, Any]]:
+    def list_rubrics(self, collection_id: str) -> list[dict[str, Any]]:
         """List all rubrics for a given collection.
 
         Args:
@@ -213,36 +213,48 @@ class Docent:
         response.raise_for_status()
         return response.json()
 
-    def get_search_results(
-        self, collection_id: str, rubric_id: str, rubric_version: int
-    ) -> list[dict[str, Any]]:
-        """Get rubric results for a given collection, rubric and version.
+    def get_rubric_run_state(self, collection_id: str, rubric_id: str) -> dict[str, Any]:
+        """Get rubric run state for a given collection and rubric.
 
         Args:
             collection_id: ID of the Collection.
-            rubric_id: The ID of the rubric to get results for.
-            rubric_version: The version of the rubric to get results for.
+            rubric_id: The ID of the rubric to get run state for.
 
         Returns:
-            list: List of dictionaries containing rubric result information.
+            dict: Dictionary containing rubric run state with results, job_id, and total_agent_runs.
 
         Raises:
             requests.exceptions.HTTPError: If the API request fails.
         """
-        url = f"{self._server_url}/rubric/{collection_id}/{rubric_id}/results"
-        response = self._session.get(url, params={"rubric_version": rubric_version})
+        url = f"{self._server_url}/rubric/{collection_id}/{rubric_id}/rubric_run_state"
+        response = self._session.get(url)
         response.raise_for_status()
         return response.json()
 
-    def list_search_clusters(
-        self, collection_id: str, rubric_id: str, rubric_version: int | None = None
-    ) -> list[dict[str, Any]]:
-        """List all centroids for a given collection and rubric.
+    def get_clustering_state(self, collection_id: str, rubric_id: str) -> dict[str, Any]:
+        """Get clustering state for a given collection and rubric.
+
+        Args:
+            collection_id: ID of the Collection.
+            rubric_id: The ID of the rubric to get clustering state for.
+
+        Returns:
+            dict: Dictionary containing job_id, centroids, and assignments.
+
+        Raises:
+            requests.exceptions.HTTPError: If the API request fails.
+        """
+        url = f"{self._server_url}/rubric/{collection_id}/{rubric_id}/clustering_job"
+        response = self._session.get(url)
+        response.raise_for_status()
+        return response.json()
+
+    def get_cluster_centroids(self, collection_id: str, rubric_id: str) -> list[dict[str, Any]]:
+        """Get centroids for a given collection and rubric.
 
         Args:
             collection_id: ID of the Collection.
             rubric_id: The ID of the rubric to get centroids for.
-            rubric_version: Optional version of the rubric. If not provided, uses latest.
 
         Returns:
             list: List of dictionaries containing centroid information.
@@ -250,34 +262,24 @@ class Docent:
         Raises:
             requests.exceptions.HTTPError: If the API request fails.
         """
-        url = f"{self._server_url}/rubric/{collection_id}/{rubric_id}/centroids"
-        params: dict[str, int] = {}
-        if rubric_version is not None:
-            params["rubric_version"] = rubric_version
-        response = self._session.get(url, params=params)
-        response.raise_for_status()
-        return response.json()
+        clustering_state = self.get_clustering_state(collection_id, rubric_id)
+        return clustering_state.get("centroids", [])
 
-    def get_cluster_matches(
-        self, collection_id: str, rubric_id: str, rubric_version: int
-    ) -> list[dict[str, Any]]:
+    def get_cluster_assignments(self, collection_id: str, rubric_id: str) -> dict[str, list[str]]:
         """Get centroid assignments for a given rubric.
 
         Args:
             collection_id: ID of the Collection.
             rubric_id: The ID of the rubric to get assignments for.
-            rubric_version: The version of the rubric to get assignments for.
 
         Returns:
-            list: List of dictionaries containing centroid assignment information.
+            dict: Dictionary mapping centroid IDs to lists of judge result IDs.
 
         Raises:
             requests.exceptions.HTTPError: If the API request fails.
         """
-        url = f"{self._server_url}/rubric/{collection_id}/{rubric_id}/assignments"
-        response = self._session.get(url, params={"rubric_version": rubric_version})
-        response.raise_for_status()
-        return response.json()
+        clustering_state = self.get_clustering_state(collection_id, rubric_id)
+        return clustering_state.get("assignments", {})
 
     def get_agent_run(self, collection_id: str, agent_run_id: str) -> AgentRun | None:
         """Get a specific agent run by its ID.
