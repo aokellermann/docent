@@ -1,5 +1,5 @@
-import { FileText } from 'lucide-react';
-import React from 'react';
+import { FileText, Copy, Check } from 'lucide-react';
+import React, { useState } from 'react';
 
 import { BaseMetadata } from '@/app/types/transcriptTypes';
 import { Button } from '@/components/ui/button';
@@ -24,10 +24,50 @@ const isEmptyObject = (obj: BaseMetadata) => {
   return Object.keys(obj).length === 0;
 };
 
+// Helper function to copy text to clipboard
+const copyToClipboard = async (text: string): Promise<boolean> => {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (err) {
+    console.error('Failed to copy to clipboard:', err);
+    return false;
+  }
+};
+
 type MetadataDialogProps = {
   metadata: BaseMetadata;
   title?: string;
   trigger?: React.ReactNode;
+};
+
+// Component for copy button with success feedback
+const CopyButton: React.FC<{ value: any }> = ({ value }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    const textToCopy = formatMetadataValue(value);
+    const success = await copyToClipboard(textToCopy);
+
+    if (success) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000); // Reset after 2 seconds
+    }
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      className="ml-2 p-1 rounded hover:bg-muted transition-colors"
+      title="Copy to clipboard"
+    >
+      {copied ? (
+        <Check className="h-3 w-3 text-green-text" />
+      ) : (
+        <Copy className="h-3 w-3 text-muted-foreground hover:text-primary" />
+      )}
+    </button>
+  );
 };
 
 const MetadataDialog: React.FC<MetadataDialogProps> = ({
@@ -70,8 +110,11 @@ const MetadataDialog: React.FC<MetadataDialogProps> = ({
                       <div className="w-1/3 font-medium text-sm text-primary break-words pr-4">
                         {key}
                       </div>
-                      <div className="w-2/3 text-sm text-muted-foreground break-words whitespace-pre-wrap font-mono text-xs">
-                        {formatMetadataValue(value)}
+                      <div className="w-2/3 text-sm text-muted-foreground break-words whitespace-pre-wrap font-mono text-xs flex items-start justify-between">
+                        <span className="flex-1">
+                          {formatMetadataValue(value)}
+                        </span>
+                        <CopyButton value={value} />
                       </div>
                     </div>
                   ))}
