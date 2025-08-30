@@ -4,7 +4,6 @@ import { Copy } from 'lucide-react';
 
 export default function UuidPill({ uuid }: { uuid?: string }) {
   if (!uuid) return null;
-  const shortUuid = uuid.split('-')[0];
 
   const onClick = async () => {
     const success = await copyToClipboard(uuid);
@@ -30,7 +29,7 @@ export default function UuidPill({ uuid }: { uuid?: string }) {
       title="Click to copy full UUID"
     >
       <Copy className="h-3 w-3" />
-      {shortUuid}
+      {uuid}
     </span>
   );
 }
