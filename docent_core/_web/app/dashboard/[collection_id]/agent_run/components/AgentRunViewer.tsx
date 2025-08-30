@@ -443,8 +443,6 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
     /**
      * Scrolling
      */
-    const [scrollPosition, setScrollPosition] = useState(0);
-    const debouncedScrollPosition = useDebounce(scrollPosition, 100);
     const [scrollNode, setScrollNode] = useState<HTMLDivElement | null>(null);
     const [currentBlockIndex, setCurrentBlockIndex] = useState<number | null>(
       null
@@ -454,20 +452,51 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
       null
     );
 
-    const scrollContainerRef = useCallback((node: HTMLDivElement) => {
-      if (!node) return;
-      // Store the node reference
-      setScrollNode(node);
+    // Store scroll positions per transcript
+    const [transcriptScrollPositions, setTranscriptScrollPositions] = useState<
+      Record<string, number>
+    >({});
 
-      // Update scroll position on scroll
-      const handleScroll = () => {
-        setScrollPosition(node.scrollTop);
-      };
-      node.addEventListener('scroll', handleScroll);
-      return () => {
-        node.removeEventListener('scroll', handleScroll);
-      };
-    }, []);
+    // Debounced scroll position for the current transcript
+    const debouncedScrollPosition = useDebounce(
+      selectedTranscriptKey
+        ? transcriptScrollPositions[selectedTranscriptKey] || 0
+        : 0,
+      100
+    );
+
+    const scrollContainerRef = useCallback(
+      (node: HTMLDivElement) => {
+        if (!node) return;
+        // Store the node reference
+        setScrollNode(node);
+
+        // Update scroll position on scroll
+        const handleScroll = () => {
+          // Save scroll position for current transcript
+          if (selectedTranscriptKey) {
+            setTranscriptScrollPositions((prev) => ({
+              ...prev,
+              [selectedTranscriptKey]: node.scrollTop,
+            }));
+          }
+        };
+        node.addEventListener('scroll', handleScroll);
+        return () => {
+          node.removeEventListener('scroll', handleScroll);
+        };
+      },
+      [selectedTranscriptKey]
+    );
+
+    // Restore scroll position when transcript changes
+    useEffect(() => {
+      if (scrollNode && selectedTranscriptKey) {
+        const savedPosition =
+          transcriptScrollPositions[selectedTranscriptKey] || 0;
+        scrollNode.scrollTop = savedPosition;
+      }
+    }, [selectedTranscriptKey]);
 
     // Compute the current block index based on scroll position
     useEffect(() => {
@@ -634,16 +663,16 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
           ? Math.min(currentBlockIndex + 1, transcript.messages.length - 1)
           : 0;
 
-      scrollToBlock(nextIndex, secondary ? 1 : 0);
-    }, [currentBlockIndex, transcript, scrollToBlock]);
+      scrollToBlock(nextIndex, transcriptIdx, secondary ? 1 : 0);
+    }, [currentBlockIndex, transcript, scrollToBlock, transcriptIdx]);
     const goToPrevBlock = useCallback(() => {
       if (!transcript) return;
 
       const prevIndex =
         currentBlockIndex !== null ? Math.max(currentBlockIndex - 1, 0) : 0;
 
-      scrollToBlock(prevIndex, secondary ? 1 : 0);
-    }, [currentBlockIndex, transcript, scrollToBlock]);
+      scrollToBlock(prevIndex, transcriptIdx, secondary ? 1 : 0);
+    }, [currentBlockIndex, transcript, scrollToBlock, transcriptIdx]);
 
     return (
       <Card className="h-full flex-1 p-3 min-h-0 min-w-0 flex flex-col space-y-3">
