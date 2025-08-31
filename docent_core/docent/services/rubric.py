@@ -410,6 +410,15 @@ class RubricService:
         sqla_results = result.scalars().all()
         return [sqla_result.to_pydantic() for sqla_result in sqla_results]
 
+    async def get_rubric_result_by_id(self, judge_result_id: str) -> JudgeResult | None:
+        result = await self.session.execute(
+            select(SQLAJudgeResult).where(SQLAJudgeResult.id == judge_result_id)
+        )
+        sqla_result = result.scalar_one_or_none()
+        if sqla_result is None:
+            return None
+        return sqla_result.to_pydantic()
+
     async def cancel_active_rubric_eval_job(self, rubric_id: str):
         job = await self.get_active_job_for_rubric(rubric_id)
         if job:

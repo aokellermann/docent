@@ -1,223 +1,152 @@
 import re
-from typing import TypedDict
+
+from pydantic import BaseModel
 
 
-class Citation(TypedDict):
+class Citation(BaseModel):
     start_idx: int
     end_idx: int
-    agent_run_idx: int | None
-    transcript_idx: int | None
+    agent_run_idx: int | None = None
+    transcript_idx: int | None = None
     block_idx: int
-    action_unit_idx: int | None
+    action_unit_idx: int | None = None
+    start_pattern: str | None = None
 
 
-def parse_citations_single_run(text: str) -> list[Citation]:
+RANGE_BEGIN = "<RANGE>"
+RANGE_END = "</RANGE>"
+
+_SINGLE_RE = re.compile(r"T(\d+)B(\d+)")
+_RANGE_CONTENT_RE = re.compile(r":\s*" + re.escape(RANGE_BEGIN) + r".*?" + re.escape(RANGE_END))
+
+
+def _extract_range_pattern(range_part: str) -> str | None:
+    start_pattern: str | None = None
+
+    if RANGE_BEGIN in range_part and RANGE_END in range_part:
+        range_begin_idx = range_part.find(RANGE_BEGIN)
+        range_end_idx = range_part.find(RANGE_END)
+        if range_begin_idx != -1 and range_end_idx != -1:
+            range_content = range_part[range_begin_idx + len(RANGE_BEGIN) : range_end_idx]
+            start_pattern = range_content if range_content else None
+
+    return start_pattern
+
+
+def _scan_brackets(text: str) -> list[tuple[int, int, str]]:
+    """Scan text for bracketed segments, respecting RANGE markers and nested brackets.
+
+    Returns a list of (start_index, end_index_exclusive, inner_content).
     """
-    Parse citations from text in the format described by SINGLE_BLOCK_CITE_INSTRUCTION.
+    matches: list[tuple[int, int, str]] = []
+    i = 0
+    while i < len(text):
+        if text[i] == "[":
+            start = i
+            bracket_count = 1
+            j = i + 1
+            in_range = False
+
+            while j < len(text) and bracket_count > 0:
+                if text[j : j + len(RANGE_BEGIN)] == RANGE_BEGIN:
+                    in_range = True
+                elif text[j : j + len(RANGE_END)] == RANGE_END:
+                    in_range = False
+                elif text[j] == "[" and not in_range:
+                    bracket_count += 1
+                elif text[j] == "]" and not in_range:
+                    bracket_count -= 1
+                j += 1
+
+            if bracket_count == 0:
+                end_exclusive = j
+                bracket_content = text[start + 1 : end_exclusive - 1]
+                matches.append((start, end_exclusive, bracket_content))
+                i = j
+            else:
+                i += 1
+        else:
+            i += 1
+    return matches
+
+
+def _parse_single_citation(part: str) -> tuple[int, int, str | None] | None:
+    """
+    Parse a single citation token inside a bracket and return its components.
+
+    Returns (transcript_idx, block_idx, start_pattern) or None if invalid.
+    """
+    token = part.strip()
+    if not token:
+        return None
+
+    if ":" in token:
+        citation_part, range_part = token.split(":", 1)
+        single_match = _SINGLE_RE.match(citation_part.strip())
+        if not single_match:
+            return None
+        transcript_idx = int(single_match.group(1))
+        block_idx = int(single_match.group(2))
+        start_pattern = _extract_range_pattern(range_part)
+        return transcript_idx, block_idx, start_pattern
+    else:
+        single_match = _SINGLE_RE.match(token)
+        if not single_match:
+            return None
+        transcript_idx = int(single_match.group(1))
+        block_idx = int(single_match.group(2))
+        return transcript_idx, block_idx, None
+
+
+def parse_citations(text: str) -> tuple[str, list[Citation]]:
+    """
+    Parse citations from text in the format described by BLOCK_RANGE_CITE_INSTRUCTION.
 
     Supported formats:
     - Single block: [T<key>B<idx>]
-    - Multiple blocks: [T<key1>B<idx1>, T<key2>B<idx2>, ...]
-    - Dash-separated blocks: [T<key1>B<idx1>-T<key2>B<idx2>]
+    - Text range with start pattern: [T<key>B<idx>:<RANGE>start_pattern</RANGE>]
 
     Args:
         text: The text to parse citations from
 
     Returns:
-        A list of Citation objects with start_idx and end_idx representing
-        the character positions in the text (excluding brackets)
+        A tuple of (cleaned_text, citations) where cleaned_text has brackets and range markers removed
+        and citations have start_idx and end_idx representing character positions
+        in the cleaned text
     """
     citations: list[Citation] = []
+    cleaned_text = ""
 
-    # Find all bracketed content first
-    bracket_pattern = r"\[(.*?)\]"
-    bracket_matches = re.finditer(bracket_pattern, text)
+    bracket_matches = _scan_brackets(text)
 
-    for bracket_match in bracket_matches:
-        bracket_content = bracket_match.group(1)
-        # Starting position of the bracket content (excluding '[')
-        content_start_pos = bracket_match.start() + 1
+    last_end = 0
+    for start, end, bracket_content in bracket_matches:
+        # Append non-bracket text segment as-is
+        cleaned_text += text[last_end:start]
 
-        # Split by commas if present
-        parts = [part.strip() for part in bracket_content.split(",")]
+        # Parse a single citation token inside the bracket
+        parsed = _parse_single_citation(bracket_content)
+        if parsed:
+            transcript_idx, block_idx, start_pattern = parsed
+            replacement = f"T{transcript_idx}B{block_idx}"
+            # Current absolute start position for this replacement in the cleaned text
+            start_idx = len(cleaned_text)
+            end_idx = start_idx + len(replacement)
+            citations.append(
+                Citation(
+                    start_idx=start_idx,
+                    end_idx=end_idx,
+                    agent_run_idx=None,
+                    transcript_idx=transcript_idx,
+                    block_idx=block_idx,
+                    action_unit_idx=None,
+                    start_pattern=start_pattern,
+                )
+            )
+            cleaned_text += replacement
+        last_end = end
 
-        for part in parts:
-            # Check if this part contains a dash (range citation)
-            if "-" in part:
-                # Split by dash and process each sub-part
-                dash_parts = [dash_part.strip() for dash_part in part.split("-")]
-                for dash_part in dash_parts:
-                    # Check for single block citation: T<key>B<idx>
-                    single_match = re.match(r"T(\d+)B(\d+)", dash_part)
-                    if single_match:
-                        transcript_idx = int(single_match.group(1))
-                        block_idx = int(single_match.group(2))
+    # Append any remaining tail after the last bracket
+    cleaned_text += text[last_end:]
 
-                        # Find position within the original text
-                        citation_text = f"T{transcript_idx}B{block_idx}"
-                        part_pos_in_content = bracket_content.find(dash_part)
-                        ref_pos = content_start_pos + part_pos_in_content
-                        ref_end = ref_pos + len(citation_text)
-
-                        # Check if this citation overlaps with any existing citation
-                        if not any(
-                            citation["start_idx"] <= ref_pos < citation["end_idx"]
-                            or citation["start_idx"] < ref_end <= citation["end_idx"]
-                            for citation in citations
-                        ):
-                            citations.append(
-                                Citation(
-                                    start_idx=ref_pos,
-                                    end_idx=ref_end,
-                                    agent_run_idx=None,
-                                    transcript_idx=transcript_idx,
-                                    block_idx=block_idx,
-                                    action_unit_idx=None,
-                                )
-                            )
-            else:
-                # Check for single block citation: T<key>B<idx>
-                single_match = re.match(r"T(\d+)B(\d+)", part)
-                if single_match:
-                    transcript_idx = int(single_match.group(1))
-                    block_idx = int(single_match.group(2))
-
-                    # Find position within the original text
-                    citation_text = f"T{transcript_idx}B{block_idx}"
-                    part_pos_in_content = bracket_content.find(part)
-                    ref_pos = content_start_pos + part_pos_in_content
-                    ref_end = ref_pos + len(citation_text)
-
-                    # Check if this citation overlaps with any existing citation
-                    if not any(
-                        citation["start_idx"] <= ref_pos < citation["end_idx"]
-                        or citation["start_idx"] < ref_end <= citation["end_idx"]
-                        for citation in citations
-                    ):
-                        citations.append(
-                            Citation(
-                                start_idx=ref_pos,
-                                end_idx=ref_end,
-                                agent_run_idx=None,
-                                transcript_idx=transcript_idx,
-                                block_idx=block_idx,
-                                action_unit_idx=None,
-                            )
-                        )
-
-    return citations
-
-
-def parse_citations_multi_run(text: str) -> list[Citation]:
-    """
-    Parse citations from text in the format described by MULTI_BLOCK_CITE_INSTRUCTION.
-
-    Supported formats:
-    - Single block in transcript: [R<idx>T<key>B<idx>] or ([R<idx>T<key>B<idx>])
-    - Multiple blocks: [R<idx1>T<key1>B<idx1>][R<idx2>T<key2>B<idx2>]
-    - Comma-separated blocks: [R<idx1>T<key1>B<idx1>, R<idx2>T<key2>B<idx2>, ...]
-    - Dash-separated blocks: [R<idx1>T<key1>B<idx1>-R<idx2>T<key2>B<idx2>]
-
-    Args:
-        text: The text to parse citations from
-
-    Returns:
-        A list of Citation objects with start_idx and end_idx representing
-        the character positions in the text (excluding brackets)
-    """
-    citations: list[Citation] = []
-
-    # Find all content within brackets - this handles nested brackets too
-    bracket_pattern = r"\[([^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*)\]"
-    # Also handle optional parentheses around the brackets
-    paren_bracket_pattern = r"\(\[([^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*)\]\)"
-
-    # Single citation pattern
-    single_pattern = r"R(\d+)T(\d+)B(\d+)"
-
-    # Find all bracket matches
-    for pattern in [bracket_pattern, paren_bracket_pattern]:
-        matches = re.finditer(pattern, text)
-        for match in matches:
-            # Get the content inside brackets
-            if pattern == bracket_pattern:
-                content = match.group(1)
-                start_pos = match.start() + 1  # +1 to skip the opening bracket
-            else:
-                content = match.group(1)
-                start_pos = match.start() + 2  # +2 to skip the opening parenthesis and bracket
-
-            # Split by comma if present
-            items = [item.strip() for item in content.split(",")]
-
-            for item in items:
-                # Check if this item contains a dash (range citation)
-                if "-" in item:
-                    # Split by dash and process each sub-item
-                    dash_items = [dash_item.strip() for dash_item in item.split("-")]
-                    for dash_item in dash_items:
-                        # Check for single citation
-                        single_match = re.match(single_pattern, dash_item)
-                        if single_match:
-                            agent_run_idx = int(single_match.group(1))
-                            transcript_idx = int(single_match.group(2))
-                            block_idx = int(single_match.group(3))
-
-                            # Calculate position in the original text
-                            citation_text = f"R{agent_run_idx}T{transcript_idx}B{block_idx}"
-                            citation_start = text.find(citation_text, start_pos)
-                            citation_end = citation_start + len(citation_text)
-
-                            # Move start_pos for the next item if there are more items
-                            start_pos = citation_end
-
-                            # Avoid duplicate citations
-                            if not any(
-                                citation["start_idx"] == citation_start
-                                and citation["end_idx"] == citation_end
-                                for citation in citations
-                            ):
-                                citations.append(
-                                    Citation(
-                                        start_idx=citation_start,
-                                        end_idx=citation_end,
-                                        agent_run_idx=agent_run_idx,
-                                        transcript_idx=transcript_idx,
-                                        block_idx=block_idx,
-                                        action_unit_idx=None,
-                                    )
-                                )
-                else:
-                    # Check for single citation
-                    single_match = re.match(single_pattern, item)
-                    if single_match:
-                        agent_run_idx = int(single_match.group(1))
-                        transcript_idx = int(single_match.group(2))
-                        block_idx = int(single_match.group(3))
-
-                        # Calculate position in the original text
-                        citation_text = f"R{agent_run_idx}T{transcript_idx}B{block_idx}"
-                        citation_start = text.find(citation_text, start_pos)
-                        citation_end = citation_start + len(citation_text)
-
-                        # Move start_pos for the next item if there are more items
-                        start_pos = citation_end
-
-                        # Avoid duplicate citations
-                        if not any(
-                            citation["start_idx"] == citation_start
-                            and citation["end_idx"] == citation_end
-                            for citation in citations
-                        ):
-                            citations.append(
-                                Citation(
-                                    start_idx=citation_start,
-                                    end_idx=citation_end,
-                                    agent_run_idx=agent_run_idx,
-                                    transcript_idx=transcript_idx,
-                                    block_idx=block_idx,
-                                    action_unit_idx=None,
-                                )
-                            )
-
-    return citations
+    return cleaned_text, citations

@@ -1,9 +1,10 @@
 'use client';
-import { navToAgentRun } from '@/lib/nav';
 import { useRouter } from 'next/navigation';
-import { useAppSelector, useAppDispatch } from '@/app/store/hooks';
-import { renderTextWithCitations } from '@/lib/renderCitations';
-import { openAgentRunInDashboard } from '@/app/store/transcriptSlice';
+import { useAppSelector } from '@/app/store/hooks';
+import {
+  NavigateToCitation,
+  TextWithCitations,
+} from '@/components/CitationRenderer';
 import { cn } from '@/lib/utils';
 import {
   JudgeResultWithCitations,
@@ -12,26 +13,28 @@ import {
 import { useCallback, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useCitationNavigation } from '../rubric/[rubric_id]/NavigateToCitationContext';
 import posthog from 'posthog-js';
+import { useCitationHighlight } from '@/lib/citationUtils';
 
 interface CollapsibleResultsSectionProps {
   title: string;
   judgeResultIds: string[];
   judgeResultsMap: Record<string, JudgeResultWithCitations>;
-  usePreview: boolean;
   isPollingAssignments: boolean;
   isExpanded?: boolean;
   onToggle?: () => void;
+  selectedResultId?: string;
 }
 
 const CollapsibleResultsSection = ({
   title,
   judgeResultIds,
   judgeResultsMap,
-  usePreview,
   isPollingAssignments,
   isExpanded = true,
   onToggle,
+  selectedResultId,
 }: CollapsibleResultsSectionProps) => {
   const [showUniqueAgentRuns, setShowUniqueAgentRuns] = useState(false);
 
@@ -132,7 +135,7 @@ const CollapsibleResultsSection = ({
                   <JudgeResultCard
                     key={`${agentRunId}-${idx}`}
                     judgeResult={judgeResult}
-                    usePreview={usePreview}
+                    isActive={selectedResultId === judgeResult.id}
                   />
                 ))}
               </div>
@@ -145,19 +148,19 @@ const CollapsibleResultsSection = ({
 };
 
 interface JudgeResultsListProps {
-  usePreview?: boolean; // Whether to use the agent run preview
   judgeResultsMap: Record<string, JudgeResultWithCitations>;
   centroidsMap: Record<string, RubricCentroid>;
   centroidAssignments: Record<string, string[]>;
   isPollingAssignments: boolean;
+  selectedResultId?: string;
 }
 
 export const JudgeResultsList = ({
-  usePreview = true,
   judgeResultsMap,
   centroidsMap,
   centroidAssignments,
   isPollingAssignments,
+  selectedResultId,
 }: JudgeResultsListProps) => {
   // Lazy initialization - expand all sections by default
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
@@ -216,10 +219,10 @@ export const JudgeResultsList = ({
             title={centroidTitle}
             judgeResultIds={judgeResultIds}
             judgeResultsMap={judgeResultsMap}
-            usePreview={usePreview}
             isPollingAssignments={isPollingAssignments}
             isExpanded={expandedSections.has(centroidId)}
             onToggle={() => toggleSectionExpansion(centroidId)}
+            selectedResultId={selectedResultId}
           />
         );
       })}
@@ -230,10 +233,10 @@ export const JudgeResultsList = ({
           title={Object.keys(centroidsMap).length > 0 ? 'Residuals' : 'Results'}
           judgeResultIds={residualResultIds}
           judgeResultsMap={judgeResultsMap}
-          usePreview={usePreview}
           isPollingAssignments={isPollingAssignments}
           isExpanded={expandedSections.has('residuals')}
           onToggle={() => toggleSectionExpansion('residuals')}
+          selectedResultId={selectedResultId}
         />
       )}
     </div>
@@ -242,17 +245,17 @@ export const JudgeResultsList = ({
 
 interface JudgeResultCardProps {
   judgeResult: JudgeResultWithCitations;
-  usePreview: boolean;
+  isActive: boolean;
 }
 
 export const JudgeResultCard = ({
   judgeResult,
-  usePreview,
+  isActive,
 }: JudgeResultCardProps) => {
   const router = useRouter();
-  const dispatch = useAppDispatch();
   const collectionId = useAppSelector((state) => state.collection.collectionId);
-
+  const { highlightCitation } = useCitationHighlight();
+  const citationNav = useCitationNavigation();
   const resultText = judgeResult.value;
   if (!resultText) {
     return null;
@@ -260,10 +263,36 @@ export const JudgeResultCard = ({
   const agentRunId = judgeResult.agent_run_id;
   const citations = judgeResult.citations || [];
 
+  const handleNavigateToCitation: NavigateToCitation = ({
+    citation,
+    newTab,
+  }) => {
+    const url = `/dashboard/${collectionId}/rubric/${judgeResult.rubric_id}/result/${judgeResult.id}`;
+    if (!isActive) {
+      if (citationNav?.prepareForNavigation) {
+        citationNav.prepareForNavigation(); // Clear current handler for proper timing
+      }
+      if (newTab) {
+        window.open(url, '_blank');
+      } else {
+        router.push(url, { scroll: false } as any);
+      }
+    }
+    if (citationNav?.navigateToCitation) {
+      citationNav.navigateToCitation({ citation, newTab });
+    }
+    highlightCitation(citation);
+  };
+
   return (
     <div
-      className="group bg-indigo-bg rounded-md p-1 text-xs text-primary leading-snug mt-1 hover:border-indigo-border transition-colors cursor-pointer border border-transparent"
-      onMouseDown={(e) => {
+      className={cn(
+        'group rounded-md p-1 border text-xs leading-snug mt-1 transition-colors cursor-pointer border',
+        isActive
+          ? 'border-indigo-border text-primary bg-indigo-bg'
+          : 'bg-secondary/30 hover:bg-indigo-bg text-primary'
+      )}
+      onClick={(e) => {
         e.stopPropagation();
         const firstCitation = citations.length > 0 ? citations[0] : null;
 
@@ -272,43 +301,25 @@ export const JudgeResultCard = ({
           agent_run_id: agentRunId,
         });
 
-        if (e.metaKey || e.ctrlKey || !usePreview) {
-          // Open in new tab - use original navigation
-          navToAgentRun(
-            router,
-            window,
-            agentRunId,
-            firstCitation?.transcript_idx ?? undefined,
-            firstCitation?.block_idx,
-            collectionId,
-            judgeResult.rubric_id,
-            false
-          );
-        } else if (e.button === 0 && usePreview) {
-          // Open in dashboard - use new mechanism
-          dispatch(
-            openAgentRunInDashboard({
-              agentRunId,
-              blockIdx: firstCitation?.block_idx,
-              transcriptIdx: firstCitation?.transcript_idx ?? undefined,
-            })
-          );
+        if (firstCitation) {
+          handleNavigateToCitation({
+            citation: firstCitation,
+            newTab: e.metaKey || e.ctrlKey,
+          });
         }
       }}
     >
       <div className="flex flex-col">
         <div className="flex items-start justify-between gap-2">
-          <p className="mb-0.5 flex-1">
-            {renderTextWithCitations(
-              resultText,
-              citations,
-              agentRunId,
-              router,
-              window,
-              dispatch,
-              judgeResult.rubric_id,
-              collectionId
-            )}
+          <p
+            className="mb-0.5 flex-1 wrap-anywhere"
+            style={{ overflowWrap: 'anywhere' }}
+          >
+            <TextWithCitations
+              text={resultText}
+              citations={citations}
+              onNavigate={handleNavigateToCitation}
+            />
           </p>
         </div>
       </div>

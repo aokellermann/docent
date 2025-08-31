@@ -2,7 +2,7 @@ import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import { BASE_URL } from '@/app/constants';
 import { Collection, ComplexFilter } from '@/app/types/collectionTypes';
 import { TranscriptMetadataField } from '@/app/types/experimentViewerTypes';
-import { BaseAgentRunMetadata } from '@/app/types/transcriptTypes';
+import { AgentRun, BaseAgentRunMetadata } from '@/app/types/transcriptTypes';
 import sseService from '../services/sseService';
 
 interface CreateCollectionRequest {
@@ -113,6 +113,15 @@ export const collectionApi = createApi({
         body,
       }),
     }),
+    getAgentRun: build.query<
+      AgentRun,
+      { collectionId: string; agentRunId: string }
+    >({
+      query: ({ collectionId, agentRunId }) => ({
+        url: `/${collectionId}/agent_run?agent_run_id=${agentRunId}&apply_base_where_clause=false`,
+        method: 'GET',
+      }),
+    }),
     previewImportRunsFromFile: build.mutation<
       {
         status: string;
@@ -209,4 +218,5 @@ export const {
   usePreviewImportRunsFromFileMutation,
   useImportRunsFromFileStreamQuery,
   useLazyImportRunsFromFileStreamQuery,
+  useGetAgentRunQuery,
 } = collectionApi;

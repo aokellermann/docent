@@ -17,7 +17,12 @@ import React, {
   useState,
 } from 'react';
 
-import { useAppSelector } from '@/app/store/hooks';
+import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
+import {
+  addMatchedCitations,
+  clearHighlightedCitation,
+  selectAllCitations,
+} from '@/app/store/transcriptSlice';
 import {
   ChatMessage,
   Content,
@@ -36,6 +41,8 @@ import { useDebounce } from '@/hooks/use-debounce';
 
 import MetadataDialog from './MetadataDialog';
 import { cn } from '@/lib/utils';
+import { Citation } from '@/app/types/experimentViewerTypes';
+import { computeCitationIntervals } from '@/lib/citationMatch';
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -47,14 +54,17 @@ export interface AgentRunViewerHandle {
   scrollToBlock: (
     blockIdx: number,
     transcriptIdx: number,
-    agentRunIdx: number
+    agentRunIdx: number,
+    highlightDuration?: number
   ) => void;
 }
 
 // Add props interface
 interface AgentRunViewerProps {
   secondary: boolean;
+  agentRun?: AgentRun;
   otherAgentRunRef?: React.RefObject<AgentRunViewerHandle>;
+  initialTranscriptIdx?: number;
 }
 
 // Add this helper function near the top of the file
@@ -386,10 +396,17 @@ const TranscriptPath: React.FC<{
 };
 
 const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
-  ({ secondary, otherAgentRunRef }, ref) => {
-    const agentRun = useAppSelector((state) =>
-      secondary ? state.transcript.altAgentRun : state.transcript?.curAgentRun
+  ({ secondary, agentRun, otherAgentRunRef, initialTranscriptIdx }, ref) => {
+    const dispatch = useAppDispatch();
+    agentRun = useAppSelector(
+      (state) =>
+        agentRun ||
+        (secondary
+          ? state.transcript.altAgentRun
+          : state.transcript?.curAgentRun)
     );
+
+    const allCitations = useAppSelector(selectAllCitations);
 
     // Add state for selected transcript key and transcript group
     const [selectedTranscriptKey, setSelectedTranscriptKey] = useState<
@@ -566,19 +583,37 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
         return [null, 0];
       }
 
-      // If no transcript is selected, default to the first one
-      const targetId =
-        selectedTranscriptKey && transcriptKeys.includes(selectedTranscriptKey)
-          ? selectedTranscriptKey
-          : transcriptKeys[0];
+      // Determine target transcript ID based on selection, initial index, or default
+      let targetId: string;
 
-      // Update selected transcript key if it was null
-      if (!selectedTranscriptKey && transcriptKeys.length > 0) {
-        setSelectedTranscriptKey(transcriptKeys[0]);
+      if (
+        selectedTranscriptKey &&
+        transcriptKeys.includes(selectedTranscriptKey)
+      ) {
+        // Use currently selected transcript
+        targetId = selectedTranscriptKey;
+      } else if (
+        initialTranscriptIdx !== undefined &&
+        transcriptKeys[initialTranscriptIdx]
+      ) {
+        // Use initial transcript index if provided and valid
+        targetId = transcriptKeys[initialTranscriptIdx];
+      } else {
+        // Default to first transcript
+        targetId = transcriptKeys[0];
+      }
+
+      // Update selected transcript key if it was null or if we're using initial index
+      if (
+        !selectedTranscriptKey ||
+        (initialTranscriptIdx !== undefined &&
+          transcriptKeys[initialTranscriptIdx])
+      ) {
+        setSelectedTranscriptKey(targetId);
       }
 
       return [agentRun.transcripts[targetId], transcriptKeys.indexOf(targetId)];
-    }, [agentRun, selectedTranscriptKey, transcriptKeys]);
+    }, [agentRun, selectedTranscriptKey, transcriptKeys, initialTranscriptIdx]);
 
     // Initialize pretty print for messages with JSON content when transcript changes
     useEffect(() => {
@@ -636,9 +671,14 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
     }, [agentRun?.transcript_groups, expandedGroups]);
 
     // Handler for transcript selection
-    const handleTranscriptSelect = useCallback((transcriptKey: string) => {
-      setSelectedTranscriptKey(transcriptKey);
-    }, []);
+    const handleTranscriptSelect = useCallback(
+      (transcriptKey: string) => {
+        setSelectedTranscriptKey(transcriptKey);
+        // Clear any highlighted citations when switching transcripts
+        dispatch(clearHighlightedCitation());
+      },
+      [dispatch]
+    );
 
     /**
      * Scrolling
@@ -750,7 +790,6 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
         mostVisibleBlock.visibilityScore > 0
       ) {
         setCurrentBlockIndex(mostVisibleBlock.blockIndex);
-        console.log('Current block index:', mostVisibleBlock.blockIndex);
       }
     }, [debouncedScrollPosition, transcript, scrollNode]);
 
@@ -761,7 +800,8 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
       (
         toBlockIdx: number,
         toTranscriptIdx: number = 0,
-        toAgentRunIdx: number = 0
+        toAgentRunIdx: number = 0,
+        highlightDuration: number = 0
       ) => {
         // Determine which transcript should handle this scroll
         const currentAgentRunIdx = secondary ? 1 : 0;
@@ -771,7 +811,8 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
           otherAgentRunRef.current.scrollToBlock(
             toBlockIdx,
             toTranscriptIdx,
-            (toAgentRunIdx + 1) % 2
+            (toAgentRunIdx + 1) % 2,
+            highlightDuration
           );
           return;
         }
@@ -797,7 +838,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
 
             scrollNode.scrollTo({
               top: relativeTop,
-              behavior: 'smooth',
+              behavior: 'auto',
             });
 
             // Update current block index
@@ -809,7 +850,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
             // Remove highlight after animation duration
             setTimeout(() => {
               setHighlightedBlock(null);
-            }, 0);
+            }, highlightDuration);
 
             return true;
           }
@@ -875,7 +916,10 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
     }, [currentBlockIndex, transcript, scrollToBlock, transcriptIdx]);
 
     return (
-      <Card className="h-full flex-1 p-3 min-h-0 min-w-0 flex flex-col space-y-3">
+      <Card
+        className="h-full basis-1/2 p-3 min-h-0 min-w-0 flex flex-col space-y-3"
+        style={{ flexGrow: '2' }}
+      >
         {/* Header area Content */}
         {agentRun && (
           <>
@@ -907,7 +951,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
               className="flex flex-1 min-h-0 w-full overflow-hidden relative"
             >
               {/* Transcript Groups and Transcripts Sidebar */}
-              {transcriptKeys.length >= 1 && (
+              {transcriptKeys.length >= 2 && (
                 <>
                   <ResizablePanel
                     defaultSize={25}
@@ -1063,11 +1107,13 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                           key={index}
                           message={message}
                           index={index}
-                          id={blockId}
-                          agentRun={agentRun}
-                          scrollToBlock={scrollToBlock}
-                          transcriptIdx={transcriptIdx}
+                          blockId={blockId}
                           isHighlighted={highlightedBlock === blockId}
+                          citedRanges={allCitations.filter(
+                            (c) =>
+                              c.transcript_idx === transcriptIdx &&
+                              c.block_idx === index
+                          )}
                           prettyPrintJsonMessages={prettyPrintJsonMessages}
                           setPrettyPrintJsonMessages={
                             setPrettyPrintJsonMessages
@@ -1117,50 +1163,143 @@ AgentRunViewer.displayName = 'AgentRunViewer';
 
 export default AgentRunViewer;
 
-const roleColorMap: Record<string, string> = {
-  assistant: 'blue',
-  user: 'gray',
-  system: 'orange',
-  tool: 'green',
-};
-
 const MessageBox: React.FC<{
   message: ChatMessage;
   index: number;
-  id?: string;
-  agentRun: AgentRun;
-  scrollToBlock: (blockIndex: number, transcriptIdx?: number) => void;
-  transcriptIdx: number;
+  blockId?: string;
   isHighlighted: boolean;
+  citedRanges: Citation[];
   prettyPrintJsonMessages: Set<number>;
   setPrettyPrintJsonMessages: React.Dispatch<React.SetStateAction<Set<number>>>;
 }> = ({
   message,
   index,
-  id,
-  agentRun,
-  scrollToBlock,
-  transcriptIdx,
+  blockId: id,
   isHighlighted,
+  citedRanges,
   prettyPrintJsonMessages,
   setPrettyPrintJsonMessages,
 }) => {
-  const agentRunId = agentRun.id;
+  const dispatch = useAppDispatch();
 
-  const getRoleStyle = (role: string, isHighlighted: boolean) => {
-    const color = roleColorMap[role] || 'gray';
+  const highlightedCitationId = useAppSelector(
+    (state) => state.transcript.highlightedCitationId
+  );
 
-    if (role === 'user') {
-      if (isHighlighted) {
-        return `bg-secondary/50 border-l-4 border-primary`;
+  // Scroll to highlighted citation span
+  useEffect(() => {
+    if (highlightedCitationId) {
+      // Use setTimeout to ensure highlighting has been applied to DOM
+      setTimeout(() => {
+        const targetSpan = document.querySelector(
+          `span[data-citation-ids*="${highlightedCitationId}"]`
+        );
+        if (targetSpan) {
+          targetSpan.scrollIntoView({
+            behavior: 'instant',
+            block: 'center',
+            inline: 'nearest',
+          });
+        }
+      }, 50);
+    }
+  }, [highlightedCitationId]);
+
+  // Helper function to extract text content from message content
+  const getMessageContent = (content: string | Content[]): string => {
+    if (typeof content === 'string') {
+      return content;
+    }
+    // If content is an array of Content objects
+    return content
+      .filter(
+        (item): item is Content & { text: string } =>
+          item.type === 'text' && typeof item.text === 'string'
+      )
+      .map((item) => item.text)
+      .join('\n');
+  };
+
+  // Helper function to create character position mapping between original and pretty-printed JSON
+  const createPositionMapping = (originalText: string, prettyText: string) => {
+    // Create a mapping from original positions to pretty positions by finding matching content
+    const originalToPrety: number[] = new Array(originalText.length);
+    const prettyToOriginal: number[] = new Array(prettyText.length);
+
+    let originalPos = 0;
+    let prettyPos = 0;
+
+    while (originalPos < originalText.length && prettyPos < prettyText.length) {
+      const originalChar = originalText[originalPos];
+      const prettyChar = prettyText[prettyPos];
+
+      if (originalChar === prettyChar) {
+        // Exact match - record the mapping
+        originalToPrety[originalPos] = prettyPos;
+        prettyToOriginal[prettyPos] = originalPos;
+        originalPos++;
+        prettyPos++;
+      } else if (/\s/.test(originalChar) && /\s/.test(prettyChar)) {
+        // Both are whitespace - advance both but prefer the pretty position mapping
+        originalToPrety[originalPos] = prettyPos;
+        prettyToOriginal[prettyPos] = originalPos;
+        originalPos++;
+        prettyPos++;
+      } else if (/\s/.test(prettyChar)) {
+        // Pretty has extra whitespace (common in formatted JSON)
+        prettyToOriginal[prettyPos] = originalPos;
+        prettyPos++;
+      } else if (/\s/.test(originalChar)) {
+        // Original has whitespace that was removed/changed
+        originalToPrety[originalPos] = prettyPos;
+        originalPos++;
+      } else {
+        // Non-matching characters - this shouldn't happen with valid JSON formatting
+        originalToPrety[originalPos] = prettyPos;
+        prettyToOriginal[prettyPos] = originalPos;
+        originalPos++;
+        prettyPos++;
       }
-      return `bg-secondary border-l-4 border-primary`;
     }
 
-    if (isHighlighted) {
-      return `bg-${color}-bg/50 border-l-4 border-${color}-border`;
+    // Fill in any remaining positions
+    while (originalPos < originalText.length) {
+      originalToPrety[originalPos] = prettyText.length;
+      originalPos++;
     }
-    return `bg-${color}-bg border-l-4 border-${color}-border`;
+    while (prettyPos < prettyText.length) {
+      prettyToOriginal[prettyPos] = originalText.length;
+      prettyPos++;
+    }
+
+    return { originalToPrety, prettyToOriginal };
+  };
+
+  // Helper function to transform citation intervals from original to pretty-printed positions
+  const transformCitationIntervals = (
+    intervals: { start: number; end: number; id: string }[],
+    originalText: string,
+    prettyText: string
+  ) => {
+    if (originalText === prettyText) {
+      return intervals; // No transformation needed
+    }
+
+    const { originalToPrety } = createPositionMapping(originalText, prettyText);
+
+    return intervals
+      .map((interval) => {
+        // Map the start and end positions
+        const newStart = originalToPrety[interval.start] ?? interval.start;
+        const newEnd = originalToPrety[interval.end - 1] ?? interval.end;
+
+        return {
+          ...interval,
+          start: newStart,
+          end: newEnd + 1, // Add 1 back since we mapped end-1
+        };
+      })
+      .filter((interval) => interval.start < interval.end); // Remove invalid intervals
   };
 
   // Helper function to detect and pretty-print JSON
@@ -1184,6 +1323,171 @@ const MessageBox: React.FC<{
       // If parsing fails, return original text
     }
     return text;
+  };
+
+  // Memoize citation intervals computation for all messages with citations
+  const allCitationIntervals = useMemo(() => {
+    const messageContent = getMessageContent(message.content);
+    return computeCitationIntervals(messageContent, citedRanges);
+  }, [message.content, citedRanges]);
+
+  // Memoize matched citation IDs for dispatch
+  const matchedCitationIds = useMemo(() => {
+    const ids = new Set<string>();
+    allCitationIntervals.forEach(({ start, end, id }) => {
+      if (start < end) {
+        ids.add(id);
+      }
+    });
+    return Array.from(ids);
+  }, [allCitationIntervals]);
+
+  // Dispatch matched citations after render to avoid state updates during render
+  useEffect(() => {
+    if (matchedCitationIds.length > 0) {
+      dispatch(addMatchedCitations(matchedCitationIds));
+    }
+  }, [dispatch, matchedCitationIds]);
+
+  const getRoleStyle = (role: string, isHighlighted: boolean) => {
+    const transitionClasses = 'transition-colors duration-500 ease-out';
+
+    // Use specific color classes instead of dynamic ones
+    const getColorClasses = (role: string, highlighted: boolean) => {
+      switch (role) {
+        case 'user':
+          return highlighted
+            ? 'bg-muted-foreground/40 border-l-4 border-muted-foreground'
+            : 'bg-gray-50 dark:bg-gray-900/50 border-l-4 border-gray-300 dark:border-gray-700';
+        case 'assistant':
+          return highlighted
+            ? 'bg-blue-500/40 border-l-4 border-blue-500'
+            : 'bg-blue-50 dark:bg-blue-950/30 border-l-4 border-blue-300 dark:border-blue-700';
+        case 'system':
+          return highlighted
+            ? 'bg-orange-500/40 border-l-4 border-orange-500'
+            : 'bg-orange-50 dark:bg-orange-950/30 border-l-4 border-orange-300 dark:border-orange-700';
+        case 'tool':
+          return highlighted
+            ? 'bg-green-500/40 border-l-4 border-green-500'
+            : 'bg-green-50 dark:bg-green-950/30 border-l-4 border-green-300 dark:border-green-700';
+        default:
+          return highlighted
+            ? 'bg-slate-500/40 border-l-4 border-slate-500'
+            : 'bg-gray-50 dark:bg-gray-900/50 border-l-4 border-gray-300 dark:border-gray-700';
+      }
+    };
+
+    const colorClasses = getColorClasses(role, isHighlighted);
+    return `${colorClasses} ${transitionClasses}`;
+  };
+
+  const getCitationColors = (role: string, isHighlighted: boolean) => {
+    switch (role) {
+      case 'user':
+        return isHighlighted
+          ? 'bg-muted-foreground text-background'
+          : 'bg-muted-foreground/20';
+      case 'assistant':
+        return isHighlighted ? 'bg-blue-600 text-white' : 'bg-blue-500/20';
+      case 'system':
+        return isHighlighted ? 'bg-orange-600 text-white' : 'bg-orange-500/20';
+      case 'tool':
+        return isHighlighted ? 'bg-green-600 text-white' : 'bg-green-500/20';
+      default:
+        return isHighlighted ? 'bg-slate-600 text-white' : 'bg-slate-500/20';
+    }
+  };
+
+  const renderMessageContent = (
+    content: string | Content[],
+    citations: Citation[],
+    role: string,
+    precomputedIntervals: { start: number; end: number; id: string }[]
+  ) => {
+    // First apply JSON pretty-printing if enabled, then get the final content string
+    const rawContentString = getMessageContent(content);
+    const contentString = prettyPrintJsonMessages.has(index)
+      ? formatContent(rawContentString)
+      : rawContentString;
+
+    if (!citations || citations.length === 0) {
+      return <div>{contentString}</div>;
+    }
+
+    const textLength = contentString.length;
+    type EventMap = Record<number, string[]>;
+    const opens: EventMap = {};
+    const closes: EventMap = {};
+
+    // If content was pretty-printed, transform the citation intervals to match the new positions
+    // Otherwise use the precomputed intervals
+    let citationIntervals: { start: number; end: number; id: string }[];
+    if (
+      prettyPrintJsonMessages.has(index) &&
+      rawContentString !== contentString
+    ) {
+      // Transform intervals from original positions to pretty-printed positions
+      citationIntervals = transformCitationIntervals(
+        precomputedIntervals,
+        rawContentString,
+        contentString
+      );
+    } else {
+      // Use precomputed intervals
+      citationIntervals = precomputedIntervals;
+    }
+
+    // Build sweep events from the citation intervals
+    const matchedIds = new Set<string>();
+    citationIntervals.forEach(({ start, end, id }) => {
+      if (start >= end) return;
+      if (!opens[start]) opens[start] = [];
+      if (!closes[end]) closes[end] = [];
+      opens[start].push(id);
+      closes[end].push(id);
+      matchedIds.add(id);
+    });
+
+    const boundaries = new Set<number>([0, textLength]);
+    Object.keys(opens).forEach((k) => boundaries.add(Number(k)));
+    Object.keys(closes).forEach((k) => boundaries.add(Number(k)));
+    const sorted = Array.from(boundaries).sort((a, b) => a - b);
+
+    const parts: (string | JSX.Element)[] = [];
+    const active = new Set<string>();
+
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const idx = sorted[i];
+      const next = sorted[i + 1];
+
+      // Apply closes then opens at the boundary
+      (closes[idx] || []).forEach((id) => active.delete(id));
+      (opens[idx] || []).forEach((id) => active.add(id));
+
+      if (next <= idx) continue;
+      const slice = contentString.slice(idx, next);
+      if (!slice) continue;
+
+      if (active.size === 0) {
+        parts.push(slice);
+      } else {
+        const isHighlighted = highlightedCitationId
+          ? Array.from(active).includes(highlightedCitationId)
+          : false;
+        parts.push(
+          <span
+            key={`seg-${idx}-${next}`}
+            className={getCitationColors(role, isHighlighted)}
+            data-citation-ids={Array.from(active).join(',')}
+          >
+            {slice}
+          </span>
+        );
+      }
+    }
+
+    return <div>{parts}</div>;
   };
 
   // Add a new function to extract reasoning content
@@ -1301,9 +1605,12 @@ const MessageBox: React.FC<{
           </>
         )}
         <div className="whitespace-pre-wrap [overflow-wrap:anywhere] max-w-full text-xs overflow-x-auto font-mono">
-          {prettyPrintJsonMessages.has(index)
-            ? formatContent(getMessageContent(message.content))
-            : getMessageContent(message.content)}
+          {renderMessageContent(
+            message.content,
+            citedRanges,
+            message.role,
+            allCitationIntervals
+          )}
         </div>
         {renderToolInfo()}
         {renderToolCalls()}

@@ -50,7 +50,6 @@ from docent_core.docent.db.schemas.tables import (
     SQLAAgentRun,
     SQLAAnalyticsEvent,
     SQLAApiKey,
-    SQLAChatSession,
     SQLACollection,
     SQLAJob,
     SQLAModelApiKey,
@@ -423,6 +422,7 @@ class MonoService:
 
     async def get_agent_runs(
         self,
+        # ctx: ViewContext | None = None,
         ctx: ViewContext,
         agent_run_ids: list[str] | None = None,
         _where_clause: ColumnElement[bool] | None = None,
@@ -1120,25 +1120,6 @@ class MonoService:
             await session.execute(
                 update(SQLAJob).filter(SQLAJob.id == job_id).values(job_json=job_json)
             )
-
-    async def cleanup_old_chat_sessions(self, days_old: int = 7) -> int:
-        """
-        Delete chat sessions that haven't been updated in the specified number of days.
-
-        Args:
-            days_old: Number of days after which sessions are considered old (default: 7)
-
-        Returns:
-            Number of sessions deleted
-        """
-        cutoff_date = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days_old)
-
-        async with self.db.session() as session:
-            result = await session.execute(
-                delete(SQLAChatSession).where(SQLAChatSession.updated_at < cutoff_date)
-            )
-            deleted_count = result.rowcount or 0
-            return deleted_count
 
     #########
     # Users #

@@ -35,6 +35,7 @@ interface AssistantMessage extends BaseChatMessage {
   role: 'assistant';
   tool_calls?: ToolCall[];
   citations?: Citation[];
+  suggested_messages?: string[];
 }
 
 interface ToolMessage extends BaseChatMessage {
@@ -59,12 +60,6 @@ export interface ToolCall {
     content: string;
     format: string;
   };
-}
-
-export interface TaMessage {
-  role: 'user' | 'assistant';
-  content: string;
-  citations: Citation[];
 }
 
 export type ChatMessage =

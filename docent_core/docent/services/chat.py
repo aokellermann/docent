@@ -1,0 +1,442 @@
+import traceback
+from copy import deepcopy
+from datetime import UTC, datetime, timedelta
+from typing import Any, AsyncContextManager, AsyncIterator, Callable, Protocol, cast
+from uuid import uuid4
+
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from docent._log_util import get_logger
+from docent.data_models.agent_run import AgentRun
+from docent.data_models.chat.message import (
+    AssistantMessage,
+    ChatMessage,
+    SystemMessage,
+    UserMessage,
+)
+from docent.data_models.citation import (
+    parse_citations,
+)
+from docent_core._llm_util.data_models.llm_output import LLMOutput
+from docent_core._llm_util.prod_llms import get_llm_completions_async
+from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES
+from docent_core._server._broker.redis_client import (
+    STATE_KEY_FORMAT,
+    STREAM_KEY_FORMAT,
+    enqueue_job,
+    get_redis_client,
+)
+from docent_core._worker.constants import WorkerFunction
+from docent_core.docent.ai_tools.assistant.chat import make_system_prompt
+from docent_core.docent.db.contexts import ViewContext
+from docent_core.docent.db.schemas.chat import ChatSession, SQLAChatSession
+from docent_core.docent.db.schemas.tables import JobStatus, SQLAJob
+from docent_core.docent.services.monoservice import MonoService
+from docent_core.docent.services.rubric import RubricService
+
+logger = get_logger(__name__)
+
+
+class ChatEventCallback(Protocol):
+    async def __call__(self, session: ChatSession):
+        pass
+
+
+def parse_suggestions(content: str) -> tuple[str, list[str]]:
+    """Parse suggestions from assistant message content.
+
+    Args:
+        content: The message content that may contain suggestions
+
+    Returns:
+        Tuple of (cleaned_content, suggestions_list)
+    """
+    import re
+
+    pattern = r"<SUGGESTIONS>\s*(.*?)\s*</SUGGESTIONS>"
+    match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+
+    if not match:
+        return content, []
+
+    # Extract suggestions block
+    suggestions_text = match.group(1).strip()
+
+    # Remove the suggestions block from content
+    cleaned_content = re.sub(pattern, "", content, flags=re.DOTALL | re.IGNORECASE).strip()
+
+    # Parse individual suggestions (lines starting with -)
+    suggestions: list[str] = []
+    for line in suggestions_text.split("\n"):
+        line = line.strip()
+        if line.startswith("-"):
+            suggestion = line[1:].strip()
+            if suggestion:
+                suggestions.append(suggestion)
+
+    return cleaned_content, suggestions
+
+
+def _parse_citations_in_messages(messages: list[ChatMessage], run: AgentRun) -> list[ChatMessage]:
+    """Parse citations and suggestions in assistant messages and return updated messages."""
+
+    parsed_messages: list[ChatMessage] = []
+
+    for message in messages:
+        if message.role == "assistant":
+            try:
+                # Parse suggestions first, then citations from the content
+                content_text = message.text
+                cleaned_text_suggestions, suggestions = parse_suggestions(content_text)
+                cleaned_text, citations = parse_citations(cleaned_text_suggestions)
+
+                # Create new message with parsed citations and suggestions
+                updated_message = AssistantMessage(
+                    id=message.id,
+                    content=cleaned_text,
+                    model=message.model,
+                    tool_calls=message.tool_calls,
+                    citations=citations,
+                    suggested_messages=suggestions if suggestions else None,
+                )
+                parsed_messages.append(updated_message)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to parse citations and suggestions from assistant message: {e}"
+                )
+                parsed_messages.append(message)
+        else:
+            parsed_messages.append(message)
+
+    return parsed_messages
+
+
+class ChatService:
+    def __init__(
+        self,
+        session: AsyncSession,
+        session_cm_factory: Callable[[], AsyncContextManager[AsyncSession]],
+        mono_svc: MonoService,
+        rubric_svc: RubricService,
+    ):
+        self.session = session
+        self.session_cm_factory = session_cm_factory
+        self.mono_svc = mono_svc
+        self.rubric_svc = rubric_svc
+
+    async def get_session_by_id(self, session_id: str) -> SQLAChatSession | None:
+        result = await self.session.execute(
+            select(SQLAChatSession).where(
+                SQLAChatSession.id == session_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_session_by_run(self, run_id: str, judge_result_id: str | None = None):
+        result = await self.session.execute(
+            select(SQLAChatSession)
+            .where(SQLAChatSession.agent_run_id == run_id)
+            .where(SQLAChatSession.judge_result_id == judge_result_id)
+            .order_by(SQLAChatSession.updated_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_or_create_session(
+        self,
+        user_id: str,
+        agent_run_id: str,
+        judge_result_id: str | None = None,
+        force_create: bool = False,
+    ):
+        async with self.mono_svc.advisory_lock(agent_run_id, f"create_session_{agent_run_id}"):
+            sqla_session: SQLAChatSession | None = None
+            if not force_create:
+                sqla_session = await self.get_session_by_run(agent_run_id, judge_result_id)
+            if sqla_session is None:
+                # Ensure required fields are initialized so the instance is usable pre-flush
+                sqla_session = SQLAChatSession(
+                    id=str(uuid4()),  # Explicitly set ID to avoid None during pre-flush usage
+                    user_id=user_id,
+                    agent_run_id=agent_run_id,
+                    judge_result_id=judge_result_id,
+                    messages=[],
+                )
+                self.session.add(sqla_session)
+            return sqla_session
+
+    async def _update_session(self, sqla_session: SQLAChatSession, messages: list[dict[str, Any]]):
+        # Update the instance directly so its in-memory state is current
+        sqla_session.messages = messages
+        sqla_session.updated_at = datetime.now(UTC).replace(tzinfo=None)
+
+    async def add_user_message(self, sqla_session: SQLAChatSession, message: str):
+        await self._update_session(
+            sqla_session, sqla_session.messages + [UserMessage(content=message).model_dump()]
+        )
+
+    async def get_current_state(
+        self, ctx: ViewContext, sqla_session: SQLAChatSession
+    ) -> ChatSession:
+        """Return the current state of the chat session as a pydantic model with parsed citations."""
+        session = sqla_session.to_pydantic()
+        return await self._parse_citations_in_session(ctx, session)
+
+    async def _parse_citations_in_session(
+        self, ctx: ViewContext, session: ChatSession
+    ) -> ChatSession:
+        """Helper to parse citations in a chat session."""
+        if not session.agent_run_id:
+            return session
+
+        agent_run = await self.mono_svc.get_agent_run(
+            ctx, session.agent_run_id, apply_base_where_clause=False
+        )
+        if agent_run is None:
+            return session
+
+        # Parse citations in assistant messages
+        parsed_messages = _parse_citations_in_messages(session.messages, run=agent_run)
+        return session.model_copy(update={"messages": parsed_messages})
+
+    @staticmethod
+    async def _get_active_chat_job(session: AsyncSession, session_id: str) -> SQLAJob | None:
+        result = await session.execute(
+            select(SQLAJob)
+            .where(SQLAJob.type == WorkerFunction.CHAT_JOB.value)
+            .where(SQLAJob.job_json["session_id"].astext == session_id)
+            .where((SQLAJob.status == JobStatus.PENDING) | (SQLAJob.status == JobStatus.RUNNING))
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_active_job_for_session(self, session_id: str) -> SQLAJob | None:
+        return await self._get_active_chat_job(self.session, session_id)
+
+    async def start_or_get_chat_job(self, ctx: ViewContext, sqla_session: SQLAChatSession):
+        """This job is responsible for running the chat for one turn.
+        Uses an advisory lock to avoid races where multiple jobs are started for the same session.
+        """
+
+        async with self.mono_svc.advisory_lock(
+            sqla_session.id,
+            f"start_chat_session_{sqla_session.id}",
+        ):
+            # Is there already a job for this session?
+            existing_job = await self._get_active_chat_job(self.session, sqla_session.id)
+            if existing_job:
+                return existing_job.id
+
+            # There is no running job, create a new one
+            job_id = str(uuid4())
+            self.session.add(
+                SQLAJob(
+                    id=job_id,
+                    type=WorkerFunction.CHAT_JOB.value,
+                    job_json={"session_id": sqla_session.id},
+                )
+            )
+
+            # Exception to rule of not committing inside the service:
+            #   commit so that the enqueued job is visible to the worker
+            await self.session.commit()
+            await enqueue_job(ctx, job_id)
+
+            return job_id
+
+    async def listen_for_job_state(self, job_id: str) -> AsyncIterator[ChatSession]:
+        REDIS = await get_redis_client()
+        stream_key = STREAM_KEY_FORMAT.format(job_id=job_id)
+        state_key = STATE_KEY_FORMAT.format(job_id=job_id)
+
+        """Yield authoritative state updates for a job by listening to its notifier stream.
+        This function never errors and instead logs the error and continues.
+        It exits when the job is finished.
+        """
+
+        async def _get_state():
+            raw_state = await REDIS.get(state_key)  # type: ignore
+            if raw_state is not None:
+                return ChatSession.model_validate_json(raw_state)
+            else:
+                return None
+
+        # Before anything else, push the state
+        state = await _get_state()
+        if state is not None:
+            yield state
+
+        # Start from the beginning so we don't miss a prior "finished" event
+        # and advance the cursor on every read to avoid dropping intermediate events.
+        last_id = "0-0"
+        done = False
+
+        while not done:
+            # Block until a notifier event arrives
+            try:
+                results = await REDIS.xread({stream_key: last_id}, block=30000, count=1)  # type: ignore
+
+                # Timed out waiting for events; loop again
+
+                if not results:
+                    continue
+
+                for _stream, entries in results:
+                    if len(entries) == 0:
+                        continue
+                    _entry_id, _data = entries[-1]
+
+                    # Advance the cursor so we don't miss subsequent events
+                    last_id = _entry_id
+                    # Parse out the last event entry
+                    data = cast(dict[str, str], _data)
+                    logger.info(f"Job {job_id} received event data {data}")
+
+                    # Only look at state_updated and finished events
+                    event = data.get("event")
+                    if event not in {"state_updated", "finished"}:
+                        logger.error(f"Job {job_id} received unknown event {event}")
+                        continue
+
+                    # Regardless of whether we're done, push the state
+                    state = await _get_state()
+                    if state is not None:
+                        yield state
+
+                    # If done, return
+                    if event == "finished":
+                        done = True
+                        break
+            except Exception as e:
+                logger.error(
+                    f"Error reading from Redis stream {stream_key}: {e}. Traceback:\n{traceback.format_exc()}"
+                )
+                continue
+
+    async def one_turn(
+        self,
+        ctx: ViewContext,
+        sqla_session: SQLAChatSession,
+        callback: ChatEventCallback | None = None,
+    ):
+        """Run one turn of the chat assistant. Called by worker process, not API server.
+        Note: self.session is committed once at the end of this turn.
+        """
+
+        raw_chat_session = sqla_session.to_pydantic()
+
+        # Parse citations in existing messages so they don't revert to raw syntax during streaming
+        parsed_chat_session = await self._parse_citations_in_session(ctx, raw_chat_session)
+
+        # Only create system prompt if we have the required agent run
+        if sqla_session.agent_run_id is None:
+            raise ValueError(f"Session {sqla_session.id} has no agent run")
+
+        # Get agent run for system prompt and citation parsing
+        agent_run = await self.mono_svc.get_agent_run(
+            ctx, sqla_session.agent_run_id, apply_base_where_clause=False
+        )
+
+        # Get judge result if available
+        judge_result = None
+        if sqla_session.judge_result_id:
+            judge_result = await self.rubric_svc.get_rubric_result_by_id(
+                sqla_session.judge_result_id
+            )
+
+        # Get rubric from judge result if available
+        rubric = None
+        if judge_result:
+            sqla_rubric = await self.rubric_svc.get_rubric(
+                judge_result.rubric_id, judge_result.rubric_version
+            )
+            if sqla_rubric:
+                rubric = sqla_rubric.to_pydantic()
+
+        # Only create system prompt if we have the required agent run
+        if agent_run is None:
+            raise ValueError(f"Agent run {sqla_session.agent_run_id} not found")
+
+        system_prompt = make_system_prompt(
+            agent_run=agent_run, judge_result=judge_result, rubric=rubric
+        )
+        context_messages = [SystemMessage(content=system_prompt)] + raw_chat_session.messages
+        chat_session_messages = deepcopy(raw_chat_session.messages)
+
+        async def _streaming_callback(batch_index: int, llm_output: LLMOutput):
+            if callback and (completion := llm_output.first):
+                # Create assistant message and parse citations
+                assistant_msg = AssistantMessage(
+                    content=completion.text or "",
+                    tool_calls=completion.tool_calls,
+                )
+
+                # Parse citations before sending to callback
+                parsed_messages = _parse_citations_in_messages([assistant_msg], run=agent_run)
+
+                await callback(
+                    parsed_chat_session.model_copy(
+                        update={"messages": parsed_chat_session.messages + parsed_messages}
+                    )
+                )
+
+        logger.info(f"Running one turn of chat session: {sqla_session}")
+
+        # If user or tool: generate asst continuation
+        outputs = await get_llm_completions_async(
+            [context_messages],
+            PROVIDER_PREFERENCES.handle_ta_message,
+            max_new_tokens=8192,
+            timeout=120.0,
+            use_cache=True,
+            streaming_callback=_streaming_callback,
+        )
+
+        # Parse completion and append to messages
+        completion = outputs[0].first
+        if completion is None:
+            return
+        assistant_msg = AssistantMessage(
+            content=completion.text or "", tool_calls=completion.tool_calls
+        )
+        new_chat_session_messages = chat_session_messages + [assistant_msg]
+
+        # Update session
+        await self._update_session(
+            sqla_session, [m.model_dump() for m in new_chat_session_messages]
+        )
+
+        await self.session.commit()
+
+        final_state = sqla_session.to_pydantic()
+        final_parsed_messages = _parse_citations_in_messages(final_state.messages, run=agent_run)
+        final_state_with_citations = final_state.model_copy(
+            update={"messages": final_parsed_messages}
+        )
+
+        # Send final state via callback if provided (needed for SSE streaming)
+        if callback:
+            await callback(final_state_with_citations)
+
+        return final_state_with_citations
+
+    async def cleanup_old_chat_sessions(self, days_old: int = 7) -> int:
+        """
+        Delete chat sessions that haven't been updated in the specified number of days.
+
+        Args:
+            days_old: Number of days after which sessions are considered old (default: 7)
+
+        Returns:
+            Number of sessions deleted
+        """
+        cutoff_date = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days_old)
+
+        result = await self.session.execute(
+            delete(SQLAChatSession).where(SQLAChatSession.updated_at < cutoff_date)
+        )
+        # Ensure the deletion is persisted
+        await self.session.commit()
+        deleted_count = result.rowcount or 0
+        return deleted_count

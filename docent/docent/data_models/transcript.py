@@ -12,6 +12,7 @@ from docent.data_models._tiktoken_util import (
     truncate_to_token_limit,
 )
 from docent.data_models.chat import AssistantMessage, ChatMessage, ContentReasoning
+from docent.data_models.citation import RANGE_BEGIN, RANGE_END
 
 # Template for formatting individual transcript blocks
 TRANSCRIPT_BLOCK_TEMPLATE = """
@@ -21,10 +22,19 @@ TRANSCRIPT_BLOCK_TEMPLATE = """
 """.strip()
 
 # Instructions for citing single transcript blocks
-SINGLE_RUN_CITE_INSTRUCTION = "Each transcript and each block has a unique index. Cite the relevant indices in brackets when relevant, like [T<idx>B<idx>]. Use multiple tags to cite multiple blocks, like [T<idx1>B<idx1>][T<idx2>B<idx2>]. Use an inner dash to cite a range of blocks, like [T<idx1>B<idx1>-T<idx2>B<idx2>]. Remember to cite specific blocks and NOT action units."
+TEXT_RANGE_CITE_INSTRUCTION = f"""Anytime you quote the transcript, or refer to something that happened in the transcript, or make any claim about the transcript, add an inline citation. Each transcript and each block has a unique index. Cite the relevant indices in brackets. For example, to cite the entirety of transcript 0, block 1, write [T0B1].
 
-# Instructions for citing multiple transcript blocks
-MULTI_RUN_CITE_INSTRUCTION = "Each run, each transcript, and each block has a unique index. Cite the relevant indices in brackets when relevant, like [R<idx>T<idx>B<idx>]. Use multiple tags to cite multiple blocks, like [R<idx1>T<idx1>B<idx1>][R<idx2>T<idx2>B<idx2>]. Use an inner dash to cite a range of blocks, like [R<idx1>T<idx1>B<idx1>-R<idx2>T<idx2>B<idx2>]. Remember to cite specific blocks and NOT action units."
+A citation may include a specific range of text within a block. Use {RANGE_BEGIN} and {RANGE_END} to mark the specific range of text. Add it after the block ID separated by a colon. For example, to cite the part of transcript 0, block 1, where the agent says "I understand the task", write [T0B1:{RANGE_BEGIN}I understand the task{RANGE_END}]. Citations must follow this exact format. The markers {RANGE_BEGIN} and {RANGE_END} must be used ONLY inside the brackets of a citation.
+
+Important notes:
+- You must include the full content of the text range {RANGE_BEGIN} and {RANGE_END}, EXACTLY as it appears in the transcript, word-for-word, including any markers or punctuation that appear in the middle of the text.
+- Citations must be specific. When possible, include a text range to be more specific. If you omit the text range you will cite the entire block.
+- A citation is not a quote. For brevity, text ranges will not be rendered inline. The user will have to click on the citation to see the full text range.
+- Citations are self-contained. Do NOT label them as citation or evidence. Just insert the citation by itself at the appropriate place in the text.
+- Citations must come immediately after the part of a claim that they support. This may be in the middle of a sentence.
+"""
+
+BLOCK_CITE_INSTRUCTION = f"""Each transcript and each block has a unique index. Cite the relevant indices in brackets when relevant, like [T<idx>B<idx>]. Use multiple tags to cite multiple blocks, like [T<idx1>B<idx1>][T<idx2>B<idx2>]. Remember to cite specific blocks and NOT action units."""
 
 
 def format_chat_message(
@@ -291,66 +301,105 @@ class Transcript(BaseModel):
         agent_run_idx: int | None = None,
         highlight_action_unit: int | None = None,
     ) -> str:
-        return self.to_str_with_token_limit(
+        return self._to_str_with_token_limit_impl(
             token_limit=sys.maxsize,
-            agent_run_idx=agent_run_idx,
             transcript_idx=transcript_idx,
+            agent_run_idx=agent_run_idx,
+            use_action_units=True,
             highlight_action_unit=highlight_action_unit,
         )[0]
 
-    def to_str_with_token_limit(
+    def _generate_formatted_blocks(
         self,
-        token_limit: int,
         transcript_idx: int = 0,
         agent_run_idx: int | None = None,
+        use_action_units: bool = True,
         highlight_action_unit: int | None = None,
     ) -> list[str]:
-        """Represents the transcript as a list of strings, each of which is at most token_limit tokens
-        under the GPT-4 tokenization scheme.
+        """Generate formatted blocks for transcript representation.
 
-        We'll try to split up long transcripts along message boundaries and include metadata.
-        For very long messages, we'll have to truncate them and remove metadata.
+        Args:
+            transcript_idx: Index of the transcript
+            agent_run_idx: Optional agent run index
+            use_action_units: If True, group messages into action units. If False, use individual blocks.
+            highlight_action_unit: Optional action unit to highlight (only used with action units)
 
         Returns:
-            list[str]: A list of strings, each of which is at most token_limit tokens
-            under the GPT-4 tokenization scheme.
+            list[str]: List of formatted blocks
         """
-        if highlight_action_unit is not None and not (
-            0 <= highlight_action_unit < len(self._units_of_action or [])
-        ):
-            raise ValueError(f"Invalid action unit index: {highlight_action_unit}")
+        if use_action_units:
+            if highlight_action_unit is not None and not (
+                0 <= highlight_action_unit < len(self._units_of_action or [])
+            ):
+                raise ValueError(f"Invalid action unit index: {highlight_action_unit}")
 
-        # Format blocks by units of action
-        au_blocks: list[str] = []
-        for unit_idx, unit in enumerate(self._units_of_action or []):
-            unit_blocks: list[str] = []
-            for msg_idx in unit:
-                unit_blocks.append(
+            blocks: list[str] = []
+            for unit_idx, unit in enumerate(self._units_of_action or []):
+                unit_blocks: list[str] = []
+                for msg_idx in unit:
+                    unit_blocks.append(
+                        format_chat_message(
+                            self.messages[msg_idx],
+                            msg_idx,
+                            transcript_idx,
+                            agent_run_idx,
+                        )
+                    )
+
+                unit_content = "\n".join(unit_blocks)
+
+                # Add highlighting if requested
+                if highlight_action_unit and unit_idx == highlight_action_unit:
+                    blocks_str_template = "<HIGHLIGHTED>\n{}\n</HIGHLIGHTED>"
+                else:
+                    blocks_str_template = "{}"
+                blocks.append(
+                    blocks_str_template.format(
+                        f"<action unit {unit_idx}>\n{unit_content}\n</action unit {unit_idx}>"
+                    )
+                )
+        else:
+            # Individual message blocks
+            blocks = []
+            for msg_idx, message in enumerate(self.messages):
+                blocks.append(
                     format_chat_message(
-                        self.messages[msg_idx],
+                        message,
                         msg_idx,
                         transcript_idx,
                         agent_run_idx,
                     )
                 )
 
-            unit_content = "\n".join(unit_blocks)
+        return blocks
 
-            # Add highlighting if requested
-            if highlight_action_unit and unit_idx == highlight_action_unit:
-                blocks_str_template = "<HIGHLIGHTED>\n{}\n</HIGHLIGHTED>"
-            else:
-                blocks_str_template = "{}"
-            au_blocks.append(
-                blocks_str_template.format(
-                    f"<action unit {unit_idx}>\n{unit_content}\n</action unit {unit_idx}>"
-                )
-            )
-        blocks_str = "\n".join(au_blocks)
+    def _to_str_with_token_limit_impl(
+        self,
+        token_limit: int,
+        transcript_idx: int = 0,
+        agent_run_idx: int | None = None,
+        use_action_units: bool = True,
+        highlight_action_unit: int | None = None,
+    ) -> list[str]:
+        """Core implementation for string representation with token limits.
+
+        Args:
+            token_limit: Maximum tokens per returned string
+            transcript_idx: Index of the transcript
+            agent_run_idx: Optional agent run index
+            use_action_units: If True, group messages into action units. If False, use individual blocks.
+            highlight_action_unit: Optional action unit to highlight (only used with action units)
+
+        Returns:
+            list[str]: List of strings, each within token limit
+        """
+        blocks = self._generate_formatted_blocks(
+            transcript_idx, agent_run_idx, use_action_units, highlight_action_unit
+        )
+        blocks_str = "\n".join(blocks)
 
         # Gather metadata
         metadata_obj = fake_model_dump(self.metadata)
-
         yaml_width = float("inf")
         block_str = f"<blocks>\n{blocks_str}\n</blocks>\n"
         metadata_str = f"<metadata>\n{yaml.dump(metadata_obj, width=yaml_width)}\n</metadata>"
@@ -365,24 +414,74 @@ class Transcript(BaseModel):
             return [f"{block_str}" f"{metadata_str}"]
         else:
             results: list[str] = []
-            block_token_counts = [get_token_count(block) for block in au_blocks]
+            block_token_counts = [get_token_count(block) for block in blocks]
             ranges = group_messages_into_ranges(
                 block_token_counts, metadata_token_count, token_limit
             )
             for msg_range in ranges:
                 if msg_range.include_metadata:
-                    cur_au_blocks = "\n".join(au_blocks[msg_range.start : msg_range.end])
-                    results.append(f"<blocks>\n{cur_au_blocks}\n</blocks>\n" f"{metadata_str}")
+                    cur_blocks = "\n".join(blocks[msg_range.start : msg_range.end])
+                    results.append(f"<blocks>\n{cur_blocks}\n</blocks>\n" f"{metadata_str}")
                 else:
                     assert (
                         msg_range.end == msg_range.start + 1
                     ), "Ranges without metadata should be a single message"
-                    result = str(au_blocks[msg_range.start])
+                    result = str(blocks[msg_range.start])
                     if msg_range.num_tokens > token_limit - 10:
                         result = truncate_to_token_limit(result, token_limit - 10)
                     results.append(f"<blocks>\n{result}\n</blocks>\n")
 
             return results
+
+    def to_str_blocks(
+        self,
+        transcript_idx: int = 0,
+        agent_run_idx: int | None = None,
+    ) -> str:
+        """Represents the transcript as a string using individual message blocks.
+
+        Unlike to_str() which groups messages into action units, this method
+        formats each message as an individual block.
+
+        Returns:
+            str: A string representation with individual message blocks.
+        """
+        return self._to_str_with_token_limit_impl(
+            token_limit=sys.maxsize,
+            transcript_idx=transcript_idx,
+            agent_run_idx=agent_run_idx,
+            use_action_units=False,
+        )[0]
+
+    def to_str_with_token_limit(
+        self,
+        token_limit: int,
+        transcript_idx: int = 0,
+        agent_run_idx: int | None = None,
+        highlight_action_unit: int | None = None,
+    ) -> list[str]:
+        """Represents the transcript as a list of strings using action units with token limit handling."""
+        return self._to_str_with_token_limit_impl(
+            token_limit=token_limit,
+            transcript_idx=transcript_idx,
+            agent_run_idx=agent_run_idx,
+            use_action_units=True,
+            highlight_action_unit=highlight_action_unit,
+        )
+
+    def to_str_blocks_with_token_limit(
+        self,
+        token_limit: int,
+        transcript_idx: int = 0,
+        agent_run_idx: int | None = None,
+    ) -> list[str]:
+        """Represents the transcript as individual blocks with token limit handling."""
+        return self._to_str_with_token_limit_impl(
+            token_limit=token_limit,
+            transcript_idx=transcript_idx,
+            agent_run_idx=agent_run_idx,
+            use_action_units=False,
+        )
 
 
 class TranscriptWithoutMetadataValidator(Transcript):

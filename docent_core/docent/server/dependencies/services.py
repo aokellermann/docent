@@ -9,7 +9,7 @@ from docent_core.docent.server.dependencies.database import (
     get_session_cm_factory,
 )
 from docent_core.docent.services.charts import ChartsService
-from docent_core.docent.services.diff import DiffService
+from docent_core.docent.services.chat import ChatService
 from docent_core.docent.services.job import JobService
 from docent_core.docent.services.monoservice import MonoService
 from docent_core.docent.services.refinement import RefinementService
@@ -17,16 +17,6 @@ from docent_core.docent.services.rubric import RubricService
 from docent_core.docent.services.telemetry import TelemetryService
 from docent_core.docent.services.telemetry_accumulation import TelemetryAccumulationService
 from docent_core.services.onboarding import OnboardingService
-
-
-def get_diff_service(
-    mono_svc: MonoService = Depends(get_mono_svc),
-    session: AsyncSession = Depends(get_session),
-    session_cm_factory: Callable[[], AsyncContextManager[AsyncSession]] = Depends(
-        get_session_cm_factory
-    ),
-) -> DiffService:
-    return DiffService(session, session_cm_factory, mono_svc)
 
 
 def get_rubric_service(
@@ -48,6 +38,17 @@ def get_refinement_service(
     ),
 ) -> RefinementService:
     return RefinementService(session, session_cm_factory, mono_svc, rubric_svc)
+
+
+def get_chat_service(
+    mono_svc: MonoService = Depends(get_mono_svc),
+    rubric_svc: RubricService = Depends(get_rubric_service),
+    session: AsyncSession = Depends(get_session),
+    session_cm_factory: Callable[[], AsyncContextManager[AsyncSession]] = Depends(
+        get_session_cm_factory
+    ),
+) -> ChatService:
+    return ChatService(session, session_cm_factory, mono_svc, rubric_svc)
 
 
 def get_job_service(

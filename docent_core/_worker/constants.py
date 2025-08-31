@@ -9,4 +9,5 @@ class WorkerFunction(str, Enum):
     CENTROID_ASSIGNMENT_JOB = "centroid_assignment_job"  # Deprecated
     REFINEMENT_AGENT_JOB = "refinement_agent_job"
     CLUSTERING_JOB = "clustering_job"
+    CHAT_JOB = "chat_job"
     TELEMETRY_PROCESSING_JOB = "telemetry_processing_job"

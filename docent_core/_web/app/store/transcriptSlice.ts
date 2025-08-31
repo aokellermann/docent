@@ -16,11 +16,12 @@ import {
   ActionsSummary,
   AgentRun,
   SolutionSummary,
-  TaMessage,
 } from '../types/transcriptTypes';
+import { Citation } from '../types/experimentViewerTypes';
 
 import { RootState } from './store';
 import { setToastNotification } from './toastSlice';
+import { createAppSelector } from './hooks';
 
 // Map to store cancel functions for active SSE connections
 const cancelFunctionsMap: Record<string, () => void> = {};
@@ -48,9 +49,16 @@ export interface TranscriptState {
   // Chat assistant
   taAgentRunId?: string;
   taSessionId?: string;
-  taMessages?: TaMessage[];
-  taMessageTaskId?: string;
   loadingTaResponse?: boolean;
+  // All citations
+  allCitations?: Citation[];
+  // Citation highlighting
+  highlightedCitationId?: string;
+  // Citation match presence (computed on FE) keyed by citationId
+  matchedCitationIds?: Record<string, boolean>;
+  // Agent run sidebar state
+  agentRunSidebarOpen?: boolean;
+  agentRunSidebarTab?: string;
 }
 
 const initialState: TranscriptState = {};
@@ -344,196 +352,6 @@ export const handleAgentRunsUpdated = createAsyncThunk(
   }
 );
 
-export const createTaSession = createAsyncThunk(
-  'transcript/createTaSession',
-  async (agentRunId: string, { dispatch, getState }) => {
-    const state = getState() as RootState;
-    const collectionId = state.collection.collectionId;
-
-    if (!collectionId) {
-      dispatch(
-        setToastNotification({
-          title: 'Configuration error',
-          description: 'No collection ID available',
-          variant: 'destructive',
-        })
-      );
-      throw new Error('No collection ID available');
-    }
-
-    try {
-      // Reset existing session if any
-      dispatch(resetTaSession());
-
-      // Create a new TA session via REST API
-      const response = await apiRestClient.post(`/${collectionId}/ta_session`, {
-        agent_run_id: agentRunId,
-      });
-
-      // Set the session ID and datapoint ID
-      dispatch(setTaSessionId(response.data.session_id));
-      dispatch(setTaAgentRunId(agentRunId));
-
-      // Initialize empty messages array
-      dispatch(setTaMessages([]));
-    } catch (error) {
-      dispatch(
-        setToastNotification({
-          title: 'Error creating TA session',
-          description: 'Failed to initialize teaching assistant session',
-          variant: 'destructive',
-        })
-      );
-      throw error;
-    }
-  }
-);
-
-export const sendTaMessage = createAsyncThunk(
-  'transcript/sendTaMessage',
-  async (message: string, { dispatch, getState }) => {
-    const state = getState() as RootState;
-    const { taSessionId } = state.transcript;
-    const collectionId = state.collection.collectionId;
-
-    if (!taSessionId) {
-      dispatch(
-        setToastNotification({
-          title: 'Configuration error',
-          description: 'No TA session ID available',
-          variant: 'destructive',
-        })
-      );
-      throw new Error('No TA session ID available');
-    }
-
-    // Cancel existing request
-    const { taMessageTaskId } = state.transcript;
-    if (taMessageTaskId && cancelFunctionsMap[taMessageTaskId]) {
-      cancelFunctionsMap[taMessageTaskId]();
-      delete cancelFunctionsMap[taMessageTaskId];
-    }
-
-    // Set loading state
-    dispatch(setLoadingTaResponse(true));
-
-    try {
-      // Generate a task ID for cancellation
-      const taskId = uuidv4();
-      dispatch(setTaMessageTaskId(taskId));
-
-      // Create SSE connection
-      const { eventSource, onCancel } = sseService.createEventSource(
-        `/rest/${collectionId}/ta_message?session_id=${taSessionId}&message=${encodeURIComponent(message)}`,
-        // onMessage
-        (data) => {
-          if (data.messages) {
-            dispatch(setTaMessages(data.messages));
-
-            // Save session ID to localStorage after first successful message
-            const state = getState() as RootState;
-            const { taAgentRunId, taSessionId } = state.transcript;
-            if (taAgentRunId && taSessionId) {
-              const storageKey = getTaSessionStorageKey(taAgentRunId);
-              if (!localStorage.getItem(storageKey)) {
-                localStorage.setItem(storageKey, taSessionId);
-              }
-            }
-          }
-        },
-        // onFinish
-        () => {
-          dispatch(setLoadingTaResponse(false));
-          dispatch(setTaMessageTaskId(undefined));
-        },
-        // Pass dispatch function to handle errors
-        dispatch
-      );
-
-      // Store the cancel function for potential cleanup
-      cancelFunctionsMap[taskId] = onCancel;
-    } catch (error) {
-      dispatch(
-        setToastNotification({
-          title: 'Error sending message',
-          description: 'Failed to send message to teaching assistant',
-          variant: 'destructive',
-        })
-      );
-      dispatch(setLoadingTaResponse(false));
-      dispatch(setTaMessageTaskId(undefined));
-      throw error;
-    }
-  }
-);
-
-export const loadTaSession = createAsyncThunk(
-  'transcript/loadTaSession',
-  async (
-    { agentRunId, sessionId }: { agentRunId: string; sessionId: string },
-    { dispatch, getState }
-  ) => {
-    const state = getState() as RootState;
-    const collectionId = state.collection.collectionId;
-
-    if (!collectionId) {
-      dispatch(
-        setToastNotification({
-          title: 'Configuration error',
-          description: 'No collection ID available',
-          variant: 'destructive',
-        })
-      );
-      throw new Error('No collection ID available');
-    }
-
-    try {
-      // Load session messages from server
-      const response = await apiRestClient.get(
-        `/ta_session_messages/${sessionId}`
-      );
-
-      // Set the session state
-      dispatch(setTaSessionId(sessionId));
-      dispatch(setTaAgentRunId(agentRunId));
-      dispatch(setTaMessages(response.data.messages || []));
-
-      console.log('Loaded chat session', sessionId);
-
-      return response.data;
-    } catch (error) {
-      // If session doesn't exist on server, remove from localStorage and create new session
-      localStorage.removeItem(getTaSessionStorageKey(agentRunId));
-
-      console.warn('Chat session expired, starting fresh');
-
-      // Create a new session instead
-      dispatch(createTaSession(agentRunId));
-    }
-  }
-);
-
-export const resetTaSession = createAsyncThunk(
-  'transcript/resetTaSession',
-  async (_, { dispatch, getState }) => {
-    const state = getState() as RootState;
-
-    // Cancel existing request if exists
-    const { taMessageTaskId } = state.transcript;
-    if (taMessageTaskId && cancelFunctionsMap[taMessageTaskId]) {
-      cancelFunctionsMap[taMessageTaskId]();
-      delete cancelFunctionsMap[taMessageTaskId];
-    }
-
-    // Reset TA state
-    dispatch(setTaAgentRunId(undefined));
-    dispatch(setTaSessionId(undefined));
-    dispatch(setTaMessages(undefined));
-    dispatch(setLoadingTaResponse(false));
-    dispatch(setTaMessageTaskId(undefined));
-  }
-);
-
 export const transcriptSlice = createSlice({
   name: 'transcript',
   initialState,
@@ -594,17 +412,11 @@ export const transcriptSlice = createSlice({
     setTaSessionId: (state, action: PayloadAction<string | undefined>) => {
       state.taSessionId = action.payload;
     },
-    setTaMessages: (state, action: PayloadAction<TaMessage[] | undefined>) => {
-      state.taMessages = action.payload;
-    },
     setLoadingTaResponse: (
       state,
       action: PayloadAction<boolean | undefined>
     ) => {
       state.loadingTaResponse = action.payload;
-    },
-    setTaMessageTaskId: (state, action: PayloadAction<string | undefined>) => {
-      state.taMessageTaskId = action.payload;
     },
     setDashboardAgentRunView: (
       state,
@@ -623,6 +435,34 @@ export const transcriptSlice = createSlice({
       state.dashboardScrollToBlockIdx = undefined;
       state.dashboardScrollToTranscriptIdx = undefined;
     },
+    setAllCitations: (state, action: PayloadAction<Citation[] | undefined>) => {
+      state.allCitations = action.payload;
+    },
+    setHighlightedCitation: (
+      state,
+      action: PayloadAction<string | undefined>
+    ) => {
+      state.highlightedCitationId = action.payload;
+    },
+    clearHighlightedCitation: (state) => {
+      state.highlightedCitationId = undefined;
+    },
+    addMatchedCitations: (state, action: PayloadAction<string[]>) => {
+      if (!state.matchedCitationIds) state.matchedCitationIds = {};
+      for (const id of action.payload) state.matchedCitationIds[id] = true;
+    },
+    clearMatchedCitations: (state) => {
+      state.matchedCitationIds = {};
+    },
+    setAgentRunSidebarOpen: (state, action: PayloadAction<boolean>) => {
+      state.agentRunSidebarOpen = action.payload;
+    },
+    toggleAgentRunSidebar: (state) => {
+      state.agentRunSidebarOpen = !state.agentRunSidebarOpen;
+    },
+    setAgentRunSidebarTab: (state, action: PayloadAction<string>) => {
+      state.agentRunSidebarTab = action.payload;
+    },
     resetTranscriptSlice: () => initialState,
   },
 });
@@ -640,12 +480,24 @@ export const {
   onFinishLoadingSolutionSummary,
   setTaAgentRunId,
   setTaSessionId,
-  setTaMessages,
   setLoadingTaResponse,
-  setTaMessageTaskId,
   setDashboardAgentRunView,
   clearDashboardAgentRunView,
   resetTranscriptSlice,
+  setAllCitations,
+  setHighlightedCitation,
+  clearHighlightedCitation,
+  addMatchedCitations,
+  clearMatchedCitations,
+  setAgentRunSidebarOpen,
+  toggleAgentRunSidebar,
+  setAgentRunSidebarTab,
 } = transcriptSlice.actions;
+
+// Memoized selectors to prevent unnecessary rerenders
+export const selectAllCitations = createAppSelector(
+  [(state) => state.transcript.allCitations],
+  (allCitations) => allCitations || []
+);
 
 export default transcriptSlice.reducer;

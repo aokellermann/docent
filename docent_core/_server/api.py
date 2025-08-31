@@ -13,9 +13,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from docent._log_util import get_logger
 from docent_core._env_util import ENV, get_deployment_id
 from docent_core._server._auth.session_middleware import SessionAuthMiddleware
-
-# from docent_core._server._broker.router import broker_router
 from docent_core._server._rest._all_routers import REST_ROUTERS
+from docent_core.docent.services.chat import ChatService
+from docent_core.docent.services.rubric import RubricService
 
 logger = get_logger(__name__)
 
@@ -129,11 +129,19 @@ async def periodic_cleanup_task():
     from docent_core.docent.services.monoservice import MonoService
 
     while True:
-        await anyio.sleep(24 * 3600)  # once a day
+        await anyio.sleep(7 * 24 * 3600)  # once a week
 
         try:
             mono_svc = await MonoService.init()
-            deleted_count = await mono_svc.cleanup_old_chat_sessions()
+            async with mono_svc.db.session() as session:
+                rubric_svc = RubricService(session, mono_svc.db.session, mono_svc)
+                chat_svc = ChatService(
+                    session,
+                    mono_svc.db.session,
+                    mono_svc,
+                    rubric_svc,
+                )
+                deleted_count = await chat_svc.cleanup_old_chat_sessions()
             logger.info(f"Periodic cleanup: deleted {deleted_count} old chat sessions")
 
         except Exception as e:
@@ -156,7 +164,8 @@ async def lifespan(app: FastAPI):
         posthog.flush()
 
 
-asgi_app = FastAPI()  # type: ignore
+# Attach lifespan so background maintenance tasks run
+asgi_app = FastAPI(lifespan=lifespan)
 
 # Add middlewares in order (they are processed in reverse order when handling responses)
 # 1. Request logging middleware first

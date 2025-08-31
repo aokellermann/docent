@@ -4,7 +4,7 @@ import { Plus, Play, FileText, Trash2, Pause, PickaxeIcon } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
 import { type Rubric } from '@/app/store/rubricSlice';
 import { Button } from '@/components/ui/button';
-import { useRouter } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useCreateOrGetRefinementSessionMutation } from '@/app/api/refinementApi';
 import {
   useGetRubricsQuery,
@@ -104,7 +104,7 @@ function RubricCard({
   };
 
   const handleClick = () => {
-    router.push(`/dashboard/${collectionId}?rubricId=${rubric.id}`);
+    router.push(`/dashboard/${collectionId}/rubric/${rubric.id}`);
   };
 
   const [startEvaluation] = useStartEvaluationMutation();
@@ -196,7 +196,10 @@ function RubricCard({
 }
 
 export default function RubricList() {
+  const params = useParams();
   const collectionId = useAppSelector((state) => state.collection.collectionId);
+  const effectiveCollectionId =
+    collectionId || (params?.collection_id as string | undefined);
   const router = useRouter();
 
   // Check write permissions
@@ -204,8 +207,10 @@ export default function RubricList() {
 
   // Fetch rubrics using the new API
   const { data: rubrics, isLoading: isLoadingRubrics } = useGetRubricsQuery(
-    { collectionId: collectionId! },
-    { skip: !collectionId }
+    effectiveCollectionId
+      ? { collectionId: effectiveCollectionId }
+      : (undefined as any),
+    { skip: !effectiveCollectionId }
   );
 
   const [createRubric, { isLoading: isCreatingRubric }] =
@@ -246,23 +251,27 @@ export default function RubricList() {
             Run and modify previously-created rubrics
           </div>
         </div>
-        {hasWritePermission && (
-          <Button
-            onClick={handleAddNew}
-            size="sm"
-            variant="outline"
-            className="h-7 gap-1 text-xs"
-            disabled={isCreatingRubric}
-          >
-            <Plus className="h-3 w-3 -ml-1" />
-            {isCreatingRubric ? 'Creating...' : 'Rubric'}
-          </Button>
-        )}
+        <Button
+          onClick={handleAddNew}
+          size="sm"
+          variant="outline"
+          className="h-7 gap-1 text-xs"
+          disabled={
+            !hasWritePermission || isCreatingRubric || !effectiveCollectionId
+          }
+        >
+          <Plus className="h-3 w-3 -ml-1" />
+          {isCreatingRubric ? 'Creating...' : 'Rubric'}
+        </Button>
       </div>
 
       {/* Rubrics List */}
       <div className="space-y-1.5">
-        {isLoadingRubrics ? (
+        {!effectiveCollectionId ? (
+          <div className="text-xs text-muted-foreground text-center py-4">
+            Loading rubrics...
+          </div>
+        ) : isLoadingRubrics ? (
           <div className="text-xs text-muted-foreground text-center py-4">
             Loading rubrics...
           </div>
@@ -275,7 +284,7 @@ export default function RubricList() {
             <RubricCard
               key={rubric.id}
               rubric={rubric}
-              collectionId={collectionId!}
+              collectionId={effectiveCollectionId!}
               hasWritePermission={hasWritePermission}
             />
           ))

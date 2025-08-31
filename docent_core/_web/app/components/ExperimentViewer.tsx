@@ -40,7 +40,11 @@ import {
 // Constants for magic numbers
 const PAGINATION_LIMIT = 100;
 
-export default function ExperimentViewer() {
+export default function ExperimentViewer({
+  activeRunId,
+}: {
+  activeRunId?: string;
+}) {
   const dispatch = useAppDispatch();
 
   // Get all state at the top level
@@ -239,6 +243,7 @@ export default function ExperimentViewer() {
                 key={agentRunId}
                 agentRunId={agentRunId}
                 metadata={agentRunMetadata?.[agentRunId]}
+                isActive={activeRunId === agentRunId}
               />
             ))
           ) : (

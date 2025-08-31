@@ -1,7 +1,7 @@
 'use client';
 
 import { Card } from '@/components/ui/card';
-import ChatArea from '../../components/chat/ChatArea';
+import { ChatArea } from '../../components/chat/ChatArea';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { skipToken } from '@reduxjs/toolkit/query';
@@ -14,12 +14,12 @@ import {
 } from '@/app/api/refinementApi';
 import { useStartEvaluationMutation } from '@/app/api/rubricApi';
 import RubricEditor from '../../components/RubricEditor';
+import { useRouter } from 'next/navigation';
 import { JudgeResultWithCitations, Rubric } from '@/app/store/rubricSlice';
 import { RefinementAgentSession } from '@/app/store/refinementSlice';
 import RefinementTimeline from '../../components/RefinementTimeline';
 import { JudgeResultsList } from '../../components/JudgeResultsSection';
 import { Button } from '@/components/ui/button';
-import { useRouter } from 'next/navigation';
 import { ProgressBar } from '@/app/components/ProgressBar';
 import posthog from 'posthog-js';
 import { useHasCollectionWritePermission } from '@/lib/permissions/hooks';
