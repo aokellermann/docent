@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import time
+import zipfile
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -398,30 +399,33 @@ async def preview_import_runs_from_file(
     models: set[str] = set()
     task_ids: set[str] = set()
 
-    file_info, runs = load_inspect.runs_from_file(file.file, format)
-    for run in runs:
-        model = getattr(run.metadata, "model", None)
-        if model is not None:
-            models.add(str(model))
+    try:
+        file_info, runs = load_inspect.runs_from_file(file.file, format)
+        for run in runs:
+            model = getattr(run.metadata, "model", None)
+            if model is not None:
+                models.add(str(model))
 
-        task_id = getattr(run.metadata, "task_id", None)
-        if task_id is not None:
-            task_ids.add(str(task_id))
+            task_id = getattr(run.metadata, "task_id", None)
+            if task_id is not None:
+                task_ids.add(str(task_id))
 
-        if "scores" in run.metadata:
-            scores_keys.update(run.metadata["scores"].keys())
+            if "scores" in run.metadata:
+                scores_keys.update(run.metadata["scores"].keys())
 
-        count_runs += 1
+            count_runs += 1
 
-        if len(previews) < 10:
-            previews.append(run)
+            if len(previews) < 10:
+                previews.append(run)
 
-    file_info = {
-        "filename": file.filename,
-        "task": file_info.get("task"),
-        "model": file_info.get("model"),
-        "total_samples": count_runs,
-    }
+        file_info = {
+            "filename": file.filename,
+            "task": file_info.get("task"),
+            "model": file_info.get("model"),
+            "total_samples": count_runs,
+        }
+    except zipfile.BadZipfile:
+        raise HTTPException(status_code=400, detail=f"Unable to read {file.filename} as a zip file")
 
     return {
         "status": "preview",
