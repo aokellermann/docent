@@ -31,7 +31,12 @@ import {
 import { cn } from '@/lib/utils';
 
 interface AgentSummaryProps {
-  onCitationClick?: (agentRunId: string, blockId?: number) => void;
+  onCitationClick?: (
+    agentRunId: string,
+    blockId?: number,
+    transcriptIdx?: number,
+    highlightDuration?: number
+  ) => void;
   initialActionIndex?: number;
 }
 
@@ -174,7 +179,12 @@ const ActionItem = ({
   isHighLevel?: boolean;
   lowLevelActions?: LowLevelAction[];
   observations?: ObservationType[];
-  onCitationClick?: (agentRunId: string, blockId?: number) => void;
+  onCitationClick?: (
+    agentRunId: string,
+    blockId?: number,
+    transcriptIdx?: number,
+    highlightDuration?: number
+  ) => void;
   agentRun?: AgentRun | null;
   expandedActions?: Set<number>;
   setExpandedActions?: (callback: (prev: Set<number>) => Set<number>) => void;
@@ -216,7 +226,12 @@ const ActionItem = ({
         onCitationClick &&
         agentRun?.id
       ) {
-        onCitationClick(agentRun.id, highLevelAction.first_block_idx);
+        onCitationClick(
+          agentRun.id,
+          highLevelAction.first_block_idx,
+          undefined,
+          500
+        );
       }
     } else if (
       citations &&
@@ -225,7 +240,12 @@ const ActionItem = ({
       agentRun?.id &&
       citations[0].block_idx !== undefined
     ) {
-      onCitationClick(agentRun.id, citations[0].block_idx);
+      onCitationClick(
+        agentRun.id,
+        citations[0].block_idx,
+        citations[0].transcript_idx ?? undefined,
+        500
+      );
     }
   };
 
@@ -269,7 +289,12 @@ const ActionItem = ({
               agentRun?.id &&
               citation.block_idx !== undefined
             ) {
-              onCitationClick(agentRun.id, citation.block_idx);
+              onCitationClick(
+                agentRun.id,
+                citation.block_idx,
+                citation.transcript_idx ?? undefined,
+                500
+              );
             }
           }}
         >

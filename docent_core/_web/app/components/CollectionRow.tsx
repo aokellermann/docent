@@ -20,7 +20,6 @@ import { TableCell, TableRow } from '@/components/ui/table';
 import { toast } from '@/hooks/use-toast';
 import { cn, copyToClipboard } from '@/lib/utils';
 
-import { useAppDispatch } from '../store/hooks';
 import { useHasCollectionPermission } from '@/lib/permissions/hooks';
 import { useUpdateCollectionMutation } from '../api/collectionApi';
 
@@ -39,7 +38,6 @@ export default function CollectionRow({
   onDelete,
 }: CollectionRowProps) {
   const router = useRouter();
-  const dispatch = useAppDispatch();
   const hasAdminPermission = useHasCollectionPermission('admin', collection.id);
   const hasWritePermission = useHasCollectionPermission('write', collection.id);
 

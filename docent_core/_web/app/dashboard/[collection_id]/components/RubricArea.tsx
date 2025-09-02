@@ -1,6 +1,6 @@
 'use client';
 
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { v4 as uuidv4 } from 'uuid';
 
 import { Card } from '@/components/ui/card';
@@ -13,17 +13,11 @@ import {
 import { useCreateOrGetRefinementSessionMutation } from '../../../api/refinementApi';
 import { toast } from '@/hooks/use-toast';
 import QuickSearchBox from './QuickSearchBox';
-import SingleRubricArea from './SingleRubricArea';
 
 const RubricArea = () => {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const params = useParams();
   const collectionId = params.collection_id as string;
-
-  // Keep activeRubricId for backwards compatibility
-  const rubricId =
-    searchParams.get('rubricId') || searchParams.get('activeRubricId') || null;
 
   // Handle starting evaluations
   const [startEvaluation] = useStartEvaluationMutation();
@@ -33,8 +27,6 @@ const RubricArea = () => {
       collectionId,
       rubricId,
     });
-    // Then redirect to the rubric page
-    router.push(`/dashboard/${collectionId}?rubricId=${rubricId}`);
   };
 
   /**
@@ -97,6 +89,8 @@ const RubricArea = () => {
       const rubricId = await handleAddNewRubric(highLevelDescription);
       if (rubricId) {
         handleEvaluate(rubricId);
+        // Then redirect to the rubric page
+        router.push(`/dashboard/${collectionId}/rubric/${rubricId}`);
       }
     }
   };
@@ -105,17 +99,11 @@ const RubricArea = () => {
     <Card className="h-full flex overflow-y-auto flex-col flex-1 p-3 custom-scrollbar space-y-3">
       {/* Rubric Display */}
       <div className="space-y-2">
-        {!rubricId && (
-          <>
-            <QuickSearchBox
-              onSubmit={handleQuickSearchSubmit}
-              isLoading={isCreatingRubric || isCreatingOrGettingSession}
-            />
-            <RubricList />
-          </>
-        )}
-
-        {rubricId && <SingleRubricArea rubricId={rubricId} />}
+        <QuickSearchBox
+          onSubmit={handleQuickSearchSubmit}
+          isLoading={isCreatingRubric || isCreatingOrGettingSession}
+        />
+        <RubricList />
       </div>
     </Card>
   );

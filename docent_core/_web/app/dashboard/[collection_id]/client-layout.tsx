@@ -1,6 +1,11 @@
 'use client';
 
-import { useParams, useRouter } from 'next/navigation';
+import {
+  redirect,
+  useParams,
+  useRouter,
+  useSearchParams,
+} from 'next/navigation';
 import React, { useEffect, Suspense } from 'react';
 
 import Breadcrumbs from '../../components/Breadcrumbs';
@@ -17,6 +22,13 @@ export default function DocentDashboardClientLayout({
   const dispatch = useAppDispatch();
   const params = useParams();
   const collectionId = params.collection_id as string;
+
+  const searchParams = useSearchParams();
+  const rubricId =
+    searchParams.get('rubricId') || searchParams.get('activeRubricId');
+  if (rubricId) {
+    redirect(`/dashboard/${collectionId}/rubric/${rubricId}`);
+  }
 
   // Set the collection ID in the store
   useEffect(() => {

@@ -40,12 +40,13 @@ class ProviderPreferences(BaseModel):
                 model_name="claude-sonnet-4-20250514",
             ),
             ModelOption(
-                provider="google",
-                model_name="gemini-2.5-flash-preview-05-20",
+                provider="openai",
+                model_name="gpt-5",
+                reasoning_effort="low",
             ),
             ModelOption(
-                provider="openai",
-                model_name="o1",
+                provider="google",
+                model_name="gemini-2.5-flash-preview-05-20",
             ),
         ]
 

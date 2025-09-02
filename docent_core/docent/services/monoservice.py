@@ -50,7 +50,6 @@ from docent_core.docent.db.schemas.tables import (
     SQLAAgentRun,
     SQLAAnalyticsEvent,
     SQLAApiKey,
-    SQLAChatSession,
     SQLACollection,
     SQLAJob,
     SQLAModelApiKey,
@@ -423,6 +422,7 @@ class MonoService:
 
     async def get_agent_runs(
         self,
+        # ctx: ViewContext | None = None,
         ctx: ViewContext,
         agent_run_ids: list[str] | None = None,
         _where_clause: ColumnElement[bool] | None = None,
@@ -1085,11 +1085,13 @@ class MonoService:
             )
 
             existing_job_result = await session.execute(existing_job_query)
-            existing_job = existing_job_result.scalar_one_or_none()
+            existing_jobs = existing_job_result.scalars().all()
 
-            if existing_job:
+            if existing_jobs:
+                # Log all existing jobs for debugging
+                job_ids = [job.id for job in existing_jobs]
                 logger.debug(
-                    f"Telemetry processing job already exists for collection {collection_id}: {existing_job.id} (status: {existing_job.status})"
+                    f"Telemetry processing job(s) already exist for collection {collection_id}: {job_ids} (statuses: {[job.status for job in existing_jobs]})"
                 )
                 return None
 
@@ -1166,25 +1168,6 @@ class MonoService:
             await session.execute(
                 update(SQLAJob).filter(SQLAJob.id == job_id).values(job_json=job_json)
             )
-
-    async def cleanup_old_chat_sessions(self, days_old: int = 7) -> int:
-        """
-        Delete chat sessions that haven't been updated in the specified number of days.
-
-        Args:
-            days_old: Number of days after which sessions are considered old (default: 7)
-
-        Returns:
-            Number of sessions deleted
-        """
-        cutoff_date = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days_old)
-
-        async with self.db.session() as session:
-            result = await session.execute(
-                delete(SQLAChatSession).where(SQLAChatSession.updated_at < cutoff_date)
-            )
-            deleted_count = result.rowcount or 0
-            return deleted_count
 
     #########
     # Users #

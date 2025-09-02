@@ -1,8 +1,11 @@
 import re
 from typing import Literal, Protocol, TypedDict
 
-from docent.data_models.citation import Citation, parse_citations_single_run
-from docent.data_models.transcript import SINGLE_RUN_CITE_INSTRUCTION, Transcript
+from docent.data_models.citation import Citation, parse_citations
+from docent.data_models.transcript import (
+    BLOCK_CITE_INSTRUCTION,
+    Transcript,
+)
 from docent_core._llm_util.data_models.llm_output import LLMOutput
 from docent_core._llm_util.prod_llms import get_llm_completions_async
 from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES
@@ -57,7 +60,7 @@ The format should be:
 </summary>
 
 Any references to the transcript must be accompanied by a citation to the relevant transcript blocks.
-Follow these guidelines: {SINGLE_RUN_CITE_INSTRUCTION}. The citation should be as close to the specific reference as possible (e.g., not at the very end).
+Follow these guidelines: {BLOCK_CITE_INSTRUCTION}. The citation should be as close to the specific reference as possible (e.g., not at the very end).
         """.strip()
 
     llm_streaming_callback = _get_llm_callback(streaming_callback)
@@ -92,15 +95,19 @@ def _parse_title_summary_pairs(text: str) -> list[LowLevelAction]:
         (int(match.group(1)), match.group(2).strip(), match.group(3).strip()) for match in matches
     ]
 
-    return [
-        LowLevelAction(
-            action_unit_idx=idx,
-            title=title,
-            summary=summary,
-            citations=parse_citations_single_run(summary),
+    actions: list[LowLevelAction] = []
+    for idx, title, summary in triples:
+        cleaned_summary, citations = parse_citations(summary)
+        actions.append(
+            LowLevelAction(
+                action_unit_idx=idx,
+                title=title,
+                summary=cleaned_summary,
+                citations=citations,
+            )
         )
-        for idx, title, summary in triples
-    ]
+
+    return actions
 
 
 class HighLevelAction(TypedDict):
@@ -252,7 +259,7 @@ def _parse_high_level_steps(text: str, transcript: Transcript) -> list[HighLevel
                     if action_unit_indices
                     else None
                 ),
-                citations=parse_citations_single_run(summary),
+                citations=parse_citations(summary)[1],
             )
         )
 

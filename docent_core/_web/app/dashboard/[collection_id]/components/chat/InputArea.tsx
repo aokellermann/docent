@@ -152,31 +152,6 @@ export default function InputArea({
             <ArrowUpIcon size={14} />
           )}
         </Button>
-        {/* {status === 'submitted' ? (
-          <Button
-            data-testid="stop-button"
-            className="rounded-full p-1.5 h-fit border dark:border-zinc-600"
-            onClick={(event) => {
-              event.preventDefault();
-              stop();
-              //   setMessages((messages) => messages);
-            }}
-          >
-            <StopCircleIcon size={14} />
-          </Button>
-        ) : (
-          <Button
-            data-testid="send-button"
-            className="rounded-full p-1.5 h-fit border dark:border-zinc-600"
-            onClick={(event) => {
-              event.preventDefault();
-              submitForm();
-            }}
-            disabled={input.length === 0}
-          >
-            <ArrowUpIcon size={14} />
-          </Button>
-        )} */}
       </div>
     </div>
   );

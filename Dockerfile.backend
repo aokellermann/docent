@@ -34,11 +34,10 @@ RUN uv pip install --system -e .
 COPY alembic alembic
 COPY alembic.ini alembic.ini
 COPY .env .env
-COPY scripts scripts
 
 # Create and set the docent user; avoid running container as root
 RUN groupadd -r docent && useradd -r -g docent docent
 USER docent
 
-# By default, run the ECR entrypoint script that modulates between server and worker via $SERVICE
-CMD ["/app/scripts/ecr_entrypoint.sh"]
+# Default command (overridden by docker-compose services or Terraform config)
+CMD ["docent_core", "--help"]

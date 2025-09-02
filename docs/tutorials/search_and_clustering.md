@@ -46,17 +46,16 @@ You can also link to specific parts of the agent run:
 
 ### Retrieving results from the SDK
 
-The Python SDK exposes rubric results via `get_search_results`, given a Collection ID (`collection_id`), `rubric_id`, and `rubric_version`.
+The Python SDK exposes rubric results via `get_rubric_run_state`, given a Collection ID (`collection_id`) and `rubric_id`.
 
 ```python
-# Get rubric results for a specific rubric and version
+# Get rubric run state for a specific rubric
 rubric_id = "your-rubric-id"
-rubric_version = 1
-search_results = client.get_search_results(collection_id, rubric_id, rubric_version)
-print(search_results)
+run_state = client.get_rubric_run_state(collection_id, rubric_id)
+print(run_state)
 ```
 
-Note that `get_search_results` doesn't run a search, it just retrieves the results from a completed rubric evaluation.
+Note that `get_rubric_run_state` doesn't run a search, it just retrieves the results from a completed rubric evaluation along with job status and total agent runs.
 
 ```
 {
@@ -91,68 +90,34 @@ collection_id = collections[0]["id"]  # An arbitrary Collection
 
 ??? note "How to get rubrics for the current Collection"
 
-    For programmatic access to rubrics, you can use `list_searches` to get a list of rubric objects given a `collection_id`
+    For programmatic access to rubrics, you can use `list_rubrics` to get a list of rubric objects given a `collection_id`
 
     ```python
-    rubrics = client.list_searches(collection_id)
+    rubrics = client.list_rubrics(collection_id)
     print(rubrics)
     rubric_id = rubrics[0]["id"] # An arbitrary rubric
     ```
 
-    You'll get back a list of rubric objects from `list_searches`, which might look like:
-
-    ```
-    [
-        {
-            "id": "590f5bab-5a9c-49ce-bd1b-a7f79b324ae8",
-            "collection_id": "e95ad408-9992-43e9-94aa-b0c81536711d",
-            "high_level_description": "The user asks a question.",
-            "created_at": "2025-06-30T01:46:12.483370",
-            "version": 1
-        },
-        {
-            "id": "4a7b48de-29a1-44fa-b245-e2313451e5f9",
-            "collection_id": "e95ad408-9992-43e9-94aa-b0c81536711d",
-            "high_level_description": "The model runs a python function to decode the contents of a file.",
-            "created_at": "2025-06-30T02:04:11.141527",
-            "version": 1
-        },
-        ...
-    ]
-    ```
-
-To view centroids and corresponding rubric results, call `list_search_clusters` with the `rubric_id` and optional `rubric_version`.
+To view centroids and corresponding rubric results, call `get_clustering_state` with the `rubric_id`.
 
 ```python
-# Get the list of centroids for a given rubric
-clusters = client.list_search_clusters(collection_id, rubric_id, rubric_version)
-print(clusters)
-centroid_id = clusters["centroids"][0]["id"] # A centroid ID
+# Get the clustering state for a given rubric
+clustering_state = client.get_clustering_state(collection_id, rubric_id)
+print(clustering_state)
+centroid_id = clustering_state["centroids"][0]["id"] # A centroid ID
 ```
 
-You'll get back a list of centroid objects from `list_search_clusters`, which might look like:
+You can also get just the centroids using the convenience method:
 
-```
-{
-    "centroids": [
-        {
-            "centroid": "ROT/Caesar Cipher Decryption: Items where the model uses character rotation-based ciphers (like ROT47 or Caesar cipher), which work by shifting each character by a fixed number of positions in the alphabet or ASCII table.",
-            "id": "9c03ddb6-9dfa-4dfa-8303-9c3916367616",
-            ...
-        },
-        {
-            "centroid": "XOR-based Decryption: Items where the model performs exclusive OR (XOR) operations between the encrypted data and a key/password to reveal the original content.",
-            "id": "27edec9b-3309-4c54-b4ee-a759b103129e",
-            ...
-        },
-        ...
-    ]
-}
+```python
+# Get just the centroids for a given rubric
+centroids = client.get_cluster_centroids(collection_id, rubric_id)
+print(centroids)
 ```
 
-Finally, use `get_cluster_matches` to see which rubric results match which clusters.
+Finally, use `get_cluster_assignments` to see which rubric results match which clusters.
 
 ```python
 # Get centroid assignments for the rubric
-cluster_assignments = client.get_cluster_matches(collection_id, rubric_id, rubric_version)
+cluster_assignments = client.get_cluster_assignments(collection_id, rubric_id)
 ```

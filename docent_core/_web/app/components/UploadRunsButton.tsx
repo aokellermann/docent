@@ -7,7 +7,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { PlusIcon, Upload, BookOpen, Code } from 'lucide-react';
 import { useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import UploadRunsDialog from './UploadRunsDialog';
 
 interface UploadRunsButtonProps {
@@ -20,7 +19,6 @@ export default function UploadRunsButton({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const router = useRouter();
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;

@@ -14,10 +14,7 @@ import {
 } from './collabSlice';
 import { Button } from '@/components/ui/button';
 import { useRequireUserContext } from '@/app/contexts/UserContext';
-import {
-  useHasCollectionAdminPermission,
-  useHasCollectionWritePermission,
-} from './hooks';
+import { useHasCollectionAdminPermission } from './hooks';
 
 // Types matching ShareViewPopover
 
@@ -53,7 +50,6 @@ interface CollaboratorRowProps {
 const CollaboratorRow = ({ collaborator }: CollaboratorRowProps) => {
   const [upsertCollaborator] = useUpsertCollaboratorMutation();
   const [removeCollaborator] = useRemoveCollaboratorMutation();
-  const hasWritePermission = useHasCollectionWritePermission();
   const hasAdminPermission = useHasCollectionAdminPermission();
   const onPermissionChange = (newPermission: PermissionLevel) => {
     upsertCollaborator({

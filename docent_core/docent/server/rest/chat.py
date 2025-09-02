@@ -1,0 +1,121 @@
+from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi.responses import StreamingResponse
+
+from docent._log_util import get_logger
+from docent_core._server._analytics.posthog import AnalyticsClient
+from docent_core._server.util import generator_to_sse_stream
+from docent_core.docent.db.contexts import ViewContext
+from docent_core.docent.db.schemas.auth_models import User
+from docent_core.docent.db.schemas.chat import ChatSession, SQLAChatSession
+from docent_core.docent.server.dependencies.analytics import use_posthog_user_context
+from docent_core.docent.server.dependencies.database import AsyncSession, get_session
+from docent_core.docent.server.dependencies.services import (
+    get_chat_service,
+)
+from docent_core.docent.server.dependencies.user import (
+    get_authenticated_user,
+    get_default_view_ctx,
+    get_user_anonymous_ok,
+)
+from docent_core.docent.services.chat import ChatService
+
+logger = get_logger(__name__)
+
+chat_router = APIRouter(dependencies=[Depends(get_user_anonymous_ok)])
+
+
+################
+# Dependencies #
+################
+
+
+async def get_chat_session(
+    session_id: str,
+    chat_svc: ChatService = Depends(get_chat_service),
+):
+    sqla_session = await chat_svc.get_session_by_id(session_id)
+    if sqla_session is None:
+        raise HTTPException(status_code=404, detail=f"Chat session {session_id} not found")
+    return sqla_session
+
+
+#############
+# Endpoints #
+#############
+
+
+@chat_router.post("/{collection_id}/{run_id}/session/get")
+async def create_session(
+    run_id: str,
+    result_id: str | None = None,
+    user: User = Depends(get_authenticated_user),
+    chat_svc: ChatService = Depends(get_chat_service),
+    force_create: bool = False,
+) -> dict[str, str]:
+    """Create a new chat session."""
+
+    # Create session without rubric or judge result context
+    sqla_session = await chat_svc.get_or_create_session(
+        user.id, agent_run_id=run_id, judge_result_id=result_id, force_create=force_create
+    )
+    return {"session_id": sqla_session.id}
+
+
+@chat_router.get("/{collection_id}/{run_id}/job/{job_id}/listen")
+async def listen_to_chat_job(
+    job_id: str,
+    chat_svc: ChatService = Depends(get_chat_service),
+) -> StreamingResponse:
+    """Listen to SSE updates for a chat job."""
+    return StreamingResponse(
+        generator_to_sse_stream(chat_svc.listen_for_job_state(job_id)),
+        media_type="text/event-stream",
+    )
+
+
+@chat_router.post("/{collection_id}/{run_id}/session/{session_id}/message")
+async def post_message_to_chat_session(
+    run_id: str,
+    session_id: str,
+    message: str = Body(..., embed=True),
+    chat_svc: ChatService = Depends(get_chat_service),
+    ctx: ViewContext = Depends(get_default_view_ctx),
+    session: AsyncSession = Depends(get_session),
+    sq_rsession: SQLAChatSession = Depends(get_chat_session),
+    analytics: AnalyticsClient = Depends(use_posthog_user_context),
+) -> dict[str, str | ChatSession]:
+    # Check whether there's an active job for this session
+    active_job = await chat_svc.get_active_job_for_session(session_id)
+    if active_job is not None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot post message to session {session_id} because there's a job already running",
+        )
+
+    # Add the message to the session
+    await chat_svc.add_user_message(sq_rsession, message)
+    await session.commit()
+
+    # Track analytics for message post
+    analytics.track_event(
+        "chat_post_message",
+        properties={
+            "run_id": run_id,
+            "session_id": session_id,
+            "judge_result_id": sq_rsession.judge_result_id,
+            "message": message,
+        },
+    )
+
+    # Trigger a new turn of the agent
+    job_id = await chat_svc.start_or_get_chat_job(ctx, sq_rsession)
+    return {"job_id": job_id, "session": sq_rsession.to_pydantic()}
+
+
+@chat_router.get("/{collection_id}/{run_id}/session/{session_id}/state")
+async def get_current_state_endpoint(
+    sq_rsession: SQLAChatSession = Depends(get_chat_session),
+    chat_svc: ChatService = Depends(get_chat_service),
+    view_ctx: ViewContext = Depends(get_default_view_ctx),
+) -> ChatSession:
+    return await chat_svc.get_current_state(view_ctx, sq_rsession)

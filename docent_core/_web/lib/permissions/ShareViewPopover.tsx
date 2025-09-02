@@ -19,7 +19,6 @@ import CollaboratorsList from './CollaboratorsList';
 import { useState, useCallback } from 'react';
 import {
   useGetCollaboratorsQuery,
-  useGetOrgUsersQuery,
   useLazyGetUserByEmailQuery,
   useUpsertCollaboratorMutation,
   useRemoveCollaboratorMutation,
@@ -34,9 +33,6 @@ import {
 } from './hooks';
 
 const AddCollaborator = ({ collectionId }: { collectionId: string }) => {
-  const { data: orgUsers, isLoading: isLoadingOrgUsers } =
-    useGetOrgUsersQuery(collectionId);
-  const { data: collaborators } = useGetCollaboratorsQuery(collectionId);
   const { user } = useRequireUserContext();
 
   // Local state for input

@@ -2,7 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import { useAppSelector, useAppDispatch } from '../store/hooks';
-import Chart from './Chart';
+import dynamic from 'next/dynamic';
+
+const Chart = dynamic(() => import('./Chart'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center p-4">Loading chart...</div>
+  ),
+});
 import {
   ChartColumn,
   ChartLine,
@@ -160,6 +167,17 @@ export function ChartsArea() {
   };
 
   const activeChart = charts.find((chart) => chart.id === activeTabId);
+
+  // Ensure consistent SSR/CSR output before collectionId is known
+  if (!collectionId) {
+    return (
+      <div className="flex flex-col resize-y overflow-y-auto min-h-[200px] h-[35%]">
+        <div className="flex items-center justify-center p-4 text-sm">
+          Loading charts...
+        </div>
+      </div>
+    );
+  }
 
   // Handle loading and error states
   if (isLoading) {

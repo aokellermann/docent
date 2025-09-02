@@ -9,8 +9,8 @@ from pydantic import BaseModel, Field
 from docent._log_util import get_logger
 from docent.data_models._tiktoken_util import MAX_TOKENS
 from docent.data_models.agent_run import AgentRun
-from docent.data_models.citation import Citation, parse_citations_single_run
-from docent.data_models.transcript import SINGLE_RUN_CITE_INSTRUCTION
+from docent.data_models.citation import Citation, parse_citations
+from docent.data_models.transcript import TEXT_RANGE_CITE_INSTRUCTION
 from docent_core._llm_util.data_models.llm_output import LLMOutput
 from docent_core._llm_util.prod_llms import get_llm_completions_async
 from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES
@@ -39,7 +39,7 @@ description
 
 This list should be exhaustive.
 
-{SINGLE_RUN_CITE_INSTRUCTION}
+{TEXT_RANGE_CITE_INSTRUCTION}
 """.strip()
 
 
@@ -56,11 +56,14 @@ class SearchResultWithCitations(SearchResult):
 
     @classmethod
     def from_search_result(cls, result: SearchResult) -> "SearchResultWithCitations":
+        # Parse citations and get cleaned text
+        citations = None
+        if result.value is not None:
+            _, citations = parse_citations(result.value)
+
         return cls(
             **result.model_dump(),
-            citations=(
-                parse_citations_single_run(result.value) if result.value is not None else None
-            ),
+            citations=citations,
         )
 
 

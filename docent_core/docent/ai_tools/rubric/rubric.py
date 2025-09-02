@@ -8,8 +8,8 @@ from pydantic import BaseModel, Field, field_serializer
 from docent._log_util import get_logger
 from docent.data_models.agent_run import AgentRun
 from docent.data_models.chat import ChatMessage
-from docent.data_models.citation import Citation, parse_citations_single_run
-from docent.data_models.transcript import SINGLE_RUN_CITE_INSTRUCTION
+from docent.data_models.citation import Citation, parse_citations
+from docent.data_models.transcript import TEXT_RANGE_CITE_INSTRUCTION
 from docent_core._llm_util.data_models.llm_output import LLMOutput
 from docent_core._llm_util.prod_llms import MessagesInput, get_llm_completions_async
 from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES, ModelOption
@@ -34,7 +34,10 @@ Return all justifications for each rubric match instance in the following exact 
 ...
 </instance>
 
-{SINGLE_RUN_CITE_INSTRUCTION}
+{TEXT_RANGE_CITE_INSTRUCTION}
+- Outside of citations, do not refer to transcript numbers or block numbers.
+- Outside of citations, avoid quoting or paraphrasing the transcript. Focus on describing high-level patterns.
+- Be concise. Focus on the most important aspects of the agent's behavior. In most cases, 1 paragraph per match instance is enough.
 """
 
 
@@ -82,12 +85,12 @@ class JudgeResultWithCitations(JudgeResult):
 
     @classmethod
     def from_judge_result(cls, result: JudgeResult) -> "JudgeResultWithCitations":
-        return cls(
-            **result.model_dump(),
-            citations=(
-                parse_citations_single_run(result.value) if result.value is not None else None
-            ),
-        )
+        jrwc = cls(**result.model_dump(), citations=[])
+        if result.value is not None:
+            cleaned_text, citations = parse_citations(result.value)
+            jrwc.value = cleaned_text
+            jrwc.citations = citations
+        return jrwc
 
 
 class JudgeResultStreamingCallback(Protocol):
@@ -141,7 +144,9 @@ def _get_prompt_resolver(rubric: Rubric, ar: AgentRun, prompt_template: str):
         return [
             {
                 "role": "user",
-                "content": prompt_template.format(rubric=rubric.rubric_text, agent_run=ar.text),
+                "content": prompt_template.format(
+                    rubric=rubric.rubric_text, agent_run=ar.text_blocks
+                ),
             }
         ]
 
@@ -207,7 +212,7 @@ Return all relevant instances of the rubric in the following exact format:
 ...
 </instance>
 
-{SINGLE_RUN_CITE_INSTRUCTION}
+{TEXT_RANGE_CITE_INSTRUCTION}
 """
 
 

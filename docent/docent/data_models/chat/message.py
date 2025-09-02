@@ -5,6 +5,7 @@ from pydantic import BaseModel, Discriminator
 
 from docent.data_models.chat.content import Content
 from docent.data_models.chat.tool import ToolCall
+from docent.data_models.citation import Citation
 
 logger = getLogger(__name__)
 
@@ -66,11 +67,15 @@ class AssistantMessage(BaseChatMessage):
         role: Always set to "assistant".
         model: Optional identifier for the model that generated this message.
         tool_calls: Optional list of tool calls made by the assistant.
+        citations: Optional list of citations referenced in the message content.
+        suggested_messages: Optional list of suggested followup messages.
     """
 
     role: Literal["assistant"] = "assistant"  # type: ignore
     model: str | None = None
     tool_calls: list[ToolCall] | None = None
+    citations: list[Citation] | None = None
+    suggested_messages: list[str] | None = None
 
 
 class ToolMessage(BaseChatMessage):

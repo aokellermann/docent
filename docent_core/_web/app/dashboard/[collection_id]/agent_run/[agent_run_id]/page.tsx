@@ -4,16 +4,23 @@ import { useParams, useSearchParams } from 'next/navigation';
 import React, { Suspense, useEffect, useRef } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
-import { getCurAgentRun } from '@/app/store/transcriptSlice';
+import {
+  getCurAgentRun,
+  toggleAgentRunSidebar,
+  setAgentRunSidebarTab,
+} from '@/app/store/transcriptSlice';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 import AgentSummary from '../components/AgentSummary';
-import TaPanel from '../components/TaPanel';
 import AgentRunViewer, {
   AgentRunViewerHandle,
 } from '../components/AgentRunViewer';
+import { Button } from '@/components/ui/button';
+import { PanelRight } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import TranscriptChat from '@/components/TranscriptChat';
 
 export default function AgentRunPage() {
   const dispatch = useAppDispatch();
@@ -24,6 +31,12 @@ export default function AgentRunPage() {
   const curAgentRun = useAppSelector((state) => state.transcript?.curAgentRun);
   const hasInitSearchQuery = useAppSelector(
     (state) => state.collection?.hasInitSearchQuery
+  );
+  const showSidebar = useAppSelector(
+    (state) => state.transcript?.agentRunSidebarOpen ?? false
+  );
+  const selectedTab = useAppSelector(
+    (state) => state.transcript?.agentRunSidebarTab ?? 'chat'
   );
 
   const params = useParams();
@@ -73,56 +86,109 @@ export default function AgentRunPage() {
     if (blockIdx !== undefined && agentRunViewerRef.current) {
       alreadyScrolledRef.current = true;
       setTimeout(() => {
-        console.log('Scrolling to block', blockIdx, transcriptIdx);
         agentRunViewerRef.current?.scrollToBlock(
           blockIdx,
           transcriptIdx || 0,
-          0
+          0,
+          undefined
         );
       }, 100);
     }
   }, [curAgentRun, agentRunId, blockIdx, transcriptIdx, hasInitSearchQuery]);
 
-  const onShowAgentRun = (agentRunId: string, blockIdx?: number) => {
+  const onShowAgentRun = (
+    agentRunId: string,
+    blockIdx?: number,
+    transcriptIdx?: number,
+    highlightDuration?: number
+  ) => {
     if (agentRunId !== curAgentRun?.id) {
       dispatch(getCurAgentRun(agentRunId));
     }
 
     if (blockIdx !== undefined) {
-      agentRunViewerRef.current?.scrollToBlock(blockIdx, transcriptIdx || 0, 0);
+      agentRunViewerRef.current?.scrollToBlock(
+        blockIdx,
+        transcriptIdx || 0,
+        0,
+        highlightDuration
+      );
     }
   };
 
   return (
     <Suspense>
-      <div className="flex-1 flex space-x-3 min-h-0">
-        <AgentRunViewer ref={agentRunViewerRef} secondary={false} />
+      {/* Transcript */}
+      <AgentRunViewer ref={agentRunViewerRef} secondary={false} />
 
-        <Card className="h-full overflow-y-auto w-2/5 p-3">
-          <Tabs defaultValue="chat" className="h-full flex flex-col">
-            <TabsList className="grid w-full grid-cols-2 h-8">
-              <TabsTrigger value="agent" className="text-xs">
-                Agent Summary
-              </TabsTrigger>
-              <TabsTrigger value="chat" className="text-xs">
-                Transcript Chat
-              </TabsTrigger>
-            </TabsList>
+      {/* Assistant summary / transcript chat */}
+      <Card
+        className={cn(
+          'shrink-0 grow-1 h-full p-3 flex flex-col min-w-0 min-h-0 bg-background',
+          showSidebar && 'basis-1/4'
+        )}
+      >
+        {showSidebar ? (
+          <Tabs
+            value={selectedTab}
+            onValueChange={(value) => dispatch(setAgentRunSidebarTab(value))}
+            className="h-full flex flex-col"
+          >
+            <div className="flex items-center justify-between">
+              <TabsList className="grid w-full grid-cols-2 h-8">
+                <TabsTrigger value="agent" className="text-xs">
+                  Summary
+                </TabsTrigger>
+                <TabsTrigger value="chat" className="text-xs">
+                  Chat
+                </TabsTrigger>
+              </TabsList>
+              <Button
+                variant="ghost"
+                className="px-1 ml-2"
+                onClick={() => dispatch(toggleAgentRunSidebar())}
+              >
+                <PanelRight />
+              </Button>
+            </div>
 
-            <TabsContent value="agent" className="flex-1 mt-0">
-              <ScrollArea className="h-full px-1 py-2">
+            <TabsContent value="agent" className="flex-1 mt-0 min-h-0">
+              <ScrollArea className="h-full pt-2">
                 <AgentSummary onCitationClick={onShowAgentRun} />
               </ScrollArea>
             </TabsContent>
 
-            <TabsContent value="chat" className="flex-1 mt-0 overflow-hidden">
-              <div className="h-full px-1 py-2">
-                <TaPanel onShowAgentRun={onShowAgentRun} />
+            <TabsContent value="chat" className="flex-1 mt-0 min-h-0">
+              <div className="h-full pt-2 flex flex-col min-h-0">
+                <TranscriptChat
+                  runId={agentRunId}
+                  collectionId={collectionId}
+                  title="Transcript Chat"
+                  className="flex-1 flex flex-col min-w-0 min-h-0"
+                  onNavigateToCitation={({ citation }) => {
+                    if (onShowAgentRun && citation.block_idx !== undefined) {
+                      onShowAgentRun(
+                        agentRunId,
+                        citation.block_idx,
+                        citation.transcript_idx || 0,
+                        500
+                      );
+                    }
+                  }}
+                />
               </div>
             </TabsContent>
           </Tabs>
-        </Card>
-      </div>
+        ) : (
+          <Button
+            variant="ghost"
+            className="px-1"
+            onClick={() => dispatch(toggleAgentRunSidebar())}
+          >
+            <PanelRight />
+          </Button>
+        )}
+      </Card>
     </Suspense>
   );
 }

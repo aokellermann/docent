@@ -90,19 +90,36 @@ class AgentRun(BaseModel):
             raise ValueError("AgentRun must have at least one transcript")
         return self
 
-    def to_text(self, token_limit: int = sys.maxsize) -> list[str]:
+    def _to_text_impl(self, token_limit: int = sys.maxsize, use_blocks: bool = False) -> list[str]:
         """
-        Represents an agent run as a list of strings, each of which is at most token_limit tokens
-        under the GPT-4 tokenization scheme.
+        Core implementation for converting agent run to text representation.
 
-        We'll try to split up long AgentRuns along transcript boundaries and include metadata.
-        For very long transcripts, we'll have to split them up further and remove metadata.
+        Args:
+            token_limit: Maximum tokens per returned string under the GPT-4 tokenization scheme
+            use_blocks: If True, use individual message blocks. If False, use action units.
+
+        Returns:
+            List of strings, each at most token_limit tokens
         """
+        # Generate transcript strings using appropriate method
+        transcript_strs: list[str] = []
+        for i, (t_key, t) in enumerate(self.transcripts.items()):
+            if use_blocks:
+                transcript_content = t.to_str_blocks_with_token_limit(
+                    token_limit=sys.maxsize,
+                    transcript_idx=i,
+                    agent_run_idx=None,
+                )[0]
+            else:
+                transcript_content = t.to_str_with_token_limit(
+                    token_limit=sys.maxsize,
+                    transcript_idx=i,
+                    agent_run_idx=None,
+                )[0]
+            transcript_strs.append(
+                f"<transcript {t_key}>\n{transcript_content}\n</transcript {t_key}>"
+            )
 
-        transcript_strs: list[str] = [
-            f"<transcript {t_key}>\n{t.to_str(agent_run_idx=None, transcript_idx=i)}\n</transcript {t_key}>"
-            for i, (t_key, t) in enumerate(self.transcripts.items())
-        ]
         transcripts_str = "\n\n".join(transcript_strs)
 
         # Gather metadata
@@ -128,7 +145,6 @@ class AgentRun(BaseModel):
             return [f"{transcripts_str}" f"{metadata_str}"]
 
         # Otherwise, split up the transcript and metadata into chunks
-        # TODO(vincent, mengk): does this code account for multiple transcripts correctly? a little confused.
         else:
             results: list[str] = []
             transcript_token_counts = [get_token_count(t) for t in transcript_strs]
@@ -150,13 +166,23 @@ class AgentRun(BaseModel):
                     ), "Ranges without metadata should be a single message"
                     t_id, t = list(self.transcripts.items())[msg_range.start]
                     if msg_range.num_tokens < token_limit - 50:
-                        transcript = f"<transcript {t_id}>\n{t.to_str()}\n</transcript {t_id}>"
+                        if use_blocks:
+                            transcript = f"<transcript {t_id}>\n{t.to_str_blocks_with_token_limit(token_limit=sys.maxsize)[0]}\n</transcript {t_id}>"
+                        else:
+                            transcript = f"<transcript {t_id}>\n{t.to_str_with_token_limit(token_limit=sys.maxsize)[0]}\n</transcript {t_id}>"
                         result = (
                             f"Here is a partial agent run for analysis purposes only:\n{transcript}"
                         )
                         results.append(result)
                     else:
-                        transcript_fragments = t.to_str_with_token_limit(token_limit - 50)
+                        if use_blocks:
+                            transcript_fragments = t.to_str_blocks_with_token_limit(
+                                token_limit=token_limit - 50,
+                            )
+                        else:
+                            transcript_fragments = t.to_str_with_token_limit(
+                                token_limit=token_limit - 50,
+                            )
                         for fragment in transcript_fragments:
                             result = f"<transcript {t_id}>\n{fragment}\n</transcript {t_id}>"
                             result = (
@@ -165,6 +191,26 @@ class AgentRun(BaseModel):
                             results.append(result)
             return results
 
+    def to_text(self, token_limit: int = sys.maxsize) -> list[str]:
+        """
+        Represents an agent run as a list of strings, each of which is at most token_limit tokens
+        under the GPT-4 tokenization scheme.
+
+        We'll try to split up long AgentRuns along transcript boundaries and include metadata.
+        For very long transcripts, we'll have to split them up further and remove metadata.
+        """
+        return self._to_text_impl(token_limit=token_limit, use_blocks=False)
+
+    def to_text_blocks(self, token_limit: int = sys.maxsize) -> list[str]:
+        """
+        Represents an agent run as a list of strings using individual message blocks,
+        each of which is at most token_limit tokens under the GPT-4 tokenization scheme.
+
+        Unlike to_text() which uses action units, this method formats each message
+        as an individual block.
+        """
+        return self._to_text_impl(token_limit=token_limit, use_blocks=True)
+
     @property
     def text(self) -> str:
         """Concatenates all transcript texts with double newlines as separators.
@@ -172,7 +218,16 @@ class AgentRun(BaseModel):
         Returns:
             str: A string representation of all transcripts.
         """
-        return self.to_text()[0]
+        return self._to_text_impl(token_limit=sys.maxsize, use_blocks=False)[0]
+
+    @property
+    def text_blocks(self) -> str:
+        """Concatenates all transcript texts using individual blocks format.
+
+        Returns:
+            str: A string representation of all transcripts using individual message blocks.
+        """
+        return self._to_text_impl(token_limit=sys.maxsize, use_blocks=True)[0]
 
     def model_dump(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         """Extends the parent model_dump method to include the text property.

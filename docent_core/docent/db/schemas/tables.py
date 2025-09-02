@@ -55,7 +55,6 @@ TABLE_USER_ORGANIZATION = "user_organizations"
 TABLE_SEARCH_CLUSTER = "search_clusters"
 TABLE_SEARCH_RESULT_CLUSTER = "search_result_clusters"
 TABLE_ANALYTICS_EVENT = "analytics_events"
-TABLE_CHAT_SESSION = "chat_sessions"
 TABLE_API_KEY = "api_keys"
 TABLE_TELEMETRY_LOG = "telemetry_logs"
 TABLE_USER_PROFILE = "user_profiles"
@@ -731,7 +730,6 @@ class EndpointType(enum.Enum):
     RESUME_COMPUTE_SEARCH = "resume_compute_search"
     GET_EXISTING_CLUSTERS = "get_existing_clusters"
     START_CLUSTER_SEARCH_RESULTS = "start_cluster_search_results"
-    GET_TA_MESSAGE = "get_ta_message"
     GET_DIFFS_REPORT = "get_diffs_report"
     START_COMPUTE_DIFFS = "start_compute_diffs"
     COMPUTE_DIFF_CLUSTERS = "compute_diff_clusters"
@@ -741,25 +739,6 @@ class EndpointType(enum.Enum):
     DELETE_CHART = "delete_chart"
     MAKE_COLLECTION_PUBLIC = "make_collection_public"
     SHARE_COLLECTION_WITH_EMAIL = "share_collection_with_email"
-
-
-class SQLAChatSession(SQLABase):
-    __tablename__ = TABLE_CHAT_SESSION
-
-    id = mapped_column(String(36), primary_key=True)
-    user_id = mapped_column(String(36), ForeignKey(f"{TABLE_USER}.id"), nullable=False, index=True)
-
-    # JSON field to store all messages
-    messages = mapped_column(JSONB, nullable=False, default=list)
-
-    # Associated agent run IDs for context
-    agent_run_ids = mapped_column(JSONB, nullable=False, default=list)
-
-    updated_at = mapped_column(
-        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False, index=True
-    )
-
-    user: Mapped["SQLAUser"] = relationship("SQLAUser", lazy="select")
 
 
 class SQLAAnalyticsEvent(SQLABase):

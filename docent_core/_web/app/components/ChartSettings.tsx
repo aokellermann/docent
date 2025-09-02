@@ -57,7 +57,7 @@ function DimensionSelect({
 }) {
   return (
     <Select value={dim || 'None'} onValueChange={onChange}>
-      <SelectTrigger className="h-6 max-w-24 w-24 text-xs border-border bg-transparent hover:bg-secondary px-2 font-normal">
+      <SelectTrigger className="h-6 w-16 text-xs border-border bg-transparent hover:bg-secondary px-2 font-normal">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>

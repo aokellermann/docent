@@ -6,8 +6,7 @@ import pytest
 
 from docent.data_models.citation import (
     Citation,
-    parse_citations_multi_run,
-    parse_citations_single_run,
+    parse_citations,
 )
 
 
@@ -16,76 +15,33 @@ from docent.data_models.citation import (
     "parser_func,text,expected_citations,test_description",
     [
         # Single-run citation tests
-        (parse_citations_single_run, "Basic [T1B2] citation.", [(1, 2)], "single_basic"),
+        (parse_citations, "Basic [T1B2] citation.", [(1, 2)], "single_basic"),
         (
-            parse_citations_single_run,
-            "Multiple [T1B2, T3B4] citations.",
+            parse_citations,
+            "Multiple [T1B2] and [T3B4] citations.",
             [(1, 2), (3, 4)],
             "single_multiple",
         ),
         (
-            parse_citations_single_run,
-            "Range [T1B2-T3B4] citation.",
-            [(1, 2), (3, 4)],
-            "single_range",
-        ),
-        (
-            parse_citations_single_run,
-            "Complex [T1B2, T3B4-T5B6] citations.",
-            [(1, 2), (3, 4), (5, 6)],
-            "single_complex",
-        ),
-        (
-            parse_citations_single_run,
-            "Spaced [ T1B2 , T3B4 ] citations.",
-            [(1, 2), (3, 4)],
+            parse_citations,
+            "Spaced [ T1B2 ] citations.",
+            [(1, 2)],
             "single_whitespace",
-        ),
-        # Multi-run citation tests
-        (parse_citations_multi_run, "Basic [R1T2B3] citation.", [(1, 2, 3)], "multi_basic"),
-        (
-            parse_citations_multi_run,
-            "Multiple [R1T2B3, R4T5B6] citations.",
-            [(1, 2, 3), (4, 5, 6)],
-            "multi_multiple",
-        ),
-        (
-            parse_citations_multi_run,
-            "Range [R1T2B3-R4T5B6] citation.",
-            [(1, 2, 3), (4, 5, 6)],
-            "multi_range",
-        ),
-        (
-            parse_citations_multi_run,
-            "Parentheses ([R1T2B3]) citation.",
-            [(1, 2, 3)],
-            "multi_parentheses",
-        ),
-        (
-            parse_citations_multi_run,
-            "Spaced [ R1T2B3 , R4T5B6 ] citations.",
-            [(1, 2, 3), (4, 5, 6)],
-            "multi_whitespace",
         ),
     ],
 )
 def test_valid_citations(
-    parser_func: Callable[[str], list[Citation]],
+    parser_func: Callable[[str], tuple[str, list[Citation]]],
     text: str,
     expected_citations: list[tuple[int, ...]],
     test_description: str,
 ):
     """Test parsing of valid citation patterns."""
-    result = parser_func(text)
+    cleaned, result = parser_func(text)
     assert len(result) == len(expected_citations), f"Failed for {test_description}"
 
     # Convert results to tuples for comparison
-    if parser_func == parse_citations_single_run:
-        actual_citations = [(c["transcript_idx"], c["block_idx"]) for c in result]
-    else:
-        actual_citations = [
-            (c["agent_run_idx"], c["transcript_idx"], c["block_idx"]) for c in result
-        ]
+    actual_citations = [(c.transcript_idx, c.block_idx) for c in result]
 
     # Verify all expected citations are present
     for expected in expected_citations:
@@ -96,19 +52,75 @@ def test_valid_citations(
 @pytest.mark.parametrize(
     "parser_func,text,test_description",
     [
-        (parse_citations_single_run, "No citations here.", "single_none"),
-        (parse_citations_single_run, "", "single_empty"),
-        (parse_citations_single_run, "Invalid [brackets] content.", "single_invalid"),
-        (parse_citations_multi_run, "No citations here.", "multi_none"),
-        (parse_citations_multi_run, "", "multi_empty"),
-        (parse_citations_multi_run, "Invalid [brackets] content.", "multi_invalid"),
+        (parse_citations, "No citations here.", "none"),
+        (parse_citations, "", "empty"),
+        (parse_citations, "Invalid [brackets] content.", "invalid"),
     ],
 )
 def test_no_citations_found(
-    parser_func: Callable[[str], list[Citation]],
+    parser_func: Callable[[str], tuple[str, list[Citation]]],
     text: str,
     test_description: str,
 ):
     """Test cases where no valid citations should be found."""
-    result = parser_func(text)
+    cleaned, result = parser_func(text)
     assert len(result) == 0, f"Expected no citations for {test_description}"
+
+
+@pytest.mark.unit
+def test_citation_indices():
+    """Test that citation indices are calculated correctly in the cleaned text."""
+    text = "Before [T1B2] middle [T3B4] after"
+    cleaned, citations = parse_citations(text)
+
+    # Verify cleaned text
+    assert cleaned == "Before T1B2 middle T3B4 after"
+
+    # Verify citation count
+    assert len(citations) == 2
+
+    # Verify first citation
+    assert citations[0].transcript_idx == 1
+    assert citations[0].block_idx == 2
+    assert citations[0].start_idx == 7  # "Before " = 7 chars
+    assert citations[0].end_idx == 11  # "Before T1B2" = 11 chars
+    assert cleaned[citations[0].start_idx : citations[0].end_idx] == "T1B2"
+
+    # Verify second citation
+    assert citations[1].transcript_idx == 3
+    assert citations[1].block_idx == 4
+    assert citations[1].start_idx == 19  # "Before T1B2 middle " = 19 chars
+    assert citations[1].end_idx == 23  # "Before T1B2 middle T3B4" = 23 chars
+    assert cleaned[citations[1].start_idx : citations[1].end_idx] == "T3B4"
+
+
+@pytest.mark.unit
+def test_range_markers_in_regular_text():
+    """Test that range markers in regular text are preserved, not stripped."""
+    text = "Text with <RANGE>markers</RANGE> and [T1B2] citation."
+    cleaned, citations = parse_citations(text)
+
+    # Range markers in regular text should be preserved
+    assert "<RANGE>markers</RANGE>" in cleaned
+    assert cleaned == "Text with <RANGE>markers</RANGE> and T1B2 citation."
+
+    # Citation should still be parsed correctly
+    assert len(citations) == 1
+    assert citations[0].transcript_idx == 1
+    assert citations[0].block_idx == 2
+
+
+@pytest.mark.unit
+def test_range_markers_in_citations():
+    """Test that range markers inside citations are processed correctly."""
+    text = "Text with [T1B2:<RANGE>pattern</RANGE>] citation."
+    cleaned, citations = parse_citations(text)
+
+    # Citation bracket and range markers should be removed from cleaned text
+    assert cleaned == "Text with T1B2 citation."
+
+    # Citation should be parsed with range patterns
+    assert len(citations) == 1
+    assert citations[0].transcript_idx == 1
+    assert citations[0].block_idx == 2
+    assert citations[0].start_pattern == "pattern"

@@ -90,14 +90,12 @@ resource "aws_ecs_task_definition" "worker" {
       name  = "worker"
       image = "${aws_ecr_repository.backend.repository_url}:latest"
 
+      command = ["docent_core", "worker", "--workers", tostring(var.ecs_num_workers)]
+
       environment = [
         {
-          name  = "SERVICE"
-          value = "worker"  # Starts the worker, not the uvicorn server
-        },
-        {
-          name  = "NUM_WORKERS"
-          value = tostring(var.ecs_num_workers)
+          name  = "ENV_RESOLUTION_STRATEGY"
+          value = "os_environ"
         },
         {
           name  = "DEPLOYMENT_ID"

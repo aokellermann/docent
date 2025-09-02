@@ -31,13 +31,20 @@ import {
   useClearClustersMutation,
 } from '../../../api/rubricApi';
 import { toast } from '@/hooks/use-toast';
+import { NavigateToCitation } from '@/components/CitationRenderer';
 import { useCreateOrGetRefinementSessionMutation } from '@/app/api/refinementApi';
 
 interface SingleRubricAreaProps {
   rubricId: string;
+  selectedResultId?: string;
+  onNavigateToCitation?: NavigateToCitation;
 }
 
-export default function SingleRubricArea({ rubricId }: SingleRubricAreaProps) {
+export default function SingleRubricArea({
+  rubricId,
+  selectedResultId,
+  onNavigateToCitation,
+}: SingleRubricAreaProps) {
   const params = useParams();
   const collectionId = params.collection_id as string;
 
@@ -293,7 +300,7 @@ export default function SingleRubricArea({ rubricId }: SingleRubricAreaProps) {
   );
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 flex flex-col flex-1 min-w-0">
       <RubricEditor
         rubricId={rubricId}
         rubricVersion={null}
@@ -315,7 +322,7 @@ export default function SingleRubricArea({ rubricId }: SingleRubricAreaProps) {
       )}
 
       {/* Action Buttons */}
-      <div className="flex items-center justify-end gap-2 pt-1">
+      <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
         {/* Exit and share buttons - always visible */}
         <Button
           type="button"
@@ -442,6 +449,7 @@ export default function SingleRubricArea({ rubricId }: SingleRubricAreaProps) {
         centroidsMap={centroidsMap}
         centroidAssignments={centroidAssignments}
         isPollingAssignments={activeClusteringJobId !== null}
+        selectedResultId={selectedResultId}
       />
     </div>
   );

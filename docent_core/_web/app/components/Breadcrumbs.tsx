@@ -1,12 +1,7 @@
 import { ModeToggle } from '@/components/ui/theme-toggle';
 import { BookText, ChevronRight, Layers, MessageCircle } from 'lucide-react';
 import Link from 'next/link';
-import {
-  useRouter,
-  useParams,
-  useSearchParams,
-  usePathname,
-} from 'next/navigation';
+import { useRouter, useParams, usePathname } from 'next/navigation';
 import { useSelector } from 'react-redux';
 
 import { BASE_DOCENT_PATH } from '@/app/constants';
@@ -24,7 +19,6 @@ import ShareViewPopover from '@/lib/permissions/ShareViewPopover';
 const Breadcrumbs: React.FC = () => {
   const router = useRouter();
   const params = useParams();
-  const searchParams = useSearchParams();
   const pathname = usePathname();
 
   const collectionId = useSelector(
@@ -131,7 +125,9 @@ const Breadcrumbs: React.FC = () => {
         </Button>
 
         {/* Share view */}
-        {collectionId && <ShareViewPopover collectionId={collectionId} />}
+        {effectiveCollectionId && (
+          <ShareViewPopover collectionId={effectiveCollectionId} />
+        )}
 
         {/* Embeddings */}
         {/* <EmbeddingsPopover /> */}
