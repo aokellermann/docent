@@ -821,7 +821,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                         </div>
                       </div>
                       {/* Expand/Collapse All Button */}
-                      {transcriptGroupTree.length >= 2 && (
+                      {transcriptGroupTree.length > 0 && (
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <button
@@ -865,7 +865,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                   </div>
                 )}
               {/* Transcript Groups and Transcripts Sidebar */}
-              {transcriptKeys.length >= 0 && (
+              {transcriptKeys.length >= 2 && (
                 <>
                   <ResizablePanel
                     defaultSize={sidebarVisible ? 25 : 0}
