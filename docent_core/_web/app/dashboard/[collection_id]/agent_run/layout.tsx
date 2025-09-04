@@ -15,7 +15,7 @@ export default function AgentRunLayout({
   const agentRunId = params.agent_run_id as string;
 
   const leftSidebarOpen = useAppSelector(
-    (state) => state.transcript.leftSidebarOpen ?? false
+    (state) => state.transcript.agentRunLeftSidebarOpen
   );
 
   return (

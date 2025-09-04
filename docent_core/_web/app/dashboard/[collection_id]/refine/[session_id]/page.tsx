@@ -5,7 +5,6 @@ import { ChatArea } from '../../components/chat/ChatArea';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { skipToken } from '@reduxjs/toolkit/query';
-import { useAppDispatch } from '@/app/store/hooks';
 import {
   useStartRefinementSessionMutation,
   usePostMessageToRefinementSessionMutation,
@@ -26,7 +25,6 @@ import { useHasCollectionWritePermission } from '@/lib/permissions/hooks';
 
 export default function RefinePage() {
   const params = useParams();
-  const dispatch = useAppDispatch();
   const router = useRouter();
   const collectionId = (params as any)?.collection_id as string | undefined;
   const sessionId = (params as any)?.session_id as string | undefined;
@@ -37,7 +35,6 @@ export default function RefinePage() {
     null
   );
 
-  // const messages = useAppSelector((s) => s.refinement.messages);
   const [jobId, setJobId] = useState<string | null>(null);
   const [rubricId, setRubricId] = useState<string | null>(null);
 

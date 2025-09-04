@@ -293,6 +293,16 @@ async def get_collections(
     ]
 
 
+@user_router.get("/{collection_id}/collection")
+async def get_collection_name(
+    collection_id: str = Depends(require_collection_exists),
+    mono_svc: MonoService = Depends(get_mono_svc),
+    _: None = Depends(require_collection_permission(Permission.READ)),
+):
+    collection = await mono_svc.get_collection(collection_id)
+    return {"name": collection.name if collection else None}
+
+
 class CreateCollectionRequest(BaseModel):
     collection_id: str | None = None
     name: str | None = None

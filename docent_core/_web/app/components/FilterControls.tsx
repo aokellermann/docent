@@ -26,7 +26,6 @@ interface FilterControlsProps {
   onFiltersChange: (filters: ComplexFilter | null) => void;
   metadataFields: TranscriptMetadataField[];
   collectionId: string;
-  className?: string;
   showFilterChips?: boolean;
   initialFilter?: PrimitiveFilter | null;
 }
@@ -36,7 +35,6 @@ export const FilterControls = ({
   onFiltersChange,
   metadataFields,
   collectionId,
-  className,
   showFilterChips = true,
   initialFilter = null,
 }: FilterControlsProps) => {

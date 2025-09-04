@@ -12,7 +12,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { Loader2, UploadIcon, ChevronLeft, ChevronRight } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { toast } from '@/hooks/use-toast';
 import { ProgressBar } from './ProgressBar';
@@ -80,48 +80,51 @@ export default function UploadRunsDialog({
   const [triggerImportStream, importStreamState] =
     useLazyImportRunsFromFileStreamQuery();
 
+  const processFile = useCallback(
+    async (selectedFile: File) => {
+      setUploadState(uploadStates.PROCESSING);
+      setError('');
+      setPreviewResult(null);
+
+      // Validate file extension
+      const validExtensions = ['.eval', '.json'];
+      const fileExtension = selectedFile.name.toLowerCase();
+      const hasValidExtension = validExtensions.some((ext) =>
+        fileExtension.endsWith(ext)
+      );
+
+      if (!hasValidExtension) {
+        setError(
+          `Invalid file type. Please upload a file with one of these extensions: ${validExtensions.join(', ')}`
+        );
+        setUploadState(uploadStates.REVIEWING);
+        return;
+      }
+
+      try {
+        const response = await triggerPreview({
+          collectionId: collection_id,
+          file: selectedFile,
+        }).unwrap();
+        setUploadState(uploadStates.REVIEWING);
+        setPreviewResult(response as any);
+        setCurrentSampleIndex(0);
+        setProgressCurrent(0);
+        setProgressTotal(response?.would_import?.num_agent_runs ?? null);
+      } catch (err: any) {
+        setError(err?.data?.detail || err?.message || 'Preview failed');
+        setUploadState(uploadStates.REVIEWING);
+      }
+    },
+    [collection_id, triggerPreview]
+  );
+
   // Process file when dialog opens with a file
   useEffect(() => {
     if (isOpen && file && uploadState === uploadStates.INACTIVE) {
       processFile(file);
     }
-  }, [isOpen, file]);
-
-  const processFile = async (selectedFile: File) => {
-    setUploadState(uploadStates.PROCESSING);
-    setError('');
-    setPreviewResult(null);
-
-    // Validate file extension
-    const validExtensions = ['.eval', '.json'];
-    const fileExtension = selectedFile.name.toLowerCase();
-    const hasValidExtension = validExtensions.some((ext) =>
-      fileExtension.endsWith(ext)
-    );
-
-    if (!hasValidExtension) {
-      setError(
-        `Invalid file type. Please upload a file with one of these extensions: ${validExtensions.join(', ')}`
-      );
-      setUploadState(uploadStates.REVIEWING);
-      return;
-    }
-
-    try {
-      const response = await triggerPreview({
-        collectionId: collection_id,
-        file: selectedFile,
-      }).unwrap();
-      setUploadState(uploadStates.REVIEWING);
-      setPreviewResult(response as any);
-      setCurrentSampleIndex(0);
-      setProgressCurrent(0);
-      setProgressTotal(response?.would_import?.num_agent_runs ?? null);
-    } catch (err: any) {
-      setError(err?.data?.detail || err?.message || 'Preview failed');
-      setUploadState(uploadStates.REVIEWING);
-    }
-  };
+  }, [isOpen, file, uploadState, processFile]);
 
   const handleImport = async () => {
     if (!file) return;
@@ -149,14 +152,14 @@ export default function UploadRunsDialog({
     }
   };
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
     }
     setUploadState(uploadStates.INACTIVE);
     onClose();
-  };
+  }, [onClose]);
 
   // Reflect streaming progress from RTK Query into local UI state
   useEffect(() => {
@@ -176,7 +179,7 @@ export default function UploadRunsDialog({
       }
       handleClose();
     }
-  }, [importStreamState.data]);
+  }, [importStreamState.data, handleClose, onImportSuccess]);
 
   const showTruncationTooltip =
     previewResult &&

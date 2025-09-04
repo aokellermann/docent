@@ -57,8 +57,9 @@ export default function ExperimentViewer({
   );
 
   // Fetch agent run IDs using RTK skipToken
-  const { data: rawAgentRunIds, isLoading: isLoadingAgentRunIds } =
-    useGetAgentRunIdsQuery(collectionId ? { collectionId } : skipToken);
+  const { data: agentRunIds } = useGetAgentRunIdsQuery(
+    collectionId ? { collectionId } : skipToken
+  );
 
   /**
    * Scrolling
@@ -126,11 +127,6 @@ export default function ExperimentViewer({
     },
     [experimentViewerScrollPosition]
   );
-
-  // Filter agent run IDs to ones that have the attribute query
-  const agentRunIds = useMemo(() => {
-    return rawAgentRunIds;
-  }, [rawAgentRunIds]);
 
   // Add pagination state
   const [currentPage, setCurrentPage] = useState(1);

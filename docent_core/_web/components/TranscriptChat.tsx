@@ -102,7 +102,6 @@ export default function TranscriptChat({
           { scroll: false } as any
         );
       }
-      // For general transcript chat, we don't have a default navigation
     },
     [onNavigateToCitation, resultContext, router, collectionId]
   );

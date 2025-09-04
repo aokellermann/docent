@@ -18,6 +18,18 @@ export const chatApi = createApi({
   }),
   tagTypes: ['ChatSession'],
   endpoints: (build) => ({
+    getActiveChatJob: build.query<
+      { job_id: string | null },
+      { collectionId: string; runId: string; sessionId: string }
+    >({
+      query: ({ collectionId, runId, sessionId }) => ({
+        url: `/${collectionId}/${runId}/session/${sessionId}/active-job`,
+        method: 'GET',
+      }),
+      providesTags: (result, _err, arg) => [
+        { type: 'ChatSession' as const, id: arg.sessionId },
+      ],
+    }),
     getChatState: build.query<
       { messages: ChatMessage[]; session_id: string },
       { collectionId: string; runId: string; sessionId: string }
@@ -116,4 +128,5 @@ export const {
   usePostChatMessageMutation,
   useListenToChatJobQuery,
   useLazyListenToChatJobQuery,
+  useGetActiveChatJobQuery,
 } = chatApi;

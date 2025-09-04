@@ -59,9 +59,9 @@ def parse_suggestions(content: str, streaming: bool) -> tuple[str, list[str]]:
         # Hide an unclosed <SUGGESTIONS> while streaming
         try:
             suggestions_start_idx = content.index("<SUGGESTIONS>")
+            cleaned_content = content[:suggestions_start_idx]
         except ValueError:
-            suggestions_start_idx = 0
-        cleaned_content = content[:suggestions_start_idx]
+            cleaned_content = content
         return cleaned_content, []
 
     pattern = r"<SUGGESTIONS>\s*(.*?)\s*</SUGGESTIONS>"

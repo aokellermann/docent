@@ -322,7 +322,6 @@ export type NavigateToCitation = (args: {
 interface TextWithCitationsProps {
   text: string;
   citations: Citation[];
-  dataId?: string; // For backwards compatibility, not used
   onNavigate?: NavigateToCitation;
 }
 

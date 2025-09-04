@@ -5,10 +5,11 @@ import {
   useGetOrCreateChatSessionMutation,
   usePostChatMessageMutation,
   useListenToChatJobQuery,
+  useGetActiveChatJobQuery,
   chatApi,
 } from '@/app/api/chatApi';
 import { useAppDispatch } from '@/app/store/hooks';
-import { setAllCitations } from '@/app/store/transcriptSlice';
+import { setRunCitations } from '@/app/store/transcriptSlice';
 import { JudgeResultWithCitations } from '@/app/store/rubricSlice';
 
 export interface UseTranscriptChatOptions {
@@ -31,6 +32,16 @@ export function useTranscriptChat({
   const { data: currentState } = useGetChatStateQuery(
     sessionId ? { collectionId, runId, sessionId } : skipToken
   );
+
+  // Check if there is an active job for this session (to resume SSE after refresh)
+  const { data: activeJobData } = useGetActiveChatJobQuery(
+    sessionId ? { collectionId, runId, sessionId } : skipToken
+  );
+  useEffect(() => {
+    if (activeJobData?.job_id) {
+      setJobId(activeJobData.job_id);
+    }
+  }, [activeJobData?.job_id]);
 
   const [getOrCreateChatSession] = useGetOrCreateChatSessionMutation();
 
@@ -95,7 +106,7 @@ export function useTranscriptChat({
 
       // Only update if we have citations to avoid unnecessary dispatches
       if (allCitationsArray.length > 0) {
-        dispatch(setAllCitations(allCitationsArray));
+        dispatch(setRunCitations({ [runId]: allCitationsArray }));
       }
     }
   }, [messages, judgeResult?.citations, dispatch]);
@@ -120,6 +131,8 @@ export function useTranscriptChat({
   // Handle reset chat
   const resetChat = useCallback(() => {
     if (!sessionId) return;
+
+    dispatch(setRunCitations({ [runId]: judgeResult?.citations || [] }));
 
     // Clear current session's cache before creating new one
     dispatch(

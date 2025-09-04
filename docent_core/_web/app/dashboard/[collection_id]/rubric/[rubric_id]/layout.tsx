@@ -1,6 +1,7 @@
 'use client';
 
 import React, { Suspense } from 'react';
+import { useAppSelector } from '@/app/store/hooks';
 import { useParams } from 'next/navigation';
 import SingleRubricArea from '../../components/SingleRubricArea';
 import {
@@ -17,17 +18,23 @@ export default function RubricLayout({
   const params = useParams();
   const rubricId = params.rubric_id as string;
   const selectedResultId = params.result_id as string | undefined;
+  // If no result selected, always show sidebar
+  const judgeLeftSidebarOpen = useAppSelector(
+    (state) => state.transcript.judgeLeftSidebarOpen || !selectedResultId
+  );
 
   return (
     <Suspense>
       <CitationNavigationProvider>
         <div className="flex-1 flex space-x-3 min-h-0 shrink-0">
-          <Card className="flex min-w-0 basis-1/3 max-w-1/3 grow-0 shrink-0">
-            <RubricLeftColumn
-              rubricId={rubricId}
-              selectedResultId={selectedResultId}
-            />
-          </Card>
+          {judgeLeftSidebarOpen && (
+            <Card className="flex min-w-0 basis-1/3 max-w-1/3 grow-0 shrink-0">
+              <RubricLeftColumn
+                rubricId={rubricId}
+                selectedResultId={selectedResultId}
+              />
+            </Card>
+          )}
           {children}
         </div>
       </CitationNavigationProvider>

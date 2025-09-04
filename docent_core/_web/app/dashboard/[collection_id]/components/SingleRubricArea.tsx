@@ -43,7 +43,6 @@ interface SingleRubricAreaProps {
 export default function SingleRubricArea({
   rubricId,
   selectedResultId,
-  onNavigateToCitation,
 }: SingleRubricAreaProps) {
   const params = useParams();
   const collectionId = params.collection_id as string;

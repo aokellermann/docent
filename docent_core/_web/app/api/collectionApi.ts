@@ -47,6 +47,10 @@ export const collectionApi = createApi({
     'AgentRunIds',
   ],
   endpoints: (build) => ({
+    getCollectionName: build.query<{ name: string | null }, string>({
+      query: (collectionId) => `/${collectionId}/collection`,
+      providesTags: ['Collection'],
+    }),
     getCollections: build.query<Collection[], void>({
       query: () => '/collections',
       providesTags: ['Collection'],
@@ -214,6 +218,7 @@ export const collectionApi = createApi({
 });
 
 export const {
+  useGetCollectionNameQuery,
   useGetCollectionsQuery,
   useCreateCollectionMutation,
   useUpdateCollectionMutation,

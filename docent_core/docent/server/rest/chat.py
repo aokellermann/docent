@@ -119,3 +119,13 @@ async def get_current_state_endpoint(
     view_ctx: ViewContext = Depends(get_default_view_ctx),
 ) -> ChatSession:
     return await chat_svc.get_current_state(view_ctx, sq_rsession)
+
+
+@chat_router.get("/{collection_id}/{run_id}/session/{session_id}/active-job")
+async def get_active_chat_job_for_session(
+    session_id: str,
+    chat_svc: ChatService = Depends(get_chat_service),
+):
+    """Return the active job id for this chat session if one exists, else null."""
+    active_job = await chat_svc.get_active_job_for_session(session_id)
+    return {"job_id": active_job.id if active_job is not None else None}

@@ -23,9 +23,10 @@ import {
 import { RootState } from '../store/store';
 import { UserProfile } from './auth/UserProfile';
 import ShareViewPopover from '@/lib/permissions/ShareViewPopover';
-import { useGetCollectionsQuery } from '@/app/api/collectionApi';
+import { useGetCollectionNameQuery } from '@/app/api/collectionApi';
 import {
-  toggleLeftSidebar,
+  toggleAgentRunLeftSidebar,
+  toggleJudgeLeftSidebar,
   toggleRightSidebar,
 } from '../store/transcriptSlice';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -40,24 +41,34 @@ const Breadcrumbs: React.FC = () => {
     (state: RootState) => state.collection.collectionId
   );
 
-  const leftSidebarOpen = useSelector(
-    (state: RootState) => state.transcript.leftSidebarOpen ?? false
+  // Determine route
+  const agentRunId = params?.agent_run_id as string | undefined;
+  const rubricId = params?.rubric_id as string | undefined;
+  const resultId = params?.result_id as string | undefined;
+  const isAgentRunView = !!agentRunId && !rubricId;
+  const isJudgeResultView = !!rubricId && !!resultId;
+
+  // Select left sidebar state based on route
+  const leftSidebarOpen = useSelector((state: RootState) =>
+    isJudgeResultView
+      ? state.transcript.judgeLeftSidebarOpen
+      : state.transcript.agentRunLeftSidebarOpen
   );
 
   const rightSidebarOpen = useSelector(
-    (state: RootState) => state.transcript.rightSidebarOpen ?? true
+    (state: RootState) => state.transcript.rightSidebarOpen
   );
 
   // check if we are "home", i.e. at /dashboard/[collection_id]
   const effectiveCollectionId =
     collectionId || (params?.collection_id as string | undefined);
-  const { collectionName } = useGetCollectionsQuery(undefined, {
-    skip: !effectiveCollectionId,
-    selectFromResult: ({ data }) => ({
-      collectionName:
-        data?.find((c) => c.id === effectiveCollectionId)?.name ?? null,
-    }),
-  });
+  const { data: collectionNameResp } = useGetCollectionNameQuery(
+    effectiveCollectionId as string,
+    {
+      skip: !effectiveCollectionId,
+    }
+  );
+  const collectionName = collectionNameResp?.name ?? null;
 
   const normalizePath = (p?: string | null) => (p ? p.replace(/\/+$/, '') : '');
   const isHome =
@@ -66,17 +77,18 @@ const Breadcrumbs: React.FC = () => {
       normalizePath(`${BASE_DOCENT_PATH}/${effectiveCollectionId}`);
 
   // Get the current page information
-  const agentRunId = params?.agent_run_id as string | undefined;
-  const rubricId = params?.rubric_id as string | undefined;
-  const resultId = params?.result_id as string | undefined;
   const refinementSessionId = params?.session_id as string | undefined;
 
   // Check if we're on a page that should show sidebar toggles
-  const showSidebarToggles = !!(agentRunId && !rubricId);
+  const showSidebarToggles = isAgentRunView || isJudgeResultView;
 
   // Determine if left sidebar should be disabled (no run/result selected)
   const leftSidebarDisabled =
     showSidebarToggles && !agentRunId && !(rubricId && resultId);
+
+  const collectionBreadcrumbText = collectionName
+    ? `Collection: ${collectionName}`
+    : 'Collection';
 
   return (
     <div className="_Breadcrumbs text-sm flex items-center justify-between w-full">
@@ -103,14 +115,14 @@ const Breadcrumbs: React.FC = () => {
           {/* Home link */}
           {isHome ? (
             <span className="text-muted-foreground">
-              {collectionName ? `Collection: ${collectionName}` : 'Collection'}
+              {collectionBreadcrumbText}
             </span>
           ) : (
             <Link
               href={`${BASE_DOCENT_PATH}/${effectiveCollectionId}`}
               className="text-blue-text hover:underline"
             >
-              {collectionName ? `Collection: ${collectionName}` : 'Collection'}
+              {collectionBreadcrumbText}
             </Link>
           )}
 
@@ -207,7 +219,11 @@ const Breadcrumbs: React.FC = () => {
               const newRightOpen = value.includes('right');
 
               if (newLeftOpen !== leftSidebarOpen && !leftSidebarDisabled) {
-                dispatch(toggleLeftSidebar());
+                dispatch(
+                  isJudgeResultView
+                    ? toggleJudgeLeftSidebar()
+                    : toggleAgentRunLeftSidebar()
+                );
               }
               if (newRightOpen !== rightSidebarOpen) {
                 dispatch(toggleRightSidebar());

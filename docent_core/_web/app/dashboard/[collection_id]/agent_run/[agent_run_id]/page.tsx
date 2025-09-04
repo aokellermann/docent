@@ -17,6 +17,7 @@ import AgentRunViewer, {
   AgentRunViewerHandle,
 } from '../components/AgentRunViewer';
 import TranscriptChat from '@/components/TranscriptChat';
+import { Citation } from '@/app/types/experimentViewerTypes';
 
 export default function AgentRunPage() {
   const dispatch = useAppDispatch();
@@ -29,7 +30,7 @@ export default function AgentRunPage() {
     (state) => state.collection?.hasInitSearchQuery
   );
   const rightSidebarOpen = useAppSelector(
-    (state) => state.transcript?.rightSidebarOpen ?? true
+    (state) => state.transcript?.rightSidebarOpen
   );
   const selectedTab = useAppSelector(
     (state) => state.transcript?.agentRunSidebarTab ?? 'chat'
@@ -61,7 +62,7 @@ export default function AgentRunPage() {
     }
 
     dispatch(getCurAgentRun(agentRunId));
-  }, [collectionId, agentRunId, dispatch]);
+  }, [collectionId, agentRunId, curAgentRun?.id, dispatch]);
 
   const alreadyScrolledRef = useRef(false);
 
@@ -96,7 +97,8 @@ export default function AgentRunPage() {
     agentRunId: string,
     blockIdx?: number,
     transcriptIdx?: number,
-    highlightDuration?: number
+    highlightDuration?: number,
+    citation?: Citation
   ) => {
     if (agentRunId !== curAgentRun?.id) {
       dispatch(getCurAgentRun(agentRunId));
@@ -107,7 +109,8 @@ export default function AgentRunPage() {
         blockIdx,
         transcriptIdx || 0,
         0,
-        highlightDuration
+        highlightDuration,
+        citation
       );
     }
   };
@@ -115,7 +118,7 @@ export default function AgentRunPage() {
   return (
     <Suspense>
       {/* Transcript */}
-      <AgentRunViewer ref={agentRunViewerRef} secondary={false} />
+      <AgentRunViewer ref={agentRunViewerRef} />
 
       {/* Assistant summary / transcript chat */}
       {rightSidebarOpen && (
@@ -153,7 +156,8 @@ export default function AgentRunPage() {
                         agentRunId,
                         citation.block_idx,
                         citation.transcript_idx || 0,
-                        500
+                        500,
+                        citation
                       );
                     }
                   }}

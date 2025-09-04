@@ -19,7 +19,7 @@ import { useGetAgentRunQuery } from '@/app/api/collectionApi';
 
 import { skipToken } from '@reduxjs/toolkit/query';
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
-import { setAllCitations } from '@/app/store/transcriptSlice';
+import { setRunCitations } from '@/app/store/transcriptSlice';
 import { Citation } from '@/app/types/experimentViewerTypes';
 import { useCitationNavigation } from '../../NavigateToCitationContext';
 import { Loader2 } from 'lucide-react';
@@ -31,7 +31,7 @@ export default function JudgeResultPage() {
   const citationNav = useCitationNavigation();
 
   const rightSidebarOpen = useAppSelector(
-    (state) => state.transcript.rightSidebarOpen ?? true
+    (state) => state.transcript.rightSidebarOpen
   );
 
   const resultId = params.result_id as string;
@@ -92,8 +92,14 @@ export default function JudgeResultPage() {
   }, [result?.citations]);
 
   useEffect(() => {
-    dispatch(setAllCitations(result?.citations || []));
-  }, [result]);
+    if (agentRunId) {
+      dispatch(
+        setRunCitations({
+          [agentRunId]: result?.citations || [],
+        })
+      );
+    }
+  }, [result, agentRunId, dispatch]);
 
   const {
     data: agentRun,
@@ -127,7 +133,13 @@ export default function JudgeResultPage() {
     const transcriptIdx = citation.transcript_idx ?? 0;
 
     alreadyScrolledRef.current = true;
-    agentRunViewerRef.current?.scrollToBlock(blockIdx, transcriptIdx, 0, 500);
+    agentRunViewerRef.current?.scrollToBlock(
+      blockIdx,
+      transcriptIdx,
+      0,
+      500,
+      citation
+    );
   }, [agentRun, result]);
 
   // Create citation navigation handler
@@ -143,7 +155,8 @@ export default function JudgeResultPage() {
         citation.block_idx,
         citation.transcript_idx ?? 0,
         0,
-        500
+        500,
+        citation
       );
     },
     []
@@ -191,7 +204,6 @@ export default function JudgeResultPage() {
         <AgentRunViewer
           ref={agentRunViewerRef}
           agentRun={agentRun}
-          secondary={false}
           initialTranscriptIdx={initialTranscriptIdx}
         />
       );
@@ -201,7 +213,7 @@ export default function JudgeResultPage() {
   return (
     <Suspense>
       {agentRunViewerContent}
-      {agentRun && (
+      {agentRun && rightSidebarOpen && (
         <Card className="shrink-0 grow-1 basis-1/4 flex flex-col min-w-0 min-h-0 bg-background h-full">
           <TranscriptChat
             runId={agentRun.id}

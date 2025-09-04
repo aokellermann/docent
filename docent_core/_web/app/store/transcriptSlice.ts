@@ -21,7 +21,6 @@ import { Citation } from '../types/experimentViewerTypes';
 
 import { RootState } from './store';
 import { setToastNotification } from './toastSlice';
-import { createAppSelector } from './hooks';
 
 // Map to store cancel functions for active SSE connections
 const cancelFunctionsMap: Record<string, () => void> = {};
@@ -33,7 +32,6 @@ export const getTaSessionStorageKey = (agentRunId: string) =>
 export interface TranscriptState {
   // Cur
   curAgentRun?: AgentRun;
-  altAgentRun?: AgentRun;
   // Dashboard agent run view
   dashboardHasRunPreview?: boolean;
   dashboardScrollToBlockIdx?: number;
@@ -46,24 +44,23 @@ export interface TranscriptState {
   solutionSummary?: SolutionSummary;
   loadingSolutionSummaryForTranscriptId?: string;
   solutionSummaryTaskId?: string;
-  // Chat assistant
-  taAgentRunId?: string;
-  taSessionId?: string;
-  loadingTaResponse?: boolean;
   // All citations
-  allCitations?: Citation[];
+  allCitations: Record<string, Citation[]>;
   // Citation highlighting
   highlightedCitationId?: string;
   // Agent run sidebar state
   agentRunSidebarTab?: string;
   // Sidebar visibility states for different routes
-  leftSidebarOpen?: boolean;
-  rightSidebarOpen?: boolean;
+  agentRunLeftSidebarOpen: boolean;
+  judgeLeftSidebarOpen: boolean;
+  rightSidebarOpen: boolean;
 }
 
 const initialState: TranscriptState = {
-  leftSidebarOpen: undefined, // Hidden by default, shown when clicking agent run card
+  agentRunLeftSidebarOpen: false,
+  judgeLeftSidebarOpen: true,
   rightSidebarOpen: true,
+  allCitations: {},
 };
 
 export const getActionsSummary = createAsyncThunk(
@@ -228,13 +225,6 @@ export const clearCurAgentRun = createAsyncThunk(
   }
 );
 
-export const clearAltAgentRun = createAsyncThunk(
-  'transcript/clearAltAgentRun',
-  async (_, { dispatch }) => {
-    dispatch(setAltAgentRun(undefined));
-  }
-);
-
 export const getCurAgentRun = createAsyncThunk(
   'transcript/getAgentRun',
   async (agentRunId: string, { dispatch, getState }) => {
@@ -327,21 +317,6 @@ export const handleAgentRunsUpdated = createAsyncThunk(
       dispatch(getCurAgentRun(curAgentRun.id));
     }
 
-    // Refresh alternative datapoint
-    // const altAgentRun = state.transcript.altAgentRun;
-    // if (altAgentRun !== undefined) {
-    //   dispatch(getAltAgentRun(altAgentRun.id));
-    // }
-
-    // Refresh transcript metadata
-    // const transcriptMetadata = state.collection.agentRunMetadata;
-    // if (transcriptMetadata !== undefined) {
-    //   dispatch(getAgentRunMetadata(Object.keys(transcriptMetadata)));
-    // }
-
-    // Refresh transcript metadata fields
-    // dispatch(getAgentRunMetadataFields());
-
     // Show a toast
     dispatch(
       setToastNotification({
@@ -361,9 +336,6 @@ export const transcriptSlice = createSlice({
   reducers: {
     setCurAgentRun: (state, action: PayloadAction<AgentRun | undefined>) => {
       state.curAgentRun = action.payload;
-    },
-    setAltAgentRun: (state, action: PayloadAction<AgentRun | undefined>) => {
-      state.altAgentRun = action.payload;
     },
     setActionsSummary: (
       state,
@@ -409,18 +381,6 @@ export const transcriptSlice = createSlice({
       state.loadingSolutionSummaryForTranscriptId = undefined;
       state.solutionSummaryTaskId = undefined;
     },
-    setTaAgentRunId: (state, action: PayloadAction<string | undefined>) => {
-      state.taAgentRunId = action.payload;
-    },
-    setTaSessionId: (state, action: PayloadAction<string | undefined>) => {
-      state.taSessionId = action.payload;
-    },
-    setLoadingTaResponse: (
-      state,
-      action: PayloadAction<boolean | undefined>
-    ) => {
-      state.loadingTaResponse = action.payload;
-    },
     setDashboardAgentRunView: (
       state,
       action: PayloadAction<{
@@ -438,8 +398,13 @@ export const transcriptSlice = createSlice({
       state.dashboardScrollToBlockIdx = undefined;
       state.dashboardScrollToTranscriptIdx = undefined;
     },
-    setAllCitations: (state, action: PayloadAction<Citation[] | undefined>) => {
-      state.allCitations = action.payload;
+    setRunCitations: (
+      state,
+      action: PayloadAction<Record<string, Citation[]>>
+    ) => {
+      for (const [key, value] of Object.entries(action.payload)) {
+        state.allCitations[key] = value;
+      }
     },
     setHighlightedCitation: (
       state,
@@ -453,11 +418,17 @@ export const transcriptSlice = createSlice({
     setAgentRunSidebarTab: (state, action: PayloadAction<string>) => {
       state.agentRunSidebarTab = action.payload;
     },
-    setLeftSidebarOpen: (state, action: PayloadAction<boolean>) => {
-      state.leftSidebarOpen = action.payload;
+    setAgentRunLeftSidebarOpen: (state, action: PayloadAction<boolean>) => {
+      state.agentRunLeftSidebarOpen = action.payload;
     },
-    toggleLeftSidebar: (state) => {
-      state.leftSidebarOpen = !(state.leftSidebarOpen ?? false);
+    toggleAgentRunLeftSidebar: (state) => {
+      state.agentRunLeftSidebarOpen = !(state.agentRunLeftSidebarOpen ?? false);
+    },
+    setJudgeLeftSidebarOpen: (state, action: PayloadAction<boolean>) => {
+      state.judgeLeftSidebarOpen = action.payload;
+    },
+    toggleJudgeLeftSidebar: (state) => {
+      state.judgeLeftSidebarOpen = !(state.judgeLeftSidebarOpen ?? false);
     },
     setRightSidebarOpen: (state, action: PayloadAction<boolean>) => {
       state.rightSidebarOpen = action.payload;
@@ -471,7 +442,6 @@ export const transcriptSlice = createSlice({
 
 export const {
   setCurAgentRun,
-  setAltAgentRun,
   setActionsSummary,
   setLoadingActionsSummaryForTranscriptId,
   setActionsSummaryTaskId,
@@ -480,26 +450,24 @@ export const {
   setLoadingSolutionSummaryForTranscriptId,
   setSolutionSummaryTaskId,
   onFinishLoadingSolutionSummary,
-  setTaAgentRunId,
-  setTaSessionId,
-  setLoadingTaResponse,
   setDashboardAgentRunView,
   clearDashboardAgentRunView,
   resetTranscriptSlice,
-  setAllCitations,
+  setRunCitations,
   setHighlightedCitation,
   clearHighlightedCitation,
   setAgentRunSidebarTab,
-  setLeftSidebarOpen,
-  toggleLeftSidebar,
+  setAgentRunLeftSidebarOpen,
+  toggleAgentRunLeftSidebar,
+  setJudgeLeftSidebarOpen,
+  toggleJudgeLeftSidebar,
   setRightSidebarOpen,
   toggleRightSidebar,
 } = transcriptSlice.actions;
 
-// Memoized selectors to prevent unnecessary rerenders
-export const selectAllCitations = createAppSelector(
-  [(state) => state.transcript.allCitations],
-  (allCitations) => allCitations || []
-);
+export const selectRunCitationsById = (state: RootState, runId?: string) => {
+  if (!runId) return [] as Citation[];
+  return state.transcript.allCitations[runId] || [];
+};
 
 export default transcriptSlice.reducer;
