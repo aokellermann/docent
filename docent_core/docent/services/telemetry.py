@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from google.protobuf.json_format import MessageToDict
 from opentelemetry.proto.collector.trace.v1 import trace_service_pb2
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from docent._log_util import get_logger
@@ -72,6 +72,7 @@ class TelemetryService:
                 json_data=sanitized_json_data,
             )
         )
+        await self.session.commit()
         return telemetry_id
 
     async def update_telemetry_log_collection_id(self, telemetry_id: str, collection_id: str):
@@ -133,25 +134,26 @@ class TelemetryService:
             List[str]: List of agent run IDs that were successfully processed
         """
         # Atomically get agent runs that need processing and mark them as processing
-        agent_runs_needing_processing = await self.get_and_mark_agent_runs_for_processing(
-            collection_id
-        )
+        agent_run_versions = await self.get_and_mark_agent_runs_for_processing(collection_id)
 
-        if not agent_runs_needing_processing:
+        if not agent_run_versions:
             logger.info(f"No agent runs need processing for collection {collection_id}")
             return []
 
         logger.info(
-            f"Found and marked {len(agent_runs_needing_processing)} agent runs for processing in collection {collection_id}"
+            f"Found and marked {len(agent_run_versions)} agent runs for processing in collection {collection_id}"
         )
 
         # Process each agent run individually
         processed_count = 0
         successfully_processed_agent_run_ids: List[str] = []
+        successfully_processed_versions: dict[str, int] = {}
 
-        for agent_run_id in agent_runs_needing_processing:
+        for agent_run_id, current_version in agent_run_versions.items():
             try:
-                logger.info(f"Processing agent run {agent_run_id} in collection {collection_id}")
+                logger.info(
+                    f"Processing agent run {agent_run_id} (version {current_version}) in collection {collection_id}"
+                )
 
                 # Process this agent run (handles both new and existing agent runs)
                 success = await self._process_single_agent_run(
@@ -163,9 +165,10 @@ class TelemetryService:
                 if success:
                     processed_count += 1
                     successfully_processed_agent_run_ids.append(agent_run_id)
-                    logger.info(f"Successfully processed agent run {agent_run_id}")
-                    # Mark agent run as completed only on success
-                    await self._mark_agent_runs_as_completed(collection_id, {agent_run_id})
+                    successfully_processed_versions[agent_run_id] = current_version
+                    logger.info(
+                        f"Successfully processed agent run {agent_run_id} (version {current_version})"
+                    )
                 else:
                     logger.error(f"Failed to process agent run {agent_run_id}")
                     # Mark agent run as errored on failure
@@ -179,8 +182,12 @@ class TelemetryService:
                 logger.error(f"Error processing agent run {agent_run_id}: {str(e)}")
                 continue
 
+        # Mark all successfully processed agent runs as completed with their versions
+        if successfully_processed_versions:
+            await self._mark_agent_runs_as_completed(collection_id, successfully_processed_versions)
+
         logger.info(
-            f"Successfully processed {processed_count} out of {len(agent_runs_needing_processing)} agent runs in collection {collection_id}"
+            f"Successfully processed {processed_count} out of {len(agent_run_versions)} agent runs in collection {collection_id}"
         )
 
         # Track with analytics if available
@@ -191,7 +198,7 @@ class TelemetryService:
                     "telemetry_processing_completed",
                     properties={
                         "collection_id": collection_id,
-                        "agent_runs_attempted": len(agent_runs_needing_processing),
+                        "agent_runs_attempted": len(agent_run_versions),
                         "agent_runs_processed": processed_count,
                     },
                 )
@@ -199,6 +206,35 @@ class TelemetryService:
             logger.warning(f"Failed to track analytics event: {str(e)}")
 
         return successfully_processed_agent_run_ids
+
+    async def check_agent_run_needs_reprocessing(
+        self, collection_id: str, agent_run_id: str
+    ) -> bool:
+        """
+        Check if an agent run needs reprocessing by comparing current_version to processed_version.
+
+        Args:
+            collection_id: The collection ID
+            agent_run_id: The agent run ID
+
+        Returns:
+            True if the agent run needs reprocessing (current_version > processed_version)
+        """
+        result = await self.session.execute(
+            select(
+                SQLATelemetryAgentRunStatus.current_version,
+                SQLATelemetryAgentRunStatus.processed_version,
+            ).where(
+                SQLATelemetryAgentRunStatus.collection_id == collection_id,
+                SQLATelemetryAgentRunStatus.agent_run_id == agent_run_id,
+            )
+        )
+
+        row = result.first()
+        if not row:
+            return False
+
+        return row.current_version > row.processed_version
 
     async def _process_single_agent_run(
         self,
@@ -281,6 +317,7 @@ class TelemetryService:
                 logger.warning(f"No agent run created from spans for {agent_run_id}")
                 return False
 
+            # TODO(gregor): Use the original user who created the telemetry data instead of the processing user
             # Get or create default view context for this collection
             ctx = await self.mono_svc.get_default_view_ctx(collection_id, user)
             # Store the agent run in the database
@@ -707,15 +744,16 @@ class TelemetryService:
             else:
                 logger.error("Accumulation service not found, skipping accumulation")
 
-    async def get_and_mark_agent_runs_for_processing(self, collection_id: str) -> set[str]:
+    async def get_and_mark_agent_runs_for_processing(self, collection_id: str) -> dict[str, int]:
         """
         Atomically get agent runs that need processing and mark them as processing.
+        Returns both the agent run IDs and their current versions.
 
         Args:
             collection_id: The collection ID
 
         Returns:
-            Set of agent run IDs that were successfully marked as processing
+            Dictionary mapping agent_run_id to current_version for successfully marked agent runs
         """
 
         stmt = (
@@ -726,56 +764,120 @@ class TelemetryService:
                 SQLATelemetryAgentRunStatus.collection_id == collection_id,
             )
             .values(status=TelemetryAgentRunStatus.PROCESSING.value)
-            .returning(SQLATelemetryAgentRunStatus.agent_run_id)
+            .returning(
+                SQLATelemetryAgentRunStatus.agent_run_id,
+                SQLATelemetryAgentRunStatus.current_version,
+            )
         )
 
         # Log the SQL query for debugging
         logger.info(f"SQL Query: {stmt.compile(compile_kwargs={'literal_binds': True})}")
 
         result = await self.session.execute(stmt)
-        agent_run_ids = set(result.scalars().all())
+        rows = result.fetchall()
+
+        agent_run_versions = {row.agent_run_id: row.current_version for row in rows}
 
         logger.info(
-            f"Atomically marked {len(agent_run_ids)} agent runs as processing in collection {collection_id}"
+            f"Atomically marked {len(agent_run_versions)} agent runs as processing in collection {collection_id}"
         )
-        return agent_run_ids
+        return agent_run_versions
+
+    async def has_remaining_work(self, collection_id: str) -> bool:
+        """
+        Check if there are agent runs that still need processing for a collection.
+        An agent run needs processing if it has status NEEDS_PROCESSING OR if its current_version > processed_version.
+
+        Args:
+            collection_id: The collection ID to check
+
+        Returns:
+            True if there are agent runs that need processing, False otherwise
+        """
+        stmt = (
+            select(SQLATelemetryAgentRunStatus.agent_run_id)
+            .where(
+                SQLATelemetryAgentRunStatus.collection_id == collection_id,
+                or_(
+                    SQLATelemetryAgentRunStatus.status
+                    == TelemetryAgentRunStatus.NEEDS_PROCESSING.value,
+                    SQLATelemetryAgentRunStatus.current_version
+                    > SQLATelemetryAgentRunStatus.processed_version,
+                ),
+            )
+            .limit(1)
+        )
+
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none() is not None
+
+    async def ensure_telemetry_processing_for_collection(
+        self, collection_id: str, user: User
+    ) -> str | None:
+        """
+        Check if a collection has remaining telemetry work and queue a job if needed.
+        This combines the logic of checking for remaining work and queueing a job.
+
+        Args:
+            collection_id: The collection ID to check and potentially process
+            user: The user who initiated the check
+
+        Returns:
+            The job ID if a job was created and enqueued, None if no work was found or job already exists
+        """
+
+        # Check if there's remaining work
+        has_work = await self.has_remaining_work(collection_id)
+
+        if not has_work:
+            logger.debug(f"No remaining telemetry work for collection {collection_id}")
+            return None
+
+        # No existing job and there's work to do, create and enqueue a job
+        logger.info(
+            f"Found remaining telemetry work for collection {collection_id}, queueing processing job"
+        )
+        return await self.mono_svc.add_and_enqueue_telemetry_processing_job(collection_id, user)
 
     async def _mark_agent_runs_as_completed(
-        self, collection_id: str, agent_run_ids: set[str]
+        self, collection_id: str, agent_run_versions: dict[str, int]
     ) -> None:
         """
         Mark agent runs as completed after successful processing.
+        Updates the processed_version to match the version that was processed.
         Only mark as completed if currently processing to prevent the case where new data arrives while agent runs are being processed.
 
         Args:
             collection_id: The collection ID
-            agent_run_ids: Set of agent run IDs to mark as completed
+            agent_run_versions: Dictionary mapping agent_run_id to the version that was processed
         """
-        if not agent_run_ids:
+        if not agent_run_versions:
             return
 
-        # Only mark as completed if currently processing
-        update_stmt = (
-            update(SQLATelemetryAgentRunStatus)
-            .where(
-                SQLATelemetryAgentRunStatus.agent_run_id.in_(list(agent_run_ids)),
-                SQLATelemetryAgentRunStatus.collection_id == collection_id,
-                SQLATelemetryAgentRunStatus.status == TelemetryAgentRunStatus.PROCESSING.value,
+        # Update each agent run individually to set the correct processed_version
+        for agent_run_id, processed_version in agent_run_versions.items():
+            update_stmt = (
+                update(SQLATelemetryAgentRunStatus)
+                .where(
+                    SQLATelemetryAgentRunStatus.agent_run_id == agent_run_id,
+                    SQLATelemetryAgentRunStatus.collection_id == collection_id,
+                    SQLATelemetryAgentRunStatus.status == TelemetryAgentRunStatus.PROCESSING.value,
+                )
+                .values(
+                    status=TelemetryAgentRunStatus.COMPLETED.value,
+                    processed_version=processed_version,
+                )
             )
-            .values(status=TelemetryAgentRunStatus.COMPLETED.value)
-        )
 
-        result = await self.session.execute(update_stmt)
-        updated_count = result.rowcount
-
-        if updated_count > 0:
-            logger.info(
-                f"Marked {updated_count} agent runs as completed in collection {collection_id}"
-            )
-        else:
-            logger.warning(
-                f"No agent runs were marked as completed in collection {collection_id} (they may have been marked for reprocessing by new data)"
-            )
+            result = await self.session.execute(update_stmt)
+            if result.rowcount > 0:
+                logger.info(
+                    f"Marked agent run {agent_run_id} as completed with processed_version {processed_version}"
+                )
+            else:
+                logger.warning(
+                    f"Agent run {agent_run_id} was not marked as completed (may have been marked for reprocessing by new data)"
+                )
 
     async def _mark_agent_runs_as_errored(
         self, collection_id: str, agent_run_ids: set[str], error_message: str | None = None
@@ -899,8 +1001,11 @@ class TelemetryService:
 
         # Handle transcript groups
         if transcript_group_data:
-            for sqla_transcript_group in transcript_group_data:
-
+            # Sort transcript groups to ensure parent groups come before children
+            sorted_transcript_group_data = self._sort_transcript_groups_by_parent_order(
+                transcript_group_data
+            )
+            for sqla_transcript_group in sorted_transcript_group_data:
                 # Use merge to handle both insert and update
                 await self.session.merge(sqla_transcript_group)
                 logger.debug(
@@ -1208,10 +1313,6 @@ class TelemetryService:
                 for i, span in enumerate(transcript_spans):
                     span_attrs = span.get("attributes", {})
                     logger.debug(f"    Span {i}: attributes={list(span_attrs.keys())}")
-                    if "gen_ai" in str(span_attrs):
-                        logger.debug(f"    Span {i}: contains gen_ai data")
-                    else:
-                        logger.debug(f"    Span {i}: no gen_ai data found")
 
                 # Extract metadata and scores from spans
                 for span in transcript_spans:
@@ -1235,8 +1336,12 @@ class TelemetryService:
                     # Extract model from span attributes
                     span_attrs = span.get("attributes", {})
                     if not agent_run_model and "gen_ai.response.model" in span_attrs:
-                        agent_run_model = span_attrs["gen_ai.response.model"]
-                        logger.info(f"    Found model: {agent_run_model}")
+                        llm_request_type = (
+                            span_attrs.get("llm", {}).get("request", {}).get("type", None)
+                        )
+                        if llm_request_type != "embedding":
+                            agent_run_model = span_attrs["gen_ai.response.model"]
+                            logger.info(f"    Found model: {agent_run_model}")
 
                 # Create transcripts from spans
                 transcripts_list = self._create_transcripts_from_spans(transcript_spans)

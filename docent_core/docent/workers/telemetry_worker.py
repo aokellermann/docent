@@ -21,8 +21,7 @@ async def telemetry_processing_job(ctx: ViewContext, job: SQLAJob) -> None:
     """
     Process agent runs that need processing.
 
-    This job processes all agent runs that need processing for a collection,
-    handling race conditions and ensuring data consistency.
+    This job processes agent runs once and queues a new job if there's more work.
     """
     try:
         # Get job parameters
@@ -52,43 +51,34 @@ async def telemetry_processing_job(ctx: ViewContext, job: SQLAJob) -> None:
         lock = redis_client.lock(f"telemetry_collection_lock_{collection_id}", timeout=0)
         try:
             async with lock:
-                # Continue processing agent runs as long as there are new ones to process
-                total_processed = 0
-                iteration = 0
-
-                while True:
-                    iteration += 1
-                    logger.info(
-                        f"Telemetry processing iteration {iteration} for collection {collection_id}"
+                # Process agent runs once
+                async with mono_svc.db.session() as session:
+                    telemetry_svc = TelemetryService(session, mono_svc)
+                    processed_agent_run_ids = await telemetry_svc.process_agent_runs_for_collection(
+                        collection_id, user
                     )
 
-                    async with mono_svc.db.session() as session:
-                        telemetry_svc = TelemetryService(session, mono_svc)
-                        processed_agent_run_ids = (
-                            await telemetry_svc.process_agent_runs_for_collection(
-                                collection_id, user
-                            )
-                        )
-
-                    if not processed_agent_run_ids:
-                        logger.info(
-                            f"No more agent runs to process for collection {collection_id} after {iteration} iterations"
-                        )
-                        break
-
-                    total_processed += len(processed_agent_run_ids)
+                if processed_agent_run_ids:
                     logger.info(
-                        f"Processed {len(processed_agent_run_ids)} agent runs in iteration {iteration}, total: {total_processed}"
+                        f"Processed {len(processed_agent_run_ids)} agent runs for collection {collection_id}"
                     )
+                else:
+                    logger.info(f"No agent runs to process for collection {collection_id}")
 
-                    # Small delay to prevent tight loops and allow for any new data to arrive
-                    import asyncio
-
-                    await asyncio.sleep(1)
-
-                logger.info(
-                    f"Completed telemetry processing for collection {collection_id}: {total_processed} agent runs processed in {iteration} iterations"
+            # Check if there's more work and queue a new job if needed
+            async with mono_svc.db.session() as session:
+                telemetry_svc = TelemetryService(session, mono_svc)
+                new_job_id = await telemetry_svc.ensure_telemetry_processing_for_collection(
+                    collection_id, user
                 )
+
+            if new_job_id:
+                logger.info(
+                    f"More work found for collection {collection_id}, queued new job {new_job_id}"
+                )
+            else:
+                logger.info(f"No more work for collection {collection_id}")
+
         except LockError:
             logger.info(f"Collection {collection_id} is already being processed, skipping")
             return

@@ -3,13 +3,20 @@ from fastapi.responses import JSONResponse
 
 from docent._log_util import get_logger
 from docent_core._server._analytics.posthog import AnalyticsClient
-from docent_core.docent.db.schemas.auth_models import User
+from docent_core.docent.db.schemas.auth_models import Permission, User
 from docent_core.docent.server.dependencies.analytics import use_posthog_user_context
+from docent_core.docent.server.dependencies.database import require_collection_exists
+from docent_core.docent.server.dependencies.permissions import require_collection_permission
 from docent_core.docent.server.dependencies.services import (
+    get_mono_svc,
     get_telemetry_accumulation_service,
     get_telemetry_service,
 )
-from docent_core.docent.server.dependencies.user import get_authenticated_user
+from docent_core.docent.server.dependencies.user import (
+    get_authenticated_user,
+    get_user_anonymous_ok,
+)
+from docent_core.docent.services.monoservice import MonoService
 from docent_core.docent.services.telemetry import TelemetryService
 from docent_core.docent.services.telemetry_accumulation import TelemetryAccumulationService
 
@@ -450,3 +457,37 @@ async def add_transcript_group_metadata_endpoint(
     except Exception as e:
         logger.error(f"Error adding transcript group metadata: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@telemetry_router.post("/{collection_id}/ensure-telemetry-processing")
+async def ensure_telemetry_processing(
+    collection_id: str = Depends(require_collection_exists),
+    user: User = Depends(get_user_anonymous_ok),
+    mono_svc: MonoService = Depends(get_mono_svc),
+    _: None = Depends(require_collection_permission(Permission.READ)),
+):
+    """
+    Ensure telemetry processing is queued for a collection if there's remaining work.
+    This endpoint is called when a user accesses a collection to trigger background processing.
+    """
+    logger.info(
+        f"ensure_telemetry_processing endpoint called for collection {collection_id} by user {user.email}"
+    )
+    try:
+        from docent_core.docent.services.telemetry import TelemetryService
+
+        async with mono_svc.db.session() as session:
+            telemetry_svc = TelemetryService(session, mono_svc)
+            job_id = await telemetry_svc.ensure_telemetry_processing_for_collection(
+                collection_id, user
+            )
+
+            if job_id:
+                logger.info(
+                    f"Triggered telemetry processing job {job_id} for collection {collection_id}"
+                )
+            else:
+                logger.debug(f"No telemetry processing needed for collection {collection_id}")
+
+    except Exception as e:
+        logger.error(f"Failed to ensure telemetry processing for collection {collection_id}: {e}")

@@ -159,5 +159,6 @@ def run():
             "redis_settings": redis_settings,
             "queue_name": WORKER_QUEUE_NAME,
             "max_jobs": 1,  # per worker
+            "job_timeout": 10 * 60,  # 10 minutes
         }
     )

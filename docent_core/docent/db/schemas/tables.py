@@ -180,6 +180,10 @@ class SQLATelemetryAgentRunStatus(SQLABase):
     # Optional metadata about the processing (e.g., error messages, processing notes)
     metadata_json = mapped_column(JSONB, nullable=True)
 
+    # Version tracking for dirty-bit scheduler pattern
+    current_version = mapped_column(Integer, nullable=False, default=0)
+    processed_version = mapped_column(Integer, nullable=False, default=0)
+
     __table_args__ = (
         # Ensure one status record per agent run
         UniqueConstraint("agent_run_id", name="uq_telemetry_agent_run_status_agent_run_id"),

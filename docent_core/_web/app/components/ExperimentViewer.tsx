@@ -37,6 +37,7 @@ import {
   collectionApi,
 } from '../api/collectionApi';
 import { useHasCollectionWritePermission } from '@/lib/permissions/hooks';
+import { INTERNAL_BASE_URL } from '@/app/constants';
 
 // Constants for magic numbers
 const PAGINATION_LIMIT = 100;
@@ -157,6 +158,25 @@ export default function ExperimentViewer({
   useEffect(() => {
     fetchedAgentRunIdsRef.current.clear();
   }, [agentRunIds]);
+
+  useEffect(() => {
+    if (!collectionId) return;
+
+    const ensureTelemetryProcessing = async () => {
+      try {
+        const telemetryUrl = `${INTERNAL_BASE_URL}/rest/telemetry/${collectionId}/ensure-telemetry-processing`;
+
+        fetch(telemetryUrl, {
+          method: 'POST',
+          credentials: 'include',
+        });
+      } catch (error) {
+        console.error(error);
+      }
+    };
+
+    ensureTelemetryProcessing();
+  }, [collectionId]);
 
   useEffect(() => {
     if (agentRunIds && totalPages > 0 && currentPage > totalPages) {

@@ -573,12 +573,14 @@ class TelemetryAccumulationService:
 
         # Use PostgreSQL's ON CONFLICT to handle upserts atomically
         # Always mark as needs_processing regardless of current status
+        # Increment current_version to indicate new data has arrived
         stmt = insert(SQLATelemetryAgentRunStatus).values(status_records)
         stmt = stmt.on_conflict_do_update(
             index_elements=["agent_run_id"],
             set_={
                 "status": TelemetryAgentRunStatus.NEEDS_PROCESSING.value,
                 "metadata_json": None,  # Clear any retry/error metadata
+                "current_version": SQLATelemetryAgentRunStatus.current_version + 1,
             },
         )
 

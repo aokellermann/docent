@@ -3,7 +3,6 @@ import contextvars
 import itertools
 import logging
 import os
-import signal
 import sys
 import threading
 import uuid
@@ -158,6 +157,7 @@ class DocentTracer:
             lambda: itertools.count(0)
         )
         self._transcript_counter_lock = threading.Lock()
+        self._flush_lock = threading.Lock()
 
     def get_current_agent_run_id(self) -> Optional[str]:
         """
@@ -179,14 +179,6 @@ class DocentTracer:
         # Register atexit handler
         atexit.register(self.cleanup)
 
-        # Register signal handlers for graceful shutdown
-        try:
-            signal.signal(signal.SIGINT, self._signal_handler)
-            signal.signal(signal.SIGTERM, self._signal_handler)
-        except (ValueError, OSError):
-            # Signal handlers might not work in all environments
-            pass
-
         self._cleanup_registered = True
 
     def _next_span_order(self, transcript_id: str) -> int:
@@ -196,10 +188,6 @@ class DocentTracer:
         """
         with self._transcript_counter_lock:
             return next(self._transcript_counters[transcript_id])
-
-    def _signal_handler(self, signum: int, frame: Optional[object]):
-        """Handle shutdown signals."""
-        self.cleanup()
 
     def _init_spans_exporter(self, endpoint: str) -> Optional[Union[HTTPExporter, GRPCExporter]]:
         """Initialize the appropriate span exporter based on endpoint."""
@@ -211,9 +199,11 @@ class DocentTracer:
                 http_exporter: HTTPExporter = HTTPExporter(
                     endpoint=f"{endpoint}/v1/traces", headers=self.headers
                 )
+                logger.debug(f"Initialized HTTP exporter for endpoint: {endpoint}/v1/traces")
                 return http_exporter
             else:
                 grpc_exporter: GRPCExporter = GRPCExporter(endpoint=endpoint, headers=self.headers)
+                logger.debug(f"Initialized gRPC exporter for endpoint: {endpoint}")
                 return grpc_exporter
         except Exception as e:
             logger.error(f"Failed to initialize span exporter for {endpoint}: {e}")
@@ -239,9 +229,11 @@ class DocentTracer:
         """Create appropriate span processor based on configuration."""
         if self.disable_batch or _is_notebook():
             simple_processor: SimpleSpanProcessor = SimpleSpanProcessor(exporter)
+            logger.debug("Created SimpleSpanProcessor for immediate export")
             return simple_processor
         else:
             batch_processor: BatchSpanProcessor = BatchSpanProcessor(exporter)
+            logger.debug("Created BatchSpanProcessor for batched export")
             return batch_processor
 
     def initialize(self):
@@ -310,8 +302,19 @@ class DocentTracer:
                         # attributes not available, skip them
                         pass
 
+                    # Debug logging for span creation
+                    span_name = getattr(span, "name", "unknown")
+                    span_attrs = getattr(span, "attributes", {})
+                    logger.debug(
+                        f"Created span: name='{span_name}', collection_id={self.manager.collection_id}, agent_run_id={span_attrs.get('agent_run_id')}, transcript_id={span_attrs.get('transcript_id')}"
+                    )
+
                 def on_end(self, span: ReadableSpan) -> None:
-                    pass
+                    # Debug logging for span completion
+                    span_attrs = span.attributes or {}
+                    logger.debug(
+                        f"Completed span: name='{span.name}', collection_id={span_attrs.get('collection_id')}, agent_run_id={span_attrs.get('agent_run_id')}, transcript_id={span_attrs.get('transcript_id')}, duration_ns={span.end_time - span.start_time if span.end_time and span.start_time else 'unknown'}"
+                    )
 
                 def shutdown(self) -> None:
                     pass
@@ -422,15 +425,8 @@ class DocentTracer:
             return
 
         try:
-            # Notify backend that trace is done (no span creation)
-            try:
-                self._send_trace_done()
-            except Exception as e:
-                logger.warning(f"Failed to notify trace done: {e}")
+            self.flush()
 
-            self._root_context = None  # type: ignore
-
-            # Shutdown our isolated tracer provider
             if self._tracer_provider:
                 self._tracer_provider.shutdown()
                 self._tracer_provider = None
@@ -456,9 +452,12 @@ class DocentTracer:
             return
 
         try:
-            for processor in self._spans_processors:
+            logger.debug(f"Flushing {len(self._spans_processors)} span processors")
+            for i, processor in enumerate(self._spans_processors):
                 if hasattr(processor, "force_flush"):
-                    processor.force_flush()
+                    logger.debug(f"Flushing span processor {i}")
+                    processor.force_flush(timeout_millis=50)
+            logger.debug("Span flush completed")
         except Exception as e:
             logger.error(f"Error during flush: {e}")
 
@@ -475,29 +474,6 @@ class DocentTracer:
     def verify_initialized(self) -> bool:
         """Verify if the manager is properly initialized."""
         return self._initialized
-
-    def __enter__(self) -> "DocentTracer":
-        """Context manager entry."""
-        self.initialize()
-        return self
-
-    def __exit__(self, exc_type: type[BaseException], exc_val: Any, exc_tb: Any) -> None:
-        """Context manager exit."""
-        self.close()
-
-    @property
-    def tracer(self) -> Optional[trace.Tracer]:
-        """Get the tracer instance."""
-        if not self._initialized:
-            self.initialize()
-        return self._tracer
-
-    @property
-    def root_context(self) -> Optional[Context]:
-        """Get the root context."""
-        if not self._initialized:
-            self.initialize()
-        return self._root_context
 
     @contextmanager
     def agent_run_context(
@@ -617,13 +593,15 @@ class DocentTracer:
         Get the API headers for HTTP requests.
 
         Returns:
-            Dictionary of headers including Authorization
+            Dictionary of headers including Authorization if set
         """
+        headers = {"Content-Type": "application/json"}
 
-        return {
-            "Content-Type": "application/json",
-            "Authorization": self.headers.get("Authorization", ""),
-        }
+        authorization = self.headers.get("Authorization")
+        if authorization:
+            headers["Authorization"] = authorization
+
+        return headers
 
     def _post_json(self, path: str, data: Dict[str, Any]) -> None:
         if not self._api_endpoint_base:
@@ -1157,7 +1135,10 @@ def close_tracing() -> None:
 def flush_tracing() -> None:
     """Force flush all spans to exporters."""
     if _global_tracer:
+        logger.debug("Flushing global tracer")
         _global_tracer.flush()
+    else:
+        logger.debug("No global tracer available to flush")
 
 
 def verify_initialized() -> bool:

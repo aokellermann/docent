@@ -42,6 +42,9 @@ from docent_core.docent.db.schemas.auth_models import (
     User,
 )
 from docent_core.docent.db.schemas.chart import SQLAChart
+from docent_core.docent.db.schemas.chat import SQLAChatSession
+from docent_core.docent.db.schemas.refinement import SQLARefinementAgentSession
+from docent_core.docent.db.schemas.rubric import SQLAJudgeResult, SQLARubric
 from docent_core.docent.db.schemas.tables import (
     EMBEDDING_DIM,
     TABLE_TRANSCRIPT_EMBEDDING,
@@ -240,6 +243,26 @@ class MonoService:
                 )
             )
 
+        # delete all chat_sessions for agent runs in this collection
+        async with self.db.session() as session:
+            await session.execute(
+                delete(SQLAChatSession).where(
+                    SQLAChatSession.agent_run_id.in_(
+                        select(SQLAAgentRun.id).where(SQLAAgentRun.collection_id == collection_id)
+                    )
+                )
+            )
+
+        # delete judge_results for agent runs in this collection
+        async with self.db.session() as session:
+            await session.execute(
+                delete(SQLAJudgeResult).where(
+                    SQLAJudgeResult.agent_run_id.in_(
+                        select(SQLAAgentRun.id).where(SQLAAgentRun.collection_id == collection_id)
+                    )
+                )
+            )
+
         # Delete all agent runs
         async with self.db.session() as session:
             await session.execute(
@@ -276,6 +299,22 @@ class MonoService:
         # Delete charts
         async with self.db.session() as session:
             await session.execute(delete(SQLAChart).where(SQLAChart.collection_id == collection_id))
+
+        # Delete all refinement agent sessions for rubrics in this collection
+        async with self.db.session() as session:
+            await session.execute(
+                delete(SQLARefinementAgentSession).where(
+                    SQLARefinementAgentSession.rubric_id.in_(
+                        select(SQLARubric.id).where(SQLARubric.collection_id == collection_id)
+                    )
+                )
+            )
+
+        # Delete all rubrics for this collection
+        async with self.db.session() as session:
+            await session.execute(
+                delete(SQLARubric).where(SQLARubric.collection_id == collection_id)
+            )
 
         # Finally delete the collection
         async with self.db.session() as session:
@@ -1063,7 +1102,7 @@ class MonoService:
     async def add_telemetry_processing_job(self, collection_id: str, user: User) -> str | None:
         """
         Adds a telemetry processing job for the given collection.
-        Only adds the job if there isn't already a pending or processing job for this collection.
+        Only adds the job if there isn't already a pending job for this collection.
 
         Args:
             collection_id: The collection ID to process
@@ -1073,11 +1112,11 @@ class MonoService:
             The job ID if created, None if job already exists
         """
         async with self.db.session() as session:
-            # Check if there's already a pending or processing job for this collection
+            # Check if there's already a pending job for this collection
             existing_job_query = select(SQLAJob).where(
                 SQLAJob.type == "telemetry_processing_job",
                 SQLAJob.job_json.contains({"collection_id": collection_id}),
-                SQLAJob.status.in_([JobStatus.PENDING, JobStatus.RUNNING]),
+                SQLAJob.status.in_([JobStatus.PENDING]),
             )
 
             existing_job_result = await session.execute(existing_job_query)
@@ -1114,7 +1153,7 @@ class MonoService:
     ) -> str | None:
         """
         Adds a telemetry processing job for the given collection and enqueues it to Redis.
-        Only adds the job if there isn't already a pending or processing job for this collection.
+        Only adds the job if there isn't already a pending job for this collection.
 
         Args:
             collection_id: The collection ID to process
