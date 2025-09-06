@@ -28,6 +28,7 @@ nav:
   - Get support: support.md
   - Tutorials:
       - tutorials/search_and_clustering.md
+      - tutorials/logging_agent_runs.md
   - Core Concepts:
       - Data Models:
           - concepts/data_models/agent_run.md

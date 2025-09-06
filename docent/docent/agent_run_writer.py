@@ -60,7 +60,7 @@ class AgentRunWriter:
         api_key: str,
         collection_id: str,
         server_url: str = "https://api.docent.transluce.org",
-        num_workers: int = 1,
+        num_workers: int = 2,
         queue_maxsize: int = 20_000,
         request_timeout: float = 30.0,
         flush_interval: float = 1.0,
@@ -228,7 +228,7 @@ class AgentRunWriter:
 
 
 def init(
-    run_name: str = "Agent Run Collection",
+    collection_name: str = "Agent Run Collection",
     collection_id: str | None = None,
     server_url: str = "https://api.docent.transluce.org",
     web_url: str = "https://docent.transluce.org",
@@ -237,7 +237,7 @@ def init(
     """Initialize the AgentRunWriter thread.
 
     Args:
-        run_name (str): Name of the agent run collection.
+        collection_name (str): Name of the agent run collection.
         collection_id (str): ID of the agent run collection.
         server_url (str): URL of the Docent server.
         web_url (str): URL of the Docent web UI.
@@ -257,7 +257,7 @@ def init(
         api_key=api_key,
     )
 
-    collection_id = collection_id or sdk.create_collection(name=run_name)
+    collection_id = collection_id or sdk.create_collection(name=collection_name)
 
     return AgentRunWriter(
         api_key=api_key,
