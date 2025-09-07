@@ -9,7 +9,7 @@ from redis.exceptions import LockError
 
 from docent._log_util import get_logger
 from docent_core._server._broker.redis_client import get_redis_client
-from docent_core._worker.worker import JOB_TIMEOUT_SECONDS
+from docent_core._worker.constants import JOB_TIMEOUT_SECONDS
 from docent_core.docent.db.contexts import ViewContext
 from docent_core.docent.db.schemas.tables import SQLAJob
 from docent_core.docent.services.monoservice import MonoService
