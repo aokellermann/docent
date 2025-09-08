@@ -1,7 +1,6 @@
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from pydantic import ValidationError
 from sqlalchemy import (
     Boolean,
     DateTime,
@@ -45,7 +44,7 @@ class SQLARubric(SQLABase):
     )
 
     rubric_text: Mapped[str] = mapped_column(Text, nullable=False)
-    judge_model: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    judge_model: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
     # Follows https://json-schema.org standard
     output_schema: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
@@ -90,19 +89,12 @@ class SQLARubric(SQLABase):
             version=rubric.version,
             collection_id=collection_id,
             rubric_text=rubric.rubric_text,
-            judge_model=rubric.judge_model.model_dump() if rubric.judge_model else None,
+            judge_model=rubric.judge_model.model_dump(),
             output_schema=rubric.output_schema,
         )
 
     def to_pydantic(self) -> Rubric:
-        if self.judge_model is None:
-            jm = None
-        else:
-            try:
-                jm = ModelOption.model_validate(self.judge_model)
-            except ValidationError:
-                logger.warning(f"Unable to parse judge model from database: {self.judge_model}")
-                jm = None
+        jm = ModelOption.model_validate(self.judge_model)
 
         return Rubric(
             id=self.id,

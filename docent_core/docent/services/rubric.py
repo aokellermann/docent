@@ -256,13 +256,12 @@ class RubricService:
         else:
             api_key_overrides = await self.service.get_api_key_overrides(user.id)
 
-        if rubric.judge_model is not None:
-            is_default = rubric.judge_model in PROVIDER_PREFERENCES.default_judge_models
-            if not is_default and not api_key_overrides.get(rubric.judge_model.provider):
-                raise ValueError(
-                    f"Rubric {rubric.id} uses a non-default model {rubric.judge_model.model_name} "
-                    f"but no API key override was provided for provider {rubric.judge_model.provider}"
-                )
+        is_default = rubric.judge_model in PROVIDER_PREFERENCES.default_judge_models
+        if not is_default and not api_key_overrides.get(rubric.judge_model.provider):
+            raise ValueError(
+                f"Rubric {rubric.id} uses a non-default model {rubric.judge_model.model_name} "
+                f"but no API key override was provided for provider {rubric.judge_model.provider}"
+            )
 
         return await evaluate_rubric(
             agent_runs,

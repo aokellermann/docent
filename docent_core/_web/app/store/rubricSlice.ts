@@ -11,7 +11,7 @@ export interface Rubric {
   id: string;
   version: number;
   rubric_text: string;
-  judge_model: JudgeModel | null;
+  judge_model: JudgeModel;
   output_schema: Record<string, any>;
 }
 

@@ -46,6 +46,8 @@ DEFAULT_OUTPUT_SCHEMA = {
     },
 }
 
+DEFAULT_JUDGE_MODEL = PROVIDER_PREFERENCES.default_judge_models[0]
+
 
 def _schema_requests_citations(schema: dict[str, Any]) -> bool:
     """Check if any field in the schema requests citations by having 'citations': 'true'."""
@@ -70,7 +72,7 @@ class Rubric(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     version: int = 1
     rubric_text: str
-    judge_model: ModelOption | None = None
+    judge_model: ModelOption = DEFAULT_JUDGE_MODEL
     output_schema: dict[str, Any] = DEFAULT_OUTPUT_SCHEMA
 
 
@@ -254,7 +256,7 @@ async def evaluate_rubric(
 
     outputs = await get_llm_completions_async(
         prompt_resolvers,
-        get_model_options_for_rubric(rubric, max_recall),
+        [rubric.judge_model],
         max_new_tokens=8192,
         timeout=180.0,
         use_cache=True,
@@ -301,15 +303,3 @@ Your job is to find concrete examples of behavior in this agent run that might b
 Your output MUST adhere to the following schema:
 {output_schema}
 """
-
-
-def get_model_options_for_rubric(rubric: Rubric, max_recall: bool) -> list[ModelOption]:
-    if rubric.judge_model is not None:
-        # If the user asked for a specific model, we shouldn't silently fall back to another one
-        return [rubric.judge_model]
-    else:
-        return (
-            PROVIDER_PREFERENCES.evaluate_rubric_max_recall
-            if max_recall
-            else PROVIDER_PREFERENCES.evaluate_rubric
-        )

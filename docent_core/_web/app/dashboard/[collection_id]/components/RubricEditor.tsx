@@ -409,8 +409,9 @@ export default function RubricEditor({
                           const selected = availableJudgeModels?.find(
                             (jm) => nameJudgeModel(jm) === value
                           );
+                          if (!selected) return;
                           updateRubric({
-                            judge_model: selected || null,
+                            judge_model: selected,
                           });
                         }}
                         disabled={isDisabled}
@@ -419,9 +420,6 @@ export default function RubricEditor({
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="Default" className="text-xs">
-                            Default
-                          </SelectItem>
                           {availableJudgeModels?.map((jm) => (
                             <SelectItem
                               key={nameJudgeModel(jm)}

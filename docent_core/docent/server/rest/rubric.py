@@ -207,13 +207,9 @@ async def start_eval_rubric_job(
     job_id = await rubric_svc.start_or_get_eval_rubric_job(ctx, rubric_id, max_results)
 
     # Check if user has a custom API key (just for analytics purposes)
-    is_byok = False
-    if jm := sqla_rubric.judge_model:
-        if ctx.user:
-            overrides = await mono_svc.get_api_key_overrides(ctx.user.id)
-            is_byok = jm.get("provider") in overrides
-        else:
-            is_byok = False
+    if ctx.user:
+        overrides = await mono_svc.get_api_key_overrides(ctx.user.id)
+        is_byok = sqla_rubric.judge_model.get("provider") in overrides
     else:
         is_byok = False
 
