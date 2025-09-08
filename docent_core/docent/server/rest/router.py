@@ -27,7 +27,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.inspection import inspect as sqla_inspect
 
 from docent._log_util.logger import get_logger
-from docent.data_models.agent_run import AgentRun
+from docent.data_models.agent_run import AgentRun, FilterableField
 from docent.data_models.transcript import fake_model_dump
 from docent.loaders import load_inspect
 from docent_core._server._analytics.posthog import AnalyticsClient
@@ -571,14 +571,19 @@ async def agent_run_metadata_fields(
     mono_svc: MonoService = Depends(get_mono_svc),
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.READ)),
-):
-    # Get any agent_run to get the metadata fields
-    any_data = await mono_svc.get_any_agent_run(ctx)
-    if any_data is not None:
-        fields = any_data.get_filterable_fields()
-    else:
-        fields = []
+) -> dict[str, list[FilterableField]]:
+    # Get up to 20 agent runs to get the union of metadata fields
+    agent_runs = await mono_svc.get_agent_runs(ctx, _limit=20)
 
+    # Collect all unique filterable fields from all runs
+    all_fields: dict[str, FilterableField] = {}
+    for run in agent_runs:
+        for field in run.get_filterable_fields():
+            # Use field name as key to ensure uniqueness
+            all_fields[field["name"]] = field
+
+    # Convert to sorted list
+    fields = sorted(all_fields.values(), key=lambda f: f["name"])
     return {"fields": fields}
 
 

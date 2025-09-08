@@ -588,13 +588,6 @@ class MonoService:
         assert len(agent_runs) <= 1, f"Found {len(agent_runs)} AgentRuns with ID {agent_run_id}"
         return agent_runs[0] if agent_runs else None
 
-    async def get_any_agent_run(self, ctx: ViewContext) -> AgentRun | None:
-        """
-        Get an arbitrary AgentRun from the database for a given Collection ID.
-        """
-        agent_runs = await self.get_agent_runs(ctx, _limit=1)
-        return agent_runs[0] if agent_runs else None
-
     async def get_unique_field_values(
         self, ctx: ViewContext, field_name: str, search: str | None = None, limit: int = 100
     ) -> list[str]:
