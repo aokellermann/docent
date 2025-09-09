@@ -3,6 +3,8 @@ name = "docent-core"
 version = "0.1.0-alpha"
 description = "Docent core"
 classifiers = ["Private :: Do Not Upload"]
+license = "Apache-2.0"
+license-files = ["LICENSE.md"]
 
 requires-python = ">=3.11"
 dependencies = [

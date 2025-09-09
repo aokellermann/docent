@@ -5,7 +5,7 @@ version = "0.1.13-alpha"
 authors = [
   { name="Transluce", email="info@transluce.org" },
 ]
-license = "MIT"
+license = "Apache-2.0"
 license-files = ["LICENSE.md"]
 
 requires-python = ">=3.11"

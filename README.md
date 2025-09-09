@@ -1,7 +1,7 @@
 ## Docent helps summarize, cluster, and search over agent transcripts
 
 <p align="center">
-  <a href="https://www.apache.org/licenses/LICENSE-2.0"><img alt="License: Apache 2.0" src="https://img.shields.io/github/license/saltstack/salt"/></a>
+  <a href="https://www.apache.org/licenses/LICENSE-2.0"><img alt="License: Apache 2.0" src="https://img.shields.io/github/license/TransluceAI/docent"/></a>
   <a href='https://github.com/TransluceAI/docent/pulls'><img alt='PRs Welcome' src='https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=shields'/></a>
   <img alt="GitHub commit activity" src="https://img.shields.io/github/commit-activity/m/TransluceAI/docent"/>
   <img alt="GitHub closed issues" src="https://img.shields.io/github/issues-closed/TransluceAI/docent"/>
