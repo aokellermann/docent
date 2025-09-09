@@ -8,6 +8,7 @@ from uuid import uuid4
 from google.protobuf.json_format import MessageToDict
 from opentelemetry.proto.collector.trace.v1 import trace_service_pb2
 from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from docent._log_util import get_logger
@@ -399,13 +400,18 @@ class TelemetryService:
         """
         try:
             if not await self.mono_svc.collection_exists(collection_id):
-                await self.mono_svc.create_collection(
-                    user=user,
-                    collection_id=collection_id,
-                    name=collection_name,
-                    description="",
-                )
-                logger.info(f"Created collection {collection_id} with name: {collection_name}")
+                try:
+                    await self.mono_svc.create_collection(
+                        user=user,
+                        collection_id=collection_id,
+                        name=collection_name,
+                        description="",
+                    )
+                    logger.info(f"Created collection {collection_id} with name: {collection_name}")
+                except IntegrityError as e:
+                    logger.info(
+                        f"Collection {collection_id} was created by another process: {str(e)}"
+                    )
             else:
                 if collection_name:
                     collection = await self.mono_svc.get_collection(collection_id)
