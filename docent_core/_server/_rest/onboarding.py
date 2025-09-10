@@ -7,7 +7,7 @@ from docent_core.docent.db.schemas.auth_models import User
 from docent_core.docent.server.dependencies.analytics import use_posthog_user_context
 from docent_core.docent.server.dependencies.services import get_onboarding_service
 from docent_core.docent.server.dependencies.user import get_authenticated_user
-from docent_core.services.onboarding import OnboardingService
+from docent_core.docent.services.onboarding import OnboardingService
 
 logger = get_logger(__name__)
 

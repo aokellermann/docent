@@ -12,11 +12,11 @@ from docent_core.docent.services.charts import ChartsService
 from docent_core.docent.services.chat import ChatService
 from docent_core.docent.services.job import JobService
 from docent_core.docent.services.monoservice import MonoService
+from docent_core.docent.services.onboarding import OnboardingService
 from docent_core.docent.services.refinement import RefinementService
 from docent_core.docent.services.rubric import RubricService
 from docent_core.docent.services.telemetry import TelemetryService
 from docent_core.docent.services.telemetry_accumulation import TelemetryAccumulationService
-from docent_core.services.onboarding import OnboardingService
 
 
 def get_rubric_service(
