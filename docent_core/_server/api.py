@@ -3,7 +3,6 @@ from contextlib import asynccontextmanager
 from typing import Any, Awaitable, Callable
 
 import anyio
-import posthog
 import sentry_sdk
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +11,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from docent._log_util import get_logger
 from docent_core._env_util import ENV, get_deployment_id
+from docent_core._server._analytics.posthog import AnalyticsClient
 from docent_core._server._auth.session_middleware import SessionAuthMiddleware
 from docent_core._server._rest._all_routers import REST_ROUTERS
 from docent_core.docent.services.chat import ChatService
@@ -161,7 +161,8 @@ async def lifespan(app: FastAPI):
 
     # Make sure posthog is flushed
     with anyio.CancelScope(shield=True):
-        posthog.flush()
+        analytics_client = AnalyticsClient()
+        analytics_client.flush()
 
 
 # Attach lifespan so background maintenance tasks run

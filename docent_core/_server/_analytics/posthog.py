@@ -71,6 +71,17 @@ class AnalyticsClient:
         event_properties = properties or {}
         self.ph.capture(event=event_name, properties=event_properties)
 
+    def flush(self) -> None:
+        """
+        Flush PostHog events to ensure they are sent.
+        Only flushes if PostHog client is initialized.
+        """
+        if not self.ph:
+            logger.debug("PostHog client not initialized, skipping flush")
+            return
+
+        self.ph.flush()
+
     @contextmanager
     def user_context(self, user: Optional[User]):
         if not self.ph:
