@@ -197,12 +197,14 @@ class DocentTracer:
         try:
             if "http" in endpoint.lower() or "https" in endpoint.lower():
                 http_exporter: HTTPExporter = HTTPExporter(
-                    endpoint=f"{endpoint}/v1/traces", headers=self.headers
+                    endpoint=f"{endpoint}/v1/traces", headers=self.headers, timeout=30
                 )
                 logger.debug(f"Initialized HTTP exporter for endpoint: {endpoint}/v1/traces")
                 return http_exporter
             else:
-                grpc_exporter: GRPCExporter = GRPCExporter(endpoint=endpoint, headers=self.headers)
+                grpc_exporter: GRPCExporter = GRPCExporter(
+                    endpoint=endpoint, headers=self.headers, timeout=30
+                )
                 logger.debug(f"Initialized gRPC exporter for endpoint: {endpoint}")
                 return grpc_exporter
         except Exception as e:
