@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import secrets
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import (
@@ -29,6 +28,7 @@ from docent._log_util import get_logger
 from docent.data_models.agent_run import AgentRun
 from docent.data_models.transcript import Transcript, TranscriptGroup
 from docent_core._db_service.db import DocentDB
+from docent_core._env_util import ENV
 from docent_core._llm_util.data_models.llm_output import AsyncEmbeddingStreamingCallback
 from docent_core._llm_util.providers.openai import get_chunked_openai_embeddings_async
 from docent_core._server._broker.redis_client import enqueue_job
@@ -1621,6 +1621,20 @@ class MonoService:
                 )
                 logger.info(f"Released advisory lock for {collection_id}/{action_id}")
 
+    def _create_fingerprint(self, raw_api_key: str) -> str:
+        """Create a deterministic fingerprint for a key using HMAC-SHA256."""
+        import hashlib
+        import hmac
+
+        pepper = ENV.get("API_KEY_PEPPER")
+        if not pepper:
+            raise ValueError("API_KEY_PEPPER environment variable is required")
+
+        # Hash the pepper to ensure consistent key length and higher entropy
+        pepper_bytes = pepper.encode("utf-8")
+        hashed_pepper = hashlib.sha256(pepper_bytes).digest()
+        return hmac.new(hashed_pepper, raw_api_key.encode("utf-8"), hashlib.sha256).hexdigest()
+
     async def create_api_key(self, user_id: str, name: str) -> tuple[str, str]:
         """
         Create a new API key for a user.
@@ -1629,8 +1643,15 @@ class MonoService:
         Returns:
             tuple: (api_key_id, raw_api_key) - raw key should be shown to user once
         """
+        import secrets
+        import string
 
-        raw_api_key = f"dk_{secrets.token_urlsafe(32)}"
+        alphabet = string.ascii_letters + string.digits
+        key_id = "".join(secrets.choice(alphabet) for _ in range(16))
+        secret = "".join(secrets.choice(alphabet) for _ in range(46))
+        raw_api_key = f"dk_{key_id}_{secret}"
+
+        # Create Argon2 hash for key verification
         key_hash = pwd_context.hash(raw_api_key)
         api_key_id = str(uuid4())
 
@@ -1639,11 +1660,13 @@ class MonoService:
                 id=api_key_id,
                 user_id=user_id,
                 name=name,
+                key_id=key_id,
                 key_hash=key_hash,
             )
             session.add(api_key)
+            await session.commit()
 
-        logger.info(f"Created API key {api_key_id} for user {user_id}")
+        logger.info(f"Created API key id:{api_key_id} for user {user_id}")
         return api_key_id, raw_api_key
 
     async def get_user_api_keys(self, user_id: str) -> list[SQLAApiKey]:
@@ -1670,26 +1693,82 @@ class MonoService:
         """
         Validate an API key and return the associated user.
         Updates last_used_at timestamp if key is valid.
+
+        Supports both new key_id pattern and legacy Argon2 hashes for migration.
         """
         if not raw_api_key.startswith("dk_"):
             return None
 
         async with self.db.session() as session:
-            result = await session.execute(
-                select(SQLAApiKey)
-                .join(SQLAUser, SQLAApiKey.user_id == SQLAUser.id)
-                .where(SQLAApiKey.disabled_at.is_(None))  # type: ignore
-                .options(selectinload(SQLAApiKey.user))
-            )
+            # Parse key_id from API key format: dk_{key_id}_{secret}
+            key_id = None
+            api_key_data = None
+            if raw_api_key.startswith("dk_"):
+                parts = raw_api_key.split("_", 2)
+                if len(parts) == 3:
+                    key_id = parts[1]
 
-            for api_key in result.scalars().all():
-                if pwd_context.verify(raw_api_key, api_key.key_hash):
+                if key_id:
+                    # Try new key_id pattern first
+                    result = await session.execute(
+                        select(SQLAApiKey)
+                        .options(selectinload(SQLAApiKey.user))
+                        .where(
+                            SQLAApiKey.key_id == key_id,
+                            SQLAApiKey.disabled_at.is_(None),  # type: ignore
+                        )
+                    )
+                    api_key_data = result.scalar_one_or_none()
+                    logger.info(f"Found key with key_id: {api_key_data is not None}")
+
+                # If key_id lookup failed, try fingerprint lookup for legacy keys
+                if not api_key_data:
+                    fingerprint = self._create_fingerprint(raw_api_key)
+                    result = await session.execute(
+                        select(SQLAApiKey)
+                        .options(selectinload(SQLAApiKey.user))
+                        .where(
+                            SQLAApiKey.fingerprint == fingerprint,
+                            SQLAApiKey.disabled_at.is_(None),  # type: ignore
+                        )
+                    )
+                    api_key_data = result.scalar_one_or_none()
+
+            if api_key_data and api_key_data.key_hash:
+                # Verify the raw key against Argon2 hash
+                if pwd_context.verify(raw_api_key, api_key_data.key_hash):
                     await session.execute(
                         update(SQLAApiKey)
-                        .where(SQLAApiKey.id == api_key.id)
+                        .where(SQLAApiKey.id == api_key_data.id)
                         .values(last_used_at=datetime.now(UTC).replace(tzinfo=None))
                     )
-                    return api_key.user.to_user()
+                    return api_key_data.user.to_user()
+
+            # Final fallback: Argon2-only verification for keys without fingerprint (legacy keys)
+            result = await session.execute(
+                select(SQLAApiKey)
+                .options(selectinload(SQLAApiKey.user))
+                .where(
+                    SQLAApiKey.disabled_at.is_(None),  # type: ignore
+                    SQLAApiKey.key_id.is_(None),  # Only keys without key_id
+                    SQLAApiKey.fingerprint.is_(None),  # Only keys without fingerprint
+                )
+            )
+
+            for api_key_data in result.scalars().all():
+                if api_key_data.key_hash and pwd_context.verify(raw_api_key, api_key_data.key_hash):
+                    # Backfill fingerprint for very legacy key on first successful use
+                    fingerprint = self._create_fingerprint(raw_api_key)
+                    await session.execute(
+                        update(SQLAApiKey)
+                        .where(SQLAApiKey.id == api_key_data.id)
+                        .values(
+                            fingerprint=fingerprint,
+                            last_used_at=datetime.now(UTC).replace(tzinfo=None),
+                        )
+                    )
+                    logger.info(f"Backfilled fingerprint for legacy API key {api_key_data.id}")
+                    return api_key_data.user.to_user()
 
             return None
 

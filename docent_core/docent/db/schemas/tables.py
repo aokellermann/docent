@@ -788,7 +788,15 @@ class SQLAApiKey(SQLABase):
     id = mapped_column(String(36), primary_key=True)
     user_id = mapped_column(String(36), ForeignKey(f"{TABLE_USER}.id"), nullable=False, index=True)
     name = mapped_column(Text, nullable=False)
-    key_hash = mapped_column(Text, nullable=False, unique=True, index=True)
+    key_hash = mapped_column(
+        Text, nullable=False, unique=True, index=True
+    )  # Argon2 hash of the raw API key
+    key_id = mapped_column(
+        String(12), nullable=True, unique=True, index=True
+    )  # New: short key ID for O(1) lookup
+    fingerprint = mapped_column(
+        String(64), nullable=True, unique=True, index=True
+    )  # New: HMAC fingerprint
     created_at = mapped_column(
         DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False
     )
