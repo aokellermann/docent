@@ -158,7 +158,6 @@ resource "aws_apprunner_service" "frontend" {
         port = "3000"
         runtime_environment_variables = {
           NODE_ENV = "production"
-          NEXT_PUBLIC_API_URL = "https://${aws_apprunner_service.api.service_url}"
           HOSTNAME = "0.0.0.0"
         }
       }
