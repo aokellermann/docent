@@ -33,7 +33,7 @@ const CollapsibleResultsSection = ({
   const resultHits = useMemo(() => {
     return judgeResultIds
       .map((id) => judgeResultsMap[id])
-      .filter((result) => result !== null);
+      .filter((result) => result !== null && result !== undefined);
   }, [judgeResultIds, judgeResultsMap]);
 
   // Group results by agent run ID
