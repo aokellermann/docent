@@ -421,7 +421,8 @@ class ChartsService:
                 -- Base case: top-level keys
                 SELECT
                     key AS path,
-                    value
+                    value,
+                    id AS agent_run_id
                 FROM agent_runs
                 CROSS JOIN LATERAL jsonb_each(metadata_json) AS t(key, value)
                 WHERE metadata_json IS NOT NULL
@@ -434,33 +435,53 @@ class ChartsService:
                 -- Recursive case: nested keys
                 SELECT
                     jp.path || '.' || nested.key AS path,
-                    nested.value
+                    nested.value,
+                    jp.agent_run_id
                 FROM json_paths jp
                 CROSS JOIN LATERAL jsonb_each(jp.value) AS nested(key, value)
                 WHERE jsonb_typeof(jp.value) = 'object'
+            ),
+            total_runs AS (
+                SELECT COUNT(id)::int AS total_runs
+                FROM agent_runs
+                WHERE collection_id = :collection_id
+            ),
+            agg AS (
+                SELECT
+                    path,
+                    COUNT(DISTINCT agent_run_id) FILTER (WHERE jsonb_typeof(value) <> 'null') AS present_count,
+                    CASE
+                        WHEN bool_and(jsonb_typeof(value) = 'null') THEN 'null'
+                        WHEN bool_and(jsonb_typeof(value) IN ('number','null')) THEN 'numeric'
+                        WHEN bool_and(jsonb_typeof(value) IN ('number','boolean','null')) THEN 'numeric_or_boolean'
+                        WHEN bool_and(jsonb_typeof(value) IN ('number','boolean','string','null')) THEN 'text'
+                        ELSE 'unknown'
+                    END AS data_type
+                FROM json_paths
+                WHERE NOT (
+                    path IN ('_field_descriptions', 'allow_fields_without_descriptions')
+                    OR path LIKE '_field_descriptions.%'
+                    OR path LIKE 'allow_fields_without_descriptions.%'
+                )
+                GROUP BY path
             )
             SELECT
-                path,
-                CASE
-                    WHEN bool_and(jsonb_typeof(value) = 'null') THEN 'null'
-                    WHEN bool_and(jsonb_typeof(value) IN ('number','null')) THEN 'numeric'
-                    WHEN bool_and(jsonb_typeof(value) IN ('number','boolean','null')) THEN 'numeric_or_boolean'
-                    WHEN bool_and(jsonb_typeof(value) IN ('number','boolean','string','null')) THEN 'text'
-                    ELSE 'unknown'
-                END AS data_type
-            FROM json_paths
-            WHERE NOT (
-                path IN ('_field_descriptions', 'allow_fields_without_descriptions')
-                OR path LIKE '_field_descriptions.%'
-                OR path LIKE 'allow_fields_without_descriptions.%'
-            )
-            GROUP BY path
-            ORDER BY path
+                agg.path AS path,
+                agg.data_type AS data_type
+            FROM agg, total_runs
+            WHERE (agg.present_count::numeric / NULLIF(total_runs.total_runs::numeric, 0)) >= :min_presence_ratio
+            ORDER BY agg.path
             """
         )
 
         try:
-            result = await self.session.execute(query, {"collection_id": collection_id})
+            result = await self.session.execute(
+                query,
+                {
+                    "collection_id": collection_id,
+                    "min_presence_ratio": 0.5,
+                },
+            )
 
             rows = list(result)
 
