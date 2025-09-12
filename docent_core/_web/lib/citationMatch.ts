@@ -1,5 +1,6 @@
 import { Citation } from '@/app/types/experimentViewerTypes';
 import { generateCitationId } from './citationUtils';
+import { toast } from '@/hooks/use-toast';
 
 export interface Interval {
   start: number;
@@ -197,7 +198,13 @@ function createPrettyPrintJsonPositionMapping(
       originalToPretty[originalPos] = prettyPos;
       originalPos++;
     } else {
-      throw new Error('JSON pretty-print resulted in non-matching characters');
+      console.error('JSON pretty-print resulted in non-matching characters');
+
+      toast({
+        title: 'JSON pretty-print resulted in non-matching characters',
+        description: 'Citation ranges may be incorrect.',
+        variant: 'destructive',
+      });
     }
   }
 

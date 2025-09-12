@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-
+import jsonStringFormatter from 'json-string-formatter';
 import { useAppSelector } from '@/app/store/hooks';
 import { ChatMessage, Content, ToolCall } from '@/app/types/transcriptTypes';
 import { cn } from '@/lib/utils';
@@ -11,10 +11,6 @@ import {
   TextSpanWithCitations,
   transformCitationIntervalsForPrettyPrintJson,
 } from '@/lib/citationMatch';
-import {
-  stringify as losslessStringify,
-  parse as losslessParse,
-} from 'lossless-json';
 
 function stringify(x: any): string {
   if (typeof x === 'string') return x;
@@ -269,10 +265,9 @@ export function MessageBox({
         (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
         (trimmed.startsWith('[') && trimmed.endsWith(']'))
       ) {
-        const parsed = losslessParse(trimmed);
-        const stringified = losslessStringify(parsed, null, 2);
-        if (stringified) {
-          return stringified;
+        const prettyText = jsonStringFormatter.format(trimmed);
+        if (prettyText) {
+          return prettyText;
         }
       }
     } catch (e) {
