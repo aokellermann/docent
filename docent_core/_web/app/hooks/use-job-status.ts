@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
   useGetClusteringStateQuery,
   useGetRubricRunStateQuery,
@@ -13,13 +13,12 @@ interface UseJobStatusProps {
 }
 
 interface UseJobStatusResponse {
-  activeRubricJobId?: string;
-  shouldPollRubricRunState: boolean;
+  rubricJobId: string | null;
   judgeResults: JudgeResultWithCitations[];
   totalAgentRuns: number;
   currentAgentRuns: number;
   activeClusteringJobId?: string;
-  shouldPollClusteringState: boolean;
+  clusteringJobId: string | null;
   centroids: RubricCentroid[];
   assignments: Record<string, string[]>;
 }
@@ -30,8 +29,9 @@ const useJobStatus = ({
 }: UseJobStatusProps): UseJobStatusResponse => {
   // Rubric run state
   const { version } = useRubricVersion();
-  const [shouldPollRubricRunState, setShouldPollRubricRunState] =
-    useState(false);
+
+  // Maintain a local state + effect so we can start a job back up on page reload
+  const [rubricJobId, setRubricJobId] = useState<string | null>(null);
   const { data: rubricRunState } = useGetRubricRunStateQuery(
     {
       collectionId,
@@ -39,37 +39,31 @@ const useJobStatus = ({
       version,
     },
     {
-      pollingInterval: shouldPollRubricRunState ? 1000 : 0,
+      pollingInterval: rubricJobId !== null ? 1000 : 0,
     }
   );
   useEffect(() => {
-    setShouldPollRubricRunState(rubricRunState?.job_id !== null);
+    setRubricJobId(rubricRunState?.job_id ?? null);
   }, [rubricRunState?.job_id]);
 
-  const activeRubricJobId = rubricRunState?.job_id ?? undefined;
-
   // Clustering job status
-  const [shouldPollClusteringState, setShouldPollClusteringState] =
-    useState(false);
+  const [clusteringJobId, setClusteringJobId] = useState<string | null>(null);
   const { data: clusteringState } = useGetClusteringStateQuery(
     {
       collectionId,
       rubricId,
     },
     {
-      pollingInterval: shouldPollClusteringState ? 1000 : 0,
+      pollingInterval: clusteringJobId !== null ? 1000 : 0,
     }
   );
   useEffect(() => {
-    setShouldPollClusteringState(clusteringState?.job_id !== null);
+    setClusteringJobId(clusteringState?.job_id ?? null);
   }, [clusteringState?.job_id]);
-
-  const activeClusteringJobId = clusteringState?.job_id ?? undefined;
 
   return {
     // Rubric run progress
-    activeRubricJobId,
-    shouldPollRubricRunState,
+    rubricJobId,
     totalAgentRuns: rubricRunState?.total_agent_runs ?? 0,
     currentAgentRuns: rubricRunState?.results.length ?? 0,
 
@@ -77,8 +71,7 @@ const useJobStatus = ({
     judgeResults: rubricRunState?.results ?? [],
 
     // Clustering job status
-    activeClusteringJobId,
-    shouldPollClusteringState,
+    clusteringJobId,
 
     // Clustering results
     centroids: clusteringState?.centroids ?? [],

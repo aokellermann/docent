@@ -51,8 +51,7 @@ export default function SingleRubricArea({ rubricId }: SingleRubricAreaProps) {
 
   const {
     // Rubric job status
-    shouldPollRubricRunState,
-    activeRubricJobId,
+    rubricJobId,
     totalAgentRuns,
     currentAgentRuns,
 
@@ -60,12 +59,11 @@ export default function SingleRubricArea({ rubricId }: SingleRubricAreaProps) {
     judgeResults,
 
     // Clustering job status
-    activeClusteringJobId,
+    clusteringJobId,
     centroids,
 
     // Clustering results
     assignments,
-    shouldPollClusteringState,
   } = useJobStatus({
     collectionId,
     rubricId,
@@ -120,9 +118,9 @@ export default function SingleRubricArea({ rubricId }: SingleRubricAreaProps) {
         shouldConfirmOnSave={hasLabels}
         onHasUnsavedChangesUpdated={setHasUnsavedChanges}
         editable={
-          !shouldPollRubricRunState &&
+          !rubricJobId &&
           hasWritePermission &&
-          !activeClusteringJobId &&
+          !clusteringJobId &&
           isLabelsSuccess
         }
       />
@@ -160,21 +158,22 @@ export default function SingleRubricArea({ rubricId }: SingleRubricAreaProps) {
           </Button>
           <ShareRubricButton rubricId={rubricId} collectionId={collectionId} />
           {/* Clustering controls */}
-          {!shouldPollRubricRunState && hasWritePermission && (
+          {!rubricJobId && hasWritePermission && (
             <ClusterButton
               collectionId={collectionId}
               rubricId={rubricId}
-              activeClusteringJobId={activeClusteringJobId}
+              clusteringJobId={clusteringJobId}
               hasUnsavedChanges={hasUnsavedChanges}
+              hasCentroids={centroids.length > 0}
             />
           )}
 
           {/* Rubric controls */}
-          {!activeClusteringJobId && hasWritePermission && (
+          {!clusteringJobId && hasWritePermission && (
             <RunRubricButton
               collectionId={collectionId}
               rubricId={rubricId}
-              activeRubricJobId={activeRubricJobId}
+              rubricJobId={rubricJobId}
               setShowOnlyLabeled={setLabeled}
               hasUnsavedChanges={hasUnsavedChanges}
             />
@@ -189,7 +188,7 @@ export default function SingleRubricArea({ rubricId }: SingleRubricAreaProps) {
         />
       </div>
 
-      {shouldPollRubricRunState && (
+      {rubricJobId && (
         <ProgressBar
           current={currentAgentRuns}
           total={totalAgentRuns}
@@ -203,7 +202,7 @@ export default function SingleRubricArea({ rubricId }: SingleRubricAreaProps) {
         centroids={centroids}
         assignments={assignments}
         judgeResults={judgeResults}
-        isClusteringActive={shouldPollClusteringState}
+        isClusteringActive={clusteringJobId !== null}
       />
     </div>
   );

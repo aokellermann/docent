@@ -275,12 +275,8 @@ async def get_rubric_run_state(
         sqla_rubric_for_schema = sqla_rubric_latest
 
     # What's the ID of the job that's currently running, if any?
-    # Only expose job/progress for latest (no explicit version provided)
-    cur_job = None
-    total_agent_runs = None
-    if version is None:
-        cur_job = await rubric_svc.get_active_job_for_rubric(rubric_id)
-        total_agent_runs = cur_job.job_json.get("total_agent_runs") if cur_job else None
+    cur_job = await rubric_svc.get_active_job_for_rubric(rubric_id)
+    total_agent_runs = cur_job.job_json.get("total_agent_runs") if cur_job else None
 
     # Get current results for the specified version (defaults to latest inside service)
     results = await rubric_svc.get_rubric_results(rubric_id, version)

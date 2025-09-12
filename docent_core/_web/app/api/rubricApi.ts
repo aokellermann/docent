@@ -105,6 +105,7 @@ export const rubricApi = createApi({
     'Rubric',
     'RubricJob',
     'JudgeResult',
+    'RubricRunState',
     'ClusteringJob',
     'Centroids',
     'Assignments',
@@ -220,6 +221,7 @@ export const rubricApi = createApi({
       }),
       invalidatesTags: (result, error, { rubricId }) => [
         { type: 'RubricJob', id: rubricId },
+        { type: 'RubricRunState', id: rubricId },
       ],
     }),
     cancelEvaluation: build.mutation<
@@ -232,6 +234,7 @@ export const rubricApi = createApi({
       }),
       invalidatesTags: (result, error, { rubricId }) => [
         { type: 'RubricJob', id: rubricId },
+        { type: 'RubricRunState', id: rubricId },
       ],
     }),
     cancelClusteringJob: build.mutation<
@@ -267,9 +270,12 @@ export const rubricApi = createApi({
         method: 'GET',
         params: version ? { version } : undefined,
       }),
-      providesTags: (result, error, { rubricId }) => [
+      providesTags: (result, error, { rubricId, version }) => [
         { type: 'RubricJob', id: rubricId },
         { type: 'JudgeResult', id: rubricId },
+        // Specific and generic run-state tags to support targeted and broad invalidation
+        { type: 'RubricRunState', id: rubricId },
+        { type: 'RubricRunState', id: `${rubricId}:${version ?? 'latest'}` },
       ],
     }),
     startClusteringJob: build.mutation<

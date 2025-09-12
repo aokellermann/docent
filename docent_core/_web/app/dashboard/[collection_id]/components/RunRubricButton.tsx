@@ -15,7 +15,7 @@ import { ChevronDown } from 'lucide-react';
 interface RunRubricButtonProps {
   collectionId: string;
   rubricId: string;
-  activeRubricJobId?: string;
+  rubricJobId: string | null;
   setShowOnlyLabeled: (showOnlyLabeled: boolean) => void;
   hasUnsavedChanges: boolean;
 }
@@ -23,7 +23,7 @@ interface RunRubricButtonProps {
 const RunRubricButton = ({
   collectionId,
   rubricId,
-  activeRubricJobId,
+  rubricJobId,
   setShowOnlyLabeled,
   hasUnsavedChanges,
 }: RunRubricButtonProps) => {
@@ -43,17 +43,17 @@ const RunRubricButton = ({
   };
 
   const handleCancelRubricJob = async () => {
-    if (!activeRubricJobId) return;
+    if (!rubricJobId) return;
     await cancelEvaluation({
       collectionId,
       rubricId,
-      jobId: activeRubricJobId,
+      jobId: rubricJobId,
     });
   };
 
   return (
     <>
-      {!activeRubricJobId && (
+      {!rubricJobId && (
         <div className="flex flex-row">
           <Button
             type="button"
@@ -113,7 +113,7 @@ const RunRubricButton = ({
           </DropdownMenu>
         </div>
       )}
-      {activeRubricJobId && (
+      {rubricJobId && (
         <Button
           type="button"
           size="sm"

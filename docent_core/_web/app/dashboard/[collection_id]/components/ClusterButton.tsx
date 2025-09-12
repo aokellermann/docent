@@ -16,7 +16,7 @@ interface ClusterButtonProps {
   hasUnsavedChanges: boolean;
   collectionId: string;
   rubricId: string;
-  activeClusteringJobId?: string;
+  clusteringJobId: string | null;
   hasCentroids?: boolean;
 }
 
@@ -24,18 +24,18 @@ const ClusterButton = ({
   hasUnsavedChanges,
   collectionId,
   rubricId,
-  activeClusteringJobId,
+  clusteringJobId,
   hasCentroids,
 }: ClusterButtonProps) => {
   // Cancel clustering job
   const [cancelClusteringJob, { isLoading: isCancellingClustering }] =
     useCancelClusteringJobMutation();
   const handleCancelClustering = async () => {
-    if (!activeClusteringJobId || !collectionId || !rubricId) return;
+    if (!clusteringJobId || !collectionId || !rubricId) return;
     await cancelClusteringJob({
       collectionId,
       rubricId,
-      jobId: activeClusteringJobId,
+      jobId: clusteringJobId,
     });
   };
 
@@ -46,7 +46,7 @@ const ClusterButton = ({
     feedback: string | undefined,
     recluster: boolean
   ) => {
-    if (!collectionId || !rubricId) return;
+    if (!collectionId || !rubricId || clusteringJobId !== null) return;
     await startClusteringJob({
       collectionId,
       rubricId,
@@ -89,9 +89,9 @@ const ClusterButton = ({
           size="sm"
           className="gap-1 h-7 text-xs"
           variant="outline"
-          disabled={activeClusteringJobId !== null || hasUnsavedChanges}
+          disabled={clusteringJobId !== null || hasUnsavedChanges}
         >
-          {activeClusteringJobId ? 'Proposing...' : 'Re-cluster results'}
+          {clusteringJobId ? 'Proposing...' : 'Re-cluster results'}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-96 p-2 space-y-2">
@@ -122,9 +122,9 @@ const ClusterButton = ({
             size="sm"
             className="text-xs"
             onClick={handleReclusterSubmit}
-            disabled={activeClusteringJobId !== null}
+            disabled={clusteringJobId !== null}
           >
-            {activeClusteringJobId !== null ? 'Proposing...' : 'Re-cluster'}
+            {clusteringJobId !== null ? 'Proposing...' : 'Re-cluster'}
           </Button>
         </div>
       </PopoverContent>
@@ -133,7 +133,7 @@ const ClusterButton = ({
 
   return (
     <>
-      {!activeClusteringJobId && !hasCentroids && (
+      {!clusteringJobId && !hasCentroids && (
         <Button
           type="button"
           size="sm"
@@ -145,7 +145,7 @@ const ClusterButton = ({
           {isStartingClustering ? 'Starting clustering...' : 'Cluster results'}
         </Button>
       )}
-      {!activeClusteringJobId && hasCentroids && (
+      {!clusteringJobId && hasCentroids && (
         <>
           {reclusterPopover}
           <Button
@@ -160,7 +160,7 @@ const ClusterButton = ({
           </Button>
         </>
       )}
-      {activeClusteringJobId && (
+      {clusteringJobId && (
         <Button
           type="button"
           size="sm"
