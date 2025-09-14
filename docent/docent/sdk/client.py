@@ -104,7 +104,9 @@ class Docent:
         )
         return collection_id
 
-    def add_agent_runs(self, collection_id: str, agent_runs: list[AgentRun]) -> dict[str, Any]:
+    def add_agent_runs(
+        self, collection_id: str, agent_runs: list[AgentRun], batch_size: int = 1000
+    ) -> dict[str, Any]:
         """Adds agent runs to a Collection.
 
         Agent runs represent execution traces that can be visualized and analyzed.
@@ -123,7 +125,6 @@ class Docent:
         from tqdm import tqdm
 
         url = f"{self._server_url}/{collection_id}/agent_runs"
-        batch_size = 1000
         total_runs = len(agent_runs)
 
         # Process agent runs in batches
