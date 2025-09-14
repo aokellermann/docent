@@ -87,7 +87,7 @@ def load_malt_record(record: dict[str, Any]) -> AgentRun:
     agent_run = AgentRun(
         name=f"MALT Task {record.get('task_id', 'unknown')} - Run {record.get('run_id', 'unknown')}",
         description=f"MALT evaluation run using model {record.get('model', 'unknown')}",
-        transcripts={"main": transcript},
+        transcripts=[transcript],
         metadata=metadata,
     )
 

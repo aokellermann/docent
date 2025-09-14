@@ -90,7 +90,7 @@ async def process_tau_bench_file(file_path: Path) -> Tuple[List[AgentRun], dict[
         )
 
         agent_run = AgentRun(
-            transcripts={"default": transcript},
+            transcripts=[transcript],
             metadata=metadata,
         )
 

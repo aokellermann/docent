@@ -1,42 +1,71 @@
 import React from 'react';
-import { FileText, Folder, FolderOpen } from 'lucide-react';
+import {
+  FileText,
+  Folder,
+  FolderOpen,
+  Maximize2,
+  Minimize2,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { AgentRun, TranscriptGroup } from '@/app/types/transcriptTypes';
+import {
+  AgentRun,
+  Transcript,
+  TranscriptGroup,
+} from '@/app/types/transcriptTypes';
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { MetadataDialog } from './MetadataDialog';
+import { Checkbox } from '@/components/ui/checkbox';
 
-// Interface for hierarchical transcript group structure
-interface TranscriptGroupNode {
-  group: TranscriptGroup;
-  transcripts: string[];
-  children: TranscriptGroupNode[];
-  level: number;
+// Unified tree node type: a node can be a group or a transcript
+export interface TreeNode {
+  type: 'group' | 'transcript';
+  id: string; // group id or transcript key
+  level: number; // indentation level for rendering
+  children?: TreeNode[]; // only for group nodes
 }
 
-// Component for rendering a single transcript group node (recursive)
-const TranscriptGroupNode: React.FC<{
-  node: TranscriptGroupNode;
-  selectedTranscriptKey: string | null;
+// Component for rendering a single node (recursive for groups)
+const TreeNodeView: React.FC<{
+  node: TreeNode;
+  selectedTranscriptId: string | null;
   selectedTranscriptGroupId: string | null;
   expandedGroups: Set<string>;
-  onTranscriptSelect: (transcriptKey: string) => void;
+  onTranscriptSelect: (transcriptId: string) => void;
   onGroupToggle: (groupId: string) => void;
   agentRun: AgentRun;
+  transcriptsById: Record<string, Transcript>;
+  transcriptGroupsById: Record<string, TranscriptGroup>;
 }> = ({
   node,
-  selectedTranscriptKey,
+  selectedTranscriptId,
   selectedTranscriptGroupId,
   expandedGroups,
   onTranscriptSelect,
   onGroupToggle,
   agentRun,
+  transcriptsById,
+  transcriptGroupsById,
 }) => {
-  const isExpanded = expandedGroups.has(node.group.id);
-  const isSelected = selectedTranscriptGroupId === node.group.id;
+  if (node.type === 'transcript') {
+    return (
+      <TranscriptListItem
+        transcriptId={node.id}
+        selectedTranscriptId={selectedTranscriptId}
+        agentRun={agentRun}
+        transcriptsById={transcriptsById}
+        onTranscriptSelect={onTranscriptSelect}
+        level={node.level}
+      />
+    );
+  }
+
+  const group = transcriptGroupsById[node.id];
+  const isExpanded = expandedGroups.has(node.id);
+  const isSelected = selectedTranscriptGroupId === node.id;
 
   return (
     <div className="space-y-1">
@@ -51,7 +80,7 @@ const TranscriptGroupNode: React.FC<{
         style={{ marginLeft: `${node.level * 12}px` }}
       >
         <button
-          onClick={() => onGroupToggle(node.group.id)}
+          onClick={() => onGroupToggle(node.id)}
           className="flex items-center flex-1 px-2 py-1 min-w-0 cursor-pointer"
         >
           {isExpanded ? (
@@ -60,18 +89,17 @@ const TranscriptGroupNode: React.FC<{
             <Folder className="h-3 w-3 mr-1 flex-shrink-0" />
           )}
           <span className="text-ellipsis whitespace-nowrap overflow-hidden min-w-0">
-            {node.group.name || node.group.id}
+            {group?.name || node.id}
           </span>
         </button>
-        {(Object.keys(node.group.metadata || {}).length > 0 ||
-          node.group.id) && (
+        {(group && Object.keys(group.metadata || {}).length > 0) || node.id ? (
           <Tooltip>
             <TooltipTrigger asChild>
               <div className="flex h-full items-center">
                 <MetadataDialog
-                  metadata={node.group.metadata || {}}
-                  title={`Transcript Group Metadata - ${node.group.name || node.group.id}`}
-                  id={node.group.id}
+                  metadata={group?.metadata || {}}
+                  title={`Transcript Group Metadata - ${group?.name || node.id}`}
+                  id={node.id}
                   trigger={
                     <button
                       className={cn(
@@ -91,35 +119,24 @@ const TranscriptGroupNode: React.FC<{
               <p>View transcript group metadata</p>
             </TooltipContent>
           </Tooltip>
-        )}
+        ) : null}
       </div>
 
       {/* Expanded Content */}
-      {isExpanded && (
+      {isExpanded && node.children && node.children.length > 0 && (
         <div className="space-y-1">
-          {/* Child Groups */}
           {node.children.map((childNode) => (
-            <TranscriptGroupNode
-              key={childNode.group.id}
+            <TreeNodeView
+              key={`${childNode.type}:${childNode.id}`}
               node={childNode}
-              selectedTranscriptKey={selectedTranscriptKey}
+              selectedTranscriptId={selectedTranscriptId}
               selectedTranscriptGroupId={selectedTranscriptGroupId}
               expandedGroups={expandedGroups}
               onTranscriptSelect={onTranscriptSelect}
               onGroupToggle={onGroupToggle}
               agentRun={agentRun}
-            />
-          ))}
-
-          {/* Transcripts in this group */}
-          {node.transcripts.map((transcriptKey) => (
-            <TranscriptListItem
-              key={transcriptKey}
-              transcriptKey={transcriptKey}
-              selectedTranscriptKey={selectedTranscriptKey}
-              agentRun={agentRun}
-              onTranscriptSelect={onTranscriptSelect}
-              level={node.level + 1}
+              transcriptsById={transcriptsById}
+              transcriptGroupsById={transcriptGroupsById}
             />
           ))}
         </div>
@@ -130,46 +147,48 @@ const TranscriptGroupNode: React.FC<{
 
 // Component for individual transcript items
 const TranscriptListItem: React.FC<{
-  transcriptKey: string;
-  selectedTranscriptKey: string | null;
+  transcriptId: string;
+  selectedTranscriptId: string | null;
   agentRun: AgentRun;
+  transcriptsById: Record<string, Transcript>;
   onTranscriptSelect: (key: string) => void;
   level?: number;
 }> = ({
-  transcriptKey,
-  selectedTranscriptKey,
+  transcriptId,
+  selectedTranscriptId,
   agentRun,
+  transcriptsById,
   onTranscriptSelect,
   level = 0,
 }) => (
   <div
     className={cn(
       'flex items-center text-xs rounded border transition-colors min-w-0',
-      selectedTranscriptKey === transcriptKey
+      selectedTranscriptId === transcriptId
         ? 'bg-blue-bg border-blue-border text-primary'
         : 'bg-secondary border-border text-primary hover:bg-blue-bg/50 hover:border-blue-border/50'
     )}
     style={{ marginLeft: `${level * 12}px` }}
   >
     <button
-      onClick={() => onTranscriptSelect(transcriptKey)}
+      onClick={() => onTranscriptSelect(transcriptId)}
       className="flex-1 text-left px-2 py-1.5 text-ellipsis whitespace-nowrap overflow-hidden min-w-0 font-medium"
-      title={transcriptKey}
+      title={transcriptId}
     >
-      {transcriptKey}
+      {transcriptId}
     </button>
     <Tooltip>
       <TooltipTrigger asChild>
         <div className="flex h-full items-center">
           <MetadataDialog
-            metadata={agentRun?.transcripts[transcriptKey]?.metadata || {}}
+            metadata={transcriptsById[transcriptId]?.metadata || {}}
             title={`Transcript Metadata`}
-            id={transcriptKey}
+            id={transcriptId}
             trigger={
               <button
                 className={cn(
                   'p-0.5 mr-1 rounded transition-colors',
-                  selectedTranscriptKey === transcriptKey
+                  selectedTranscriptId === transcriptId
                     ? 'hover:bg-blue-bg text-primary'
                     : 'hover:bg-accent text-muted-foreground'
                 )}
@@ -189,52 +208,116 @@ const TranscriptListItem: React.FC<{
 
 // Pure navigation component - only concerned with rendering the transcript tree
 export const TranscriptNavigator: React.FC<{
-  transcriptGroupTree: TranscriptGroupNode[];
-  ungroupedTranscripts: string[];
-  selectedTranscriptKey: string | null;
+  nodes: TreeNode[];
+  selectedTranscriptId: string | null;
   selectedTranscriptGroupId: string | null;
   expandedGroups: Set<string>;
   agentRun: AgentRun;
+  transcriptsById: Record<string, Transcript>;
+  transcriptGroupsById: Record<string, TranscriptGroup>;
   onTranscriptSelect: (key: string) => void;
   onGroupToggle: (groupId: string) => void;
-  className?: string;
+  className?: string; // applies to the scrollable list container
+  // Optional header controls
+  showHeader?: boolean;
+  headerLeft?: React.ReactNode;
+  headerClassName?: string;
+  fullTree?: boolean;
+  onFullTreeChange?: (v: boolean) => void;
+  onToggleAllGroups?: () => void;
+  allGroupsExpanded?: boolean;
 }> = ({
-  transcriptGroupTree,
-  ungroupedTranscripts,
-  selectedTranscriptKey,
+  nodes,
+  selectedTranscriptId,
   selectedTranscriptGroupId,
   expandedGroups,
   agentRun,
+  transcriptsById,
+  transcriptGroupsById,
   onTranscriptSelect,
   onGroupToggle,
   className,
+  showHeader = false,
+  headerLeft,
+  headerClassName,
+  fullTree = false,
+  onFullTreeChange,
+  onToggleAllGroups,
+  allGroupsExpanded,
 }) => {
-  return (
-    <div className={cn('space-y-1 custom-scrollbar', className)}>
-      {/* Hierarchical Transcript Groups */}
-      {transcriptGroupTree.map((node) => (
-        <TranscriptGroupNode
-          key={node.group.id}
-          node={node}
-          selectedTranscriptKey={selectedTranscriptKey}
-          selectedTranscriptGroupId={selectedTranscriptGroupId}
-          expandedGroups={expandedGroups}
-          onTranscriptSelect={onTranscriptSelect}
-          onGroupToggle={onGroupToggle}
-          agentRun={agentRun}
-        />
-      ))}
+  const hasGroups = (agentRun?.transcript_groups || []).length > 0;
 
-      {/* Root Level Transcripts (ungrouped) */}
-      {ungroupedTranscripts.map((transcriptKey) => (
-        <TranscriptListItem
-          key={transcriptKey}
-          transcriptKey={transcriptKey}
-          selectedTranscriptKey={selectedTranscriptKey}
-          agentRun={agentRun}
-          onTranscriptSelect={onTranscriptSelect}
-        />
-      ))}
+  return (
+    <div className="flex flex-col">
+      {showHeader && (
+        <div
+          className={cn(
+            'flex items-center justify-between mb-2',
+            headerClassName
+          )}
+        >
+          <div className="flex items-center space-x-1">
+            {headerLeft}
+            <div className="text-xs font-medium text-primary">Transcripts</div>
+          </div>
+          <div className="flex items-center gap-2">
+            {typeof fullTree !== 'undefined' && onFullTreeChange && (
+              <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer select-none">
+                <Checkbox
+                  checked={!!fullTree}
+                  onCheckedChange={(v) => onFullTreeChange(!!v)}
+                  className="h-3.5 w-3.5"
+                />
+                <span>Full tree</span>
+              </label>
+            )}
+            {hasGroups && onToggleAllGroups && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={onToggleAllGroups}
+                    className="p-0.5 rounded text-muted-foreground hover:text-primary hover:bg-muted transition-colors"
+                    aria-label={
+                      allGroupsExpanded
+                        ? 'Collapse all groups'
+                        : 'Expand all groups'
+                    }
+                  >
+                    {allGroupsExpanded ? (
+                      <Minimize2 className="h-3 w-3" />
+                    ) : (
+                      <Maximize2 className="h-3 w-3" />
+                    )}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" align="end">
+                  <p>
+                    {allGroupsExpanded
+                      ? 'Collapse all groups'
+                      : 'Expand all groups'}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+          </div>
+        </div>
+      )}
+      <div className={cn('space-y-1 custom-scrollbar', className)}>
+        {nodes.map((node) => (
+          <TreeNodeView
+            key={`${node.type}:${node.id}`}
+            node={node}
+            selectedTranscriptId={selectedTranscriptId}
+            selectedTranscriptGroupId={selectedTranscriptGroupId}
+            expandedGroups={expandedGroups}
+            onTranscriptSelect={onTranscriptSelect}
+            onGroupToggle={onGroupToggle}
+            agentRun={agentRun}
+            transcriptsById={transcriptsById}
+            transcriptGroupsById={transcriptGroupsById}
+          />
+        ))}
+      </div>
     </div>
   );
 };

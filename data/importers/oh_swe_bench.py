@@ -97,7 +97,7 @@ def _parse_openhands_swebench_data(data: dict[str, Any]) -> AgentRun:
     )
 
     agent_run = AgentRun(
-        transcripts={"default": transcript},
+        transcripts=[transcript],
         metadata=metadata,
     )
 

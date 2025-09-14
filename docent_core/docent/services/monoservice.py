@@ -409,13 +409,13 @@ class MonoService:
             agent_run_data.append(sqla_agent_run)
 
             # Process transcripts for this agent run
-            for dk, t in ar.transcripts.items():
-                sqla_transcript = SQLATranscript.from_transcript(t, dk, ctx.collection_id, ar.id)
+            for t in ar.transcripts:
+                sqla_transcript = SQLATranscript.from_transcript(t, t.id, ctx.collection_id, ar.id)
                 transcript_data.append(sqla_transcript)
 
             # Process transcript groups for this agent run
             if hasattr(ar, "transcript_groups") and ar.transcript_groups:
-                for tg in ar.transcript_groups.values():
+                for tg in ar.transcript_groups:
                     # Use the existing from_transcript_group method to get all fields properly
                     sqla_transcript_group = SQLATranscriptGroup.from_transcript_group(
                         tg, ctx.collection_id
@@ -640,28 +640,69 @@ class MonoService:
                     transcript_groups_raw.extend(batch_transcript_groups)
 
         # Collate run_id -> transcripts
-        agent_run_transcripts: dict[str, list[tuple[str, Transcript]]] = {}
+        agent_run_transcripts: dict[str, list[Transcript]] = {}
         for t_raw in transcripts_raw:
-            agent_run_transcripts.setdefault(t_raw.agent_run_id, []).append(
-                t_raw.to_dict_key_and_transcript()
-            )
+            agent_run_transcripts.setdefault(t_raw.agent_run_id, []).append(t_raw.to_transcript())
 
         # Collate run_id -> transcript groups
-        agent_run_transcript_groups: dict[str, dict[str, TranscriptGroup]] = {}
+        agent_run_transcript_groups: dict[str, list[TranscriptGroup]] = {}
         for tg_raw in transcript_groups_raw:
-            agent_run_transcript_groups.setdefault(tg_raw.agent_run_id, {})[
-                tg_raw.id
-            ] = tg_raw.to_transcript_group()
+            agent_run_transcript_groups.setdefault(tg_raw.agent_run_id, []).append(
+                tg_raw.to_transcript_group()
+            )
 
         final_result = [
             ar_raw.to_agent_run(
-                transcripts={dk: t for dk, t in agent_run_transcripts.get(ar_raw.id, [])},
-                transcript_groups=agent_run_transcript_groups.get(ar_raw.id, {}),
+                transcripts=agent_run_transcripts.get(ar_raw.id, []),
+                transcript_groups=agent_run_transcript_groups.get(ar_raw.id, []),
             )
             for ar_raw in agent_runs_raw
         ]
 
         return final_result
+
+    async def get_metadata_for_agent_runs(
+        self,
+        ctx: ViewContext,
+        agent_run_ids: list[str],
+        apply_base_where_clause: bool = True,
+    ) -> dict[str, dict[str, Any]]:
+        """
+        Efficiently fetch only metadata for the specified agent run IDs.
+
+        This avoids loading transcripts and transcript groups, which can be expensive.
+
+        Args:
+            ctx: View context used to apply base filters and permissions.
+            agent_run_ids: List of agent run IDs to fetch metadata for.
+            apply_base_where_clause: Whether to apply the base where clause.
+
+        Returns:
+            Mapping of agent_run_id -> metadata dict
+        """
+        if not agent_run_ids:
+            return {}
+
+        metadata_map: dict[str, dict[str, Any]] = {}
+
+        async with self.db.session() as session:
+            # Use batching to avoid exceeding database parameter limits
+            batch_size = 10_000
+            for i in range(0, len(agent_run_ids), batch_size):
+                batch_ids = agent_run_ids[i : i + batch_size]
+
+                query = select(SQLAAgentRun.id, SQLAAgentRun.metadata_json).where(
+                    SQLAAgentRun.id.in_(batch_ids)
+                )
+                if apply_base_where_clause:
+                    query = query.where(ctx.get_base_where_clause(SQLAAgentRun))
+
+                result = await session.execute(query)
+                for run_id, metadata in result.all():
+                    # metadata_json is already a JSON-decoded dict via SQLAlchemy's JSONB
+                    metadata_map[run_id] = metadata or {}
+
+        return metadata_map
 
     async def get_agent_run(
         self, ctx: ViewContext, agent_run_id: str, apply_base_where_clause: bool = True

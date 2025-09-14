@@ -14,14 +14,14 @@ An [`AgentRun`][docent.data_models.agent_run.AgentRun] represents a complete age
 from docent.data_models import AgentRun, Transcript
 from docent.data_models.chat import UserMessage, AssistantMessage
 
-transcripts = {
-    "default": Transcript(
+transcripts = [
+    Transcript(
         messages=[
             UserMessage(content="Hello, what's 1 + 1?"),
             AssistantMessage(content="2"),
         ]
     )
-}
+]
 
 agent_run = AgentRun(
     transcripts=transcripts,

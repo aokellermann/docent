@@ -341,7 +341,7 @@ async def load_agent_runs(tar_path: Path) -> Tuple[List[AgentRun], Dict[str, Any
                 }
 
                 # Create agent run
-                agent_run = AgentRun(transcripts={"default": transcript}, metadata=metadata)
+                agent_run = AgentRun(transcripts=[transcript], metadata=metadata)
                 agent_runs.append(agent_run)
 
                 # Progress indicator

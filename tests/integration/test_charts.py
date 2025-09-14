@@ -18,9 +18,7 @@ transcript_raw = [
 def runs_with_metadata(metadatas: list[dict[str, Any]]) -> list[AgentRun]:
     return [
         AgentRun(
-            transcripts={
-                "default": Transcript(messages=[parse_chat_message(msg) for msg in transcript_raw])
-            },
+            transcripts=[Transcript(messages=[parse_chat_message(msg) for msg in transcript_raw])],
             metadata=metadata,
         )
         for metadata in metadatas

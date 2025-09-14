@@ -4,7 +4,6 @@ import React, {
   Suspense,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -22,9 +21,7 @@ import AgentRunViewer, {
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import TranscriptChat from '@/components/TranscriptChat';
 import { useGetRubricRunStateQuery } from '@/app/api/rubricApi';
-import { useGetAgentRunQuery } from '@/app/api/collectionApi';
 
-import { skipToken } from '@reduxjs/toolkit/query';
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
 import { setRunCitations } from '@/app/store/transcriptSlice';
 import { Citation } from '@/app/types/experimentViewerTypes';
@@ -110,12 +107,6 @@ export default function JudgeResultPage() {
   // scroll and is reset when the selected result changes.
   const alreadyScrolledRef = useRef(false);
 
-  // Calculate initial transcript index from citations
-  const initialTranscriptIdx = useMemo(() => {
-    if (!citations || citations.length === 0) return undefined;
-    return citations[0].transcript_idx ?? 0;
-  }, [citations]);
-
   useEffect(() => {
     if (agentRunId) {
       dispatch(
@@ -125,14 +116,6 @@ export default function JudgeResultPage() {
       );
     }
   }, [result, agentRunId, dispatch]);
-
-  const {
-    data: agentRun,
-    isLoading: isLoadingAgentRun,
-    isError: isErrorAgentRun,
-  } = useGetAgentRunQuery(
-    agentRunId ? { collectionId, agentRunId } : skipToken
-  );
 
   // Reset the gate whenever the selected result changes so the next result can
   // perform its own one-time initial scroll.
@@ -146,7 +129,7 @@ export default function JudgeResultPage() {
   // provided to AgentRunViewer because block positions depend on loaded data.
   useEffect(() => {
     if (alreadyScrolledRef.current) return;
-    if (!agentRun || !result) return;
+    if (!agentRunId || !result) return;
 
     const citation = citations && citations.length > 0 ? citations[0] : null;
     if (!citation) return;
@@ -162,7 +145,7 @@ export default function JudgeResultPage() {
       500,
       citation
     );
-  }, [agentRun, result]);
+  }, [agentRunId, result]);
 
   // Create citation navigation handler
   const handleNavigateToCitation = useCallback(
@@ -187,7 +170,7 @@ export default function JudgeResultPage() {
   // Register the handler with the route-scoped provider so other components can invoke it
   // Only register when agentRun is loaded so AgentRunViewer is ready
   useEffect(() => {
-    if (!agentRun) return;
+    if (!agentRunId) return;
 
     if (citationNav?.registerHandler) {
       citationNav.registerHandler(handleNavigateToCitation);
@@ -197,7 +180,7 @@ export default function JudgeResultPage() {
         citationNav.registerHandler(null);
       }
     };
-  }, [citationNav, handleNavigateToCitation, agentRun]);
+  }, [citationNav, handleNavigateToCitation, agentRunId]);
 
   // Update local state when URL parameter changes
   useEffect(() => {
@@ -227,78 +210,62 @@ export default function JudgeResultPage() {
     );
   }
 
-  let agentRunViewerContent = null;
-  if (agentRunId) {
-    if (isLoadingAgentRun) {
-      agentRunViewerContent = <div>Loading agent run...</div>;
-    } else if (isErrorAgentRun) {
-      agentRunViewerContent = <div>Failed to load agent run.</div>;
-    } else if (agentRun) {
-      agentRunViewerContent = (
-        <ResizablePanelGroup
-          direction="horizontal"
-          className="h-full min-h-0 min-w-0 flex flex-row border rounded-xl"
-          style={{ flexGrow: '2' }}
+  const agentRunViewerContent = agentRunId ? (
+    <ResizablePanelGroup
+      direction="horizontal"
+      className="h-full min-h-0 min-w-0 flex flex-row border rounded-xl"
+      style={{ flexGrow: '2' }}
+    >
+      <ResizablePanel
+        defaultSize={70}
+        className="min-w-0 p-3  min-h-0 flex flex-col overflow-hidden"
+      >
+        <AgentRunViewer ref={agentRunViewerRef} agentRunId={agentRunId} />
+      </ResizablePanel>
+
+      {rightSidebarOpen && <ResizableHandle withHandle={true} />}
+      {rightSidebarOpen && (
+        <ResizablePanel
+          defaultSize={30}
+          className="p-3 min-w-0 min-h-0 h-full flex flex-col"
         >
-          <ResizablePanel
-            defaultSize={70}
-            className="min-w-0 p-3  min-h-0 flex flex-col overflow-hidden"
+          <Tabs
+            className="flex flex-col h-full min-h-0"
+            value={activeTab}
+            onValueChange={handleTabChange}
           >
-            <AgentRunViewer
-              ref={agentRunViewerRef}
-              agentRun={agentRun}
-              initialTranscriptIdx={initialTranscriptIdx}
-            />
-          </ResizablePanel>
+            <TabsList className="grid w-full grid-cols-2 mb-2">
+              <TabsTrigger value="chat">Chat</TabsTrigger>
+              <TabsTrigger value="label">Label</TabsTrigger>
+            </TabsList>
 
-          {agentRun && rightSidebarOpen && (
-            <ResizableHandle withHandle={true} />
-          )}
+            <TabsContent value="chat" className="flex-1 h-full min-h-0">
+              {/* Transcript chat */}
+              <TranscriptChat
+                runId={agentRunId}
+                collectionId={collectionId}
+                judgeResult={result}
+                resultContext={{
+                  rubricId,
+                  resultId: result?.id || '',
+                }}
+                onNavigateToCitation={handleNavigateToCitation}
+                className="flex flex-col min-w-0 h-full"
+              />
+            </TabsContent>
 
-          {agentRun && rightSidebarOpen && (
-            <ResizablePanel
-              defaultSize={30}
-              className="p-3 min-w-0 min-h-0 h-full flex flex-col"
-            >
-              <Tabs
-                className="flex flex-col h-full min-h-0"
-                value={activeTab}
-                onValueChange={handleTabChange}
-              >
-                <TabsList className="grid w-full grid-cols-2 mb-2">
-                  <TabsTrigger value="chat">Chat</TabsTrigger>
-                  <TabsTrigger value="label">Label</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="chat" className="flex-1 h-full min-h-0">
-                  {/* Transcript chat */}
-                  <TranscriptChat
-                    runId={agentRun.id}
-                    collectionId={collectionId}
-                    judgeResult={result}
-                    resultContext={{
-                      rubricId,
-                      resultId: result?.id || '',
-                    }}
-                    onNavigateToCitation={handleNavigateToCitation}
-                    className="flex flex-col min-w-0 h-full"
-                  />
-                </TabsContent>
-
-                <TabsContent value="label" className="flex-1 min-h-0">
-                  <LabelArea
-                    result={result!}
-                    collectionId={collectionId}
-                    rubricId={rubricId}
-                  />
-                </TabsContent>
-              </Tabs>
-            </ResizablePanel>
-          )}
-        </ResizablePanelGroup>
-      );
-    }
-  }
+            <TabsContent value="label" className="flex-1 min-h-0">
+              <LabelArea
+                result={result!}
+                collectionId={collectionId}
+                rubricId={rubricId}
+              />
+            </TabsContent>
+          </Tabs>
+        </ResizablePanel>
+      )}
+    </ResizablePanelGroup>
+  ) : null;
 
   return <Suspense>{agentRunViewerContent}</Suspense>;
 }

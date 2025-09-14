@@ -232,7 +232,7 @@ def _get_prompt_resolver(rubric: Rubric, ar: AgentRun, prompt_template: str):
         output_schema_text = json.dumps(rubric.output_schema, indent=2)
 
         prompt = prompt_template.format(
-            rubric=rubric.rubric_text, agent_run=ar.text_blocks, output_schema=output_schema_text
+            rubric=rubric.rubric_text, agent_run=ar.to_text_new(), output_schema=output_schema_text
         )
 
         if _schema_requests_citations(rubric.output_schema):

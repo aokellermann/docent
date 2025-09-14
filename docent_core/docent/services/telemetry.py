@@ -992,16 +992,16 @@ class TelemetryService:
             agent_run_data.append(sqla_agent_run)
 
             # Process transcripts for this agent run
-            for key, t in agent_run.transcripts.items():
+            for t in agent_run.transcripts:
                 # Use the existing from_transcript method to get all fields properly
                 sqla_transcript = SQLATranscript.from_transcript(
-                    t, key, ctx.collection_id, agent_run.id
+                    t, t.id, ctx.collection_id, agent_run.id
                 )
                 transcript_data.append(sqla_transcript)
 
             # Process transcript groups for this agent run
             if hasattr(agent_run, "transcript_groups") and agent_run.transcript_groups:
-                for tg in agent_run.transcript_groups.values():
+                for tg in agent_run.transcript_groups:
                     sqla_transcript_group = SQLATranscriptGroup.from_transcript_group(
                         tg, ctx.collection_id
                     )
@@ -1259,7 +1259,7 @@ class TelemetryService:
                 f"collection_metadata={len(collection_metadata[agent_run_id]) if collection_metadata and agent_run_id in collection_metadata else 'None'}"
             )
 
-            agent_run_transcripts: Dict[str, Transcript] = {}
+            agent_run_transcripts: list[Transcript] = []
             agent_run_scores: Dict[str, int | float | bool | None] = {}
             agent_run_model: str | None = None
             agent_run_metadata_dict: Dict[str, Any] = {}
@@ -1325,8 +1325,7 @@ class TelemetryService:
                             )
 
                 # Add transcripts to agent run
-                for transcript in transcripts_list:
-                    agent_run_transcripts[transcript.id] = transcript
+                agent_run_transcripts.extend(transcripts_list)
 
             # Create agent run if it has transcripts
             if agent_run_transcripts:
@@ -1364,13 +1363,13 @@ class TelemetryService:
                 metadata = metadata_dict
 
                 # Get transcript groups for this agent run
-                agent_run_transcript_groups: Dict[str, TranscriptGroup] = {}
+                agent_run_transcript_groups: list[TranscriptGroup] = []
                 if (
                     transcript_groups_by_agent_run
                     and agent_run_id in transcript_groups_by_agent_run
                 ):
                     for tg in transcript_groups_by_agent_run[agent_run_id]:
-                        agent_run_transcript_groups[tg.id] = tg
+                        agent_run_transcript_groups.append(tg)
 
                 agent_run = AgentRun(
                     id=agent_run_id,

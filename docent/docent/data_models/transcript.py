@@ -1,10 +1,12 @@
 import sys
+import textwrap
 from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
 import yaml
-from pydantic import BaseModel, Field, PrivateAttr, field_serializer, field_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
+from pydantic_core import to_jsonable_python
 
 from docent.data_models._tiktoken_util import (
     get_token_count,
@@ -13,12 +15,13 @@ from docent.data_models._tiktoken_util import (
 )
 from docent.data_models.chat import AssistantMessage, ChatMessage, ContentReasoning
 from docent.data_models.citation import RANGE_BEGIN, RANGE_END
+from docent.data_models.yaml_util import yaml_dump_metadata
 
 # Template for formatting individual transcript blocks
 TRANSCRIPT_BLOCK_TEMPLATE = """
-<{index_label} | role: {role}>
+<|{index_label}; role: {role}|>
 {content}
-</{index_label}>
+</|{index_label}; role: {role}|>
 """.strip()
 
 # Instructions for citing single transcript blocks
@@ -35,7 +38,7 @@ Important notes:
 - Each pair of brackets must contain only one citation. To cite multiple blocks, use multiple pairs of brackets, like [T0B0] [T0B1].
 """
 
-BLOCK_CITE_INSTRUCTION = f"""Each transcript and each block has a unique index. Cite the relevant indices in brackets when relevant, like [T<idx>B<idx>]. Use multiple tags to cite multiple blocks, like [T<idx1>B<idx1>][T<idx2>B<idx2>]. Remember to cite specific blocks and NOT action units."""
+BLOCK_CITE_INSTRUCTION = """Each transcript and each block has a unique index. Cite the relevant indices in brackets when relevant, like [T<idx>B<idx>]. Use multiple tags to cite multiple blocks, like [T<idx1>B<idx1>][T<idx2>B<idx2>]. Remember to cite specific blocks and NOT action units."""
 
 
 def format_chat_message(
@@ -99,32 +102,6 @@ class TranscriptGroup(BaseModel):
     created_at: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("created_at", mode="before")
-    @classmethod
-    def _validate_created_at(cls, v: Any) -> datetime | None:
-        if v is None or isinstance(v, datetime):
-            return v
-        if isinstance(v, str):
-            iso_str = v.replace("Z", "+00:00") if v.endswith("Z") else v
-            try:
-                return datetime.fromisoformat(iso_str)
-            except ValueError as e:
-                raise ValueError(f"created_at must be an ISO 8601 datetime string: {e}")
-        raise ValueError(
-            f"created_at must be a datetime or ISO 8601 string, got {type(v).__name__}"
-        )
-
-    @field_serializer("created_at", when_used="json-unless-none")
-    def serialize_created_at(self, created_at: datetime | None, _info: Any) -> str | None:
-        return created_at.isoformat() if created_at is not None else None
-
-    @field_serializer("metadata")
-    def serialize_metadata(self, metadata: dict[str, Any], _info: Any) -> dict[str, Any]:
-        """
-        Custom serializer for the metadata field so the internal fields are explicitly preserved.
-        """
-        return fake_model_dump(metadata)
-
     @field_validator("metadata", mode="before")
     @classmethod
     def _validate_metadata_type(cls, v: Any) -> Any:
@@ -132,16 +109,33 @@ class TranscriptGroup(BaseModel):
             raise ValueError(f"metadata must be a dictionary, got {type(v).__name__}")
         return v  # type: ignore
 
+    def to_text_new(self, children_text: str, indent: int = 0) -> str:
+        """Render this transcript group with its children and metadata.
 
-def fake_model_dump(obj: dict[str, Any]) -> dict[str, Any]:
-    """
-    Emulate the action of pydantic.model_dump() for non-pydantic objects (to handle nested values)
-    """
+        Metadata appears below the rendered children content.
 
-    class _FakeModel(BaseModel):
-        data: dict[str, Any]
+        Args:
+            children_text: Pre-rendered text of this group's children (groups/transcripts).
+            indent: Number of spaces to indent the rendered output.
 
-    return _FakeModel(data=obj).model_dump()["data"]
+        Returns:
+            str: XML-like wrapped text including the group's metadata.
+        """
+        # Prepare YAML metadata
+        yaml_text = yaml_dump_metadata(self.metadata)
+        if yaml_text is not None:
+            if indent > 0:
+                yaml_text = textwrap.indent(yaml_text, " " * indent)
+            inner = (
+                f"{children_text}\n<|{self.name} metadata|>\n{yaml_text}\n</|{self.name} metadata|>"
+            )
+        else:
+            inner = children_text
+
+        # Compose final text: content first, then metadata, all inside the group wrapper
+        if indent > 0:
+            inner = textwrap.indent(inner, " " * indent)
+        return f"<|{self.name}|>\n{inner}\n</|{self.name}|>"
 
 
 class Transcript(BaseModel):
@@ -169,32 +163,6 @@ class Transcript(BaseModel):
     messages: list[ChatMessage]
     metadata: dict[str, Any] = Field(default_factory=dict)
     _units_of_action: list[list[int]] | None = PrivateAttr(default=None)
-
-    @field_validator("created_at", mode="before")
-    @classmethod
-    def _validate_created_at(cls, v: Any) -> datetime | None:
-        if v is None or isinstance(v, datetime):
-            return v
-        if isinstance(v, str):
-            iso_str = v.replace("Z", "+00:00") if v.endswith("Z") else v
-            try:
-                return datetime.fromisoformat(iso_str)
-            except ValueError as e:
-                raise ValueError(f"created_at must be an ISO 8601 datetime string: {e}")
-        raise ValueError(
-            f"created_at must be a datetime or ISO 8601 string, got {type(v).__name__}"
-        )
-
-    @field_serializer("created_at", when_used="json-unless-none")
-    def serialize_created_at(self, created_at: datetime | None, _info: Any) -> str | None:
-        return created_at.isoformat() if created_at is not None else None
-
-    @field_serializer("metadata")
-    def serialize_metadata(self, metadata: dict[str, Any], _info: Any) -> dict[str, Any]:
-        """
-        Custom serializer for the metadata field so the internal fields are explicitly preserved.
-        """
-        return fake_model_dump(metadata)
 
     @field_validator("metadata", mode="before")
     @classmethod
@@ -437,7 +405,7 @@ class Transcript(BaseModel):
         blocks_str = "\n".join(blocks)
 
         # Gather metadata
-        metadata_obj = fake_model_dump(self.metadata)
+        metadata_obj = to_jsonable_python(self.metadata)
         yaml_width = float("inf")
         block_str = f"<blocks>\n{blocks_str}\n</blocks>\n"
         metadata_str = f"<metadata>\n{yaml.dump(metadata_obj, width=yaml_width)}\n</metadata>"
@@ -521,15 +489,32 @@ class Transcript(BaseModel):
             use_action_units=False,
         )
 
+    ##############################
+    # New text rendering methods #
+    ##############################
 
-# class TranscriptWithoutMetadataValidator(Transcript):
-#     """
-#     A version of Transcript that doesn't have the model_validator on metadata.
-#     Needed for sending/receiving transcripts via JSON, since they incorrectly trip the existing model_validator.
-#     """
+    def to_text_new(self, transcript_idx: int = 0, indent: int = 0) -> str:
+        # Format individual message blocks
+        blocks: list[str] = []
+        for msg_idx, message in enumerate(self.messages):
+            block_text = format_chat_message(message, msg_idx, transcript_idx)
+            blocks.append(block_text)
+        blocks_str = "\n".join(blocks)
+        if indent > 0:
+            blocks_str = textwrap.indent(blocks_str, " " * indent)
 
-#     @field_validator("metadata", mode="before")
-#     @classmethod
-#     def _validate_metadata_type(cls, v: Any) -> Any:
-#         # Bypass the model_validator
-#         return v
+        content_str = f"<|T{transcript_idx} blocks|>\n{blocks_str}\n</|T{transcript_idx} blocks|>"
+
+        # Gather metadata and add to content
+        yaml_text = yaml_dump_metadata(self.metadata)
+        if yaml_text is not None:
+            if indent > 0:
+                yaml_text = textwrap.indent(yaml_text, " " * indent)
+            content_str += (
+                f"\n<|T{transcript_idx} metadata|>\n{yaml_text}\n</|T{transcript_idx} metadata|>"
+            )
+
+        # Format content and return
+        if indent > 0:
+            content_str = textwrap.indent(content_str, " " * indent)
+        return f"<|T{transcript_idx}|>\n{content_str}\n</|T{transcript_idx}|>\n"

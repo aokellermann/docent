@@ -28,7 +28,6 @@ from sqlalchemy.inspection import inspect as sqla_inspect
 
 from docent._log_util.logger import get_logger
 from docent.data_models.agent_run import AgentRun, FilterableField
-from docent.data_models.transcript import fake_model_dump
 from docent.loaders import load_inspect
 from docent_core._server._analytics.posthog import AnalyticsClient
 from docent_core._server._auth.session import (
@@ -448,10 +447,8 @@ async def preview_import_runs_from_file(
         "file_info": file_info,
         "sample_preview": [
             {
-                "metadata": fake_model_dump(run.metadata),
-                "num_messages": sum(
-                    len(transcript.messages) for transcript in run.transcripts.values()
-                ),
+                "metadata": to_jsonable_python(run.metadata),
+                "num_messages": sum(len(transcript.messages) for transcript in run.transcripts),
             }
             for run in previews
         ],
@@ -624,6 +621,25 @@ async def get_agent_run(
     return await mono_svc.get_agent_run(ctx, agent_run_id, apply_base_where_clause)
 
 
+@user_router.get("/{collection_id}/agent_run_with_canonical_tree")
+async def get_agent_run_with_canonical_tree(
+    agent_run_id: str,
+    apply_base_where_clause: bool = True,
+    full_tree: bool = False,
+    mono_svc: MonoService = Depends(get_mono_svc),
+    ctx: ViewContext = Depends(get_default_view_ctx),
+    _: None = Depends(require_view_permission(Permission.READ)),
+):
+    agent_run = await mono_svc.get_agent_run(ctx, agent_run_id, apply_base_where_clause)
+    if not agent_run:
+        return None
+    else:
+        return agent_run, {
+            "tree": agent_run.get_canonical_tree(full_tree=full_tree),
+            "transcript_ids_ordered": agent_run.get_transcript_ids_ordered(full_tree=full_tree),
+        }
+
+
 @user_router.get("/{collection_id}/agent_run_ids")
 async def get_agent_run_ids(
     sort_field: str | None = None,
@@ -648,8 +664,9 @@ async def get_agent_run_metadata(
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.READ)),
 ):
-    data = await mono_svc.get_agent_runs(ctx, agent_run_ids=request.agent_run_ids)
-    return {d.id: fake_model_dump(d.metadata) for d in data}
+    # Query metadata directly without loading full agent runs
+    data = await mono_svc.get_metadata_for_agent_runs(ctx, request.agent_run_ids)
+    return {k: to_jsonable_python(v) for k, v in data.items()}
 
 
 class PostAgentRunsRequest(BaseModel):
@@ -1280,9 +1297,10 @@ async def get_actions_summary(
     agent_run = await mono_svc.get_agent_run(ctx, agent_run_id, apply_base_where_clause=False)
     if not agent_run:
         raise ValueError(f"AgentRun {agent_run_id} not found")
-    transcript = next(
-        iter(agent_run.transcripts.values())
-    )  # Get first transcript TODO(mengk): generalize
+    # Get first transcript TODO(mengk): generalize to multi-agent setting
+    if len(agent_run.transcripts) == 0:
+        raise ValueError(f"AgentRun {agent_run_id} has no transcripts")
+    transcript = agent_run.transcripts[0]
 
     # Result variables; hashes prevent updating with identical content multiple times
     low_level_actions: list[LowLevelAction] = []

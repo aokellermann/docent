@@ -4,8 +4,6 @@ import {
   Loader2,
   FolderTree,
   ChevronRight,
-  Maximize2,
-  Minimize2,
   PanelRightClose,
   PanelRightOpen,
 } from 'lucide-react';
@@ -14,6 +12,7 @@ import React, {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 
@@ -25,15 +24,11 @@ import {
 } from '@/app/store/transcriptSlice';
 import {
   Content,
-  AgentRun,
+  Transcript,
   TranscriptGroup,
 } from '@/app/types/transcriptTypes';
-import { TranscriptNavigator } from './TranscriptNavigator';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
+import { TranscriptNavigator, TreeNode } from './TranscriptNavigator';
+// Tooltip moved into TranscriptNavigator header
 
 import UuidPill from '@/components/UuidPill';
 import { useDebounce } from '@/hooks/use-debounce';
@@ -49,6 +44,9 @@ import {
 } from '@/components/ui/resizable';
 import { MessageBox, hasJsonContent } from './MessageBox';
 import { Button } from '@/components/ui/button';
+import { useGetAgentRunWithCanonicalTreeQuery } from '@/app/api/collectionApi';
+import { skipToken } from '@reduxjs/toolkit/query';
+// Checkbox moved into TranscriptNavigator header
 
 // Export interface for use in other components
 export interface AgentRunViewerHandle {
@@ -63,8 +61,8 @@ export interface AgentRunViewerHandle {
 
 // Add props interface
 interface AgentRunViewerProps {
-  agentRun?: AgentRun;
-  initialTranscriptIdx?: number;
+  agentRunId: string;
+  // initialTranscriptIdx?: number;
 }
 
 // Add this helper function near the top of the file
@@ -75,28 +73,9 @@ const formatMetadataValue = (value: any): string => {
   return String(value);
 };
 
-// Helper function to sort transcripts by created_at timestamp
-const sortTranscriptsByTimestamp = (
-  transcriptIds: string[],
-  transcripts: Record<string, any>
-): string[] => {
-  return [...transcriptIds].sort((a, b) => {
-    const timestampA = transcripts[a].created_at;
-    const timestampB = transcripts[b].created_at;
-    if (!timestampA && !timestampB) return 0;
-    if (!timestampA) return 1;
-    if (!timestampB) return -1;
-    return new Date(timestampA).getTime() - new Date(timestampB).getTime();
-  });
-};
+// No client-side sorting: rely on backend canonical tree order
 
-// Interface for hierarchical transcript group structure
-interface TranscriptGroupNode {
-  group: TranscriptGroup;
-  transcripts: string[];
-  children: TranscriptGroupNode[];
-  level: number;
-}
+// Unified node tree: groups and transcripts share a single node type
 
 // Helper function to get message content as string
 const getMessageContent = (content: string | Content[]): string => {
@@ -115,8 +94,9 @@ const getMessageContent = (content: string | Content[]): string => {
 
 // Helper function to build transcript path
 const buildTranscriptPath = (
-  transcriptKey: string,
-  agentRun: AgentRun
+  transcriptId: string,
+  transcriptsById: Record<string, Transcript>,
+  transcriptGroupsById: Record<string, TranscriptGroup>
 ): Array<{ id: string; name: string; type: 'group' | 'transcript' }> => {
   const path: Array<{
     id: string;
@@ -124,29 +104,28 @@ const buildTranscriptPath = (
     type: 'group' | 'transcript';
   }> = [];
 
-  if (!agentRun || !agentRun.transcripts[transcriptKey]) {
+  if (!transcriptId) {
     return path;
   }
 
-  const transcript = agentRun.transcripts[transcriptKey];
-  const transcriptGroups = agentRun.transcript_groups || {};
+  const transcript = transcriptsById[transcriptId];
 
   // Add the transcript itself at the end (use transcriptKey like in sidebar)
   path.unshift({
-    id: transcriptKey,
-    name: transcriptKey,
+    id: transcriptId,
+    name: transcriptId,
     type: 'transcript',
   });
 
   // Build the path from the transcript's group up to the root
-  let currentGroupId = transcript.transcript_group_id;
-  while (currentGroupId && transcriptGroups[currentGroupId]) {
-    const group = transcriptGroups[currentGroupId];
+  let currentGroupId = transcript?.transcript_group_id || null;
+  while (currentGroupId && transcriptGroupsById[currentGroupId]) {
+    const group = transcriptGroupsById[currentGroupId];
 
     // Check if there are multiple groups with the same name in the same parent
     let displayName = group.name || currentGroupId;
     if (group.parent_transcript_group_id) {
-      const siblings = Object.values(transcriptGroups).filter(
+      const siblings = Object.values(transcriptGroupsById).filter(
         (g) =>
           g.parent_transcript_group_id === group.parent_transcript_group_id &&
           g.name === group.name
@@ -216,18 +195,52 @@ const TranscriptPath: React.FC<{
 };
 
 const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
-  ({ agentRun, initialTranscriptIdx }, ref) => {
+  ({ agentRunId }, ref) => {
     const dispatch = useAppDispatch();
-    agentRun = useAppSelector(
-      (state) => agentRun || state.transcript?.curAgentRun
+
+    const collectionId = useAppSelector(
+      (state) => state.collection?.collectionId
     );
+
+    // Full tree toggle (default off)
+    const [fullTree, setFullTree] = useState(false);
+
+    // Fetch canonical tree (respect fullTree)
+    const { data: [agentRun, canonicalTree] = [] } =
+      useGetAgentRunWithCanonicalTreeQuery(
+        collectionId ? { collectionId, agentRunId, fullTree } : skipToken
+      );
+    const transcriptsById = useMemo(() => {
+      const m: Record<string, Transcript> = {};
+      if (agentRun?.transcripts)
+        for (const t of agentRun.transcripts) m[t.id] = t;
+      return m;
+    }, [agentRun]);
+    const transcriptGroupsById = useMemo(() => {
+      const m: Record<string, TranscriptGroup> = {};
+      if (agentRun?.transcript_groups)
+        for (const tg of agentRun.transcript_groups) m[tg.id] = tg;
+      return m;
+    }, [agentRun]);
+    const transcriptIdxToId = useMemo(() => {
+      return canonicalTree?.transcript_ids_ordered || [];
+    }, [canonicalTree]);
+
+    const transcriptIdToIdx = useMemo(() => {
+      const map: Record<string, number> = {};
+      const ordered = canonicalTree?.transcript_ids_ordered || [];
+      ordered.forEach((id, idx) => {
+        map[id] = idx;
+      });
+      return map;
+    }, [canonicalTree]);
 
     const runCitations = useAppSelector((state) =>
       selectRunCitationsById(state, agentRun?.id)
     );
 
-    // Add state for selected transcript key and transcript group
-    const [selectedTranscriptKey, setSelectedTranscriptKey] = useState<
+    // Add state for selected transcript id and transcript group
+    const [selectedTranscriptId, setSelectedTranscriptId] = useState<
       string | null
     >(null);
     const [selectedTranscriptGroupId] = useState<string | null>(null);
@@ -253,194 +266,124 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
     useEffect(() => {
       if (
         agentRun?.transcript_groups &&
-        Object.keys(agentRun.transcript_groups).length > 0
+        agentRun.transcript_groups.length > 0
       ) {
-        // Expand all groups by default
-        const allGroupIds = Object.keys(agentRun.transcript_groups);
+        const allGroupIds = agentRun.transcript_groups.map((g) => g.id);
         setExpandedGroups(new Set(allGroupIds));
       }
     }, [agentRun?.transcript_groups]);
 
-    // Build hierarchical transcript group structure
-    const { transcriptGroupTree, ungroupedTranscripts, transcriptKeys } =
-      useMemo(() => {
-        if (!agentRun || Object.keys(agentRun.transcripts).length === 0) {
-          return {
-            transcriptGroupTree: [],
-            ungroupedTranscripts: [],
-            transcriptKeys: [],
-          };
-        }
-
-        const transcriptGroups = agentRun.transcript_groups || {};
-        const allTranscriptKeys: string[] = [];
-        const groupToTranscripts: Record<string, string[]> = {};
-        const groupToNode: Record<string, TranscriptGroupNode> = {};
-
-        // First pass: collect all transcripts and their groups
-        Object.entries(agentRun.transcripts).forEach(
-          ([transcriptId, transcript]) => {
-            allTranscriptKeys.push(transcriptId);
-
-            if (
-              transcript.transcript_group_id &&
-              transcriptGroups[transcript.transcript_group_id]
-            ) {
-              const groupId = transcript.transcript_group_id;
-              if (!groupToTranscripts[groupId]) {
-                groupToTranscripts[groupId] = [];
-              }
-              groupToTranscripts[groupId].push(transcriptId);
-            }
-          }
-        );
-
-        // Second pass: build nodes for all groups
-        Object.entries(transcriptGroups).forEach(([groupId, group]) => {
-          groupToNode[groupId] = {
-            group,
-            transcripts: groupToTranscripts[groupId] || [],
-            children: [],
-            level: 0, // Will be calculated in the next pass
-          };
-        });
-
-        // Third pass: build the tree structure and calculate levels
-        const rootNodes: TranscriptGroupNode[] = [];
-        const processedGroups = new Set<string>();
-
-        const calculateLevel = (groupId: string, level: number): number => {
-          if (processedGroups.has(groupId)) {
-            return level;
-          }
-
-          processedGroups.add(groupId);
-          const node = groupToNode[groupId];
-          if (!node) return level;
-
-          node.level = level;
-
-          // Find children (groups that have this group as parent)
-          const children = Object.values(transcriptGroups).filter(
-            (g) => g.parent_transcript_group_id === groupId
-          );
-
-          node.children = children
-            .map((child) => {
-              const childNode = groupToNode[child.id];
-              if (childNode) {
-                calculateLevel(child.id, level + 1);
-                return childNode;
-              }
-              return null;
-            })
-            .filter((n): n is TranscriptGroupNode => n !== null);
-
-          return level;
-        };
-
-        // Find root groups (no parent) and build the tree
-        Object.values(transcriptGroups).forEach((group) => {
-          if (!group.parent_transcript_group_id) {
-            const node = groupToNode[group.id];
-            if (node) {
-              calculateLevel(group.id, 0);
-              rootNodes.push(node);
-            }
-          }
-        });
-
-        // Sort transcripts within each group by created_at timestamp
-        const sortTranscripts = (node: TranscriptGroupNode) => {
-          node.transcripts = sortTranscriptsByTimestamp(
-            node.transcripts,
-            agentRun.transcripts
-          );
-
-          // Recursively sort children
-          node.children.forEach(sortTranscripts);
-        };
-
-        rootNodes.forEach(sortTranscripts);
-
-        // Find ungrouped transcripts
-        const ungroupedTranscripts = allTranscriptKeys.filter(
-          (transcriptId) =>
-            !agentRun.transcripts[transcriptId].transcript_group_id
-        );
-
-        // Sort ungrouped transcripts by created_at timestamp
-        const sortedUngroupedTranscripts = sortTranscriptsByTimestamp(
-          ungroupedTranscripts,
-          agentRun.transcripts
-        );
-
-        console.log(
-          'Final tree structure:',
-          rootNodes.map((node) => ({
-            id: node.group.id,
-            name: node.group.name,
-            level: node.level,
-            transcriptCount: node.transcripts.length,
-            childCount: node.children.length,
-          }))
-        );
-
-        // If no transcript groups are available, treat all transcripts as ungrouped
-        if (Object.keys(transcriptGroups).length === 0) {
-          console.log(
-            'No transcript groups available, treating all transcripts as ungrouped'
-          );
-          return {
-            transcriptGroupTree: [],
-            ungroupedTranscripts: allTranscriptKeys,
-            transcriptKeys: allTranscriptKeys,
-          };
-        }
-
+    // Build unified node tree from backend canonical tree
+    const { nodes: nodeTree } = useMemo(() => {
+      // Fallback if missing data
+      if (!agentRun || !agentRun.transcripts || !canonicalTree) {
         return {
-          transcriptGroupTree: rootNodes,
-          ungroupedTranscripts: sortedUngroupedTranscripts,
-          transcriptKeys: allTranscriptKeys,
+          nodes: [] as TreeNode[],
         };
-      }, [agentRun]);
-
-    const [transcript, transcriptIdx] = useMemo(() => {
-      if (!agentRun || transcriptKeys.length === 0) {
-        return [null, 0];
       }
 
-      // Determine target transcript ID based on selection, initial index, or default
-      let targetId: string;
+      const transcripts = transcriptsById;
+      const transcriptGroups = transcriptGroupsById;
+      const tree = (canonicalTree?.tree || {}) as Record<string, any[]>;
 
+      // Helper to parse a canonical child which might be encoded as
+      // [type, id] or as a string like 't:<id>' / 'tg:<id>'
+      const parseChild = (
+        child: any
+      ): { type: 't' | 'tg'; id: string } | null => {
+        if (!child) return null;
+        if (Array.isArray(child) && child.length === 2) {
+          const [t, id] = child as ['t' | 'tg', string];
+          if ((t === 't' || t === 'tg') && typeof id === 'string') {
+            return { type: t, id };
+          }
+          return null;
+        }
+        if (typeof child === 'string') {
+          if (child.startsWith('t:')) return { type: 't', id: child.slice(2) };
+          if (child.startsWith('tg:'))
+            return { type: 'tg', id: child.slice(3) };
+        }
+        return null;
+      };
+
+      const buildGroupNode = (groupId: string, level: number): TreeNode => {
+        const childrenNodes: TreeNode[] = [];
+        const children = tree[groupId] || [];
+        for (const ch of children) {
+          const parsed = parseChild(ch);
+          if (!parsed) continue;
+          if (parsed.type === 't') {
+            if (transcripts[parsed.id])
+              childrenNodes.push({
+                type: 'transcript',
+                id: parsed.id,
+                level: level + 1,
+              });
+          } else if (parsed.type === 'tg') {
+            if (transcriptGroups[parsed.id]) {
+              childrenNodes.push(buildGroupNode(parsed.id, level + 1));
+            }
+          }
+        }
+        return { type: 'group', id: groupId, level, children: childrenNodes };
+      };
+
+      // Roots
+      const rootChildren = tree['__global_root'] || [];
+      const rootNodes: TreeNode[] = [];
+      const collectFromGroup = (groupId: string) => {
+        for (const ch of tree[groupId] || []) {
+          const parsed = parseChild(ch);
+          if (!parsed) continue;
+          if (parsed.type === 't') {
+            // ordering is defined by backend via transcript_idx_map
+          } else if (parsed.type === 'tg') {
+            if (transcriptGroups[parsed.id]) collectFromGroup(parsed.id);
+          }
+        }
+      };
+
+      for (const ch of rootChildren) {
+        const parsed = parseChild(ch);
+        if (!parsed) continue;
+        if (parsed.type === 'tg') {
+          if (transcriptGroups[parsed.id]) {
+            rootNodes.push(buildGroupNode(parsed.id, 0));
+            collectFromGroup(parsed.id);
+          }
+        } else if (parsed.type === 't') {
+          if (transcripts[parsed.id]) {
+            rootNodes.push({ type: 'transcript', id: parsed.id, level: 0 });
+          }
+        }
+      }
+
+      return {
+        nodes: rootNodes,
+      };
+    }, [agentRun, canonicalTree, transcriptsById, transcriptGroupsById]);
+
+    // Upon initial load, if no transcript has been selected, select the first one
+    const initTranscriptSelected = useRef(false);
+    useEffect(() => {
       if (
-        selectedTranscriptKey &&
-        transcriptKeys.includes(selectedTranscriptKey)
+        !initTranscriptSelected.current &&
+        selectedTranscriptId === null &&
+        transcriptIdxToId.length > 0
       ) {
-        // Use currently selected transcript
-        targetId = selectedTranscriptKey;
-      } else if (
-        initialTranscriptIdx !== undefined &&
-        transcriptKeys[initialTranscriptIdx]
-      ) {
-        // Use initial transcript index if provided and valid
-        targetId = transcriptKeys[initialTranscriptIdx];
-      } else {
-        // Default to first transcript
-        targetId = transcriptKeys[0];
+        initTranscriptSelected.current = true;
+        setSelectedTranscriptId(transcriptIdxToId[0] ?? null);
       }
+    }, [selectedTranscriptId, transcriptIdxToId]);
 
-      // Update selected transcript key if it was null or if we're using initial index
-      if (
-        !selectedTranscriptKey ||
-        (initialTranscriptIdx !== undefined &&
-          transcriptKeys[initialTranscriptIdx])
-      ) {
-        setSelectedTranscriptKey(targetId);
-      }
-
-      return [agentRun.transcripts[targetId], transcriptKeys.indexOf(targetId)];
-    }, [agentRun, selectedTranscriptKey, transcriptKeys, initialTranscriptIdx]);
+    // Resolve selected transcript and its index
+    const transcript = selectedTranscriptId
+      ? transcriptsById[selectedTranscriptId]
+      : undefined;
+    const transcriptIdx = selectedTranscriptId
+      ? transcriptIdToIdx[selectedTranscriptId]
+      : undefined;
 
     // Initialize pretty print for messages with JSON content when transcript changes
     useEffect(() => {
@@ -475,7 +418,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
     const handleToggleAllGroups = useCallback(() => {
       if (!agentRun?.transcript_groups) return;
 
-      const allGroupIds = Object.keys(agentRun.transcript_groups);
+      const allGroupIds = agentRun.transcript_groups.map((g) => g.id);
       const allExpanded = allGroupIds.every((id) => expandedGroups.has(id));
 
       if (allExpanded) {
@@ -490,7 +433,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
     // Check if all groups are expanded
     const allGroupsExpanded = useMemo(() => {
       if (!agentRun?.transcript_groups) return false;
-      const allGroupIds = Object.keys(agentRun.transcript_groups);
+      const allGroupIds = agentRun.transcript_groups.map((g) => g.id);
       return (
         allGroupIds.length > 0 &&
         allGroupIds.every((id) => expandedGroups.has(id))
@@ -499,8 +442,8 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
 
     // Handler for transcript selection
     const handleTranscriptSelect = useCallback(
-      (transcriptKey: string) => {
-        setSelectedTranscriptKey(transcriptKey);
+      (transcriptId: string) => {
+        setSelectedTranscriptId(transcriptId);
         // Clear any highlighted citations when switching transcripts
         dispatch(clearHighlightedCitation());
         // Close floating sidebar when transcript is selected
@@ -514,18 +457,17 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
     /**
      * Scrolling
      */
+
     // Scroll container node for calculating relative positions
     const [scrollNode, setScrollNode] = useState<HTMLDivElement | null>(null);
     // Viewport state: index of the block most visible to the user (drives prev/next)
     const [currentBlockIndex, setCurrentBlockIndex] = useState<number | null>(
       null
     );
-
     // Transient UI state: id of the block being flash-highlighted after a jump
     const [highlightedBlock, setHighlightedBlock] = useState<string | null>(
       null
     );
-
     // Store scroll positions per transcript
     const [transcriptScrollPositions, setTranscriptScrollPositions] = useState<
       Record<string, number>
@@ -533,49 +475,56 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
 
     // Debounced scroll position for the current transcript
     const debouncedScrollPosition = useDebounce(
-      selectedTranscriptKey
-        ? transcriptScrollPositions[selectedTranscriptKey] || 0
+      selectedTranscriptId
+        ? transcriptScrollPositions[selectedTranscriptId] || 0
         : 0,
       100
     );
 
-    const scrollContainerRef = useCallback(
-      (node: HTMLDivElement) => {
-        if (!node) return;
-        // Store the node reference
-        setScrollNode(node);
+    // Pending scroll target to resolve when DOM/content is ready
+    const [pendingScrollTarget, setPendingScrollTarget] = useState<{
+      toBlockIdx: number;
+      toTranscriptIdx: number;
+      toAgentRunIdx: number;
+      highlightDuration: number;
+      citation?: Citation;
+    } | null>(null);
 
-        // Update scroll position on scroll
-        const handleScroll = () => {
-          // Save scroll position for current transcript
-          if (selectedTranscriptKey) {
-            setTranscriptScrollPositions((prev) => ({
-              ...prev,
-              [selectedTranscriptKey]: node.scrollTop,
-            }));
-          }
-        };
-        node.addEventListener('scroll', handleScroll);
-        return () => {
-          node.removeEventListener('scroll', handleScroll);
-        };
-      },
-      [selectedTranscriptKey]
-    );
+    const scrollContainerRef = useCallback((node: HTMLDivElement | null) => {
+      // Always reflect the latest node (including null on unmount)
+      setScrollNode(node);
+    }, []);
+
+    // Attach/detach scroll listener when the scroll node changes
+    useEffect(() => {
+      if (!scrollNode) return;
+      const handleScroll = () => {
+        if (selectedTranscriptId) {
+          setTranscriptScrollPositions((prev) => ({
+            ...prev,
+            [selectedTranscriptId]: scrollNode.scrollTop,
+          }));
+        }
+      };
+      scrollNode.addEventListener('scroll', handleScroll);
+      return () => {
+        scrollNode.removeEventListener('scroll', handleScroll);
+      };
+    }, [scrollNode, selectedTranscriptId]);
 
     // Restore scroll position when transcript changes
     useEffect(() => {
-      if (scrollNode && selectedTranscriptKey) {
+      if (scrollNode && selectedTranscriptId) {
         const savedPosition =
-          transcriptScrollPositions[selectedTranscriptKey] || 0;
+          transcriptScrollPositions[selectedTranscriptId] || 0;
         scrollNode.scrollTop = savedPosition;
       }
-    }, [selectedTranscriptKey]);
+    }, [selectedTranscriptId, scrollNode]);
 
     // Compute the current block index based on scroll position
     useEffect(() => {
       // Skip if no transcript or no scroll node
-      if (!transcript || !scrollNode) return;
+      if (!transcript || !transcriptIdx || !scrollNode) return;
 
       // Get all block elements
       const blockElements = Array.from(
@@ -625,94 +574,124 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
       }
     }, [debouncedScrollPosition, transcript, scrollNode]);
 
-    /**
-     * Scroll to block function - now with cross-scrolling support
-     */
-    const scrollToBlock = useCallback(
-      (
-        toBlockIdx: number,
-        toTranscriptIdx: number = 0,
-        toAgentRunIdx: number = 0,
-        highlightDuration: number = 0,
-        citation?: Citation
-      ) => {
-        // Handle scrolling within this agent run
-        // First, change the selected transcript if needed
-        const targetTranscriptKey = transcriptKeys[toTranscriptIdx];
-        const needsTranscriptChange =
-          targetTranscriptKey && targetTranscriptKey !== selectedTranscriptKey;
+    // Fulfill pending scroll with simple retries instead of MutationObserver
+    useEffect(() => {
+      if (!pendingScrollTarget || !scrollNode) return;
 
-        if (needsTranscriptChange) {
-          setSelectedTranscriptKey(targetTranscriptKey);
+      const {
+        toBlockIdx,
+        toTranscriptIdx,
+        toAgentRunIdx,
+        highlightDuration,
+        citation,
+      } = pendingScrollTarget;
+      let blockId = `r-${toAgentRunIdx}_t-${toTranscriptIdx}_b-${toBlockIdx}`;
+
+      const tryScrollNow = (): boolean => {
+        // First, change the selected transcript if needed
+        const targetTranscriptId = transcriptIdxToId[toTranscriptIdx];
+        if (!targetTranscriptId) return false;
+        if (targetTranscriptId !== selectedTranscriptId) {
+          console.log('scroll: changing transcript to', targetTranscriptId);
+          setSelectedTranscriptId(targetTranscriptId);
         }
 
-        const tryScrolling = (attempts = 0, maxAttempts = 6) => {
-          const blockId = `r-${toAgentRunIdx}_t-${toTranscriptIdx}_b-${toBlockIdx}`;
-          const blockElement = document.getElementById(blockId);
-          if (blockElement && scrollNode) {
-            const containerRect = scrollNode.getBoundingClientRect();
-
-            // If a specific citation is provided, try to center its span
-            if (citation) {
-              const citationId = generateCitationId(citation);
-              const targetSpan = document.querySelector(
-                `span[data-citation-ids*="${citationId}"]`
-              ) as HTMLElement | null;
-              if (targetSpan) {
-                const spanRect = targetSpan.getBoundingClientRect();
-                const desiredTop =
-                  spanRect.top -
-                  containerRect.top +
-                  scrollNode.scrollTop -
-                  Math.max(0, (containerRect.height - spanRect.height) / 2);
-                scrollNode.scrollTo({ top: desiredTop, behavior: 'auto' });
-
-                setCurrentBlockIndex(toBlockIdx);
-                setHighlightedBlock(blockId);
-                setTimeout(() => {
-                  setHighlightedBlock(null);
-                }, highlightDuration);
-                return true;
-              }
-              // Citation not found yet; fall through to retry logic below
-            }
-
-            // Fallback: align the block to the top
-            const elementRect = blockElement.getBoundingClientRect();
-            const relativeTop =
-              elementRect.top - containerRect.top + scrollNode.scrollTop;
-            scrollNode.scrollTo({ top: relativeTop, behavior: 'auto' });
-
-            setCurrentBlockIndex(toBlockIdx);
-            setHighlightedBlock(blockId);
-            setTimeout(() => {
-              setHighlightedBlock(null);
-            }, highlightDuration);
-            return true;
-          }
-
-          // If element not found and we haven't exceeded max attempts
-          if (attempts < maxAttempts) {
-            // Try again after a short delay
-            setTimeout(() => tryScrolling(attempts + 1, maxAttempts), 50);
+        let blockElement = document.getElementById(blockId);
+        if (!blockElement) {
+          // It's possible this is an invalid blockIdx; check if 0 exists
+          const testBlockId = `r-${toAgentRunIdx}_t-${toTranscriptIdx}_b-0`;
+          const testBlockElement = document.getElementById(testBlockId);
+          if (testBlockElement) {
+            console.error(
+              'scroll: found invalid citation. did not find',
+              blockId,
+              'but found',
+              testBlockId,
+              'to scroll to'
+            );
+            blockElement = testBlockElement;
+            blockId = testBlockId;
+          } else {
+            console.log(
+              `scroll: no block element found for transcript ${toTranscriptIdx}`
+            );
             return false;
           }
-
-          console.warn(
-            `Failed to scroll to block ${toBlockIdx} after ${maxAttempts} attempts`
-          );
-          return false;
-        };
-
-        // If we changed the transcript, wait a bit for the UI to update before scrolling
-        if (needsTranscriptChange) {
-          setTimeout(() => tryScrolling(), 100);
-        } else {
-          tryScrolling();
         }
-      },
-      [scrollNode, transcriptKeys, selectedTranscriptKey]
-    );
+
+        const containerRect = scrollNode.getBoundingClientRect();
+        let top: number | null = null;
+
+        if (citation) {
+          const citationId = generateCitationId(citation);
+          const targetSpan = (blockElement as HTMLElement).querySelector(
+            `span[data-citation-ids*="${citationId}"]`
+          ) as HTMLElement | null;
+          if (targetSpan) {
+            const spanRect = targetSpan.getBoundingClientRect();
+            top =
+              spanRect.top -
+              containerRect.top +
+              scrollNode.scrollTop -
+              Math.max(0, (containerRect.height - spanRect.height) / 2);
+          }
+        }
+
+        if (top == null) {
+          const rect = blockElement.getBoundingClientRect();
+          top = rect.top - containerRect.top + scrollNode.scrollTop;
+        }
+
+        scrollNode.scrollTo({ top, behavior: 'auto' });
+        setCurrentBlockIndex(toBlockIdx);
+        setHighlightedBlock(blockId);
+        setTimeout(() => setHighlightedBlock(null), highlightDuration);
+        setPendingScrollTarget(null);
+        return true;
+      };
+
+      // Try immediately; else retry a few times with delay
+      if (tryScrollNow()) return;
+
+      let attempts = 0;
+      const maxAttempts = 6; // ~1.2s total at 200ms
+      const delayMs = 200;
+      const intervalId = window.setInterval(() => {
+        attempts += 1;
+        if (tryScrollNow()) {
+          window.clearInterval(intervalId);
+        } else if (attempts >= maxAttempts) {
+          window.clearInterval(intervalId);
+          setPendingScrollTarget(null);
+        }
+      }, delayMs);
+
+      return () => {
+        window.clearInterval(intervalId);
+      };
+    }, [pendingScrollTarget, scrollNode]);
+
+    // Scroll to block function
+    const scrollToBlock = (
+      toBlockIdx: number,
+      toTranscriptIdx: number = 0,
+      toAgentRunIdx: number = 0,
+      highlightDuration: number = 0,
+      citation?: Citation
+    ) => {
+      // Always defer to the pending scroll mechanism
+      setPendingScrollTarget({
+        toBlockIdx,
+        toTranscriptIdx,
+        toAgentRunIdx,
+        highlightDuration,
+        citation,
+      });
+    };
+
+    /**
+     * Block navigation
+     */
 
     React.useImperativeHandle(
       ref,
@@ -722,12 +701,8 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
       [scrollToBlock]
     );
 
-    /**
-     * Block navigation
-     */
-
     const goToNextBlock = useCallback(() => {
-      if (!transcript) return;
+      if (!transcript || !transcriptIdx) return;
 
       const nextIndex =
         currentBlockIndex !== null
@@ -737,7 +712,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
       scrollToBlock(nextIndex, transcriptIdx, 0);
     }, [currentBlockIndex, transcript, scrollToBlock, transcriptIdx]);
     const goToPrevBlock = useCallback(() => {
-      if (!transcript) return;
+      if (!transcript || !transcriptIdx) return;
 
       const prevIndex =
         currentBlockIndex !== null ? Math.max(currentBlockIndex - 1, 0) : 0;
@@ -801,7 +776,8 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
               style={{ overflow: 'visible' }} // need style attr to override style attr
             >
               {/* Floating Sidebar - shows when sidebar is hidden and hovering */}
-              {transcriptKeys.length >= 2 &&
+              {canonicalTree?.transcript_ids_ordered &&
+                canonicalTree.transcript_ids_ordered.length >= 2 &&
                 !sidebarVisible &&
                 sidebarHovering && (
                   <div
@@ -809,179 +785,128 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                     onMouseEnter={() => setSidebarHovering(true)}
                     onMouseLeave={() => setSidebarHovering(false)}
                   >
-                    {/* Header */}
-                    <div className="flex items-center justify-between mb-2 p-3 pb-1">
-                      <div className="flex items-center space-x-1">
-                        <div className="p-1 w-6 h-6 flex-shrink-0"></div>
-                        <div className="text-xs font-medium text-primary">
-                          Transcripts
-                        </div>
-                      </div>
-                      {/* Expand/Collapse All Button */}
-                      {transcriptGroupTree.length > 0 && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              onClick={handleToggleAllGroups}
-                              className="p-0.5 rounded text-muted-foreground hover:text-primary hover:bg-muted transition-colors"
-                              aria-label={
-                                allGroupsExpanded
-                                  ? 'Collapse all groups'
-                                  : 'Expand all groups'
-                              }
-                            >
-                              {allGroupsExpanded ? (
-                                <Minimize2 className="h-3 w-3" />
-                              ) : (
-                                <Maximize2 className="h-3 w-3" />
-                              )}
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom" align="end">
-                            <p>
-                              {allGroupsExpanded
-                                ? 'Collapse all groups'
-                                : 'Expand all groups'}
-                            </p>
-                          </TooltipContent>
-                        </Tooltip>
-                      )}
-                    </div>
-                    {/* Navigation */}
                     <TranscriptNavigator
-                      transcriptGroupTree={transcriptGroupTree}
-                      ungroupedTranscripts={ungroupedTranscripts}
-                      selectedTranscriptKey={selectedTranscriptKey}
+                      nodes={nodeTree}
+                      selectedTranscriptId={selectedTranscriptId}
                       selectedTranscriptGroupId={selectedTranscriptGroupId}
                       expandedGroups={expandedGroups}
                       agentRun={agentRun}
+                      transcriptsById={transcriptsById}
+                      transcriptGroupsById={transcriptGroupsById}
                       onTranscriptSelect={handleTranscriptSelect}
                       onGroupToggle={handleGroupToggle}
                       className="overflow-y-auto px-3 pb-3 flex-shrink-0"
+                      showHeader
+                      headerLeft={
+                        <div className="p-1 w-6 h-6 flex-shrink-0"></div>
+                      }
+                      headerClassName="p-3 pb-1"
+                      fullTree={fullTree}
+                      onFullTreeChange={(v) => setFullTree(!!v)}
+                      onToggleAllGroups={handleToggleAllGroups}
+                      allGroupsExpanded={allGroupsExpanded}
                     />
                   </div>
                 )}
               {/* Transcript Groups and Transcripts Sidebar */}
-              {transcriptKeys.length >= 2 && (
-                <>
-                  <ResizablePanel
-                    defaultSize={sidebarVisible ? 25 : 0}
-                    minSize={sidebarVisible ? 20 : 0}
-                    maxSize={sidebarVisible ? 50 : 0}
-                    className={sidebarVisible ? 'flex flex-col' : 'hidden'}
-                  >
-                    {/* Header */}
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center space-x-1">
-                        <button
-                          onClick={() => setSidebarVisible(false)}
-                          className="p-1 rounded text-muted-foreground hover:text-primary hover:bg-muted transition-colors"
-                          aria-label="Hide transcript hierarchy"
-                        >
-                          <FolderTree className="h-4 w-4" />
-                        </button>
-                        <div className="text-xs font-medium text-primary">
-                          Transcripts
-                        </div>
-                      </div>
-                      {/* Expand/Collapse All Button */}
-                      {transcriptGroupTree.length > 0 && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              onClick={handleToggleAllGroups}
-                              className="p-0.5 rounded text-muted-foreground hover:text-primary hover:bg-muted transition-colors"
-                              aria-label={
-                                allGroupsExpanded
-                                  ? 'Collapse all groups'
-                                  : 'Expand all groups'
-                              }
-                            >
-                              {allGroupsExpanded ? (
-                                <Minimize2 className="h-3 w-3" />
-                              ) : (
-                                <Maximize2 className="h-3 w-3" />
-                              )}
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom" align="end">
-                            <p>
-                              {allGroupsExpanded
-                                ? 'Collapse all groups'
-                                : 'Expand all groups'}
-                            </p>
-                          </TooltipContent>
-                        </Tooltip>
-                      )}
-                    </div>
-                    {/* Navigation */}
-                    <TranscriptNavigator
-                      transcriptGroupTree={transcriptGroupTree}
-                      ungroupedTranscripts={ungroupedTranscripts}
-                      selectedTranscriptKey={selectedTranscriptKey}
-                      selectedTranscriptGroupId={selectedTranscriptGroupId}
-                      expandedGroups={expandedGroups}
-                      agentRun={agentRun}
-                      onTranscriptSelect={handleTranscriptSelect}
-                      onGroupToggle={handleGroupToggle}
-                      className="flex-1 overflow-y-auto min-h-0 pr-1"
+              {canonicalTree?.transcript_ids_ordered &&
+                canonicalTree.transcript_ids_ordered.length >= 2 && (
+                  <>
+                    <ResizablePanel
+                      defaultSize={sidebarVisible ? 25 : 0}
+                      minSize={sidebarVisible ? 20 : 0}
+                      maxSize={sidebarVisible ? 50 : 0}
+                      className={sidebarVisible ? 'flex flex-col' : 'hidden'}
+                    >
+                      <TranscriptNavigator
+                        nodes={nodeTree}
+                        selectedTranscriptId={selectedTranscriptId}
+                        selectedTranscriptGroupId={selectedTranscriptGroupId}
+                        expandedGroups={expandedGroups}
+                        agentRun={agentRun}
+                        transcriptsById={transcriptsById}
+                        transcriptGroupsById={transcriptGroupsById}
+                        onTranscriptSelect={handleTranscriptSelect}
+                        onGroupToggle={handleGroupToggle}
+                        className="flex-1 overflow-y-auto min-h-0 pr-1"
+                        showHeader
+                        headerLeft={
+                          <button
+                            onClick={() => setSidebarVisible(false)}
+                            className="p-1 rounded text-muted-foreground hover:text-primary hover:bg-muted transition-colors"
+                            aria-label="Hide transcript hierarchy"
+                          >
+                            <FolderTree className="h-4 w-4" />
+                          </button>
+                        }
+                        fullTree={fullTree}
+                        onFullTreeChange={(v) => setFullTree(!!v)}
+                        onToggleAllGroups={handleToggleAllGroups}
+                        allGroupsExpanded={allGroupsExpanded}
+                      />
+                    </ResizablePanel>
+                    <ResizableHandle
+                      withHandle={false}
+                      className={cn('mx-2', sidebarVisible ? '' : 'hidden')}
                     />
-                  </ResizablePanel>
-                  <ResizableHandle
-                    withHandle={false}
-                    className={cn('mx-2', sidebarVisible ? '' : 'hidden')}
-                  />
-                </>
-              )}
+                  </>
+                )}
 
               {transcript && (
                 <ResizablePanel defaultSize={75} className="flex flex-col">
                   {/* Transcript content */}
                   <div className={getSidebarStyles('space-y-1 mb-2 pr-1')}>
                     <div className="flex items-center justify-between">
-                      {selectedTranscriptKey && (
+                      {selectedTranscriptId && (
                         <div className="flex items-center space-x-1">
                           {/* Only show toggle button if there are multiple transcripts and sidebar is hidden */}
-                          {transcriptKeys.length >= 2 && !sidebarVisible && (
-                            <div
-                              onMouseEnter={() => setSidebarHovering(true)}
-                              onMouseLeave={() => setSidebarHovering(false)}
-                              className="relative z-20"
-                            >
-                              <button
-                                onClick={() =>
-                                  setSidebarVisible(!sidebarVisible)
-                                }
-                                className="p-1 rounded text-muted-foreground hover:text-primary hover:bg-muted transition-colors"
-                                aria-label="Show transcript hierarchy"
+                          {canonicalTree?.transcript_ids_ordered &&
+                            canonicalTree.transcript_ids_ordered.length >= 2 &&
+                            !sidebarVisible && (
+                              <div
+                                onMouseEnter={() => setSidebarHovering(true)}
+                                onMouseLeave={() => setSidebarHovering(false)}
+                                className="relative z-20"
                               >
-                                <FolderTree className="h-4 w-4" />
-                              </button>
-                            </div>
-                          )}
+                                <button
+                                  onClick={() =>
+                                    setSidebarVisible(!sidebarVisible)
+                                  }
+                                  className="p-1 rounded text-muted-foreground hover:text-primary hover:bg-muted transition-colors"
+                                  aria-label="Show transcript hierarchy"
+                                >
+                                  <FolderTree className="h-4 w-4" />
+                                </button>
+                              </div>
+                            )}
                           <div className="font-semibold text-sm">
                             Transcript
                           </div>
-                          <UuidPill uuid={selectedTranscriptKey} />
+                          <UuidPill uuid={selectedTranscriptId} />
                           <MetadataDialog
                             metadata={
-                              agentRun?.transcripts[selectedTranscriptKey]
-                                ?.metadata || {}
+                              (selectedTranscriptId
+                                ? transcriptsById[selectedTranscriptId]
+                                : undefined
+                              )?.metadata || {}
                             }
-                            title={`Transcript Metadata - ${selectedTranscriptKey}`}
-                            id={selectedTranscriptKey}
+                            title={`Transcript Metadata - ${selectedTranscriptId}`}
+                            id={selectedTranscriptId}
                           />
                         </div>
                       )}
                     </div>
-                    {selectedTranscriptKey &&
-                      agentRun?.transcripts[selectedTranscriptKey]
-                        ?.transcript_group_id && (
+                    {selectedTranscriptId &&
+                      (selectedTranscriptId
+                        ? transcriptsById[selectedTranscriptId]
+                        : undefined
+                      )?.transcript_group_id && (
                         <TranscriptPath
                           className={getSidebarStyles('')}
                           path={buildTranscriptPath(
-                            selectedTranscriptKey,
-                            agentRun
+                            selectedTranscriptId,
+                            transcriptsById,
+                            transcriptGroupsById
                           )}
                         />
                       )}

@@ -1,13 +1,10 @@
 'use client';
 
-import { useParams, useSearchParams } from 'next/navigation';
-import React, { Suspense, useEffect, useRef } from 'react';
+import { useParams } from 'next/navigation';
+import React, { Suspense, useRef } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
-import {
-  getCurAgentRun,
-  setAgentRunSidebarTab,
-} from '@/app/store/transcriptSlice';
+import { setAgentRunSidebarTab } from '@/app/store/transcriptSlice';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -25,10 +22,6 @@ export default function AgentRunPage() {
   const collectionId = useAppSelector(
     (state) => state.collection?.collectionId
   );
-  const curAgentRun = useAppSelector((state) => state.transcript?.curAgentRun);
-  const hasInitSearchQuery = useAppSelector(
-    (state) => state.collection?.hasInitSearchQuery
-  );
   const rightSidebarOpen = useAppSelector(
     (state) => state.transcript?.rightSidebarOpen
   );
@@ -37,61 +30,40 @@ export default function AgentRunPage() {
   );
 
   const params = useParams();
-  const searchParams = useSearchParams();
-  const agentRunIdRaw = params.agent_run_id;
-  const blockIdxParam = searchParams.get('block_idx');
-  const blockIdx = blockIdxParam ? parseInt(blockIdxParam, 10) : undefined;
-  const transcriptIdxParam = searchParams.get('transcript_idx');
-  const transcriptIdx = transcriptIdxParam
-    ? parseInt(transcriptIdxParam, 10)
-    : undefined;
-
-  const agentRunId = React.useMemo(() => {
-    return Array.isArray(agentRunIdRaw) ? agentRunIdRaw[0] : agentRunIdRaw;
-  }, [agentRunIdRaw]);
+  const curAgentRunId = Array.isArray(params.agent_run_id)
+    ? params.agent_run_id[0]
+    : params.agent_run_id;
 
   const agentRunViewerRef = useRef<AgentRunViewerHandle>(null);
 
-  useEffect(() => {
-    if (!collectionId || !agentRunId) {
-      return;
-    }
+  /**
+   * TODO(mengk): fix, this is known to be broken.
+   */
 
-    if (curAgentRun?.id === agentRunId) {
-      return;
-    }
-
-    dispatch(getCurAgentRun(agentRunId));
-  }, [collectionId, agentRunId, curAgentRun?.id, dispatch]);
-
-  const alreadyScrolledRef = useRef(false);
-
-  useEffect(() => {
-    alreadyScrolledRef.current = false;
-  }, [agentRunId]);
-
-  useEffect(() => {
-    if (alreadyScrolledRef.current) return;
-
-    if (!curAgentRun || curAgentRun.id !== agentRunId) {
-      return;
-    }
-
-    if (hasInitSearchQuery === undefined) return;
-    if (hasInitSearchQuery === true) return;
-
-    if (blockIdx !== undefined && agentRunViewerRef.current) {
-      alreadyScrolledRef.current = true;
-      setTimeout(() => {
-        agentRunViewerRef.current?.scrollToBlock(
-          blockIdx,
-          transcriptIdx || 0,
-          0,
-          undefined
-        );
-      }, 100);
-    }
-  }, [curAgentRun, agentRunId, blockIdx, transcriptIdx, hasInitSearchQuery]);
+  // const alreadyScrolledRef = useRef(false);
+  //  const searchParams = useSearchParams();
+  // const blockIdxParam = searchParams.get('block_idx');
+  // const blockIdx = blockIdxParam ? parseInt(blockIdxParam, 10) : undefined;
+  // const transcriptIdxParam = searchParams.get('transcript_idx');
+  // const transcriptIdx = transcriptIdxParam
+  //   ? parseInt(transcriptIdxParam, 10)
+  //   : undefined;
+  // useEffect(() => {
+  //   if (
+  //     blockIdx !== undefined &&
+  //     agentRunViewerRef.current &&
+  //     !alreadyScrolledRef.current
+  //   ) {
+  //     alreadyScrolledRef.current = true;
+  //     console.log('scrolling to block', blockIdx);
+  //     agentRunViewerRef.current?.scrollToBlock(
+  //       blockIdx,
+  //       transcriptIdx || 0,
+  //       0,
+  //       undefined
+  //     );
+  //   }
+  // }, [blockIdx]);
 
   const onShowAgentRun = (
     agentRunId: string,
@@ -100,8 +72,11 @@ export default function AgentRunPage() {
     highlightDuration?: number,
     citation?: Citation
   ) => {
-    if (agentRunId !== curAgentRun?.id) {
-      dispatch(getCurAgentRun(agentRunId));
+    if (agentRunId !== curAgentRunId) {
+      console.error(
+        'this should never happen; why is the chat agent requesting a different agent run?'
+      );
+      return;
     }
 
     if (blockIdx !== undefined) {
@@ -122,7 +97,7 @@ export default function AgentRunPage() {
         className="h-full basis-1/2 p-3 min-h-0 min-w-0 flex flex-col space-y-2"
         style={{ flexGrow: '2' }}
       >
-        <AgentRunViewer ref={agentRunViewerRef} />
+        <AgentRunViewer agentRunId={curAgentRunId} ref={agentRunViewerRef} />
       </Card>
 
       {/* Assistant summary / transcript chat */}
@@ -151,14 +126,14 @@ export default function AgentRunPage() {
             <TabsContent value="chat" className="flex-1 mt-0 min-h-0">
               <div className="h-full pt-2 flex flex-col min-h-0">
                 <TranscriptChat
-                  runId={agentRunId}
+                  runId={curAgentRunId}
                   collectionId={collectionId}
                   title="Transcript Chat"
                   className="flex-1 flex flex-col min-w-0 min-h-0"
                   onNavigateToCitation={({ citation }) => {
                     if (onShowAgentRun && citation.block_idx !== undefined) {
                       onShowAgentRun(
-                        agentRunId,
+                        curAgentRunId,
                         citation.block_idx,
                         citation.transcript_idx || 0,
                         500,

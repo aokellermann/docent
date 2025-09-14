@@ -66,16 +66,13 @@ def get_transcript_text_for_citation(agent_run: AgentRun, citation: Citation) ->
         return None
 
     try:
-        transcript_keys = list(agent_run.transcripts.keys())
-        if citation.transcript_idx >= len(transcript_keys):
+        if citation.transcript_idx >= len(agent_run.get_transcript_ids_ordered()):
             return None
+        transcript_id = agent_run.get_transcript_ids_ordered()[citation.transcript_idx]
+        transcript = agent_run.transcript_dict[transcript_id]
 
-        transcript_key = transcript_keys[citation.transcript_idx]
-
-        transcript = agent_run.transcripts[transcript_key]
         if citation.block_idx >= len(transcript.messages):
             return None
-
         message = transcript.messages[citation.block_idx]
 
         # Use the same formatting function that generates content for LLMs

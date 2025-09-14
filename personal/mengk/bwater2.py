@@ -14,10 +14,10 @@ IPython.get_ipython().run_line_magic("autoreload", "2")
 from docent import Docent
 
 d = Docent(
-    api_key="dk_0Z9C_AefELmbnuzK5tsG7r7qX8pSSIVLd-SDXi9q9Ps",
-    server_url="https://api.docent-bridgewater.transluce.org",
+    api_key="dk_nfR2l2bQUmGfdcsv_pDlTVimPmKhA93BOfBeuyZFhkgDIx85926wfmuAeeB9Vjm",
+    server_url="http://localhost:8890",
 )
-collection_id = "2ee5c238-f03d-4189-a703-b96145bc7231"
+collection_id = "b0d737ce-a8d3-42fb-8570-aa53a6a60113"
 
 # %%
 
@@ -29,14 +29,15 @@ len(ids)
 # %%
 
 
-cur_id = ids[0]
+cur_id = "0c5834c4-7692-4587-b757-93094c465ebd"
 ar = d.get_agent_run(collection_id, cur_id)
 
 
 # %%
 
 
-ar.to_text_new()
+s = ar.to_text_new(indent=2)
+print(s)
 
 # %%
 

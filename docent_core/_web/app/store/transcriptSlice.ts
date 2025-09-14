@@ -279,58 +279,6 @@ export const getCurAgentRun = createAsyncThunk(
   }
 );
 
-export const openAgentRunInDashboard = createAsyncThunk(
-  'transcript/openAgentRunInDashboard',
-  async (
-    {
-      agentRunId,
-      blockIdx,
-      transcriptIdx,
-    }: {
-      agentRunId: string;
-      blockIdx?: number;
-      transcriptIdx?: number;
-    },
-    { dispatch, getState }
-  ) => {
-    // First, load the agent run
-    await dispatch(getCurAgentRun(agentRunId));
-
-    // Then set the dashboard view state
-    dispatch(
-      setDashboardAgentRunView({
-        dashboardHasRunPreview: true,
-        blockIdx,
-        transcriptIdx,
-      })
-    );
-  }
-);
-
-export const handleAgentRunsUpdated = createAsyncThunk(
-  'transcript/handleAgentRunsUpdated',
-  async (_, { dispatch, getState }) => {
-    const state = getState() as RootState;
-
-    // Refresh current datapoint
-    const curAgentRun = state.transcript.curAgentRun;
-    if (curAgentRun !== undefined) {
-      dispatch(getCurAgentRun(curAgentRun.id));
-    }
-
-    // Show a toast
-    dispatch(
-      setToastNotification({
-        title: 'AgentRuns updated',
-        description: 'AgentRuns have been updated',
-        variant: 'default',
-      })
-    );
-
-    // TODO(mengk): Deal with the trees/graphs
-  }
-);
-
 export const transcriptSlice = createSlice({
   name: 'transcript',
   initialState,

@@ -21,8 +21,8 @@ def create_test_agent_run() -> AgentRun:
     transcript = Transcript(messages=messages)
     return AgentRun(
         id="test-run",
-        transcripts={"0": transcript},
-        transcript_groups={},
+        transcripts=[transcript],
+        transcript_groups=[],
     )
 
 

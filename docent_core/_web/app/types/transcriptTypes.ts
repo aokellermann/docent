@@ -4,8 +4,8 @@ export interface AgentRun {
   id: string;
   name?: string | null;
   description?: string | null;
-  transcripts: Record<string, Transcript>;
-  transcript_groups?: Record<string, TranscriptGroup>;
+  transcripts: Transcript[];
+  transcript_groups?: TranscriptGroup[];
   metadata: BaseAgentRunMetadata;
 }
 

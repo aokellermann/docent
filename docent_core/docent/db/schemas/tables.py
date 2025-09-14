@@ -25,7 +25,7 @@ from sqlalchemy.schema import UniqueConstraint
 
 from docent._log_util import get_logger
 from docent.data_models.agent_run import AgentRun
-from docent.data_models.transcript import Transcript, TranscriptGroup, fake_model_dump
+from docent.data_models.transcript import Transcript, TranscriptGroup
 from docent_core._db_service.schemas.base import SQLABase
 from docent_core.docent.ai_tools.search import SearchResult
 from docent_core.docent.db.filters import ComplexFilter, parse_filter_dict
@@ -106,7 +106,7 @@ class SQLAAgentRun(SQLABase):
     def from_agent_run(cls, agent_run: AgentRun, collection_id: str) -> "SQLAAgentRun":
         # Sanitize raw text
         metadata_json = json.loads(
-            sanitize_pg_text(json.dumps(fake_model_dump(agent_run.metadata)))
+            sanitize_pg_text(json.dumps(to_jsonable_python(agent_run.metadata)))
         )
         text_for_search = sanitize_pg_text(agent_run.text)
         return cls(
@@ -120,8 +120,8 @@ class SQLAAgentRun(SQLABase):
 
     def to_agent_run(
         self,
-        transcripts: dict[str, Transcript],
-        transcript_groups: dict[str, TranscriptGroup] | None = None,
+        transcripts: list[Transcript],
+        transcript_groups: list[TranscriptGroup] | None = None,
     ) -> AgentRun:
         metadata = self.metadata_json
         assert isinstance(metadata, dict), f"metadata is not a dict: {metadata}"
@@ -132,7 +132,7 @@ class SQLAAgentRun(SQLABase):
             description=self.description,
             metadata=cast(dict[str, Any], metadata),
             transcripts=transcripts,
-            transcript_groups=transcript_groups or {},
+            transcript_groups=transcript_groups or [],
         )
 
 
@@ -228,7 +228,7 @@ class SQLATranscript(SQLABase):
     ) -> "SQLATranscript":
         # Serialize to JSON and then convert to bytes to avoid encoding issues
         messages_binary = json.dumps(to_jsonable_python(transcript.messages)).encode("utf-8")
-        metadata_binary = json.dumps(fake_model_dump(transcript.metadata)).encode("utf-8")
+        metadata_binary = json.dumps(to_jsonable_python(transcript.metadata)).encode("utf-8")
 
         # Build kwargs, only including created_at if it's not None
         kwargs: dict[str, Any] = {
@@ -249,21 +249,18 @@ class SQLATranscript(SQLABase):
 
         return cls(**kwargs)
 
-    def to_dict_key_and_transcript(self) -> tuple[str, Transcript]:
+    def to_transcript(self) -> Transcript:
         messages = json.loads(self.messages.decode("utf-8"))
         metadata = json.loads(self.metadata_json)  # TODO(vincent): fix this .decode("utf-8")
         assert isinstance(metadata, dict), f"metadata is not a dict: {metadata}"
-        return (
-            self.dict_key,
-            Transcript(
-                id=self.id,
-                name=self.name,
-                description=self.description,
-                transcript_group_id=self.transcript_group_id,
-                created_at=self.created_at,
-                messages=messages,
-                metadata=cast(dict[str, Any], metadata),
-            ),
+        return Transcript(
+            id=self.id,
+            name=self.name,
+            description=self.description,
+            transcript_group_id=self.transcript_group_id,
+            created_at=self.created_at,
+            messages=messages,
+            metadata=cast(dict[str, Any], metadata),
         )
 
 

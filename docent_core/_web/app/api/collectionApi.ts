@@ -5,6 +5,12 @@ import { TranscriptMetadataField } from '@/app/types/experimentViewerTypes';
 import { AgentRun, BaseAgentRunMetadata } from '@/app/types/transcriptTypes';
 import sseService from '../services/sseService';
 
+type CanonicalChild = ['t' | 'tg', string] | string;
+interface CanonicalTree {
+  tree: Record<string, CanonicalChild[]>;
+  transcript_ids_ordered: string[];
+}
+
 interface CreateCollectionRequest {
   collection_id?: string;
   name?: string;
@@ -161,6 +167,15 @@ export const collectionApi = createApi({
         method: 'GET',
       }),
     }),
+    getAgentRunWithCanonicalTree: build.query<
+      [AgentRun, CanonicalTree],
+      { collectionId: string; agentRunId: string; fullTree?: boolean }
+    >({
+      query: ({ collectionId, agentRunId, fullTree = false }) => ({
+        url: `/${collectionId}/agent_run_with_canonical_tree?agent_run_id=${agentRunId}&apply_base_where_clause=false&full_tree=${fullTree}`,
+        method: 'GET',
+      }),
+    }),
     previewImportRunsFromFile: build.mutation<
       {
         status: string;
@@ -261,4 +276,5 @@ export const {
   useImportRunsFromFileStreamQuery,
   useLazyImportRunsFromFileStreamQuery,
   useGetAgentRunQuery,
+  useGetAgentRunWithCanonicalTreeQuery,
 } = collectionApi;

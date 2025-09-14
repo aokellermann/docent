@@ -150,7 +150,7 @@ Now we're ready to ingest some logs! There are three end-to-end examples below; 
 
     agent_runs = [
         AgentRun(
-            transcripts={"default": t},
+            transcripts=[t],
             metadata={
                 "model": m["model"],
                 "agent_scaffold": m["agent_scaffold"],
@@ -184,7 +184,7 @@ Now we're ready to ingest some logs! There are three end-to-end examples below; 
     from docent.data_models import AgentRun, Transcript
     from docent.data_models.chat import ChatMessage, ToolCall, parse_chat_message
 
-    def load_tau_bench_log(data: dict[str, Any]) -> list[AgentRun]:
+    def load_tau_bench_log(data: dict[str, Any]) -> AgentRun:
         traj, info, reward, task_id = data["traj"], data["info"], data["reward"], data["task_id"]
 
         messages: list[ChatMessage] = []
@@ -246,7 +246,7 @@ Now we're ready to ingest some logs! There are three end-to-end examples below; 
             metadata=metadata,
         )
         agent_run = AgentRun(
-            transcripts={"default": transcript},
+            transcripts=[transcript],
             metadata=metadata,
         )
 
@@ -335,11 +335,11 @@ Now we're ready to ingest some logs! There are three end-to-end examples below; 
             # Create transcript
             agent_runs.append(
                 AgentRun(
-                    transcripts={
-                        "default": Transcript(
+                    transcripts=[
+                        Transcript(
                             messages=[parse_chat_message(m.model_dump()) for m in s.messages]
                         )
-                    },
+                    ],
                     metadata=metadata,
                 )
             )

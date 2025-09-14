@@ -228,7 +228,7 @@ def load_agent_run_from_content(
     if task_id_mapping is not None:
         metadata_dict["task_id"] = task_id_mapping.get(data["prompt"], "")
 
-    return AgentRun(transcripts={"default": Transcript(messages=messages)}, metadata=metadata_dict)
+    return AgentRun(transcripts=[Transcript(messages=messages)], metadata=metadata_dict)
 
 
 def load_agent_run_from_file(

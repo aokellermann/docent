@@ -86,12 +86,12 @@ def load_inspect_log(log: EvalLog) -> list[AgentRun]:
 
         agent_runs.append(
             AgentRun(
-                transcripts={
-                    "main": Transcript(
+                transcripts=[
+                    Transcript(
                         messages=[parse_chat_message(m.model_dump()) for m in s.messages],
                         metadata={},
                     )
-                },
+                ],
                 metadata=metadata,
             )
         )
@@ -123,11 +123,9 @@ def _read_sample_as_run(data: dict[str, Any], header_metadata: dict[str, Any] = 
     }
 
     run = AgentRun(
-        transcripts={
-            "main": Transcript(
-                messages=[parse_chat_message(m) for m in data["messages"]], metadata={}
-            ),
-        },
+        transcripts=[
+            Transcript(messages=[parse_chat_message(m) for m in data["messages"]], metadata={})
+        ],
         metadata=run_metadata,
     )
     return run
