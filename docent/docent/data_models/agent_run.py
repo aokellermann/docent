@@ -366,6 +366,8 @@ class AgentRun(BaseModel):
                 )
                 for t_id in tgs_to_transcripts.get(tg_id, []):
                     tg_tree.setdefault(tg_id, set()).add(("t", t_id))
+            for t_id, t in t_dict.items():
+                tg_tree.setdefault(t.transcript_group_id or "__global_root", set()).add(("t", t_id))
         else:
             # Initialize q with "important" tgs
             q, seen = Queue[str](), set[str]()
