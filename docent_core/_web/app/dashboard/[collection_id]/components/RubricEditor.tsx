@@ -121,7 +121,7 @@ interface RubricEditorProps {
   setRubricVersion?: (version: number) => void;
   showDiff?: boolean;
   setShowDiff?: (show: boolean) => void;
-  onSave: (rubric: Rubric) => void;
+  onSave: (rubric: Rubric, clearLabels: boolean) => void;
   onCloseWithoutSave?: () => void;
   editable: boolean;
   onHasUnsavedChangesUpdated?: (hasChanges: boolean) => void;
@@ -229,7 +229,8 @@ export default function RubricEditor({
     }
   };
 
-  const handleSave = () => {
+  // Don't clear by default
+  const handleSave = (clearLabels: boolean = false) => {
     if (rubric) {
       if (maxVersion === undefined) throw new Error('Latest version not found');
 
@@ -239,7 +240,7 @@ export default function RubricEditor({
         // TODO(mengk): consider whether this is ok
         version: maxVersion + 1,
       };
-      onSave(updatedRubric);
+      onSave(updatedRubric, clearLabels);
     }
   };
 
@@ -248,7 +249,8 @@ export default function RubricEditor({
 
   const handleSaveClick = async () => {
     if (!shouldConfirmOnSave || !schemaChanged) {
-      handleSave();
+      // Dont clear if schema has not changed
+      handleSave(false);
       return;
     }
 
@@ -436,7 +438,8 @@ export default function RubricEditor({
                           variant="outline"
                           onClick={() => {
                             setConfirmOpen(false);
-                            handleSave();
+                            // Clear if schema has changed
+                            handleSave(true);
                           }}
                         >
                           Save
