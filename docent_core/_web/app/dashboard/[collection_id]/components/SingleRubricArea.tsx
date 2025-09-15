@@ -80,10 +80,13 @@ export default function SingleRubricArea({ rubricId }: SingleRubricAreaProps) {
     });
   const hasLabels = (labels?.length ?? 0) > 0;
 
-  const handleRubricSave = async (rubric: Rubric) => {
+  const handleRubricSave = async (
+    rubric: Rubric,
+    clearLabels: boolean = false
+  ) => {
     setVersion(rubric.version);
 
-    if (hasLabels) {
+    if (hasLabels && clearLabels) {
       deleteAllJudgeRunLabels({
         collectionId,
         rubricId: rubric.id,
@@ -212,7 +215,7 @@ export default function SingleRubricArea({ rubricId }: SingleRubricAreaProps) {
         <div className="flex items-center justify-center">
           <Loader2 size={16} className="animate-spin text-muted-foreground" />
         </div>
-      ) : !rubricJobId && judgeResults.length === 0 ? (
+      ) : !rubricJobId && judgeResults.length === 0 && !labeled ? (
         <div className="text-xs text-muted-foreground text-center">
           No results yet
         </div>
