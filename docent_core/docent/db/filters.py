@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, Type, Union
 from uuid import uuid4
 
 from pydantic import BaseModel, Discriminator, Field, field_validator
-from sqlalchemy import ColumnElement, and_, or_
+from sqlalchemy import Boolean, ColumnElement, Float, String, and_, case, cast, or_
 
 from docent._log_util import get_logger
 
@@ -12,6 +12,21 @@ if TYPE_CHECKING:
     from docent_core.docent.db.schemas.tables import SQLAAgentRun
 
 logger = get_logger(__name__)
+
+
+def safe_bool(col: Any) -> Any:
+    """Safely cast a column to boolean using regex validation."""
+    return case(
+        (cast(col, String).op("~*")("^(true|false|t|f|1|0|yes|no|on|off)$"), cast(col, Boolean)),
+        else_=None,
+    )
+
+
+def safe_float(col: Any) -> Any:
+    """Safely cast a column to float using regex validation."""
+    return case(
+        (cast(col, String).op("~")("^[+-]?(\\d+\\.?\\d*|\\.\\d+)([eE][+-]?\\d+)?$"), cast(col, Float)), else_=None  # type: ignore
+    )
 
 
 class BaseCollectionFilter(BaseModel):
@@ -61,10 +76,10 @@ class PrimitiveFilter(BaseCollectionFilter):
             if isinstance(self.value, str):
                 sqla_value = sqla_value.as_string()
             elif isinstance(self.value, bool):
-                sqla_value = sqla_value.as_boolean()
+                sqla_value = safe_bool(sqla_value)
             elif isinstance(self.value, float) or isinstance(self.value, int):  # type: ignore warning about unnecessary comparison
                 # if self.value is an int, we may still need to do sql comparisons with floats
-                sqla_value = sqla_value.as_float()
+                sqla_value = safe_float(sqla_value)
             else:
                 raise ValueError(f"Unsupported value type: {type(self.value)}")
 
