@@ -121,6 +121,13 @@ export const SmartValueInput = React.forwardRef<
       }
     }, [fieldName]);
 
+    // Close dropdown immediately if field is not a metadata field
+    useEffect(() => {
+      if (!isMetadataField) {
+        setOpen(false);
+      }
+    }, [isMetadataField]);
+
     // Reset field changing state when new data loads
     useEffect(() => {
       if (isFieldChanging && !isFetching && fieldValuesData) {
@@ -226,6 +233,11 @@ export const SmartValueInput = React.forwardRef<
 
     // Open dropdown when data finishes loading and input is focused, or show loading state
     useEffect(() => {
+      // Don't open dropdown for non-metadata fields
+      if (!isMetadataField) {
+        return;
+      }
+
       const currentRef = (ref as React.RefObject<HTMLInputElement>) || inputRef;
       if (currentRef?.current === document.activeElement) {
         const isSearching = isFetching || inputValue !== debouncedSearch;
@@ -248,6 +260,7 @@ export const SmartValueInput = React.forwardRef<
       fieldName,
       inputValue,
       debouncedSearch,
+      isMetadataField,
     ]);
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -258,6 +271,12 @@ export const SmartValueInput = React.forwardRef<
       // Clear any existing blur timeout
       if (blurTimeoutRef.current) {
         clearTimeout(blurTimeoutRef.current);
+      }
+
+      // Don't open dropdown for non-metadata fields
+      if (!isMetadataField) {
+        setOpen(false);
+        return;
       }
 
       // Open suggestions if we have values and not currently fetching new data
@@ -290,6 +309,11 @@ export const SmartValueInput = React.forwardRef<
     };
 
     const handleInputFocus = () => {
+      // Don't open dropdown for non-metadata fields
+      if (!isMetadataField) {
+        return;
+      }
+
       const isSearching = isFetching || inputValue !== debouncedSearch;
       if (
         (values.length > 0 && !isSearching) ||
