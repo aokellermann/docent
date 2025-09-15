@@ -524,7 +524,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
     // Compute the current block index based on scroll position
     useEffect(() => {
       // Skip if no transcript or no scroll node
-      if (!transcript || !transcriptIdx || !scrollNode) return;
+      if (!transcript || transcriptIdx === undefined || !scrollNode) return;
 
       // Get all block elements
       const blockElements = Array.from(
@@ -702,7 +702,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
     );
 
     const goToNextBlock = useCallback(() => {
-      if (!transcript || !transcriptIdx) return;
+      if (!transcript || transcriptIdx === undefined) return;
 
       const nextIndex =
         currentBlockIndex !== null
@@ -712,7 +712,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
       scrollToBlock(nextIndex, transcriptIdx, 0);
     }, [currentBlockIndex, transcript, scrollToBlock, transcriptIdx]);
     const goToPrevBlock = useCallback(() => {
-      if (!transcript || !transcriptIdx) return;
+      if (!transcript || transcriptIdx === undefined) return;
 
       const prevIndex =
         currentBlockIndex !== null ? Math.max(currentBlockIndex - 1, 0) : 0;

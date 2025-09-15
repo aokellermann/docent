@@ -12,6 +12,33 @@ IPython.get_ipython().run_line_magic("autoreload", "2")
 # %%
 
 
+from docent.data_models import AgentRun, Transcript
+from docent.data_models.chat import AssistantMessage, UserMessage
+
+ar = AgentRun(
+    transcripts=[
+        Transcript(
+            messages=[
+                UserMessage(content="Hello, can you help?"),
+                AssistantMessage(content="I understand the task and will help you."),
+                UserMessage(content="Great, let's proceed."),
+            ]
+        ),
+        Transcript(
+            messages=[
+                UserMessage(content="Hello, can you help?"),
+                AssistantMessage(content="I understand the task and will help you."),
+                UserMessage(content="Great, let's proceed."),
+            ]
+        ),
+    ]
+)
+print(ar.to_text_new(full_tree=True))
+
+
+# %%
+
+
 from docent import Docent
 from docent_core._env_util import ENV
 
