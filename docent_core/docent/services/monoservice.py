@@ -755,14 +755,16 @@ class MonoService:
                     field_expr = field_expr.op("->")(part)
                 field_expr = field_expr.op("->>")(json_path_parts[-1])
 
-                query = (
-                    select(func.distinct(field_expr))
-                    .where(
-                        ctx.get_base_where_clause(SQLAAgentRun),
-                        field_expr.isnot(None),
-                    )
-                    .limit(limit)
-                )
+                where_conditions = [
+                    ctx.get_base_where_clause(SQLAAgentRun),
+                    field_expr.isnot(None),
+                ]
+
+                # Add search filter if provided
+                if search:
+                    where_conditions.append(field_expr.ilike(func.concat("%", search, "%")))
+
+                query = select(func.distinct(field_expr)).where(*where_conditions).limit(limit)
 
                 result = await session.execute(query)
                 values = [row[0] for row in result.fetchall() if row[0] is not None]
