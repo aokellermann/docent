@@ -93,7 +93,7 @@ export default function InputArea({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 10 }}
             transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-            className="absolute left-1/2 bottom-28 -translate-x-1/2 z-50"
+            className="absolute inset-x-0 bottom-28 z-50 mx-auto w-fit"
           >
             <Button
               data-testid="scroll-to-bottom-button"
@@ -105,7 +105,7 @@ export default function InputArea({
                 scrollToBottom();
               }}
             >
-              <ArrowDown />
+              <ArrowDown size={16} />
             </Button>
           </motion.div>
         )}
