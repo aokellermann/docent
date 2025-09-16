@@ -77,6 +77,9 @@ class TelemetryAccumulationService:
                 agent_run_ids.add(agent_run_id)
                 key = self._build_key(collection_id, agent_run_id=agent_run_id)
             else:
+                logger.warning(
+                    f"Span missing agent_run_id: {span['span_id']}, collection_id={collection_id}"
+                )
                 key = self._build_key(collection_id)
 
             # Sanitize the span data to remove null characters and other problematic Unicode sequences
@@ -94,7 +97,9 @@ class TelemetryAccumulationService:
             self.session.add(accumulation_entry)
 
         await self.session.commit()
-        logger.info(f"Added {len(spans)} spans to accumulation for collection {collection_id}")
+        logger.info(
+            f"Added {len(spans)} spans to accumulation for collection {collection_id}, span_ids={', '.join([span['raw_span_id'] for span in spans])}"
+        )
 
         # Mark agent runs for processing
         if agent_run_ids:

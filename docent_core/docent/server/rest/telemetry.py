@@ -63,7 +63,7 @@ async def trace_endpoint(
             raise HTTPException(status_code=415, detail=f"Unsupported content type: {content_type}")
 
         # Store the raw telemetry data for request
-        await telemetry_svc.store_telemetry_log(
+        telemetry_id = await telemetry_svc.store_telemetry_log(
             user.id,
             type="traces",
             version="v1",
@@ -81,6 +81,14 @@ async def trace_endpoint(
 
         # Ensure collections exist
         await telemetry_svc.ensure_collections_exist(collection_ids, collection_names, user)
+
+        # Update telemetry log with collection_id if we found any
+        if collection_ids:
+            primary_collection_id = next(iter(collection_ids))
+            await telemetry_svc.update_telemetry_log_collection_id(
+                telemetry_id, primary_collection_id
+            )
+            await telemetry_svc.session.commit()
 
         # Accumulate spans into database
         await telemetry_svc.accumulate_spans(spans, user.id, accumulation_service)

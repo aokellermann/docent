@@ -22,6 +22,7 @@ from docent.data_models.chat import (
     Content,
     ContentReasoning,
     ContentText,
+    ToolMessage,
     parse_chat_message,
 )
 from docent.data_models.chat.tool import ToolCall
@@ -549,6 +550,10 @@ class TelemetryService:
                         )
                         extracted_spans.append(extracted_span)
 
+                        logger.debug(
+                            f"  Extracted span: {self._get_span_debug_info(extracted_span)}"
+                        )
+
             return extracted_spans
 
         except Exception as e:
@@ -734,23 +739,19 @@ class TelemetryService:
         """
         # Group spans by collection_id for efficient processing
         spans_by_collection: Dict[str, List[Dict[str, Any]]] = {}
-        agent_runs_to_mark: Dict[str, set[str]] = {}  # collection_id -> set of agent_run_ids
 
         for span in spans:
             span_attrs = span.get("attributes", {})
             collection_id = span_attrs.get("collection_id")
-            agent_run_id = span_attrs.get("agent_run_id")
 
             if collection_id:
                 if collection_id not in spans_by_collection:
                     spans_by_collection[collection_id] = []
                 spans_by_collection[collection_id].append(span)
-
-                # Track agent runs that need processing
-                if agent_run_id:
-                    if collection_id not in agent_runs_to_mark:
-                        agent_runs_to_mark[collection_id] = set()
-                    agent_runs_to_mark[collection_id].add(agent_run_id)
+            else:
+                logger.error(
+                    f"Skipping span - missing collection_id - {self._get_span_debug_info(span)}"
+                )
 
         # Add spans to accumulation
         for collection_id, collection_spans in spans_by_collection.items():
@@ -1423,14 +1424,18 @@ class TelemetryService:
                 # Found matching thread - add new messages
                 existing_thread = chat_threads[thread_index]
                 new_messages = span_messages[len(existing_thread) :]
+
+                # Update empty tool call results in existing thread with new results
+                self._update_empty_tool_call_results(existing_thread, span_messages)
+
                 chat_threads[thread_index].extend(new_messages)
                 thread_span_indices[thread_index].append(span_idx)
-                logger.info(
-                    f"    Extended chat thread {thread_index} with {len(new_messages)} new messages. First new message: {new_messages[0].text[:100] if new_messages else 'N/A'}"
+                logger.debug(
+                    f"    Extended chat thread {thread_index} with {len(new_messages)} new messages. First new message: {new_messages[0].text[:100].replace('\n', ' ') if new_messages else 'N/A'}"
                 )
             elif action == "skip":
                 # New messages are already contained in existing thread - skip
-                logger.info(
+                logger.debug(
                     f"    Skipped span with {len(span_messages)} messages (already contained in thread {thread_index})"
                 )
 
@@ -1651,6 +1656,57 @@ class TelemetryService:
             tool_call_ids.update(msg_tool_ids)
 
         return tool_call_ids
+
+    def _update_empty_tool_call_results(
+        self, existing_thread: List[ChatMessage], new_messages: List[ChatMessage]
+    ) -> None:
+        """Update empty tool call results in existing thread with new results.
+
+        When extending a thread, check if the old thread had any empty tool call results
+        (ToolMessage with empty content) and if the new thread has tool call results with
+        the same tool_call_id and non-empty content, update the old thread's tool call results.
+
+        Args:
+            existing_thread: The existing chat thread that may have empty tool call results
+            new_messages: The new messages that may contain updated tool call results
+        """
+        # Find empty tool call results in existing thread
+        empty_tool_results: Dict[str, int] = {}  # tool_call_id -> message_index
+        for i, msg in enumerate(existing_thread):
+            if msg.role == "tool" and msg.tool_call_id and (not msg.text or msg.text.strip() == ""):
+                empty_tool_results[msg.tool_call_id] = i
+                logger.debug(f"Found empty tool result for tool_call_id: {msg.tool_call_id}")
+
+        if not empty_tool_results:
+            return
+
+        # Find corresponding non-empty tool call results in new messages
+        for msg in new_messages:
+            if (
+                msg.role == "tool"
+                and msg.tool_call_id
+                and msg.tool_call_id in empty_tool_results
+                and msg.text
+                and msg.text.strip() != ""
+            ):
+
+                # Update the existing empty tool result with the new content
+                existing_msg_index = empty_tool_results[msg.tool_call_id]
+
+                # Create updated message with new content
+                updated_msg = ToolMessage(
+                    content=msg.text,
+                    tool_call_id=msg.tool_call_id,
+                    function=msg.function,
+                    error=msg.error,
+                )
+
+                # Replace the existing message
+                existing_thread[existing_msg_index] = updated_msg
+                logger.info(
+                    f"Updated empty tool result for tool_call_id {msg.tool_call_id} "
+                    f"with content: {msg.text[:100]}..."
+                )
 
     def _span_to_chat_messages(self, span: Dict[str, Any]) -> List[ChatMessage]:
         """Convert a span to a list of chat message objects."""
@@ -1913,7 +1969,7 @@ class TelemetryService:
 
                 except Exception as e:
                     logger.warning(
-                        f"Failed to extract tool calls from content in {context} for span {raw_span_id}: {e}"
+                        f"Failed to extract tool calls from content in {context} for span: {e} {self._get_span_debug_info(span)}"
                     )
                     # Continue without tool calls from content
 
@@ -2009,26 +2065,35 @@ class TelemetryService:
                             )
                         elif content_type in ["text", "input_text"]:
                             text_content = str(item.get("text", ""))
-                            filtered_content_parts.append(text_content)
+                            if text_content and text_content != "":
+                                filtered_content_parts.append(text_content)
                         elif content_type == "tool_result":
                             content_str = json.dumps(item.get("content", ""))
                             logger.info(f"Processing tool_result content: {content_str[:200]}...")
                             text_content, _ = self._extract_tool_calls_from_content(content_str)
                             filtered_content_parts.append(text_content)
                         else:
-                            logger.warning(f"Skipping unknown content JSON type: {content_type}")
+                            if content_type:
+                                logger.error(f"Unknown content JSON type: {content_type}")
+                            else:
+                                logger.debug("No content type found for item")
 
                     # Update content and tool_calls
                     if filtered_content_parts:
-                        content = "\n".join(filtered_content_parts)
-                    else:
-                        content = ""
+                        filtered_content = "\n".join(filtered_content_parts)
+                        if filtered_content and filtered_content != "":
+                            content = filtered_content
 
                     if extracted_tool_calls:
                         tool_calls = extracted_tool_calls
                         logger.info(f"Extracted {len(tool_calls)} tool calls from content")
+
+                    if not filtered_content_parts and not extracted_tool_calls:
+                        logger.debug(
+                            "No content or tool calls found for item, treating as regular content"
+                        )
             except json.JSONDecodeError as e:
-                logger.warning(
+                logger.debug(
                     f"Content is not valid JSON: {e}, treating as regular content. Start of content: {str(content)[:200]}"
                 )
 
