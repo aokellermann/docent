@@ -3,7 +3,7 @@
 import { useScrollToBottom } from '@/app/hooks/use-scroll-to-bottom';
 import { motion } from 'framer-motion';
 
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { ChatMessage } from '@/app/types/transcriptTypes';
 import { NavigateToCitation } from '@/components/CitationRenderer';
 import { ChatMessage as ChatMessageComponent } from './ChatMessage';
@@ -44,7 +44,6 @@ export function ChatArea({
     endRef,
     onViewportEnter,
     onViewportLeave,
-    isAtBottom,
     scrollToBottom,
   } = useScrollToBottom();
 
@@ -55,12 +54,18 @@ export function ChatArea({
       lastMessage?.role !== 'tool') ||
     (messages.length === 1 && __showThinkingSpacerAfterFirstMessage);
 
-  // Auto-scroll when loading and at bottom
   useEffect(() => {
-    if (isLoading && isAtBottom) {
-      scrollToBottom('auto');
+    console.log('showThinkingSpacer', showThinkingSpacer);
+  }, [showThinkingSpacer]);
+
+  // Scroll once when the thinking spacer first appears (after send)
+  const prevShowThinking = useRef(showThinkingSpacer);
+  useEffect(() => {
+    if (!prevShowThinking.current && showThinkingSpacer) {
+      scrollToBottom('smooth');
     }
-  }, [messages, isLoading, isAtBottom, scrollToBottom]);
+    prevShowThinking.current = showThinkingSpacer;
+  }, [showThinkingSpacer, scrollToBottom]);
 
   // Extract suggested messages from the last assistant message
   const finalSuggestedMessages = (() => {
@@ -98,6 +103,7 @@ export function ChatArea({
             message={message}
             isLoadingPlaceholder={false}
             requiresScrollPadding={
+              isLoading &&
               !showThinkingSpacer &&
               index === messages.length - 1 &&
               message.role === 'assistant'
@@ -118,7 +124,6 @@ export function ChatArea({
             onNavigateToCitation={onNavigateToCitation}
           />
         )}
-
         {/* Suggestions row at the end of the chat */}
         {finalSuggestedMessages &&
           !isReadonly &&
@@ -146,7 +151,6 @@ export function ChatArea({
               </div>
             </div>
           )}
-
         {/* Sentinel to detect when viewport is at the bottom and to provide a scroll target */}
         <motion.div
           ref={endRef}
