@@ -105,9 +105,17 @@ class AgentRunWriter:
         # Register shutdown hooks
         atexit.register(self.finish)
 
+        def _handle_sigint(s: int, f: object) -> None:
+            self._shutdown()
+            raise KeyboardInterrupt
+
+        def _handle_sigterm(s: int, f: object) -> None:
+            self._shutdown()
+            raise SystemExit(0)
+
         # Register signal handlers for graceful shutdown
-        signal.signal(signal.SIGINT, lambda s, f: self._shutdown())  # Ctrl+C
-        signal.signal(signal.SIGTERM, lambda s, f: self._shutdown())  # Kill signal
+        signal.signal(signal.SIGINT, _handle_sigint)  # Ctrl+C
+        signal.signal(signal.SIGTERM, _handle_sigterm)  # Kill signal
 
     def log_agent_runs(self, agent_runs: list[AgentRun]) -> None:
         """Put a list of AgentRun objects into the queue.
