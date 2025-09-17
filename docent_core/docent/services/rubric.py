@@ -331,6 +331,8 @@ class RubricService:
                     SQLAJudgeResult.result_type == ResultType.DIRECT_RESULT,
                 ),
             )
+        # Intersect with the base filter
+        query = query.where(ctx.get_base_where_clause(SQLAAgentRun))
 
         result = await self.session.execute(query)
         agent_run_ids = cast(list[str], result.scalars().all())
@@ -339,8 +341,6 @@ class RubricService:
         await self.service.set_job_json(
             job.id, job.job_json | {"total_agent_runs": len(agent_run_ids)}
         )
-
-        logger.info(f"Evaluating rubrics for {len(agent_run_ids)} agent runs missing results")
 
         random.shuffle(agent_run_ids)
         if len(agent_run_ids) == 0:
