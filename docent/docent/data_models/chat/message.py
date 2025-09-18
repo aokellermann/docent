@@ -1,7 +1,7 @@
 from logging import getLogger
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Discriminator
+from pydantic import BaseModel, Discriminator, Field
 
 from docent.data_models.chat.content import Content
 from docent.data_models.chat.tool import ToolCall
@@ -17,11 +17,13 @@ class BaseChatMessage(BaseModel):
         id: Optional unique identifier for the message.
         content: The message content, either as a string or list of Content objects.
         role: The role of the message sender (system, user, assistant, tool).
+        metadata: Additional structured metadata about the message.
     """
 
     id: str | None = None
     content: str | list[Content]
     role: Literal["system", "user", "assistant", "tool"]
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def text(self) -> str:

@@ -20,6 +20,7 @@ export interface Content {
 
 interface BaseChatMessage {
   content: string | Content[];
+  metadata?: BaseMetadata;
 }
 
 interface SystemMessage extends BaseChatMessage {

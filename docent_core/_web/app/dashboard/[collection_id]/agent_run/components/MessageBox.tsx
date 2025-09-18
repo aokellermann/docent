@@ -11,6 +11,7 @@ import {
   TextSpanWithCitations,
   transformCitationIntervalsForPrettyPrintJson,
 } from '@/lib/citationMatch';
+import { MetadataDialog } from './MetadataDialog';
 
 function stringify(x: any): string {
   if (typeof x === 'string') return x;
@@ -447,17 +448,25 @@ export function MessageBox({
             Block {index} |{' '}
             {message.role.charAt(0).toUpperCase() + message.role.slice(1)}
           </span>
-          {hasJsonContent(componentRanges.main.content) && (
-            <label className="flex items-center space-x-1 text-xs text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={prettyPrintJsonMessages.has(index)}
-                onChange={handlePrettyPrintJsonChange}
-                className="h-3 w-3 rounded border-border"
+          <div className="flex items-center gap-2">
+            {message.metadata && Object.keys(message.metadata).length > 0 && (
+              <MetadataDialog
+                metadata={message.metadata}
+                title={`Message Metadata - Block ${index}`}
               />
-              <span>Pretty JSON</span>
-            </label>
-          )}
+            )}
+            {hasJsonContent(componentRanges.main.content) && (
+              <label className="flex items-center space-x-1 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={prettyPrintJsonMessages.has(index)}
+                  onChange={handlePrettyPrintJsonChange}
+                  className="h-3 w-3 rounded border-border"
+                />
+                <span>Pretty JSON</span>
+              </label>
+            )}
+          </div>
         </div>
 
         {typeof message.content !== 'string' && renderReasoningBlock()}

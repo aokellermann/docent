@@ -9,6 +9,8 @@ We support 4 types of message objects:
 
 Each message has a `content` field, which can either be a `str` or a list of [`Content`][docent.data_models.chat.content] objects with [text][docent.data_models.chat.content.ContentText] and/or [reasoning][docent.data_models.chat.content.ContentReasoning]. We don't support audio/image/video content yet.
 
+Each message also has an optional `metadata` field that can store additional structured information about the message as a dictionary. This metadata is included in text representations when present and defaults to an empty dictionary for backward compatibility.
+
 
 ### Usage
 
@@ -51,6 +53,8 @@ messages = [
     UserMessage(content=[ContentText(text="Help me with this problem.")]),
     AssistantMessage(content="I'll help you solve that.", tool_calls=[ToolCall(id="call_123", function="calculator", arguments={"operation": "add", "a": 5, "b": 3}, view=ToolCallContent(format="markdown", content="Calculating: 5 + 3"))]),
     ToolMessage(content="8", tool_call_id="call_123", function="calculator"),
+    # Example with metadata
+    SystemMessage(content="Processing user request", metadata={"source": "api", "priority": "high", "timestamp": "2024-01-01T12:00:00Z"}),
 ]
 ```
 

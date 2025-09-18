@@ -72,6 +72,11 @@ def format_chat_message(
                 args = ", ".join([f"{k}={v}" for k, v in tool_call.arguments.items()])
                 cur_content += f"\n<tool call>\n{tool_call.function}({args})\n</tool call>"
 
+    if message.metadata:
+        metadata_yaml = yaml_dump_metadata(message.metadata)
+        if metadata_yaml is not None:
+            cur_content += f"\n<|message metadata|>\n{metadata_yaml}\n</|message metadata|>"
+
     return TRANSCRIPT_BLOCK_TEMPLATE.format(
         index_label=index_label, role=message.role, content=cur_content
     )
@@ -394,7 +399,7 @@ class Transcript(BaseModel):
         metadata_obj = to_jsonable_python(self.metadata)
         yaml_width = float("inf")
         block_str = f"<blocks>\n{blocks_str}\n</blocks>\n"
-        metadata_str = f"<metadata>\n{yaml.dump(metadata_obj, width=yaml_width)}\n</metadata>"
+        metadata_str = f"<|transcript metadata|>\n{yaml.dump(metadata_obj, width=yaml_width)}\n</|transcript metadata|>"
 
         if token_limit == sys.maxsize:
             return [f"{block_str}" f"{metadata_str}"]
