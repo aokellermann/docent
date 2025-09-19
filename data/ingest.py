@@ -175,7 +175,7 @@ async def ingest_file(filename: str, importer_override: str | None = None) -> No
     log_info(f"Uploading {len(agent_runs)} agent runs...")
 
     try:
-        client.add_agent_runs(collection_id, agent_runs)
+        client.add_agent_runs(collection_id, agent_runs, batch_size=250)
         log_success(
             f"Successfully uploaded {len(agent_runs)} agent runs to collection '{collection_name}'"
         )
