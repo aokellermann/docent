@@ -9,7 +9,7 @@ We support 4 types of message objects:
 
 Each message has a `content` field, which can either be a `str` or a list of [`Content`][docent.data_models.chat.content] objects with [text][docent.data_models.chat.content.ContentText] and/or [reasoning][docent.data_models.chat.content.ContentReasoning]. We don't support audio/image/video content yet.
 
-Each message also has an optional `metadata` field that can store additional structured information about the message as a dictionary. This metadata is included in text representations when present and defaults to an empty dictionary for backward compatibility.
+Each message also has an optional `metadata` field that can store additional structured information about the message as a dictionary.
 
 
 ### Usage
