@@ -115,9 +115,15 @@ export default function ExperimentViewer({
 
   const [selectedColumns, setSelectedColumns] = useState<string[]>([]);
   const [hasLoadedFromStorage, setHasLoadedFromStorage] = useState(false);
+  const [discoveredColumns, setDiscoveredColumns] = useState<Set<string>>(
+    new Set()
+  );
 
   // Load persisted column selection on mount and when collectionId changes
   useEffect(() => {
+    // Clear discovered columns when collection changes
+    setDiscoveredColumns(new Set());
+
     const key = getColumnsStorageKey(collectionId);
     if (key) {
       try {
@@ -203,6 +209,28 @@ export default function ExperimentViewer({
     return Array.from(keys).sort();
   }, [metadataData, sortableFieldsData]);
 
+  // Update discovered columns when new metadata is loaded
+  useEffect(() => {
+    const sortableFieldNames = new Set(
+      sortableFieldsData?.fields?.map((field) => field.name) ?? []
+    );
+    const newDiscoveredColumns = new Set(discoveredColumns);
+
+    // Add any new metadata columns that aren't already in sortable fields
+    Object.values(metadataData).forEach((record) => {
+      Object.keys(record).forEach((key) => {
+        if (key.startsWith('metadata.') && !sortableFieldNames.has(key)) {
+          newDiscoveredColumns.add(key);
+        }
+      });
+    });
+
+    // Only update if we found new columns
+    if (newDiscoveredColumns.size !== discoveredColumns.size) {
+      setDiscoveredColumns(newDiscoveredColumns);
+    }
+  }, [metadataData, sortableFieldsData, discoveredColumns]);
+
   const availableColumns = useMemo(() => {
     // Start with sortable fields from backend
     const sortableFieldNames =
@@ -213,16 +241,24 @@ export default function ExperimentViewer({
       (key) => key !== 'agent_run_id'
     );
 
-    // Combine all columns
-    const allColumns = [...filteredSortableFields, ...derivedColumns];
+    // Combine sortable fields with both current derived columns and persisted discovered columns
+    const allDiscoveredColumns = Array.from(discoveredColumns).sort();
+    const allColumns = [
+      ...filteredSortableFields,
+      ...derivedColumns,
+      ...allDiscoveredColumns,
+    ];
+
+    // Remove duplicates while preserving order
+    const uniqueColumns = Array.from(new Set(allColumns));
 
     // Sort all columns alphabetically, but keep created_at at the end
-    return allColumns.sort((a, b) => {
+    return uniqueColumns.sort((a, b) => {
       if (a === 'created_at') return 1;
       if (b === 'created_at') return -1;
       return a.localeCompare(b);
     });
-  }, [derivedColumns, sortableFieldsData]);
+  }, [derivedColumns, sortableFieldsData, discoveredColumns]);
 
   // Set default columns when availableColumns changes and we haven't loaded from storage
   useEffect(() => {
