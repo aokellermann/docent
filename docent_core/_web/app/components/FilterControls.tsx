@@ -15,11 +15,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import React, { useState, useRef, useEffect } from 'react';
 import { toast } from '@/hooks/use-toast';
 import { v4 as uuid4 } from 'uuid';
 import { FilterChips } from './FilterChips';
 import { SmartValueInput } from './SmartValueInput';
+import { ChevronsUpDown, Check } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface FilterControlsProps {
   filters: ComplexFilter | undefined | null;
@@ -44,6 +59,7 @@ export const FilterControls = ({
     undefined
   );
   const [metadataOp, setMetadataOp] = useState<string>('==');
+  const [fieldSelectorOpen, setFieldSelectorOpen] = useState(false);
   const valueFieldRef = useRef<HTMLInputElement>(null);
 
   // Populate form when initialFilter is provided
@@ -220,22 +236,63 @@ export const FilterControls = ({
           <div className="text-xs text-muted-foreground font-mono ml-1 mb-1">
             Filter by
           </div>
-          <Select value={metadataKey} onValueChange={handleFieldChange}>
-            <SelectTrigger className="h-7 text-xs bg-background font-mono text-muted-foreground">
-              <SelectValue placeholder="Select field" />
-            </SelectTrigger>
-            <SelectContent>
-              {metadataFields?.map((field: TranscriptMetadataField) => (
-                <SelectItem
-                  key={field.name}
-                  value={field.name}
-                  className="font-mono text-muted-foreground text-xs"
-                >
-                  {field.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Popover open={fieldSelectorOpen} onOpenChange={setFieldSelectorOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                role="combobox"
+                aria-expanded={fieldSelectorOpen}
+                className={cn(
+                  'h-7 w-full justify-between bg-background font-mono text-xs text-muted-foreground',
+                  metadataKey ? undefined : 'opacity-70'
+                )}
+              >
+                {metadataKey || 'Select field'}
+                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              className="p-0"
+              align="start"
+              style={{
+                width: 'var(--radix-popover-trigger-width)',
+                minWidth: '320px',
+              }}
+            >
+              <Command>
+                <CommandInput
+                  placeholder="Search fields..."
+                  className="h-8 text-xs"
+                />
+                <CommandList>
+                  <CommandEmpty>No fields found.</CommandEmpty>
+                  <CommandGroup>
+                    {metadataFields?.map((field: TranscriptMetadataField) => (
+                      <CommandItem
+                        key={field.name}
+                        value={field.name}
+                        onSelect={(currentValue) => {
+                          handleFieldChange(currentValue);
+                          setFieldSelectorOpen(false);
+                        }}
+                        className="font-mono text-xs"
+                      >
+                        <Check
+                          className={cn(
+                            'mr-2 h-4 w-4',
+                            metadataKey === field.name
+                              ? 'opacity-100'
+                              : 'opacity-0'
+                          )}
+                        />
+                        {field.name}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
         </div>
         {metadataType === 'int' || metadataType === 'float' ? (
           <div>
