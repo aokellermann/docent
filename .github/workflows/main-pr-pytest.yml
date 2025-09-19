@@ -92,22 +92,6 @@ jobs:
           path: test-results.xml
           reporter: java-junit
 
-      - name: Post test report comment
-        uses: peter-evans/create-or-update-comment@v4
-        if: always()
-        with:
-          issue-number: ${{ github.event.pull_request.number }}
-          body: |
-            ## Test Results
-
-            **Status**: ${{ steps.test-report.outputs.conclusion }} ${{ steps.test-report.outputs.conclusion == 'success' && '✅' || '❌' }}
-            **Passed**: ${{ steps.test-report.outputs.passed }}
-            **Failed**: ${{ steps.test-report.outputs.failed }}
-            **Skipped**: ${{ steps.test-report.outputs.skipped }}
-            **Duration**: ${{ steps.test-report.outputs.time }}ms
-
-            View detailed results in the [Actions tab](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-
       - name: Show server logs on failure
         if: failure()
         run: |
