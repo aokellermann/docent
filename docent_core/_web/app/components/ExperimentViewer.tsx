@@ -1,11 +1,6 @@
-import {
-  ChevronRight,
-  ChevronLeft,
-  ChevronFirst,
-  ChevronLast,
-  Upload,
-  Loader2,
-} from 'lucide-react';
+'use client';
+
+import { Loader2, Upload } from 'lucide-react';
 import React, {
   useMemo,
   useState,
@@ -17,17 +12,15 @@ import { skipToken } from '@reduxjs/toolkit/query';
 
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 
 import { ChartsArea } from './ChartsArea';
-import AgentRunCard from './AgentRunCard';
+import { AgentRunTable } from './AgentRunTable';
 import UploadRunsButton from './UploadRunsButton';
 import UploadRunsDialog from './UploadRunsDialog';
 
 import { TranscriptFilterControls } from './TranscriptFilterControls';
-import { SortControls } from './SortControls';
 
 import { setExperimentViewerScrollPosition } from '../store/experimentViewerSlice';
 import {
@@ -39,14 +32,51 @@ import { useDebounce } from '@/hooks/use-debounce';
 import { useDragAndDrop } from '@/hooks/use-drag-drop';
 import {
   useGetAgentRunIdsQuery,
-  useGetAgentRunMetadataQuery,
+  useGetAgentRunMetadataFieldsQuery,
+  useGetAgentRunSortableFieldsQuery,
   collectionApi,
 } from '../api/collectionApi';
 import { useHasCollectionWritePermission } from '@/lib/permissions/hooks';
 import { INTERNAL_BASE_URL } from '@/app/constants';
 
-// Constants for magic numbers
-const PAGINATION_LIMIT = 100;
+import { navToAgentRun } from '@/lib/nav';
+import { useRouter } from 'next/navigation';
+import posthog from 'posthog-js';
+
+const processAgentRunMetadata = (
+  structuredMetadata: Record<string, unknown> | null | undefined
+): Record<string, unknown> => {
+  const result: Record<string, unknown> = {};
+  if (!structuredMetadata) {
+    return result;
+  }
+
+  // Include the original structured metadata for direct access
+  result._structured = structuredMetadata;
+
+  Object.entries(structuredMetadata).forEach(([key, value]) => {
+    if (key === 'metadata') {
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        // Add top-level keys
+        Object.entries(value as Record<string, unknown>).forEach(
+          ([metaKey, metaValue]) => {
+            const metadataKey = `metadata.${metaKey}`;
+            result[metadataKey] = Array.isArray(metaValue)
+              ? [...metaValue]
+              : metaValue;
+          }
+        );
+      }
+    } else {
+      // Direct keys like agent_run_id, created_at go directly to result
+      result[key] = Array.isArray(value) ? [...value] : value;
+    }
+  });
+
+  return result;
+};
+
+const METADATA_FETCH_BATCH_SIZE = 200;
 
 export default function ExperimentViewer({
   activeRunId,
@@ -66,6 +96,83 @@ export default function ExperimentViewer({
   const sortField = useAppSelector(selectSortField);
   const sortDirection = useAppSelector(selectSortDirection);
 
+  const router = useRouter();
+
+  const [metadataData, setMetadataData] = useState<
+    Record<string, Record<string, unknown>>
+  >({});
+  const [loadingMetadataIds, setLoadingMetadataIds] = useState<Set<string>>(
+    new Set()
+  );
+  const [requestedMetadataIds, setRequestedMetadataIds] = useState<Set<string>>(
+    new Set()
+  );
+
+  // Helper function to get localStorage key for selected columns
+  const getColumnsStorageKey = (collectionId: string | undefined) => {
+    return collectionId ? `agent-run-table-columns-${collectionId}` : null;
+  };
+
+  const [selectedColumns, setSelectedColumns] = useState<string[]>([]);
+  const [hasLoadedFromStorage, setHasLoadedFromStorage] = useState(false);
+
+  // Load persisted column selection on mount and when collectionId changes
+  useEffect(() => {
+    const key = getColumnsStorageKey(collectionId);
+    if (key) {
+      try {
+        const persisted = localStorage.getItem(key);
+        if (persisted) {
+          const parsedColumns = JSON.parse(persisted);
+          if (Array.isArray(parsedColumns)) {
+            setSelectedColumns(parsedColumns);
+            setHasLoadedFromStorage(true);
+            return;
+          }
+        }
+      } catch (error) {
+        console.warn(
+          `Failed to load persisted columns for collection ${collectionId}:`,
+          error
+        );
+      }
+    }
+
+    // If no persisted selection or failed to load, mark as loaded so we can set defaults
+    setHasLoadedFromStorage(true);
+  }, [collectionId]);
+
+  // Persist state changes
+  useEffect(() => {
+    const key = getColumnsStorageKey(collectionId);
+    if (key && hasLoadedFromStorage) {
+      try {
+        localStorage.setItem(key, JSON.stringify(selectedColumns));
+      } catch (error) {
+        console.warn(
+          `Failed to persist columns for collection ${collectionId}:`,
+          error
+        );
+      }
+    }
+  }, [selectedColumns, collectionId, hasLoadedFromStorage]);
+  const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(
+    null
+  );
+
+  const [fetchAgentRunMetadata] =
+    collectionApi.useLazyGetAgentRunMetadataQuery();
+
+  const { data: metadataFieldsData } = useGetAgentRunMetadataFieldsQuery(
+    collectionId!,
+    { skip: !collectionId }
+  );
+
+  const { data: sortableFieldsData } = useGetAgentRunSortableFieldsQuery(
+    collectionId!,
+    { skip: !collectionId }
+  );
+
   // Fetch agent run IDs using RTK skipToken
   const { data: agentRunIds } = useGetAgentRunIdsQuery(
     collectionId
@@ -77,6 +184,70 @@ export default function ExperimentViewer({
       : skipToken
   );
 
+  const derivedColumns = useMemo(() => {
+    const sortableFieldNames = new Set(
+      sortableFieldsData?.fields?.map((field) => field.name) ?? []
+    );
+    const keys = new Set<string>();
+
+    // Only add top-level metadata keys that aren't already in sortable fields
+    Object.values(metadataData).forEach((record) => {
+      Object.keys(record).forEach((key) => {
+        // Only add if it's a metadata.* key and not already in sortable fields
+        if (key.startsWith('metadata.') && !sortableFieldNames.has(key)) {
+          keys.add(key);
+        }
+      });
+    });
+
+    return Array.from(keys).sort();
+  }, [metadataData, sortableFieldsData]);
+
+  const availableColumns = useMemo(() => {
+    // Start with sortable fields from backend
+    const sortableFieldNames =
+      sortableFieldsData?.fields?.map((field) => field.name) ?? [];
+
+    // Filter out agent_run_id since it's a hardcoded column that's always visible
+    const filteredSortableFields = sortableFieldNames.filter(
+      (key) => key !== 'agent_run_id'
+    );
+
+    // Combine all columns
+    const allColumns = [...filteredSortableFields, ...derivedColumns];
+
+    // Sort all columns alphabetically, but keep created_at at the end
+    return allColumns.sort((a, b) => {
+      if (a === 'created_at') return 1;
+      if (b === 'created_at') return -1;
+      return a.localeCompare(b);
+    });
+  }, [derivedColumns, sortableFieldsData]);
+
+  // Set default columns when availableColumns changes and we haven't loaded from storage
+  useEffect(() => {
+    if (
+      availableColumns.length > 0 &&
+      hasLoadedFromStorage &&
+      selectedColumns.length === 0
+    ) {
+      setSelectedColumns(availableColumns);
+    }
+  }, [availableColumns, hasLoadedFromStorage, selectedColumns.length]);
+
+  const sortableColumns = useMemo(
+    () =>
+      new Set<string>(
+        (sortableFieldsData?.fields ?? []).map((field) => field.name)
+      ),
+    [sortableFieldsData]
+  );
+
+  useEffect(() => {
+    setMetadataData({});
+    setLoadingMetadataIds(new Set<string>());
+  }, [collectionId]);
+
   /**
    * Scrolling
    */
@@ -85,9 +256,6 @@ export default function ExperimentViewer({
     undefined
   );
   const debouncedScrollPosition = useDebounce(scrollPosition, 100);
-
-  // Track which agent run IDs have already been fetched to prevent duplicate calls
-  const fetchedAgentRunIdsRef = useRef<Set<string>>(new Set());
 
   // Upload state
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
@@ -108,7 +276,8 @@ export default function ExperimentViewer({
   }, []);
 
   const handleUploadSuccess = useCallback(() => {
-    fetchedAgentRunIdsRef.current.clear();
+    setMetadataData({});
+    setLoadingMetadataIds(new Set<string>());
     dispatch(
       collectionApi.util.invalidateTags([
         'AgentRunIds',
@@ -124,55 +293,23 @@ export default function ExperimentViewer({
     }
   }, [debouncedScrollPosition, dispatch]);
 
-  const containerRef = useCallback(
-    (node: HTMLDivElement) => {
-      if (!node) return;
-
-      // If there is an existing scroll position, set it
-      if (experimentViewerScrollPosition && !scrolledOnceRef.current) {
-        node.scrollTop = experimentViewerScrollPosition;
-        scrolledOnceRef.current = true;
-      }
-
-      // Save scroll position when user scrolls
-      const handleScroll = () => setScrollPosition(node.scrollTop);
-      node.addEventListener('scroll', handleScroll);
-      return () => {
-        node.removeEventListener('scroll', handleScroll);
-      };
-    },
-    [experimentViewerScrollPosition]
-  );
-
-  // Add pagination state
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = PAGINATION_LIMIT; // Use constant instead of hardcoded value
-
-  // Calculate pagination values
-  const totalPages = Math.ceil((agentRunIds?.length || 0) / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const endIndex = Math.min(
-    startIndex + itemsPerPage,
-    agentRunIds?.length || 0
-  );
-  const currentPageItems = useMemo(
-    () => agentRunIds?.slice(startIndex, endIndex) || [],
-    [agentRunIds, startIndex, endIndex]
-  );
-
-  // Fetch agent run metadata when the agent run IDs change
-  const { data: agentRunMetadata } = useGetAgentRunMetadataQuery(
-    {
-      collectionId: collectionId!,
-      agent_run_ids: currentPageItems,
-    },
-    { skip: !collectionId }
-  );
-
-  // Clear fetched IDs when the overall agent run list changes
   useEffect(() => {
-    fetchedAgentRunIdsRef.current.clear();
-  }, [agentRunIds]);
+    const node = scrollContainer;
+    if (!node) {
+      return;
+    }
+
+    if (experimentViewerScrollPosition && !scrolledOnceRef.current) {
+      node.scrollTop = experimentViewerScrollPosition;
+      scrolledOnceRef.current = true;
+    }
+
+    const handleScroll = () => setScrollPosition(node.scrollTop);
+    node.addEventListener('scroll', handleScroll);
+    return () => {
+      node.removeEventListener('scroll', handleScroll);
+    };
+  }, [experimentViewerScrollPosition, scrollContainer]);
 
   useEffect(() => {
     if (!collectionId) return;
@@ -193,19 +330,126 @@ export default function ExperimentViewer({
     ensureTelemetryProcessing();
   }, [collectionId]);
 
-  useEffect(() => {
-    if (agentRunIds && totalPages > 0 && currentPage > totalPages) {
-      setCurrentPage(1);
-    }
-  }, [agentRunIds, currentPage, totalPages]);
+  const requestMetadataForIds = useCallback(
+    async (ids: string[]) => {
+      if (!collectionId || !ids.length) {
+        return;
+      }
 
-  // Pagination controls
-  const goToPage = useCallback(
-    (page: number) => {
-      setCurrentPage(Math.max(1, Math.min(page, totalPages)));
+      const uniqueIds = Array.from(new Set(ids));
+      const idsToFetch = uniqueIds.filter(
+        (id) =>
+          !metadataData[id] &&
+          !loadingMetadataIds.has(id) &&
+          !requestedMetadataIds.has(id)
+      );
+
+      if (!idsToFetch.length) {
+        return;
+      }
+
+      // Mark these IDs as requested immediately to prevent duplicate requests
+      setRequestedMetadataIds((prev) => {
+        const next = new Set(prev);
+        idsToFetch.forEach((id) => next.add(id));
+        return next;
+      });
+
+      setLoadingMetadataIds((prev) => {
+        const next = new Set(prev);
+        idsToFetch.forEach((id) => next.add(id));
+        return next;
+      });
+
+      try {
+        for (let i = 0; i < idsToFetch.length; i += METADATA_FETCH_BATCH_SIZE) {
+          const chunk = idsToFetch.slice(i, i + METADATA_FETCH_BATCH_SIZE);
+          const response = await fetchAgentRunMetadata({
+            collectionId,
+            agent_run_ids: chunk,
+          }).unwrap();
+
+          setMetadataData((prev) => {
+            const next = { ...prev };
+            Object.entries(response).forEach(([runId, structuredMetadata]) => {
+              next[runId] = processAgentRunMetadata(structuredMetadata);
+            });
+            return next;
+          });
+        }
+      } catch (error) {
+        console.error('Failed to fetch agent run metadata', error);
+        // On error, remove from requested set so we can retry later
+        setRequestedMetadataIds((prev) => {
+          const next = new Set(prev);
+          idsToFetch.forEach((id) => next.delete(id));
+          return next;
+        });
+      } finally {
+        setLoadingMetadataIds((prev) => {
+          const next = new Set(prev);
+          idsToFetch.forEach((id) => next.delete(id));
+          return next;
+        });
+      }
     },
-    [totalPages]
+    [
+      collectionId,
+      fetchAgentRunMetadata,
+      metadataData,
+      loadingMetadataIds,
+      requestedMetadataIds,
+    ]
   );
+
+  const handleSortingChange = useCallback(
+    (field: string | null, direction: 'asc' | 'desc') => {
+      dispatch(setSorting({ field, direction }));
+    },
+    [dispatch]
+  );
+
+  const handleRowMouseDown = useCallback(
+    (runId: string, event: React.MouseEvent<HTMLTableRowElement>) => {
+      event.stopPropagation();
+      const openInNewTab = event.button === 1 || event.metaKey || event.ctrlKey;
+
+      posthog.capture('agent_run_clicked', {
+        agent_run_id: runId,
+      });
+
+      navToAgentRun(
+        router,
+        window,
+        runId,
+        undefined,
+        undefined,
+        collectionId,
+        undefined,
+        openInNewTab
+      );
+    },
+    [collectionId, router]
+  );
+
+  const emptyStateContent =
+    agentRunIds === undefined ? (
+      <Loader2 size={16} className="animate-spin text-muted-foreground" />
+    ) : (
+      <div className="flex flex-col items-center space-y-3">
+        <Upload className="h-12 w-12 text-muted-foreground" />
+        <div className="text-muted-foreground">No agent runs found</div>
+        <Button asChild variant="outline" size="sm">
+          <a
+            href="https://docs.transluce.org/en/latest/quickstart/"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            See quickstart guide
+          </a>
+        </Button>
+      </div>
+    );
 
   return (
     <Card className="flex-1 flex flex-col h-full min-w-0">
@@ -239,122 +483,28 @@ export default function ExperimentViewer({
         <TranscriptFilterControls />
       </div>
 
-      <div className="px-3">
-        <SortControls
+      <div className="flex-1 min-w-0 min-h-0 px-3 pb-3 flex">
+        <AgentRunTable
+          agentRunIds={agentRunIds}
+          metadataData={metadataData}
+          loadingMetadataIds={loadingMetadataIds}
+          requestedMetadataIds={requestedMetadataIds}
+          availableColumns={availableColumns}
+          selectedColumns={selectedColumns}
+          onSelectedColumnsChange={setSelectedColumns}
+          sortableColumns={sortableColumns}
           sortField={sortField}
           sortDirection={sortDirection}
-          onSortChange={(field, direction) => {
-            dispatch(setSorting({ field, direction }));
-          }}
+          onSortChange={handleSortingChange}
+          activeRunId={activeRunId}
+          requestMetadataForIds={requestMetadataForIds}
+          dropZoneHandlers={dropZoneHandlers}
+          isDragActive={isDragActive}
+          isOverDropZone={isOverDropZone}
+          scrollContainerRef={setScrollContainer}
+          onRowMouseDown={handleRowMouseDown}
+          emptyState={emptyStateContent}
         />
-      </div>
-
-      <div className="flex-1 custom-scrollbar min-w-0 overflow-y-auto relative">
-        <div
-          ref={containerRef}
-          className="h-full space-y-1"
-          {...dropZoneHandlers}
-        >
-          {isDragActive && (
-            <div
-              className={cn(
-                'absolute inset-0 flex flex-col items-center justify-center z-50 transition-all duration-200 border-2 rounded',
-                isOverDropZone
-                  ? 'bg-blue-100 bg-opacity-95 border-blue-text border-solid'
-                  : 'bg-blue-100 bg-opacity-80 border-blue-text border-dashed'
-              )}
-              style={{
-                pointerEvents: 'none',
-              }}
-            >
-              <Upload className="h-8 w-8 text-blue-text" />
-              <div
-                className={cn(
-                  'mt-2 text-sm font-medium transition-all duration-200 text-blue-text',
-                  isOverDropZone ? 'scale-105' : ''
-                )}
-              >
-                Drop Inspect logs to upload
-              </div>
-            </div>
-          )}
-
-          {agentRunIds === undefined && (
-            <div className="h-full flex items-center justify-center text-center min-h-[200px] text-xs">
-              <Loader2
-                size={16}
-                className="animate-spin text-muted-foreground"
-              />
-            </div>
-          )}
-
-          {agentRunIds !== undefined && agentRunIds.length > 0 ? (
-            currentPageItems.map((agentRunId) => (
-              <AgentRunCard
-                key={agentRunId}
-                agentRunId={agentRunId}
-                metadata={agentRunMetadata?.[agentRunId]}
-                isActive={activeRunId === agentRunId}
-              />
-            ))
-          ) : (
-            <div className="h-full flex items-center justify-center text-center min-h-[200px] text-xs">
-              <div className="flex flex-col items-center space-y-3">
-                <Upload className="h-12 w-12 text-muted-foreground" />
-                <div className="text-muted-foreground">No agent runs found</div>
-                <Button asChild variant="outline" size="sm">
-                  <a
-                    href="https://docs.transluce.org/en/latest/quickstart/"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    See quickstart guide
-                  </a>
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Pagination controls */}
-      <div className="flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => goToPage(1)}
-            disabled={currentPage === 1}
-            className="p-0.5 rounded hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <ChevronFirst className="h-3.5 w-3.5" />
-          </button>
-          <button
-            onClick={() => goToPage(currentPage - 1)}
-            disabled={currentPage === 1}
-            className="p-0.5 rounded hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <ChevronLeft className="h-3.5 w-3.5" />
-          </button>
-          <span className="text-xs font-mono px-1">
-            {currentPage}/{totalPages}
-          </span>
-          <button
-            onClick={() => goToPage(currentPage + 1)}
-            disabled={currentPage === totalPages}
-            className="p-0.5 rounded hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <ChevronRight className="h-3.5 w-3.5" />
-          </button>
-          <button
-            onClick={() => goToPage(totalPages)}
-            disabled={currentPage === totalPages}
-            className="p-0.5 rounded hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <ChevronLast className="h-3.5 w-3.5" />
-          </button>
-        </div>
-        <div className="text-[11px] text-muted-foreground">
-          {startIndex + 1}-{endIndex} of {agentRunIds?.length || 0}
-        </div>
       </div>
 
       <UploadRunsDialog

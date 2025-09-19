@@ -1,7 +1,6 @@
-import { ArrowLeftRight, FunnelPlus, Download } from 'lucide-react';
+import { ArrowLeftRight, FunnelPlus, Download, Scale } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
 import posthog from 'posthog-js';
-import { Scale } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {

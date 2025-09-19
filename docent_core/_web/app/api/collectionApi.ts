@@ -35,6 +35,10 @@ interface AgentRunMetadataFieldsResponse {
   fields: TranscriptMetadataField[];
 }
 
+interface AgentRunSortableFieldsResponse {
+  fields: TranscriptMetadataField[];
+}
+
 interface PostBaseFilterRequest {
   filter: ComplexFilter | null;
 }
@@ -132,7 +136,7 @@ export const collectionApi = createApi({
       providesTags: ['AgentRunMetadataFields'],
     }),
     getAgentRunSortableFields: build.query<
-      AgentRunMetadataFieldsResponse,
+      AgentRunSortableFieldsResponse,
       string
     >({
       query: (collectionId) => `/${collectionId}/agent_run_sortable_fields`,

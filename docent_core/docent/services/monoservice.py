@@ -535,22 +535,30 @@ class MonoService:
             query = select(SQLAAgentRun.id).where(ctx.get_base_where_clause(SQLAAgentRun))
 
             # Add sorting if specified
-            if sort_field and sort_field.startswith("metadata."):
-                # Extract the JSON path from metadata.field.subfield
-                path_parts = sort_field.split(".")
-                path_parts = path_parts[1:]  # Remove "metadata." prefix
+            if sort_field:
+                if sort_field.startswith("metadata."):
+                    # Extract the JSON path from metadata.field.subfield
+                    path_parts = sort_field.split(".")
+                    path_parts = path_parts[1:]  # Remove "metadata." prefix
 
-                # Build the JSON path expression for PostgreSQL
-                # Convert "field.subfield" to ->'field'->'subfield'
-                json_expr = SQLAAgentRun.metadata_json
-                for part in path_parts:
-                    json_expr = json_expr[part]
+                    # Build the JSON path expression for PostgreSQL
+                    # Convert "field.subfield" to ->'field'->'subfield'
+                    sort_expr = SQLAAgentRun.metadata_json
+                    for part in path_parts:
+                        sort_expr = sort_expr[part]
+                else:
+                    if sort_field == "agent_run_id":
+                        sort_expr = SQLAAgentRun.id
+                    elif sort_field == "created_at":
+                        sort_expr = SQLAAgentRun.created_at
+                    else:
+                        raise ValueError(f"Invalid sort field: {sort_field}")
 
                 # Apply sorting
                 if sort_direction == "desc":
-                    query = query.order_by(json_expr.desc())
+                    query = query.order_by(sort_expr.desc())
                 else:
-                    query = query.order_by(json_expr.asc())
+                    query = query.order_by(sort_expr.asc())
 
             result = await session.execute(query)
             agent_run_ids = result.scalars().all()
@@ -678,7 +686,10 @@ class MonoService:
             apply_base_where_clause: Whether to apply the base where clause.
 
         Returns:
-            Mapping of agent_run_id -> metadata dict
+            Mapping of agent_run_id -> structured metadata dict with:
+            - metadata: actual JSON metadata from the database
+            - created_at: timestamp as direct key
+            - agent_run_id: the run ID as direct key
         """
         if not agent_run_ids:
             return {}
@@ -691,16 +702,26 @@ class MonoService:
             for i in range(0, len(agent_run_ids), batch_size):
                 batch_ids = agent_run_ids[i : i + batch_size]
 
-                query = select(SQLAAgentRun.id, SQLAAgentRun.metadata_json).where(
-                    SQLAAgentRun.id.in_(batch_ids)
-                )
+                query = select(
+                    SQLAAgentRun.id, SQLAAgentRun.metadata_json, SQLAAgentRun.created_at
+                ).where(SQLAAgentRun.id.in_(batch_ids))
                 if apply_base_where_clause:
                     query = query.where(ctx.get_base_where_clause(SQLAAgentRun))
 
                 result = await session.execute(query)
-                for run_id, metadata in result.all():
-                    # metadata_json is already a JSON-decoded dict via SQLAlchemy's JSONB
-                    metadata_map[run_id] = metadata or {}
+                for run_id, metadata, created_at in result.all():
+                    # Structure the response with metadata in a separate key
+                    # and non-JSON fields as direct keys
+                    structured_metadata: dict[str, Any] = {
+                        "agent_run_id": run_id,
+                        "metadata": metadata or {},
+                    }
+
+                    # Add created_at as a direct key
+                    if created_at:
+                        structured_metadata["created_at"] = created_at.isoformat()
+
+                    metadata_map[run_id] = structured_metadata
 
         return metadata_map
 

@@ -95,6 +95,10 @@ class SQLAAgentRun(SQLABase):
     # A scan is fine for ~1e4 transcripts; if larger we might want to index
     metadata_json = mapped_column(JSONB, nullable=False)
 
+    created_at = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=True
+    )
+
     # This column is *only* used for regex search; it needs to be preprocessed to remove invalid characters
     text_for_search = mapped_column(Text, nullable=False)
 

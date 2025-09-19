@@ -570,6 +570,8 @@ async def agent_run_metadata_fields(
     _: None = Depends(require_view_permission(Permission.READ)),
 ) -> dict[str, list[FilterableField]]:
     fields: list[FilterableField] = await mono_svc.get_agent_run_metadata_fields(ctx)
+    fields.append({"name": "created_at", "type": "str"})
+
     return {"fields": fields}
 
 
@@ -579,10 +581,13 @@ async def agent_run_sortable_fields(
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.READ)),
 ) -> dict[str, list[FilterableField]]:
-    """Get sortable fields for agent runs. Currently supports metadata.x.y fields."""
+    """Get sortable fields for agent runs. Currently supports metadata.x.y fields and created_at."""
     fields: list[FilterableField] = await mono_svc.get_agent_run_metadata_fields(ctx)
-    # Only include metadata fields for sorting (metadata.x.y format)
+    # Include metadata fields for sorting (metadata.x.y format)
     fields = [field for field in fields if field["name"].startswith("metadata.")]
+    # Add agent_run_id first, then created_at field as sortable fields
+    fields.insert(0, {"name": "agent_run_id", "type": "str"})
+    fields.append({"name": "created_at", "type": "str"})
     return {"fields": fields}
 
 

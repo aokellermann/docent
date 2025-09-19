@@ -15,8 +15,10 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { FunnelPlus, X } from 'lucide-react';
-import { useResultFilterControls } from '@/providers/use-result-filters';
-import { Operator } from '@/providers/use-result-filters';
+import {
+  useResultFilterControls,
+  Operator,
+} from '@/providers/use-result-filters';
 import posthog from 'posthog-js';
 import { toast } from '@/hooks/use-toast';
 
