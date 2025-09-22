@@ -277,7 +277,10 @@ export default function RubricEditor({
       if (maxVersion === undefined) throw new Error('Latest version not found');
 
       const updatedRubric = {
-        ...rubric,
+        ...{
+          ...rubric,
+          output_schema: JSON.parse(schemaText),
+        },
         // Possibly skips over some versions, if rubric.version < latestVersion
         // TODO(mengk): consider whether this is ok
         version: maxVersion + 1,
