@@ -36,6 +36,37 @@ import { SmartValueInput } from './SmartValueInput';
 import { ChevronsUpDown, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
+export const toggleFilterDisabledState = (
+  filterGroup: ComplexFilter | null,
+  filterId: string
+): ComplexFilter | null => {
+  if (!filterGroup) {
+    return null;
+  }
+
+  let changed = false;
+  const updatedFilters = filterGroup.filters.map((filterItem) => {
+    if (filterItem.id !== filterId) {
+      return filterItem;
+    }
+
+    changed = true;
+    return {
+      ...filterItem,
+      disabled: !(filterItem.disabled ?? false),
+    };
+  });
+
+  if (!changed) {
+    return filterGroup;
+  }
+
+  return {
+    ...filterGroup,
+    filters: updatedFilters,
+  };
+};
+
 interface FilterControlsProps {
   filters: ComplexFilter | undefined | null;
   onFiltersChange: (filters: ComplexFilter | null) => void;
@@ -122,6 +153,7 @@ export const FilterControls = ({
         id: uuid4(),
         name: null,
         supports_sql: true,
+        disabled: false,
       };
 
       const newComplexFilter: ComplexFilter = filters
@@ -196,6 +228,15 @@ export const FilterControls = ({
 
   const clearAllFilters = () => {
     onFiltersChange(null);
+  };
+
+  const handleToggleFilter = (filterId: string) => {
+    const updatedFilters = toggleFilterDisabledState(filters ?? null, filterId);
+    if (!filters || !updatedFilters || updatedFilters === filters) {
+      return;
+    }
+
+    onFiltersChange(updatedFilters);
   };
 
   // Auto-select type and op when field changes
@@ -422,6 +463,7 @@ export const FilterControls = ({
           onRemoveFilter={removeFilter}
           onEditFilter={editFilter}
           onClearAllFilters={clearAllFilters}
+          onToggleFilter={handleToggleFilter}
           className="mb-1.5"
         />
       )}

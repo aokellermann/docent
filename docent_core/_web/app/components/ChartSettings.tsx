@@ -27,7 +27,7 @@ import {
   useGetChartMetadataQuery,
   useGetChartDataQuery,
 } from '../api/chartApi';
-import { FilterControls } from './FilterControls';
+import { FilterControls, toggleFilterDisabledState } from './FilterControls';
 import { FilterChips } from './FilterChips';
 import { useGetAgentRunMetadataFieldsQuery } from '../api/collectionApi';
 import {
@@ -272,6 +272,18 @@ export default function ChartSettings({ chart, onChange }: ChartSettingsProps) {
     handleRunsFilterChange(null);
   };
 
+  const handleToggleFilter = (filterId: string) => {
+    const updatedFilters = toggleFilterDisabledState(
+      runs_filter ?? null,
+      filterId
+    );
+    if (!runs_filter || !updatedFilters || updatedFilters === runs_filter) {
+      return;
+    }
+
+    handleRunsFilterChange(updatedFilters);
+  };
+
   const handleDownloadPng = async () => {
     try {
       posthog.capture('chart_download_png', {
@@ -397,6 +409,7 @@ export default function ChartSettings({ chart, onChange }: ChartSettingsProps) {
               onRemoveFilter={removeFilter}
               onEditFilter={editFilter}
               onClearAllFilters={clearAllFilters}
+              onToggleFilter={handleToggleFilter}
               className="mr-1"
               disabled={!hasWritePermission}
             />

@@ -24,6 +24,7 @@ export interface PrimitiveFilter {
   value: any;
   op: string;
   supports_sql: boolean;
+  disabled?: boolean;
 }
 
 export interface SearchResultPredicateFilter {
@@ -33,6 +34,7 @@ export interface SearchResultPredicateFilter {
   predicate: string;
   search_query: string;
   supports_sql: boolean;
+  disabled?: boolean;
 }
 
 export interface SearchResultExistsFilter {
@@ -41,6 +43,7 @@ export interface SearchResultExistsFilter {
   type: 'search_result_exists';
   search_query: string;
   supports_sql: boolean;
+  disabled?: boolean;
 }
 
 export interface ComplexFilter {
@@ -50,6 +53,7 @@ export interface ComplexFilter {
   filters: CollectionFilter[];
   op: 'and' | 'or' | 'not';
   supports_sql: boolean;
+  disabled?: boolean;
 }
 
 export interface AgentRunIdFilter {
@@ -58,6 +62,7 @@ export interface AgentRunIdFilter {
   type: 'agent_run_id';
   agent_run_ids: string[];
   supports_sql: boolean;
+  disabled?: boolean;
 }
 
 export type ChartType = 'bar' | 'line' | 'table';

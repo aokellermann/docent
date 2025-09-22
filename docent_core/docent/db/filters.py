@@ -35,6 +35,7 @@ class BaseCollectionFilter(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     name: str | None = None
     supports_sql: bool = True  # All filters must support SQL
+    disabled: bool = False
 
     def to_sqla_where_clause(self, table: Type["SQLAAgentRun"]) -> ColumnElement[bool] | None:
         """Convert this filter to a SQLAlchemy WHERE clause.
@@ -56,6 +57,9 @@ class PrimitiveFilter(BaseCollectionFilter):
 
     def to_sqla_where_clause(self, table: Type["SQLAAgentRun"]) -> ColumnElement[bool] | None:
         """Convert this filter to a SQLAlchemy WHERE clause."""
+
+        if self.disabled:
+            return None
 
         mode = self.key_path[0]
 
@@ -119,6 +123,9 @@ class ComplexFilter(BaseCollectionFilter):
     def to_sqla_where_clause(self, table: Type["SQLAAgentRun"]) -> ColumnElement[bool] | None:
         """Convert this filter to a SQLAlchemy WHERE clause."""
 
+        if self.disabled:
+            return None
+
         # Get WHERE clauses for all sub-filters
         where_clauses: list[ColumnElement[bool]] = []
         for filter_obj in self.filters:
@@ -155,6 +162,8 @@ class AgentRunIdFilter(BaseCollectionFilter):
 
     def to_sqla_where_clause(self, table: Type["SQLAAgentRun"]) -> ColumnElement[bool] | None:
         """Convert to SQLAlchemy WHERE clause for agent run ID filtering."""
+        if self.disabled:
+            return None
         return table.id.in_(self.agent_run_ids)
 
 
@@ -167,6 +176,8 @@ class SearchResultPredicateFilter(BaseCollectionFilter):
 
     def to_sqla_where_clause(self, table: Type["SQLAAgentRun"]) -> ColumnElement[bool] | None:
         """Convert to SQLAlchemy WHERE clause for search result filtering."""
+        if self.disabled:
+            return None
         # This filter requires joining with search results table
         # For now, we'll return None to indicate it needs special handling
         # In practice, this would join with the search_results table
@@ -181,6 +192,8 @@ class SearchResultExistsFilter(BaseCollectionFilter):
 
     def to_sqla_where_clause(self, table: Type["SQLAAgentRun"]) -> ColumnElement[bool] | None:
         """Convert to SQLAlchemy WHERE clause for search result existence filtering."""
+        if self.disabled:
+            return None
         # This filter requires joining with search results table
         # For now, we'll return None to indicate it needs special handling
         # In practice, this would join with the search_results table
