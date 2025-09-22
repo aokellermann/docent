@@ -18,8 +18,8 @@ from openai import (
     PermissionDeniedError,
     RateLimitError,
     UnprocessableEntityError,
+    omit,
 )
-from openai._types import NOT_GIVEN
 from openai.types.chat import (
     ChatCompletion,
     ChatCompletionAssistantMessageParam,
@@ -199,7 +199,7 @@ async def get_openai_chat_completion_streaming_async(
     timeout: float = 30.0,
 ):
     input_messages = _parse_chat_messages(messages)
-    input_tools = _parse_tools(tools) if tools else NOT_GIVEN
+    input_tools = _parse_tools(tools) if tools else omit
 
     try:
         async with asyncio.timeout(timeout) if timeout else asyncio.nullcontext():  # type: ignore
@@ -207,10 +207,10 @@ async def get_openai_chat_completion_streaming_async(
                 model=model_name,
                 messages=input_messages,
                 tools=input_tools,
-                tool_choice=tool_choice or NOT_GIVEN,
+                tool_choice=tool_choice or omit,
                 max_completion_tokens=max_new_tokens,
                 temperature=temperature,
-                reasoning_effort=reasoning_effort or NOT_GIVEN,
+                reasoning_effort=reasoning_effort or omit,
                 logprobs=logprobs,
                 top_logprobs=top_logprobs,
                 stream_options={"include_usage": True},
@@ -382,7 +382,7 @@ async def get_openai_chat_completion_async(
     timeout: float = 5.0,
 ) -> LLMOutput:
     input_messages = _parse_chat_messages(messages)
-    input_tools = _parse_tools(tools) if tools else NOT_GIVEN
+    input_tools = _parse_tools(tools) if tools else omit
 
     try:
         async with asyncio.timeout(timeout) if timeout else asyncio.nullcontext():  # type: ignore
@@ -390,10 +390,10 @@ async def get_openai_chat_completion_async(
                 model=model_name,
                 messages=input_messages,
                 tools=input_tools,
-                tool_choice=tool_choice or NOT_GIVEN,
+                tool_choice=tool_choice or omit,
                 max_completion_tokens=max_new_tokens,
                 temperature=temperature,
-                reasoning_effort=reasoning_effort or NOT_GIVEN,
+                reasoning_effort=reasoning_effort or omit,
                 logprobs=logprobs,
                 top_logprobs=top_logprobs,
             )
@@ -485,7 +485,7 @@ async def _get_openai_embeddings_async_one_batch(
         response = await client.embeddings.create(
             model=model_name,
             input=batch,
-            dimensions=dimensions if dimensions is not None else NOT_GIVEN,
+            dimensions=dimensions if dimensions is not None else omit,
         )
         return [data.embedding for data in response.data]
     except RateLimitError as e:
@@ -629,7 +629,7 @@ def get_openai_embeddings_sync(
             response = client.embeddings.create(
                 model=model_name,
                 input=batch,
-                dimensions=dimensions if dimensions is not None else NOT_GIVEN,
+                dimensions=dimensions if dimensions is not None else omit,
             )
             batch_embeddings = [data.embedding for data in response.data]
             embeddings.extend(batch_embeddings)
