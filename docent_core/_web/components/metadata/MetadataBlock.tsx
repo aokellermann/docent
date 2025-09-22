@@ -81,7 +81,11 @@ export function MetadataBlock({
             ? 'flex p-2 bg-yellow-100 dark:bg-yellow-900/30 transition-colors'
             : 'flex p-2 hover:bg-muted transition-colors';
           return (
-            <div key={key} className={rowClass}>
+            <div
+              key={key}
+              className={rowClass}
+              data-highlighted={isHighlightedRow ? 'true' : undefined}
+            >
               <div className="w-1/3 font-medium text-sm text-primary break-words pr-4">
                 {key}
               </div>

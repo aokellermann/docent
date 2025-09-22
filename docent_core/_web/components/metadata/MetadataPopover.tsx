@@ -81,11 +81,41 @@ function Content({
   align = 'start',
   title,
 }: ContentProps) {
+  const scrollContainerRef = React.useRef<HTMLDivElement>(null);
+
+  const scrollToHighlight = React.useCallback(() => {
+    const containerEl = scrollContainerRef.current;
+    if (!containerEl) return;
+    // Prefer any highlighted spans first
+    const highlightedSpans = containerEl.querySelectorAll(
+      '[data-citation-ids]'
+    );
+    if (highlightedSpans.length > 0) {
+      (highlightedSpans[0] as HTMLElement).scrollIntoView({
+        behavior: 'instant',
+        block: 'start',
+      });
+      return;
+    }
+    // Fallback: highlighted row marker
+    const highlightedRow = containerEl.querySelector(
+      '[data-highlighted="true"]'
+    ) as HTMLElement | null;
+    if (highlightedRow) {
+      highlightedRow.scrollIntoView({ behavior: 'instant', block: 'start' });
+    }
+  }, []);
+
+  // Auto-scroll when the popover opens
   return (
     <PopoverContent
       side={side}
       align={align}
       className="w-[520px] max-w-[85vw] p-3"
+      onOpenAutoFocus={() => {
+        // Ensure layout is settled before scrolling
+        requestAnimationFrame(scrollToHighlight);
+      }}
     >
       {title && (
         <div className="flex items-center justify-between mb-2">
@@ -94,7 +124,10 @@ function Content({
           </div>
         </div>
       )}
-      <div className="max-h-[60vh] overflow-auto custom-scrollbar">
+      <div
+        ref={scrollContainerRef}
+        className="max-h-[60vh] overflow-auto custom-scrollbar"
+      >
         {children}
       </div>
     </PopoverContent>
