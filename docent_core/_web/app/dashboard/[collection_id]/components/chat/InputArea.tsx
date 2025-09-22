@@ -132,7 +132,7 @@ export default function InputArea({
         type="button"
         data-testid="send-button"
         className={cn(
-          'rounded-full h-7 w-7 border dark:border-zinc-600',
+          'shrink-0 rounded-full h-7 w-7 border dark:border-zinc-600',
           isSendingMessage &&
             !onCancelMessage &&
             'pointer-events-none opacity-60'
@@ -165,7 +165,7 @@ export default function InputArea({
     return (
       <Button
         type="button"
-        className="text-xs gap-1 px-2 h-7 rounded-full"
+        className="shrink-0 text-xs gap-1 px-2 h-7 rounded-full"
         onClick={(e) => {
           e.preventDefault();
           onRetry?.();
