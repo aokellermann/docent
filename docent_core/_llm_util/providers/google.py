@@ -93,7 +93,7 @@ async def get_google_chat_completion_async(
     system, input_messages = _parse_chat_messages(messages, tools_provided=bool(tools))
 
     try:
-        async with async_timeout_ctx(timeout):  # type: ignore
+        async with async_timeout_ctx(timeout):
             # Thinking config can conflict with tool-calling on some models; enable only when requested and not using tools
             thinking_cfg = None
             if reasoning_effort and not tools:
@@ -195,7 +195,7 @@ async def get_google_chat_completion_streaming_async(
     system, input_messages = _parse_chat_messages(messages, tools_provided=bool(tools))
 
     try:
-        async with async_timeout_ctx(timeout):  # type: ignore
+        async with async_timeout_ctx(timeout):
             thinking_cfg = None
             if reasoning_effort and not tools:
                 thinking_cfg = types.ThinkingConfig(

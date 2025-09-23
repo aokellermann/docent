@@ -203,7 +203,7 @@ async def get_openai_chat_completion_streaming_async(
     input_tools = _parse_tools(tools) if tools else omit
 
     try:
-        async with async_timeout_ctx(timeout):  # type: ignore
+        async with async_timeout_ctx(timeout):
             stream = await client.chat.completions.create(
                 model=model_name,
                 messages=input_messages,
