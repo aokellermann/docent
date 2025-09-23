@@ -113,12 +113,19 @@ export default function ExperimentViewer({
     return collectionId ? `agent-run-table-columns-${collectionId}` : null;
   };
 
+  // Stores per-collection sort settings so sorting persists across reloads.
+  const getSortStorageKey = (collectionId: string | undefined) => {
+    return collectionId ? `agent-run-table-sort-${collectionId}` : null;
+  };
+
   const [selectedColumns, setSelectedColumns] = useState<string[]>([]);
   const [hasLoadedFromStorage, setHasLoadedFromStorage] = useState(false);
   const [discoveredColumns, setDiscoveredColumns] = useState<Set<string>>(
     new Set()
   );
   const hasAutoSelectedColumnsRef = useRef(false);
+  const [hasLoadedSortFromStorage, setHasLoadedSortFromStorage] =
+    useState(false);
 
   // Load persisted column selection on mount and when collectionId changes
   useEffect(() => {
@@ -165,6 +172,65 @@ export default function ExperimentViewer({
       }
     }
   }, [selectedColumns, collectionId, hasLoadedFromStorage]);
+
+  useEffect(() => {
+    setHasLoadedSortFromStorage(false);
+
+    if (!collectionId) {
+      setHasLoadedSortFromStorage(true);
+      return;
+    }
+
+    const key = getSortStorageKey(collectionId);
+    if (!key) {
+      setHasLoadedSortFromStorage(true);
+      return;
+    }
+
+    try {
+      const persisted = localStorage.getItem(key);
+      if (persisted) {
+        const storedValue = JSON.parse(persisted);
+        if (storedValue && typeof storedValue === 'object') {
+          const rawField = (storedValue as { sortField?: unknown }).sortField;
+          const rawDirection = (storedValue as { sortDirection?: unknown })
+            .sortDirection;
+          const parsedField = typeof rawField === 'string' ? rawField : null;
+          const parsedDirection = rawDirection === 'desc' ? 'desc' : 'asc';
+          dispatch(
+            setSorting({ field: parsedField, direction: parsedDirection })
+          );
+        }
+      }
+    } catch (error) {
+      console.warn(
+        `Failed to load persisted sort for collection ${collectionId}:`,
+        error
+      );
+    } finally {
+      setHasLoadedSortFromStorage(true);
+    }
+  }, [collectionId, dispatch]);
+
+  useEffect(() => {
+    if (!hasLoadedSortFromStorage || !collectionId) {
+      return;
+    }
+
+    const key = getSortStorageKey(collectionId);
+    if (!key) {
+      return;
+    }
+
+    try {
+      localStorage.setItem(key, JSON.stringify({ sortField, sortDirection }));
+    } catch (error) {
+      console.warn(
+        `Failed to persist sort for collection ${collectionId}:`,
+        error
+      );
+    }
+  }, [collectionId, sortField, sortDirection, hasLoadedSortFromStorage]);
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(
     null
   );
