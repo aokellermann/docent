@@ -39,11 +39,7 @@ import {
 } from '@/components/ui/command';
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
@@ -646,42 +642,50 @@ export const AgentRunTable = memo(function AgentRunTable({
               Columns
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent className="w-72" align="end">
-            <DropdownMenuLabel>Show Columns</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onClick={handleSelectAll}
-              onSelect={(e) => e.preventDefault()}
-              className="text-xs text-muted-foreground"
-            >
-              Select all
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={handleClearAll}
-              onSelect={(e) => e.preventDefault()}
-              className="text-xs text-muted-foreground"
-            >
-              Clear all
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <div className="max-h-64 overflow-y-auto">
-              {availableColumns.map((column) => {
-                const checked = selectedColumns.includes(column);
-                return (
-                  <DropdownMenuCheckboxItem
-                    key={column}
-                    checked={checked}
-                    onCheckedChange={(value) =>
-                      handleToggleColumn(column, Boolean(value))
-                    }
-                    onSelect={(e) => e.preventDefault()}
-                    className="text-xs font-mono"
+          <DropdownMenuContent className="w-72 p-0" align="end">
+            <Command>
+              <CommandInput
+                placeholder="Search columns..."
+                className="h-8 text-xs"
+              />
+              <CommandList>
+                <CommandEmpty>No columns found.</CommandEmpty>
+                <CommandGroup>
+                  <CommandItem
+                    onSelect={() => handleSelectAll()}
+                    className="text-xs text-muted-foreground"
                   >
-                    {column}
-                  </DropdownMenuCheckboxItem>
-                );
-              })}
-            </div>
+                    Select all
+                  </CommandItem>
+                  <CommandItem
+                    onSelect={() => handleClearAll()}
+                    className="text-xs text-muted-foreground"
+                  >
+                    Clear all
+                  </CommandItem>
+                </CommandGroup>
+                <CommandGroup>
+                  {availableColumns.map((column) => {
+                    const checked = selectedColumns.includes(column);
+                    return (
+                      <CommandItem
+                        key={column}
+                        onSelect={() => handleToggleColumn(column, !checked)}
+                        className="text-xs font-mono"
+                      >
+                        <Check
+                          className={cn(
+                            'mr-2 h-4 w-4',
+                            checked ? 'opacity-100' : 'opacity-0'
+                          )}
+                        />
+                        {column}
+                      </CommandItem>
+                    );
+                  })}
+                </CommandGroup>
+              </CommandList>
+            </Command>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
