@@ -56,7 +56,7 @@ const RunRubricButton = ({
       <Button
         type="button"
         size="sm"
-        className="gap-1 h-7 text-xs rounded"
+        className="gap-1 h-7 text-xs rounded-md"
         disabled={isButtonDisabled}
         onClick={handleStartRubricJob}
       >
