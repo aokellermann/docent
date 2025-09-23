@@ -387,7 +387,6 @@ export default function RubricEditor({
           )}
           <Separator orientation="vertical" className="h-5" />
           <div>
-            <div className="text-xs text-muted-foreground">Version:</div>
             <div className="flex items-center gap-0.5 bg-secondary rounded border px-1 py-0.5">
               <Button
                 size="sm"
@@ -400,7 +399,7 @@ export default function RubricEditor({
               </Button>
               <div className="text-xs font-mono px-1.5 min-w-[2.5rem] text-center">
                 {rubric && maxVersion !== undefined
-                  ? `${rubric.version}/${maxVersion}`
+                  ? `v${rubric.version}/${maxVersion}`
                   : rubric
                     ? rubric.version
                     : '-'}
