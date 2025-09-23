@@ -11,7 +11,13 @@ import { clearFilters, replaceFilters } from '../store/collectionSlice';
 import { ComplexFilter } from '@/app/types/collectionTypes';
 import { FilterControls } from './FilterControls';
 
-export const TranscriptFilterControls = () => {
+interface TranscriptFilterControlsProps {
+  metadataData?: Record<string, Record<string, unknown>>;
+}
+
+export const TranscriptFilterControls = ({
+  metadataData = {},
+}: TranscriptFilterControlsProps) => {
   const dispatch = useDispatch<AppDispatch>();
   // Get the filter state
   const collectionId = useSelector(
@@ -46,6 +52,7 @@ export const TranscriptFilterControls = () => {
       onFiltersChange={handleFiltersChange}
       metadataFields={agentRunMetadataFields ?? []}
       collectionId={collectionId!}
+      metadataData={metadataData}
     />
   );
 };

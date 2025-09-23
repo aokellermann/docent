@@ -28,11 +28,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { toast } from '@/hooks/use-toast';
 import { v4 as uuid4 } from 'uuid';
 import { FilterChips } from './FilterChips';
 import { SmartValueInput } from './SmartValueInput';
+import { StepFilter } from './StepFilter';
 import { ChevronsUpDown, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -72,7 +73,9 @@ interface FilterControlsProps {
   onFiltersChange: (filters: ComplexFilter | null) => void;
   metadataFields: TranscriptMetadataField[];
   collectionId: string;
+  metadataData?: Record<string, Record<string, unknown>>;
   showFilterChips?: boolean;
+  showStepFilter?: boolean;
   initialFilter?: PrimitiveFilter | null;
 }
 
@@ -81,7 +84,9 @@ export const FilterControls = ({
   onFiltersChange,
   metadataFields,
   collectionId,
+  metadataData = {},
   showFilterChips = true,
+  showStepFilter = true,
   initialFilter = null,
 }: FilterControlsProps) => {
   const [metadataKey, setMetadataKey] = useState('');
@@ -91,6 +96,7 @@ export const FilterControls = ({
   );
   const [metadataOp, setMetadataOp] = useState<string>('==');
   const [fieldSelectorOpen, setFieldSelectorOpen] = useState(false);
+  const [stepFilterValue, setStepFilterValue] = useState<number | null>(null);
   const valueFieldRef = useRef<HTMLInputElement>(null);
 
   // Populate form when initialFilter is provided
@@ -112,6 +118,24 @@ export const FilterControls = ({
       }
     }
   }, [initialFilter]);
+
+  // Sync step filter state with existing filters
+  useEffect(() => {
+    if (filters?.filters) {
+      const stepFilter = filters.filters.find(
+        (f) =>
+          f.type === 'primitive' && f.key_path.join('.') === 'metadata.step'
+      );
+      if (stepFilter && stepFilter.type === 'primitive') {
+        const stepValue = stepFilter.value;
+        if (typeof stepValue === 'number' && Number.isInteger(stepValue)) {
+          setStepFilterValue(stepValue);
+        }
+      } else {
+        setStepFilterValue(null);
+      }
+    }
+  }, [filters]);
 
   const onUpdateMetadataFilter = (value: string) => {
     if (!metadataKey.trim()) {
@@ -181,6 +205,12 @@ export const FilterControls = ({
   const removeFilter = (filterId: string) => {
     if (!filters) return;
 
+    // Check if the removed filter is a step filter
+    const removedFilter = filters.filters.find((f) => f.id === filterId);
+    const isStepFilter =
+      removedFilter?.type === 'primitive' &&
+      removedFilter.key_path.join('.') === 'metadata.step';
+
     const updatedFilters = filters.filters.filter((f) => f.id !== filterId);
 
     if (updatedFilters.length === 0) {
@@ -190,6 +220,11 @@ export const FilterControls = ({
         ...filters,
         filters: updatedFilters,
       });
+    }
+
+    // Clear step filter state if a step filter was removed
+    if (isStepFilter) {
+      setStepFilterValue(null);
     }
   };
 
@@ -227,6 +262,7 @@ export const FilterControls = ({
   };
 
   const clearAllFilters = () => {
+    setStepFilterValue(null);
     onFiltersChange(null);
   };
 
@@ -238,6 +274,58 @@ export const FilterControls = ({
 
     onFiltersChange(updatedFilters);
   };
+
+  // Handle step filter changes
+  const handleStepFilterChange = useCallback(
+    (stepValue: number | null) => {
+      setStepFilterValue(stepValue);
+
+      // Remove any existing step filter
+      const currentFilters =
+        filters?.filters.filter(
+          (f) =>
+            !(
+              f.type === 'primitive' && f.key_path.join('.') === 'metadata.step'
+            )
+        ) || [];
+
+      if (stepValue === null) {
+        // No step filter
+        if (currentFilters.length === 0) {
+          onFiltersChange(null);
+        } else {
+          onFiltersChange({
+            ...filters!,
+            filters: currentFilters,
+          });
+        }
+      } else {
+        // Add step filter
+        const stepFilter: PrimitiveFilter = {
+          type: 'primitive',
+          key_path: ['metadata', 'step'],
+          value: stepValue,
+          op: '==',
+          id: uuid4(),
+          name: null,
+          supports_sql: true,
+          disabled: false,
+        };
+
+        const newComplexFilter: ComplexFilter = {
+          id: uuid4(),
+          name: null,
+          type: 'complex',
+          filters: [...currentFilters, stepFilter],
+          op: 'and',
+          supports_sql: true,
+        };
+
+        onFiltersChange(newComplexFilter);
+      }
+    },
+    [filters]
+  );
 
   // Auto-select type and op when field changes
   const handleFieldChange = (value: string) => {
@@ -455,6 +543,16 @@ export const FilterControls = ({
           </Button>
         </div>
       </div>
+
+      {/* Step Filter */}
+      {showStepFilter && (
+        <StepFilter
+          metadataData={metadataData}
+          onStepFilterChange={handleStepFilterChange}
+          currentValue={stepFilterValue}
+          disabled={false}
+        />
+      )}
 
       {/* Current filters */}
       {showFilterChips && (

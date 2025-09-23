@@ -594,7 +594,7 @@ export default function ExperimentViewer({
         />
       </div>
       <div className="p-3 space-y-3 border-b">
-        <TranscriptFilterControls />
+        <TranscriptFilterControls metadataData={metadataData} />
       </div>
 
       <div className="flex-1 min-w-0 min-h-0 px-3 pb-3 flex">
