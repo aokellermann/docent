@@ -317,22 +317,17 @@ def update_llm_output(
                 or index >= len(cur_tool_calls)
                 or cur_tool_calls[index] is None
             ):
-                # If we somehow receive JSON before start, initialize a placeholder
-                cur_tool_calls = cur_tool_calls or []
-                if index >= len(cur_tool_calls):
-                    cur_tool_calls.extend([None] * (index - len(cur_tool_calls) + 1))
+                # This should not happen with a well-behaved API, log and skip
+                logger.warning(
+                    f"Received InputJSONDelta before start event at index {index}, skipping"
+                )
+            else:
                 cur_tool_calls[index] = ToolCallPartial(
-                    id=None,
-                    function=None,
-                    arguments_raw="",
+                    id=cur_tool_calls[index].id,  # type: ignore[union-attr]
+                    function=cur_tool_calls[index].function,  # type: ignore[union-attr]
+                    arguments_raw=(cur_tool_calls[index].arguments_raw or "") + chunk.delta.partial_json,  # type: ignore[union-attr]
                     type="function",
                 )
-            cur_tool_calls[index] = ToolCallPartial(
-                id=cur_tool_calls[index].id,  # type: ignore[union-attr]
-                function=cur_tool_calls[index].function,  # type: ignore[union-attr]
-                arguments_raw=(cur_tool_calls[index].arguments_raw or "") + chunk.delta.partial_json,  # type: ignore[union-attr]
-                type="function",
-            )
         elif isinstance(chunk.delta, SignatureDelta):
             logger.debug(
                 "Anthropic streamed thinking signature block; we should support this soon."
