@@ -17,6 +17,10 @@ import { cn } from '@/lib/utils';
 
 function nameModel(model: ModelOption, shortenName = false) {
   if (shortenName) {
+    // TODO: more general/clean way to shorten names like this
+    if (model.model_name.startsWith('claude-sonnet-4-')) {
+      return 'claude-sonnet-4';
+    }
     return `${model.model_name}`;
   }
 

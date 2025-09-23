@@ -352,7 +352,7 @@ export default function RubricEditor({
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap grow justify-end items-center gap-x-3">
           {rubric && (
             <ModelPicker
               selectedModel={rubric.judge_model}
@@ -362,7 +362,7 @@ export default function RubricEditor({
                 updateRubric({ judge_model: jm });
               }}
               borderless
-              className="pr-0"
+              className="pr-0 basis-32"
               shortenName
             />
           )}
@@ -386,38 +386,39 @@ export default function RubricEditor({
             </div>
           )}
           <Separator orientation="vertical" className="h-5" />
-
-          <div className="text-xs text-muted-foreground">Version:</div>
-          <div className="flex items-center gap-0.5 bg-secondary rounded border px-1 py-0.5">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-4 w-4 p-0 hover:bg-background/50"
-              onClick={handleVersionDecrement}
-              disabled={!rubric || rubric.version <= minVersion}
-            >
-              <ChevronLeft className="h-2.5 w-2.5" />
-            </Button>
-            <div className="text-xs font-mono px-1.5 min-w-[2.5rem] text-center">
-              {rubric && maxVersion !== undefined
-                ? `${rubric.version}/${maxVersion}`
-                : rubric
-                  ? rubric.version
-                  : '-'}
+          <div>
+            <div className="text-xs text-muted-foreground">Version:</div>
+            <div className="flex items-center gap-0.5 bg-secondary rounded border px-1 py-0.5">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-4 w-4 p-0 hover:bg-background/50"
+                onClick={handleVersionDecrement}
+                disabled={!rubric || rubric.version <= minVersion}
+              >
+                <ChevronLeft className="h-2.5 w-2.5" />
+              </Button>
+              <div className="text-xs font-mono px-1.5 min-w-[2.5rem] text-center">
+                {rubric && maxVersion !== undefined
+                  ? `${rubric.version}/${maxVersion}`
+                  : rubric
+                    ? rubric.version
+                    : '-'}
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-4 w-4 p-0 hover:bg-background/50"
+                onClick={handleVersionIncrement}
+                disabled={
+                  !rubric ||
+                  maxVersion === undefined ||
+                  rubric.version >= maxVersion
+                }
+              >
+                <ChevronRight className="h-2.5 w-2.5" />
+              </Button>
             </div>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-4 w-4 p-0 hover:bg-background/50"
-              onClick={handleVersionIncrement}
-              disabled={
-                !rubric ||
-                maxVersion === undefined ||
-                rubric.version >= maxVersion
-              }
-            >
-              <ChevronRight className="h-2.5 w-2.5" />
-            </Button>
           </div>
         </div>
       </div>
