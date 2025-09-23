@@ -415,7 +415,7 @@ export const AgentRunTable = memo(function AgentRunTable({
               timeZoneName: 'short',
             });
             return (
-              <span className="text-xs text-muted-foreground truncate block">
+              <span className="text-xs text-foreground truncate block">
                 {formattedDate}
               </span>
             );
@@ -424,7 +424,7 @@ export const AgentRunTable = memo(function AgentRunTable({
           // Default formatting for other columns
           const text = formatMetadataValue(value);
           return (
-            <span className="text-xs text-muted-foreground truncate block">
+            <span className="text-xs text-foreground truncate block">
               {text}
             </span>
           );
@@ -725,7 +725,7 @@ export const AgentRunTable = memo(function AgentRunTable({
               {!hasRows ? (
                 <TableRow>
                   <TableCell colSpan={columnCount} className="py-4">
-                    <div className="flex flex-col items-center justify-center text-center text-xs text-muted-foreground py-10">
+                    <div className="flex flex-col items-center justify-center text-center text-xs text-foreground py-10">
                       {emptyState}
                     </div>
                   </TableCell>

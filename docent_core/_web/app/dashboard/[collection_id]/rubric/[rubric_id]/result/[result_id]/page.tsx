@@ -134,7 +134,7 @@ export default function JudgeResultPage() {
 
   if (isLoadingRubricRunState) {
     return (
-      <div className="flex-1 flex items-center justify-center min-h-0">
+      <div className="flex-1 flex items-center justify-center min-h-0 h-full">
         <Loader2 size={16} className="animate-spin text-muted-foreground" />
       </div>
     );
@@ -142,7 +142,7 @@ export default function JudgeResultPage() {
 
   if (isErrorRubricRunState || !rubricRunState) {
     return (
-      <div className="flex-1 flex items-center text-xs text-muted-foreground justify-center min-h-0">
+      <div className="flex-1 flex items-center text-xs text-muted-foreground justify-center min-h-0 h-full">
         Failed to load rubric run state.
       </div>
     );

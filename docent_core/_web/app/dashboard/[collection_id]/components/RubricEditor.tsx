@@ -361,8 +361,7 @@ export default function RubricEditor({
                 if (!editable) return;
                 updateRubric({ judge_model: jm });
               }}
-              borderless
-              className="pr-0 basis-32"
+              className="max-w-28"
               shortenName
             />
           )}
