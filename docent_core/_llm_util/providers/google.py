@@ -1,5 +1,5 @@
 import asyncio
-from typing import Literal
+from typing import Any, Literal, cast
 
 import backoff
 import requests
@@ -9,7 +9,7 @@ from google.genai import errors, types
 from google.genai.client import AsyncClient as AsyncGoogle
 
 from docent._log_util import get_logger
-from docent.data_models.chat import ChatMessage, Content, ToolInfo
+from docent.data_models.chat import ChatMessage, Content, ToolCall, ToolInfo
 from docent_core._env_util import ENV
 from docent_core._llm_util.data_models.exceptions import (
     CompletionTooLongException,
@@ -86,9 +86,7 @@ async def get_google_chat_completion_async(
             "We have not implemented logprobs or top_logprobs for Google yet."
         )
 
-    system, input_messages = _parse_chat_messages(messages)
-    if tools:
-        raise NotImplementedError(f"We have not implemented tools for Google yet, got: {tools}")
+    system, input_messages = _parse_chat_messages(messages, tools_provided=bool(tools))
 
     try:
         async with asyncio.timeout(timeout) if timeout else asyncio.nullcontext():  # type: ignore
@@ -114,6 +112,12 @@ async def get_google_chat_completion_async(
                     ),
                     max_output_tokens=max_new_tokens,
                     system_instruction=system,
+                    tools=_parse_tools(tools) if tools else None,
+                    tool_config=(
+                        types.ToolConfig(function_calling_config=_parse_tool_choice(tool_choice))
+                        if tool_choice is not None
+                        else None
+                    ),
                 ),
             )
 
@@ -166,18 +170,64 @@ async def get_google_chat_completion_streaming_async(
 
 def _parse_chat_messages(
     messages: list[ChatMessage],
+    *,
+    tools_provided: bool = False,
 ) -> tuple[str | None, list[types.Content]]:
     result: list[types.Content] = []
     system_prompt: str | None = None
 
     for message in messages:
-        if message.role == "user" or message.role == "assistant":
+        if message.role == "user":
             result.append(
                 types.Content(
-                    role=message.role if message.role == "user" else "model",
+                    role="user",
                     parts=_parse_message_content(message.content),
                 )
             )
+        elif message.role == "assistant":
+            parts: list[types.Part] = _parse_message_content(message.content)
+            # If assistant previously made tool calls, include them so the model has full context
+            for tool_call in getattr(message, "tool_calls", []) or []:
+                try:
+                    parts.append(
+                        types.Part.from_function_call(
+                            name=tool_call.function,
+                            args=tool_call.arguments,  # type: ignore[arg-type]
+                            id=tool_call.id,  # type: ignore[call-arg]
+                        )
+                    )
+                except Exception:
+                    # Fallback without id if the SDK signature differs
+                    parts.append(
+                        types.Part.from_function_call(
+                            name=tool_call.function,
+                            args=tool_call.arguments,  # type: ignore[arg-type]
+                        )
+                    )
+            result.append(types.Content(role="model", parts=parts))
+        elif message.role == "tool":
+            # Represent tool result as a function_response part (Gemini tool execution result)
+            if not tools_provided:
+                # If no tools configured, pass through as plain text
+                result.append(
+                    types.Content(
+                        role="user",
+                        parts=_parse_message_content(message.content),
+                    )
+                )
+            else:
+                tool_name = getattr(message, "function", None)
+                tool_id = getattr(message, "tool_call_id", None)
+                tool_text = message.text
+                response_payload: dict[str, object] = {"result": tool_text}
+                tool_parts: list[types.Part] = [
+                    _make_function_response_part(
+                        name=tool_name or "unknown_tool",
+                        response=response_payload,
+                        id=tool_id,  # type: ignore[arg-type]
+                    )
+                ]
+                result.append(types.Content(role="user", parts=tool_parts))
         elif message.role == "system":
             system_prompt = message.text
         else:
@@ -217,14 +267,33 @@ def _parse_google_completion(message: types.GenerateContentResponse, model: str)
         finish_reason = "error"
 
     text = ""
+    tool_calls: list[ToolCall] = []
     content_parts = candidate.content.parts if candidate.content else []
     content_parts = content_parts or []
-    # tool_calls: list[ToolCall] = []
     for part in content_parts:
         if part.text is not None and not part.thought:
             text += part.text
         elif part.thought:
             logger.warning("Google returned thinking block; we should support this soon.")
+        elif getattr(part, "function_call", None) is not None:
+            fc = part.function_call
+            # Attempt to parse arguments as a dictionary
+            args = getattr(fc, "args", {})
+            if isinstance(args, str):
+                try:
+                    import json as _json
+
+                    args = _json.loads(args)
+                except Exception:
+                    args = {"__parse_error_raw_args": args}
+            tool_calls.append(
+                ToolCall(
+                    id=getattr(fc, "id", None) or f"{getattr(fc, 'name', 'tool')}_call",
+                    function=getattr(fc, "name", "unknown"),
+                    arguments=args or {},
+                    type="function",
+                )
+            )
         else:
             raise ValueError(f"Unknown content part: {part}")
 
@@ -238,8 +307,142 @@ def _parse_google_completion(message: types.GenerateContentResponse, model: str)
         completions=[
             LLMCompletion(
                 text=text,
-                finish_reason=finish_reason,
+                finish_reason=("tool_calls" if tool_calls else finish_reason),
+                tool_calls=(tool_calls or None),
             )
         ],
         total_tokens=total_tokens,
     )
+
+
+def _parse_tools(tools: list[ToolInfo]) -> list[types.Tool]:
+    # Gemini expects a list of Tool objects, each with one or more FunctionDeclarations
+    fds: list[types.FunctionDeclaration] = []
+    for tool in tools:
+        fds.append(
+            types.FunctionDeclaration(
+                name=tool.name,
+                description=tool.description,
+                parameters=_convert_toolparams_to_schema(tool.parameters),
+            )
+        )
+    # Group all function declarations into a single Tool for simplicity
+    return [types.Tool(function_declarations=fds)]
+
+
+def _parse_tool_choice(tool_choice: Literal["auto", "required"] | None):
+    if tool_choice is None:
+        return None
+    # Map our values to SDK enum; if unavailable, return None so default behavior applies
+    try:
+        if tool_choice == "auto":
+            return types.FunctionCallingConfig(mode=types.FunctionCallingConfigMode.AUTO)
+        elif tool_choice == "required":
+            return types.FunctionCallingConfig(mode=types.FunctionCallingConfigMode.ANY)
+    except Exception:
+        return None
+
+
+def _convert_toolparams_to_schema(params: Any) -> types.Schema:
+    properties: dict[str, types.Schema] = {}
+    params_props: dict[str, Any] = getattr(params, "properties", {}) or {}
+    for name, param in params_props.items():
+        prop_schema = _convert_json_schema_to_gemini_schema(
+            (getattr(param, "input_schema", {}) or {})
+        )
+        desc: Any = getattr(param, "description", None)
+        if desc and prop_schema.description is None:
+            prop_schema.description = desc
+        properties[str(name)] = prop_schema
+
+    required_names: list[str] | None = None
+    required_raw: Any = getattr(params, "required", None)
+    if isinstance(required_raw, list):
+        required_list: list[Any] = cast(list[Any], required_raw)
+        required_names = [str(item) for item in required_list]
+
+    return types.Schema(
+        type=types.Type.OBJECT,
+        properties=properties or None,
+        required=required_names,
+    )
+
+
+def _convert_json_schema_to_gemini_schema(js: dict[str, Any]) -> types.Schema:
+    type_get: Any = js.get("type")
+    type_name: str
+    if isinstance(type_get, str):
+        type_name = type_get.lower()
+    elif isinstance(type_get, list):
+        # Convert list to list[str] then take first
+        type_list: list[str] = [str(v) for v in cast(list[Any], type_get)]
+        type_name = type_list[0].lower() if type_list else ""
+    elif type_get is None:
+        type_name = ""
+    else:
+        type_name = str(type_get).lower()
+    if type_name == "string":
+        t: types.Type | None = types.Type.STRING
+    elif type_name == "number":
+        t = types.Type.NUMBER
+    elif type_name == "integer":
+        t = types.Type.INTEGER
+    elif type_name == "boolean":
+        t = types.Type.BOOLEAN
+    elif type_name == "array":
+        t = types.Type.ARRAY
+    elif type_name == "object":
+        t = types.Type.OBJECT
+    elif type_name == "null":
+        t = types.Type.NULL
+    else:
+        t = None
+    description = js.get("description")
+    enum_vals_any: Any = js.get("enum")
+    enum_vals: list[str] | None = None
+    if isinstance(enum_vals_any, list):
+        enum_vals = [str(v) for v in cast(list[Any], enum_vals_any)] or None
+
+    props_in_raw_any: Any = js.get("properties") or {}
+    props_in_raw: dict[str, Any] = (
+        cast(dict[str, Any], props_in_raw_any) if isinstance(props_in_raw_any, dict) else {}
+    )
+    props_out: dict[str, types.Schema] | None = None
+    if props_in_raw:
+        tmp_props: dict[str, types.Schema] = {}
+        for key, val in props_in_raw.items():
+            if isinstance(val, dict):
+                tmp_props[str(key)] = _convert_json_schema_to_gemini_schema(
+                    cast(dict[str, Any], val)
+                )
+        props_out = tmp_props if tmp_props else None
+
+    required_out: list[str] | None = None
+    required_raw_js: Any = js.get("required")
+    if isinstance(required_raw_js, list):
+        tmp_required_any: list[Any] = cast(list[Any], required_raw_js)
+        tmp_required: list[str] = [str(item) for item in tmp_required_any]
+        required_out = tmp_required or None
+
+    items_in_any: Any = js.get("items")
+    items_out: types.Schema | None = None
+    if isinstance(items_in_any, dict):
+        items_out = _convert_json_schema_to_gemini_schema(cast(dict[str, Any], items_in_any))
+
+    return types.Schema(
+        type=t,
+        description=description,
+        enum=enum_vals,
+        properties=props_out,
+        required=required_out,
+        items=items_out,
+    )
+
+
+def _make_function_response_part(
+    *, name: str, response: dict[str, object], id: str | None
+) -> types.Part:
+    try:
+        return types.Part.from_function_response(name=name, response=response, id=id)  # type: ignore[call-arg]
+    except Exception:
+        return types.Part.from_function_response(name=name, response=response)
