@@ -343,11 +343,11 @@ export default function RubricEditor({
   return (
     <div className="space-y-2">
       <div className="flex justify-between">
-        <div className="items-center flex">
+        <div className="items-center flex flex-col">
           <div className="text-sm font-semibold">
             {editable ? 'Rubric Editor' : 'Rubric Evaluation'}
           </div>
-          <div className="text-xs text-muted-foreground hidden 2xl:flex">
+          <div className="text-xs text-muted-foreground">
             {editable ? 'Specify a rubric.' : 'Explore rubric results.'}
           </div>
         </div>
