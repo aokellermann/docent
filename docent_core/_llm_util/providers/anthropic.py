@@ -1,5 +1,3 @@
-import asyncio
-import contextlib
 from typing import Any, Literal, cast
 
 import backoff
@@ -56,6 +54,10 @@ from docent_core._llm_util.data_models.llm_output import (
     LLMOutputPartial,
     ToolCallPartial,
     finalize_llm_output_partial,
+)
+from docent_core._llm_util.providers.common import (
+    async_timeout_ctx,
+    reasoning_budget,
 )
 
 logger = get_logger(__name__)
@@ -214,21 +216,14 @@ async def get_anthropic_chat_completion_streaming_async(
     input_tools = _parse_tools(tools) if tools else NOT_GIVEN
 
     try:
-        async with asyncio.timeout(timeout) if timeout else contextlib.nullcontext():
+        async with async_timeout_ctx(timeout):
             stream = await client.messages.create(
                 model=model_name,
                 messages=input_messages,
                 thinking=(
                     {
                         "type": "enabled",
-                        "budget_tokens": int(
-                            max_new_tokens
-                            * (
-                                0.75
-                                if reasoning_effort == "high"
-                                else (0.5 if reasoning_effort == "medium" else 0.25)
-                            )
-                        ),  # Just heuristics
+                        "budget_tokens": reasoning_budget(max_new_tokens, reasoning_effort),
                     }
                     if reasoning_effort
                     else NOT_GIVEN
@@ -411,21 +406,14 @@ async def get_anthropic_chat_completion_async(
     input_tools = _parse_tools(tools) if tools else NOT_GIVEN
 
     try:
-        async with asyncio.timeout(timeout) if timeout else contextlib.nullcontext():
+        async with async_timeout_ctx(timeout):
             raw_output = await client.messages.create(
                 model=model_name,
                 messages=input_messages,
                 thinking=(
                     {
                         "type": "enabled",
-                        "budget_tokens": int(
-                            max_new_tokens
-                            * (
-                                0.75
-                                if reasoning_effort == "high"
-                                else (0.5 if reasoning_effort == "medium" else 0.25)
-                            )
-                        ),  # Just heuristics
+                        "budget_tokens": reasoning_budget(max_new_tokens, reasoning_effort),
                     }
                     if reasoning_effort
                     else NOT_GIVEN

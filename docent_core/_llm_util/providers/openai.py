@@ -58,6 +58,7 @@ from docent_core._llm_util.data_models.llm_output import (
     ToolCallPartial,
     finalize_llm_output_partial,
 )
+from docent_core._llm_util.providers.common import async_timeout_ctx
 
 logger = get_logger(__name__)
 DEFAULT_TIKTOKEN_ENCODING = "cl100k_base"
@@ -202,7 +203,7 @@ async def get_openai_chat_completion_streaming_async(
     input_tools = _parse_tools(tools) if tools else omit
 
     try:
-        async with asyncio.timeout(timeout) if timeout else asyncio.nullcontext():  # type: ignore
+        async with async_timeout_ctx(timeout):  # type: ignore
             stream = await client.chat.completions.create(
                 model=model_name,
                 messages=input_messages,
@@ -385,7 +386,7 @@ async def get_openai_chat_completion_async(
     input_tools = _parse_tools(tools) if tools else omit
 
     try:
-        async with asyncio.timeout(timeout) if timeout else asyncio.nullcontext():  # type: ignore
+        async with async_timeout_ctx(timeout):  # type: ignore
             raw_output = await client.chat.completions.create(
                 model=model_name,
                 messages=input_messages,

@@ -1,4 +1,3 @@
-import asyncio
 from typing import Any, Literal, cast
 
 import backoff
@@ -21,6 +20,11 @@ from docent_core._llm_util.data_models.llm_output import (
     AsyncSingleLLMOutputStreamingCallback,
     LLMCompletion,
     LLMOutput,
+)
+from docent_core._llm_util.providers.common import (
+    async_timeout_ctx,
+    coerce_tool_args,
+    reasoning_budget,
 )
 
 
@@ -89,20 +93,13 @@ async def get_google_chat_completion_async(
     system, input_messages = _parse_chat_messages(messages, tools_provided=bool(tools))
 
     try:
-        async with asyncio.timeout(timeout) if timeout else asyncio.nullcontext():  # type: ignore
+        async with async_timeout_ctx(timeout):  # type: ignore
             # Thinking config can conflict with tool-calling on some models; enable only when requested and not using tools
             thinking_cfg = None
             if reasoning_effort and not tools:
                 thinking_cfg = types.ThinkingConfig(
                     include_thoughts=True,
-                    thinking_budget=int(
-                        max_new_tokens
-                        * (
-                            0.75
-                            if reasoning_effort == "high"
-                            else (0.5 if reasoning_effort == "medium" else 0.25)
-                        )
-                    ),
+                    thinking_budget=reasoning_budget(max_new_tokens, reasoning_effort),
                 )
 
             raw_output = await client.models.generate_content(
@@ -198,19 +195,12 @@ async def get_google_chat_completion_streaming_async(
     system, input_messages = _parse_chat_messages(messages, tools_provided=bool(tools))
 
     try:
-        async with asyncio.timeout(timeout) if timeout else asyncio.nullcontext():  # type: ignore
+        async with async_timeout_ctx(timeout):  # type: ignore
             thinking_cfg = None
             if reasoning_effort and not tools:
                 thinking_cfg = types.ThinkingConfig(
                     include_thoughts=True,
-                    thinking_budget=int(
-                        max_new_tokens
-                        * (
-                            0.75
-                            if reasoning_effort == "high"
-                            else (0.5 if reasoning_effort == "medium" else 0.25)
-                        )
-                    ),
+                    thinking_budget=reasoning_budget(max_new_tokens, reasoning_effort),
                 )
 
             stream = await client.models.generate_content_stream(
@@ -248,22 +238,13 @@ async def get_google_chat_completion_streaming_async(
                             accumulated_text += part.text or ""
                         elif getattr(part, "function_call", None) is not None:
                             fc = part.function_call
-                            args = getattr(fc, "args", {})
-                            if isinstance(args, str):
-                                try:
-                                    import json as _json
-
-                                    args = _json.loads(args)
-                                except Exception:
-                                    args = {"__parse_error_raw_args": args}
+                            args = coerce_tool_args(getattr(fc, "args", {}))
                             accumulated_tool_calls.append(
                                 ToolCall(
                                     id=getattr(fc, "id", None)
                                     or f"{getattr(fc, 'name', 'tool')}_call",
                                     function=getattr(fc, "name", "unknown"),
-                                    arguments=(
-                                        cast(dict[str, Any], args) if isinstance(args, dict) else {}
-                                    ),
+                                    arguments=args,
                                     type="function",
                                 )
                             )
@@ -424,19 +405,12 @@ def _parse_google_completion(message: types.GenerateContentResponse, model: str)
         elif getattr(part, "function_call", None) is not None:
             fc = part.function_call
             # Attempt to parse arguments as a dictionary
-            args = getattr(fc, "args", {})
-            if isinstance(args, str):
-                try:
-                    import json as _json
-
-                    args = _json.loads(args)
-                except Exception:
-                    args = {"__parse_error_raw_args": args}
+            args = coerce_tool_args(getattr(fc, "args", {}))
             tool_calls.append(
                 ToolCall(
                     id=getattr(fc, "id", None) or f"{getattr(fc, 'name', 'tool')}_call",
                     function=getattr(fc, "name", "unknown"),
-                    arguments=args or {},
+                    arguments=args,
                     type="function",
                 )
             )
