@@ -16,9 +16,12 @@ from anthropic import (
 )
 from anthropic._types import NOT_GIVEN
 from anthropic.types import (
+    InputJSONDelta,
     Message,
     MessageParam,
     RawContentBlockDeltaEvent,
+    RawContentBlockStartEvent,
+    RawContentBlockStopEvent,
     RawMessageDeltaEvent,
     RawMessageStartEvent,
     RawMessageStreamEvent,
@@ -51,6 +54,7 @@ from docent_core._llm_util.data_models.llm_output import (
     LLMCompletionPartial,
     LLMOutput,
     LLMOutputPartial,
+    ToolCallPartial,
     finalize_llm_output_partial,
 )
 
@@ -104,14 +108,15 @@ def _parse_chat_messages(messages: list[ChatMessage]) -> tuple[str | None, list[
             )
         elif message.role == "assistant":
             message_content = _parse_message_content(message.content)
-            all_content = cast(
-                list[TextBlockParam | ToolUseBlockParam],
-                (
-                    [TextBlockParam(text=message_content, type="text")]
-                    if isinstance(message_content, str)
-                    else message_content
-                ),
-            )
+            # Build content list without creating empty text blocks
+            if isinstance(message_content, str):
+                stripped = message_content.strip()
+                all_content = cast(
+                    list[TextBlockParam | ToolUseBlockParam],
+                    ([TextBlockParam(text=stripped, type="text")] if stripped else []),
+                )
+            else:
+                all_content = cast(list[TextBlockParam | ToolUseBlockParam], message_content)
             for tool_call in message.tool_calls or []:
                 all_content.append(
                     ToolUseBlockParam(
@@ -279,23 +284,69 @@ def update_llm_output(
         cur_text: str | None = llm_output_partial.completions[0].text
         cur_reasoning_tokens: str | None = llm_output_partial.completions[0].reasoning_tokens
         cur_finish_reason: FinishReasonType | None = llm_output_partial.completions[0].finish_reason
+        cur_tool_calls: list[ToolCallPartial | None] | None = llm_output_partial.completions[0].tool_calls  # type: ignore[assignment]
         cur_model = llm_output_partial.model
     else:
         cur_text, cur_reasoning_tokens, cur_finish_reason, cur_model = None, None, None, None
+        cur_tool_calls = None
 
     if isinstance(chunk, RawMessageStartEvent):
         cur_model = chunk.message.model
+    elif isinstance(chunk, RawContentBlockStartEvent):
+        # If a tool_use block starts, initialize a ToolCallPartial slot using the block index
+        content_block = chunk.content_block
+        if getattr(content_block, "type", None) == "tool_use":
+            # Ensure the tool_calls array exists and is long enough
+            index = chunk.index
+            cur_tool_calls = cur_tool_calls or []
+            if index >= len(cur_tool_calls):
+                cur_tool_calls.extend([None] * (index - len(cur_tool_calls) + 1))
+
+            # Initialize the partial with id/name; arguments will stream via InputJSONDelta
+            cur_tool_calls[index] = ToolCallPartial(
+                id=getattr(content_block, "id", None),
+                function=getattr(content_block, "name", None),
+                arguments_raw="",
+                type="function",
+            )
     elif isinstance(chunk, RawContentBlockDeltaEvent):
         if isinstance(chunk.delta, TextDelta):
             cur_text = (cur_text or "") + chunk.delta.text
         elif isinstance(chunk.delta, ThinkingDelta):
             cur_reasoning_tokens = (cur_reasoning_tokens or "") + chunk.delta.thinking
+        elif isinstance(chunk.delta, InputJSONDelta):
+            # Append streamed JSON into the corresponding ToolCallPartial
+            index = chunk.index
+            if (
+                cur_tool_calls is None
+                or index >= len(cur_tool_calls)
+                or cur_tool_calls[index] is None
+            ):
+                # If we somehow receive JSON before start, initialize a placeholder
+                cur_tool_calls = cur_tool_calls or []
+                if index >= len(cur_tool_calls):
+                    cur_tool_calls.extend([None] * (index - len(cur_tool_calls) + 1))
+                cur_tool_calls[index] = ToolCallPartial(
+                    id=None,
+                    function=None,
+                    arguments_raw="",
+                    type="function",
+                )
+            cur_tool_calls[index] = ToolCallPartial(
+                id=cur_tool_calls[index].id,  # type: ignore[union-attr]
+                function=cur_tool_calls[index].function,  # type: ignore[union-attr]
+                arguments_raw=(cur_tool_calls[index].arguments_raw or "") + chunk.delta.partial_json,  # type: ignore[union-attr]
+                type="function",
+            )
         elif isinstance(chunk.delta, SignatureDelta):
             logger.debug(
                 "Anthropic streamed thinking signature block; we should support this soon."
             )
         else:
             raise ValueError(f"Unsupported delta type: {type(chunk.delta)}")
+    elif isinstance(chunk, RawContentBlockStopEvent):
+        # Nothing to do on stop; tool call is considered assembled once stop occurs
+        pass
     elif isinstance(chunk, RawMessageDeltaEvent):
         if stop_reason := chunk.delta.stop_reason:
             cur_finish_reason = FINISH_REASON_MAP.get(stop_reason)
@@ -311,6 +362,8 @@ def update_llm_output(
     completions.append(
         LLMCompletionPartial(
             text=cur_text,
+            tool_calls=cur_tool_calls,
+            reasoning_tokens=cur_reasoning_tokens,
             finish_reason=cur_finish_reason,
         )
     )

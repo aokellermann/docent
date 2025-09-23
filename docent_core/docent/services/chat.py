@@ -519,7 +519,7 @@ class ChatService:
 
                 # Parse completion and append to messages
                 completion = result.first
-                if completion is None or completion.text is None:
+                if completion is None:
                     # Defensive fallback: treat as no-response error
                     error_state = raw_chat_session.model_copy(
                         update={
