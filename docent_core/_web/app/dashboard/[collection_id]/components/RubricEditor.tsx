@@ -585,11 +585,11 @@ export default function RubricEditor({
                       : '!max-h-0 pb-0 opacity-0 pointer-events-none'
                   )}
                 >
-                  <div className="border rounded-sm">
+                  <div className="border rounded-sm max-h-[30vh] overflow-y-auto custom-scrollbar">
                     <CodeMirror
                       value={schemaText}
                       height="auto"
-                      maxHeight="30vh"
+                      // maxHeight="30vh"
                       theme={resolvedTheme === 'dark' ? 'dark' : 'light'}
                       extensions={extensions}
                       onChange={(value) => {
