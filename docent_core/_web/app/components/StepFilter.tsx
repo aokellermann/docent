@@ -153,7 +153,7 @@ export const StepFilter: React.FC<StepFilterProps> = ({
               </SliderPrimitive.Root>
             </div>
             {/* Min and Max labels under slider ends */}
-            <div className="flex justify-between mt-2 pl-1">
+            <div className="flex justify-between mt-2 pl-1 pr-1">
               <div className="text-xs text-muted-foreground font-mono">
                 {stepRange.min}
               </div>
