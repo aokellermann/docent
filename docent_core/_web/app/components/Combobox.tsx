@@ -45,6 +45,7 @@ interface ComboboxProps {
   triggerProps?: Omit<ButtonProps, 'children'>;
   triggerClassName?: string;
   valueClassName?: string;
+  chevronClassName?: string;
   popoverClassName?: string;
   popoverStyle?: CSSProperties;
   popoverAlign?: PopoverContentProps['align'];
@@ -71,6 +72,7 @@ export const Combobox = ({
   triggerProps,
   triggerClassName,
   valueClassName,
+  chevronClassName,
   popoverClassName,
   popoverStyle,
   popoverAlign,
@@ -140,7 +142,7 @@ export const Combobox = ({
           aria-expanded={isOpen}
           {...restTriggerProps}
           className={cn(
-            'w-full justify-between h-7',
+            'w-full justify-between',
             triggerPropsClassName,
             triggerClassName
           )}
@@ -149,7 +151,7 @@ export const Combobox = ({
             {displayValue}
           </span>
           <ChevronsUpDown
-            className="ml-2 h-3 w-3 shrink-0 opacity-50"
+            className={cn('ml-2 h-4 w-4 shrink-0 opacity-50', chevronClassName)}
             aria-hidden="true"
           />
         </Button>
@@ -168,9 +170,7 @@ export const Combobox = ({
             className={cn('h-8 text-xs', commandInputClassName)}
           />
           <CommandList className={cn('custom-scrollbar', commandListClassName)}>
-            <CommandEmpty>
-              <span className="text-xs">{emptyMessage}</span>
-            </CommandEmpty>
+            <CommandEmpty>{emptyMessage}</CommandEmpty>
             <CommandGroup>
               {options.map((option) => {
                 const isSelected = option.value === value;
