@@ -119,11 +119,11 @@ export function ChatArea({
     );
   }, [displayedMessages]);
   useEffect(() => {
-    if (!isAtBottom && lastMessageIsThinkingSpacer) {
+    if (lastMessageIsThinkingSpacer) {
       // Small delay to ensure the thinking spacer is visible
       setTimeout(() => scrollToBottom('smooth'), 100);
     }
-  }, [isAtBottom, lastMessageIsThinkingSpacer, scrollToBottom]);
+  }, [lastMessageIsThinkingSpacer, scrollToBottom]);
 
   // Extract suggested messages from the last assistant message
   const finalSuggestedMessages = (() => {
