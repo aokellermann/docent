@@ -24,6 +24,6 @@ To get started, check out the [quickstart guide](https://docs.transluce.org/en/l
 
 - (VSCode) Open Docent via [`docent.code-workspace`](.vscode/docent.code-workspace), which sets up formatting and linting.
 - Install pre-commit hooks: `pre-commit install`.
-- Follow the [self-host guide (manual version)](https://transluce-docent.readthedocs-hosted.com/en/dev/self_hosting/self_host_docent/#__tabbed_1_2) to self-host Docent on your machine.
-- Follow the [quickstart guide](https://transluce-docent.readthedocs-hosted.com/en/dev/quickstart) to ingest some sample transcripts.
+- Follow the [self-host guide (manual version)](https://docs.transluce.org/en/latest/self_hosting/self_host_docent/) to self-host Docent on your machine.
+- Follow the [quickstart guide](https://docs.transluce.org/en/latest/quickstart) to ingest some sample transcripts.
 - To view your database through a GUI, install the [DB Client](https://marketplace.visualstudio.com/items?itemName=cweijan.vscode-database-client2) VSCode extension.
