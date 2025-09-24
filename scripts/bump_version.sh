@@ -97,17 +97,17 @@ create_tag() {
 run_version_bump() {
     # Get bump type from user if not already set
     BUMP_TYPE=""
-    echo "What type of version bump do you want to make? [major/minor/patch/rollback]"
+    echo "What type of version bump do you want to make? [major/minor/patch/skip]"
     read -r BUMP_TYPE
     BUMP_TYPE=$(printf '%s' "$BUMP_TYPE" | tr '[:upper:]' '[:lower:]')
 
-    if [[ $BUMP_TYPE == "rollback" ]]; then
-        echo "Rollback selected; no version bump performed."
+    if [[ $BUMP_TYPE == "skip" ]]; then
+        echo "Skip selected; no version bump performed."
         return 0
     fi
 
     if [[ $BUMP_TYPE != "major" && $BUMP_TYPE != "minor" && $BUMP_TYPE != "patch" ]]; then
-        error "Bump type must be one of: major, minor, patch, rollback"
+        error "Bump type must be one of: major, minor, patch, skip"
         return 1
     fi
 
@@ -118,6 +118,11 @@ run_version_bump() {
     fi
     LAST_VERSION="${TAG_INFO%%$'\n'*}"
     COMMITS_AHEAD="${TAG_INFO#*$'\n'}"
+
+    if [[ $COMMITS_AHEAD == "0" ]]; then
+        error "HEAD has no new commits since $LAST_VERSION; aborting tag creation."
+        return 1
+    fi
 
     # Compute the bumped version
     if ! BUMPED_VERSION=$(bump_version "$LAST_VERSION" "$BUMP_TYPE"); then
