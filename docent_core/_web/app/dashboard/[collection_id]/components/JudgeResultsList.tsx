@@ -4,15 +4,12 @@ import {
   JudgeRunLabel,
   JudgeResultWithCitations,
 } from '@/app/store/rubricSlice';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { JudgeResultCard } from './JudgeResultCard';
 import { Loader2, ChevronDown, ChevronRight, Tag } from 'lucide-react';
 import { useResultFilterControls } from '@/providers/use-result-filters';
 import { cn } from '@/lib/utils';
 import { RubricCentroid } from '@/app/api/rubricApi';
-import AutoSizer from 'react-virtualized-auto-sizer';
-import { VariableSizeList as List } from 'react-window';
-import type { VariableSizeList as RVList } from 'react-window';
 import { useRefinementTab } from '@/providers/use-refinement-tab';
 import { useParams, useRouter } from 'next/navigation';
 
@@ -140,7 +137,7 @@ export const JudgeResultsList = ({
   // If dropdowns are enabled and there are centroids, render clustered collapsible sections
   if (centroidSections.length > 0) {
     return (
-      <div className="space-y-2 grow overflow-y-auto">
+      <div className="space-y-2 grow overflow-y-auto custom-scrollbar">
         {centroidSections.map((section) => (
           <ResultsSection
             key={section.id}
@@ -171,13 +168,15 @@ export const JudgeResultsList = ({
 
   // Default: flat list grouped by agent run
   return (
-    <ResultsSection
-      resultsByAgentRun={getLabeledAgentRunsAsMap(
-        groupByAgentRun(filteredJudgeResultsList)
-      )}
-      judgeRunLabelsMap={judgeRunLabelsMap}
-      activeResultId={activeResultId}
-    />
+    <div className="custom-scrollbar overflow-y-auto">
+      <ResultsSection
+        resultsByAgentRun={getLabeledAgentRunsAsMap(
+          groupByAgentRun(filteredJudgeResultsList)
+        )}
+        judgeRunLabelsMap={judgeRunLabelsMap}
+        activeResultId={activeResultId}
+      />
+    </div>
   );
 };
 
@@ -188,7 +187,6 @@ interface ResultsSectionProps {
   isClusteringActive?: boolean;
   navToTranscriptOnClick?: boolean;
   activeResultId?: string;
-  fixHeight?: boolean;
 }
 
 export const ResultsSection = ({
@@ -199,118 +197,35 @@ export const ResultsSection = ({
   navToTranscriptOnClick = true,
   activeResultId,
 }: ResultsSectionProps) => {
-  const [expanded, setExpanded] = useState<boolean>(false);
-  const uniqueRuns = Object.keys(resultsByAgentRun).length;
-
-  // Flatten into a stable row model: one row per agent run
+  const [expanded, setExpanded] = useState<boolean>(!sectionTitle);
+  const uniqueRuns = useMemo(
+    () => Object.keys(resultsByAgentRun).length,
+    [resultsByAgentRun]
+  );
   const rows = useMemo(
     () => Object.entries(resultsByAgentRun),
     [resultsByAgentRun]
   );
+  const { setActiveTab } = useRefinementTab();
+  const { collection_id: collectionId } = useParams<{
+    collection_id: string;
+  }>();
+  const router = useRouter();
 
-  // react-window: keep per-row sizes with a light measurement
-  const listRef = useRef<RVList>(null);
-  const sizeMapRef = useRef<Map<number, number>>(new Map());
-  const ESTIMATE = 160; // conservative average row height
-
-  const getSize = useCallback(
-    (index: number) => sizeMapRef.current.get(index) ?? ESTIMATE,
-    []
+  const handleNavigateToLabeling = useCallback(
+    (result: JudgeResultWithCitations) => {
+      router.push(
+        `/dashboard/${collectionId}/rubric/${result.rubric_id}/result/${result.id}`
+      );
+      setActiveTab('label');
+    },
+    [collectionId, router, setActiveTab]
   );
 
-  const setSize = useCallback((index: number, size: number) => {
-    const current = sizeMapRef.current.get(index);
-    if (current !== size) {
-      sizeMapRef.current.set(index, size);
-      // Force react-window to re-render immediately so the new
-      // measured height applies without waiting for a scroll event.
-      listRef.current?.resetAfterIndex(index, true);
-    }
-  }, []);
-
-  // Row renderer with inline measurement via ResizeObserver
-  const Row = ({
-    index,
-    style,
-  }: {
-    index: number;
-    style: React.CSSProperties;
-  }) => {
-    const [agentRunId, results] = rows[index];
-
-    // Measure an inner wrapper (not the element with the react-window style)
-    const measureRef = useRef<HTMLDivElement | null>(null);
-
-    useEffect(() => {
-      const el = measureRef.current;
-      if (!el) return;
-      const measure = () => {
-        const h = Math.ceil(el.getBoundingClientRect().height);
-        setSize(index, h);
-      };
-      measure();
-      const ro = new ResizeObserver(measure);
-      ro.observe(el);
-      return () => ro.disconnect();
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [measureRef.current, index]);
-
-    // Navigate to labeling area when clicking the tag
-    const { setActiveTab } = useRefinementTab();
-    const { collection_id: collectionId } = useParams<{
-      collection_id: string;
-    }>();
-    const router = useRouter();
-
-    const handleNavigateToLabeling = useCallback(
-      (result: JudgeResultWithCitations) => {
-        router.push(
-          `/dashboard/${collectionId}/rubric/${result.rubric_id}/result/${result.id}`
-        );
-        setActiveTab('label');
-      },
-      [router]
-    );
-
-    return (
-      <div style={style} className="group px-0">
-        <div ref={measureRef} className="space-y-2 pb-2">
-          <div className="text-xs px-2 bg-secondary text-muted-foreground justify-between py-1 font-medium rounded-sm flex items-center">
-            <span>Agent Run {agentRunId.slice(0, 8)}</span>
-            {results.length > 0 && navToTranscriptOnClick && (
-              <button
-                className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 hover:text-primary"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleNavigateToLabeling(results[0]);
-                }}
-                title="Open labeling area"
-              >
-                <Tag size={14} />
-              </button>
-            )}
-          </div>
-          <div className="space-y-2">
-            {results.map((judgeResult, idx) => (
-              <div key={`${agentRunId}-${idx}`} id={`result-${judgeResult.id}`}>
-                <JudgeResultCard
-                  judgeResult={judgeResult}
-                  judgeRunLabel={judgeRunLabelsMap.get(
-                    judgeResult.agent_run_id
-                  )}
-                  navToTranscriptOnClick={navToTranscriptOnClick}
-                  active={judgeResult.id === activeResultId}
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  };
+  const shouldShowContent = (sectionTitle && expanded) || !sectionTitle;
 
   return (
-    <div className={cn('space-y-2 grow', expanded && '!h-[500px]')}>
+    <div className={cn('space-y-2 grow')}>
       {sectionTitle && (
         <div
           className="text-xs p-1.5 bg-background hover:bg-muted rounded border border-border flex cursor-pointer items-center gap-1.5"
@@ -335,22 +250,47 @@ export const ResultsSection = ({
         </div>
       )}
 
-      {((expanded && sectionTitle) || !sectionTitle) && (
-        <AutoSizer className={sectionTitle && 'pl-4'}>
-          {({ height, width }) => (
-            <List
-              ref={listRef}
-              height={sectionTitle ? 400 : height}
-              width={width}
-              itemCount={rows.length}
-              itemSize={getSize}
-              estimatedItemSize={ESTIMATE}
-              itemKey={(index: number) => rows[index]?.[0] ?? index}
-            >
-              {Row}
-            </List>
-          )}
-        </AutoSizer>
+      {shouldShowContent && (
+        <div className={cn('space-y-2', sectionTitle && 'ml-3')}>
+          {rows.map(([agentRunId, results]) => (
+            <div key={agentRunId} className="group px-0">
+              <div className="space-y-2 pb-2">
+                <div className="text-xs px-2 bg-secondary text-muted-foreground justify-between py-1 font-medium rounded-sm flex items-center">
+                  <span>Agent Run {agentRunId.slice(0, 8)}</span>
+                  {results.length > 0 && navToTranscriptOnClick && (
+                    <button
+                      className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 hover:text-primary"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleNavigateToLabeling(results[0]);
+                      }}
+                      title="Open labeling area"
+                    >
+                      <Tag size={14} />
+                    </button>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  {results.map((judgeResult, idx) => (
+                    <div
+                      key={`${agentRunId}-${idx}`}
+                      id={`result-${judgeResult.id}`}
+                    >
+                      <JudgeResultCard
+                        judgeResult={judgeResult}
+                        judgeRunLabel={judgeRunLabelsMap.get(
+                          judgeResult.agent_run_id
+                        )}
+                        navToTranscriptOnClick={navToTranscriptOnClick}
+                        active={judgeResult.id === activeResultId}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
