@@ -156,7 +156,7 @@ export default function JudgeResultPage() {
       agentRunViewerContent = <div>Failed to load agent run.</div>;
     } else if (rubricRunState) {
       agentRunViewerContent = (
-        <div className="h-full border rounded-xl p-3 overflow-hidden flex flex-col">
+        <div className="h-full border rounded-xl p-3 overflow-hidden flex flex-col space-y-2">
           <AgentRunViewer ref={agentRunViewerRef} agentRunId={agentRunId} />
         </div>
       );
