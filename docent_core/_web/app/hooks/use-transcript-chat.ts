@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useMemo } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { skipToken } from '@reduxjs/toolkit/query';
 import {
   useGetChatStateQuery,
@@ -12,6 +12,7 @@ import { useAppDispatch } from '@/app/store/hooks';
 import { setRunCitations } from '@/app/store/transcriptSlice';
 import { JudgeResultWithCitations, ModelOption } from '@/app/store/rubricSlice';
 import { rubricApi } from '@/app/api/rubricApi';
+import { ChatMessage } from '../types/transcriptTypes';
 
 export interface UseTranscriptChatOptions {
   runId: string;
@@ -63,13 +64,18 @@ export function useTranscriptChat({
   const estimatedInputTokens =
     sse?.estimated_input_tokens ?? chatState?.estimated_input_tokens;
 
-  // Get messages from SSE if available, otherwise from initial state
-  const messages = useMemo(() => {
-    if (jobId && sseMessages && sseMessages.length > 0) {
-      return sseMessages;
+  // Persist messages from SSE to prevent flickering when a new SSE connection is established
+  const [persistedMessages, setPersistedMessages] = useState<
+    ChatMessage[] | undefined
+  >(undefined);
+  useEffect(() => {
+    if (sseMessages && sseMessages.length > 0) {
+      setPersistedMessages(sseMessages);
     }
-    return chatState?.messages || [];
-  }, [jobId, sseMessages, chatState?.messages]);
+  }, [sseMessages]);
+
+  // SSE messages take precedence over chat state messages
+  const messages = persistedMessages || chatState?.messages || [];
 
   // Start the session
   useEffect(() => {
