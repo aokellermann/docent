@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Determine the parent directory of this script
+ROOT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." &> /dev/null && pwd )"
+
 # Parse arguments
 TARGET_BRANCH=""
 SOURCE_BRANCH="main"
@@ -22,10 +25,25 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
+# Validate target branch
 if [ -z "$TARGET_BRANCH" ]; then
-  echo "Error: You must specify a target branch with -t or --target"
+  error "You must specify a target branch with -t or --target"
   exit 1
 fi
+
+###############################
+# Tag HEAD if pushing to prod #
+###############################
+
+if [ "$TARGET_BRANCH" == "prod" ]; then
+  echo "Since you're pushing to prod, let's tag HEAD with a version bump."
+  . $ROOT_DIR/scripts/bump_version.sh
+  # The script will not continue if tag creation fails or is aborted
+fi
+
+################################
+# Force push the target branch #
+################################
 
 # Confirmation prompt - this is a destructive operation
 echo "⚠️  WARNING: This will completely overwrite branch '$TARGET_BRANCH' with the contents of '$SOURCE_BRANCH'!"
