@@ -1284,7 +1284,7 @@ INVESTIGATOR_ADMIN_EMAILS = _get_investigator_admin_emails()
 
 
 async def get_investigator_admin_user(
-    user: User = Depends(get_authorized_investigator_user),
+    user: User = Depends(get_user_anonymous_ok),
 ) -> User:
     """Get user and verify they are an investigator admin."""
     if user.email not in INVESTIGATOR_ADMIN_EMAILS:
