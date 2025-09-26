@@ -17,6 +17,7 @@ import SelectionBadges from './SelectionBadges';
 import { Citation } from '@/app/types/experimentViewerTypes';
 import { useTextSelection } from '@/providers/use-text-selection';
 import { useCitationNavigation } from '@/app/dashboard/[collection_id]/rubric/[rubric_id]/NavigateToCitationContext';
+import Link from 'next/link';
 
 const ESTIMATED_CHAT_MESSAGE_OUTPUT_TOKENS = 8192;
 
@@ -97,6 +98,7 @@ export default function TranscriptChat({
     resetChat,
     chatState,
     errorMessage,
+    errorId,
     estimatedInputTokens,
   } = useTranscriptChat({ runId, collectionId, judgeResult });
 
@@ -122,10 +124,31 @@ export default function TranscriptChat({
   }
 
   // Check if context window is exceeded (local estimation) or if there's an API error
-  const contextWindowErrorMessage: string | undefined = useMemo(() => {
+  const contextWindowErrorMessage: React.ReactNode | undefined = useMemo(() => {
     // If we have an error message from the SSE stream (actual failure), prioritize that
+    if (errorId == 'docent_usage_limit') {
+      return (
+        <>
+          Free daily usage limit reached.{' '}
+          <Link
+            style={{ textDecoration: 'underline' }}
+            href="/settings/model-providers"
+          >
+            Add your own API key
+          </Link>{' '}
+          or{' '}
+          <a
+            style={{ textDecoration: 'underline' }}
+            href="mailto:docent@transluce.org"
+          >
+            contact us
+          </a>
+          .
+        </>
+      );
+    }
     if (errorMessage) {
-      return errorMessage;
+      return <>{errorMessage}</>;
     }
 
     // Otherwise, check local estimation for proactive warning
@@ -160,9 +183,11 @@ export default function TranscriptChat({
           model.context_window
     );
 
-    return longerContextAvailable
-      ? 'Context window exceeded. Try a different model.'
-      : 'Context window exceeded.';
+    return longerContextAvailable ? (
+      <>Context window exceeded. Try a different model.</>
+    ) : (
+      <>Context window exceeded.</>
+    );
   }, [errorMessage, estimatedInputTokens, availableChatModels, shownChatModel]);
 
   // Wrap sendMessage to include the selected chat model

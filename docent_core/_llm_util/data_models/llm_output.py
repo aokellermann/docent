@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 from openai.types.chat.chat_completion_token_logprob import TopLogprob
 from pydantic import BaseModel
@@ -28,6 +28,31 @@ FinishReasonType = Literal[
 """Possible reasons for an LLM completion to finish."""
 
 
+TokenType = Literal["input", "output", "cache_read", "cache_write"]
+
+
+class UsageMetrics:
+    _usage: dict[TokenType, int]
+
+    def __init__(self, **kwargs: int | None):
+        filtered_kwargs = {k: v for k, v in kwargs.items() if v is not None}
+        self._usage = cast(dict[TokenType, int], filtered_kwargs)
+
+    def __getitem__(self, key: TokenType) -> int:
+        return self._usage.get(key, 0)
+
+    def __setitem__(self, key: TokenType, value: int):
+        self._usage[key] = value
+
+    def to_dict(self) -> dict[TokenType, int]:
+        # Filter out 0 values to avoid cluttering the database
+        return {k: v for k, v in self._usage.items() if v != 0}
+
+    @property
+    def total_tokens(self) -> int:
+        return self["input"] + self["output"]
+
+
 class LLMCompletion(BaseModel):
     """A single completion from an LLM.
 
@@ -36,7 +61,6 @@ class LLMCompletion(BaseModel):
         tool_calls: List of tool calls made during the completion.
         finish_reason: Reason why the completion finished.
         top_logprobs: Probability distribution for top token choices.
-        total_tokens: Total tokens consumed by the API call (input + output).
     """
 
     text: str | None = None
@@ -70,7 +94,8 @@ class LLMOutput:
     model: str
     completions: list[LLMCompletion]
     errors: list[LLMException] = field(default_factory=list)
-    total_tokens: int | None = None
+    usage: UsageMetrics = field(default_factory=UsageMetrics)
+    from_cache: bool = False
 
     @property
     def non_empty(self) -> bool:
@@ -113,7 +138,8 @@ class LLMOutput:
             "model": self.model,
             "completions": [comp.model_dump() for comp in self.completions],
             "errors": [e.error_type_id for e in self.errors],
-            "total_tokens": self.total_tokens,
+            "usage": self.usage.to_dict(),
+            "from_cache": self.from_cache,
         }
 
     @classmethod
@@ -123,12 +149,18 @@ class LLMOutput:
         errors = [error_type_map.get(e, LLMException)() for e in errors]
 
         completions = data.get("completions", [])
-        completions = [LLMCompletion(**comp) for comp in completions]
+        completions = [LLMCompletion.model_validate(comp) for comp in completions]
 
-        total_tokens = data.get("total_tokens", None)
+        usage: dict[TokenType, int] = {}
+        if data_usage := data.get("usage"):
+            usage = cast(dict[TokenType, int], data_usage)
 
         return cls(
-            model=data["model"], completions=completions, errors=errors, total_tokens=total_tokens
+            model=data["model"],
+            completions=completions,
+            errors=errors,
+            usage=UsageMetrics(**usage),
+            from_cache=bool(data.get("from_cache", False)),
         )
 
 
@@ -230,7 +262,8 @@ def finalize_llm_output_partial(partial: LLMOutputPartial) -> LLMOutput:
             )
             for c in partial.completions
         ],
-        total_tokens=partial.total_tokens,
+        usage=partial.usage,
+        from_cache=False,
     )
 
     # If the completion is empty and was truncated (likely due to too much reasoning), raise an exception

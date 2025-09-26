@@ -1,6 +1,6 @@
 """Database fixtures for integration tests."""
 
-from typing import AsyncGenerator
+from typing import AsyncContextManager, AsyncGenerator, Callable
 
 import pytest_asyncio
 import redis.asyncio as redis
@@ -64,6 +64,18 @@ async def db_connection(db_engine: AsyncEngine) -> AsyncGenerator[AsyncConnectio
 async def db_session(db_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSession(bind=db_engine, expire_on_commit=False) as session:
         yield session
+
+
+@pytest_asyncio.fixture(scope="function")
+async def session_cm_factory(
+    db_engine: AsyncEngine,
+) -> Callable[[], AsyncContextManager[AsyncSession]]:
+    """Factory that creates new database sessions for each call."""
+
+    def factory() -> AsyncContextManager[AsyncSession]:
+        return AsyncSession(bind=db_engine, expire_on_commit=False)
+
+    return factory
 
 
 @pytest_asyncio.fixture(scope="function")

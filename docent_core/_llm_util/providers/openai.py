@@ -56,6 +56,7 @@ from docent_core._llm_util.data_models.llm_output import (
     LLMOutput,
     LLMOutputPartial,
     ToolCallPartial,
+    UsageMetrics,
     finalize_llm_output_partial,
 )
 from docent_core._llm_util.providers.common import async_timeout_ctx
@@ -349,9 +350,13 @@ def update_llm_output(llm_output_partial: LLMOutputPartial | None, chunk: ChatCo
 
             _set_tool_call(i, tc_idx, tool_call_partial)
 
-    total_tokens: int | None = None
     if chunk.usage is not None:
-        total_tokens = chunk.usage.total_tokens
+        usage = UsageMetrics(
+            input=chunk.usage.prompt_tokens,
+            output=chunk.usage.completion_tokens,
+        )
+    else:
+        usage = UsageMetrics()
 
     completions: list[LLMCompletionPartial] = []
     # TOOD assert all lengths are same
@@ -364,7 +369,11 @@ def update_llm_output(llm_output_partial: LLMOutputPartial | None, chunk: ChatCo
             )
         )
 
-    return LLMOutputPartial(completions=completions, model=chunk.model, total_tokens=total_tokens)  # type: ignore[arg-type]
+    return LLMOutputPartial(
+        completions=completions,  # type: ignore[arg-type]
+        model=chunk.model,
+        usage=usage,
+    )
 
 
 @backoff.on_exception(
@@ -685,8 +694,15 @@ def parse_openai_completion(response: ChatCompletion | None, model: str) -> LLMO
             errors=[NoResponseException()],
         )
 
-    # Extract total tokens from usage if available
-    total_tokens = response.usage.total_tokens if response.usage else None
+    # Extract token usage if available
+    if response.usage:
+        usage = UsageMetrics(
+            input=response.usage.prompt_tokens,
+            output=response.usage.completion_tokens,
+        )
+    else:
+        logger.warning("OpenAI response did not include usage metrics")
+        usage = UsageMetrics()
 
     return LLMOutput(
         model=response.model,
@@ -707,7 +723,7 @@ def parse_openai_completion(response: ChatCompletion | None, model: str) -> LLMO
             )
             for choice in response.choices
         ],
-        total_tokens=total_tokens,
+        usage=usage,
     )
 
 

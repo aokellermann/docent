@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -23,67 +23,43 @@ import {
 } from '@/components/ui/select';
 import { Plus, Trash2 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
-import { apiRestClient } from '@/app/services/apiService';
-
-interface ModelApiKey {
-  id: string;
-  provider: string;
-  masked_api_key: string;
-}
-
-const PROVIDERS = [
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'google', label: 'Google' },
-] as const;
+import { PROVIDERS, getProviderLabel } from '@/app/settings/utils/providers';
+import {
+  useGetModelApiKeysQuery,
+  useUpsertModelApiKeyMutation,
+  useDeleteModelApiKeyMutation,
+} from '@/app/api/settingsApi';
+import { MaskedApiKey } from '@/app/settings/components/MaskedApiKey';
 
 export default function ModelProvidersPage() {
-  const [modelApiKeys, setModelApiKeys] = useState<ModelApiKey[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: modelApiKeys, isLoading, refetch } = useGetModelApiKeysQuery();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<string>('');
   const [apiKey, setApiKey] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
-
-  const fetchModelApiKeys = async () => {
-    try {
-      const response = await apiRestClient.get('/model-api-keys');
-      setModelApiKeys(response.data);
-    } catch (error) {
-      console.error('Failed to fetch model API keys:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to load model API keys',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchModelApiKeys();
-  }, []);
+  const [upsertModelKey, { isLoading: isSaving }] =
+    useUpsertModelApiKeyMutation();
+  const [deleteModelKey] = useDeleteModelApiKeyMutation();
 
   const getAvailableProviders = () => {
-    const usedProviders = new Set(modelApiKeys.map((key) => key.provider));
+    const usedProviders = new Set(
+      (modelApiKeys ?? []).map((key) => key.provider)
+    );
     return PROVIDERS.filter((provider) => !usedProviders.has(provider.value));
   };
 
   const handleSaveApiKey = async () => {
     if (!selectedProvider || !apiKey.trim()) return;
 
-    setIsSaving(true);
     try {
-      await apiRestClient.put('/model-api-keys', {
+      await upsertModelKey({
         provider: selectedProvider,
         api_key: apiKey.trim(),
-      });
+      }).unwrap();
 
       setApiKey('');
       setSelectedProvider('');
       setIsDialogOpen(false);
-      await fetchModelApiKeys();
+      await refetch();
     } catch (error) {
       console.error('Failed to save model API key:', error);
       toast({
@@ -91,15 +67,13 @@ export default function ModelProvidersPage() {
         description: 'Failed to save model API key',
         variant: 'destructive',
       });
-    } finally {
-      setIsSaving(false);
     }
   };
 
   const handleDeleteApiKey = async (provider: string) => {
     try {
-      await apiRestClient.delete(`/model-api-keys/${provider}`);
-      await fetchModelApiKeys();
+      await deleteModelKey({ provider }).unwrap();
+      await refetch();
     } catch (error) {
       console.error('Failed to delete model API key:', error);
       toast({
@@ -110,12 +84,7 @@ export default function ModelProvidersPage() {
     }
   };
 
-  const getProviderLabel = (provider: string) => {
-    const providerConfig = PROVIDERS.find((p) => p.value === provider);
-    return providerConfig?.label || provider;
-  };
-
-  const availableProviders = getAvailableProviders();
+  const availableProviders = useMemo(getAvailableProviders, [modelApiKeys]);
 
   return (
     <div className="space-y-6">
@@ -195,7 +164,7 @@ export default function ModelProvidersPage() {
         </Dialog>
       </div>
 
-      {availableProviders.length === 0 && modelApiKeys.length > 0 && (
+      {availableProviders.length === 0 && (modelApiKeys?.length ?? 0) > 0 && (
         <Card className="border-blue-200 bg-blue-50">
           <CardContent>
             <p className="text-sm text-blue-800">
@@ -212,7 +181,7 @@ export default function ModelProvidersPage() {
               <div>Loading...</div>
             </CardContent>
           </Card>
-        ) : modelApiKeys.length === 0 ? (
+        ) : (modelApiKeys?.length ?? 0) === 0 ? (
           <Card>
             <CardContent className="pt-6">
               <div className="text-center py-8 text-muted-foreground">
@@ -222,7 +191,7 @@ export default function ModelProvidersPage() {
             </CardContent>
           </Card>
         ) : (
-          modelApiKeys.map((key) => (
+          (modelApiKeys ?? []).map((key) => (
             <Card key={key.id}>
               <CardHeader>
                 <div className="flex items-center justify-between">
@@ -243,11 +212,7 @@ export default function ModelProvidersPage() {
                 </div>
               </CardHeader>
               <CardContent>
-                <div>
-                  <div className="font-mono text-sm bg-gray-50 p-2 rounded mt-1">
-                    {key.masked_api_key}
-                  </div>
-                </div>
+                <MaskedApiKey apiKey={key.masked_api_key} />
               </CardContent>
             </Card>
           ))

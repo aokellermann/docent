@@ -107,7 +107,11 @@ class LLMCache:
         with self._get_connection() as conn:
             cursor = conn.execute("SELECT completion FROM llm_cache WHERE key = ?", (key,))
             result = cursor.fetchone()
-            return LLMOutput.from_dict(json.loads(result[0])) if result else None
+            if not result:
+                return None
+            out = LLMOutput.from_dict(json.loads(result[0]))
+            out.from_cache = True
+            return out
 
     def set(
         self,

@@ -2,7 +2,7 @@ import { ModeToggle } from '@/components/ui/theme-toggle';
 import {
   BookText,
   ChevronRight,
-  Layers,
+  House,
   MessageCircle,
   PanelLeftClose,
   PanelLeftOpen,
@@ -52,6 +52,9 @@ const Breadcrumbs: React.FC = () => {
       : state.transcript.agentRunLeftSidebarOpen
   );
 
+  // Check if we're on settings pages
+  const isSettingsPage = pathname?.startsWith('/settings');
+
   // check if we are "home", i.e. at /dashboard/[collection_id]
   const effectiveCollectionId =
     collectionId || (params?.collection_id as string | undefined);
@@ -92,7 +95,7 @@ const Breadcrumbs: React.FC = () => {
               className="h-7 text-xs whitespace-nowrap px-2 py-0 flex items-center gap-x-1"
             >
               <Link href="/dashboard">
-                <Layers size={14} />
+                <House size={14} />
               </Link>
             </Button>
           </TooltipTrigger>
@@ -103,8 +106,11 @@ const Breadcrumbs: React.FC = () => {
 
         {/* Breadcrumbs */}
         <div className="flex gap-x-1 items-center">
-          {/* Home link */}
-          {isHome ? (
+          {/* Settings page */}
+          {isSettingsPage ? (
+            <span className="text-muted-foreground">Settings</span>
+          ) : /* Link back to collection page */
+          isHome ? (
             <span className="text-muted-foreground">
               {collectionBreadcrumbText}
             </span>

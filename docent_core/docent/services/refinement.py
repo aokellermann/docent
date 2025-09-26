@@ -18,7 +18,6 @@ from docent.data_models.chat.message import (
     UserMessage,
 )
 from docent_core._llm_util.data_models.llm_output import LLMOutput
-from docent_core._llm_util.prod_llms import get_llm_completions_async
 from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES
 from docent_core._server._broker.redis_client import (
     STATE_KEY_FORMAT,
@@ -46,6 +45,7 @@ from docent_core.docent.db.schemas.refinement import (
     SQLARefinementAgentSession,
 )
 from docent_core.docent.db.schemas.tables import JobStatus, SQLAJob
+from docent_core.docent.services.llms import LLMService
 from docent_core.docent.services.monoservice import MonoService
 from docent_core.docent.services.rubric import RubricService, SQLARubric
 
@@ -126,11 +126,13 @@ class RefinementService:
         session_cm_factory: Callable[[], AsyncContextManager[AsyncSession]],
         mono_svc: MonoService,
         rubric_svc: RubricService,
+        llm_svc: LLMService,
     ):
         self.session = session
         self.session_cm_factory = session_cm_factory
         self.mono_svc = mono_svc
         self.rubric_svc = rubric_svc
+        self.llm_svc = llm_svc
 
     async def get_session_by_id(self, session_id: str):
         result = await self.session.execute(
@@ -219,10 +221,15 @@ class RefinementService:
             random.seed(0)
             agent_runs = random.sample(agent_runs, N_SAMPLE_AGENT_RUNS)
 
+        if ctx.user is None:
+            raise ValueError("User is required to summarize agent runs")
+
         # Get summaries for max 10 agent runs
         outputs = await summarize_agent_runs(
             sq_rubric.rubric_text,
             agent_runs,
+            ctx.user.id,
+            self.llm_svc,
             completion_callback,
         )
 
@@ -483,9 +490,9 @@ class RefinementService:
                     user_message = UserMessage(content=last_message.content)
                     messages = messages[:-1] + [user_message]
 
-                outputs = await get_llm_completions_async(
-                    [messages],
-                    PROVIDER_PREFERENCES.refine_agent,
+                outputs = await self.llm_svc.get_completions(
+                    inputs=[messages],
+                    model_options=PROVIDER_PREFERENCES.refine_agent,
                     tools=[
                         create_set_rubric_and_schema_tool(),
                     ],
@@ -545,7 +552,7 @@ class RefinementService:
                                 # Point session's rubric_version pointer to the new version
                                 rsession.rubric_version = updated_rubric.version
 
-                                logger.error(f"Adding new rubric version: {updated_rubric.version}")
+                                logger.info(f"Adding new rubric version: {updated_rubric.version}")
 
                                 await self.rubric_svc.start_or_get_eval_rubric_job(
                                     ctx,

@@ -1,6 +1,6 @@
 import { getUser } from '@/app/services/dal';
 import { redirect } from 'next/navigation';
-import SettingsSidebar from './components/SettingsSidebar';
+import SettingsClientLayout from './client-layout';
 
 export default async function SettingsLayout({
   children,
@@ -15,12 +15,5 @@ export default async function SettingsLayout({
     redirect(`/login?redirect=${encodedRedirect}`);
   }
 
-  return (
-    <div className="container mx-auto py-8 px-4 max-w-6xl">
-      <div className="flex gap-8">
-        <SettingsSidebar />
-        <div className="flex-1">{children}</div>
-      </div>
-    </div>
-  );
+  return <SettingsClientLayout>{children}</SettingsClientLayout>;
 }

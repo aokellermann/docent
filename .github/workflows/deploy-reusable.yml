@@ -65,6 +65,7 @@ jobs:
           COOKIE_DOMAIN=${{ vars.COOKIE_DOMAIN }}
           DOCENT_CORS_ORIGINS=${{ vars.DOCENT_CORS_ORIGINS }}
           INVESTIGATOR_ADMIN_EMAILS=${{ vars.INVESTIGATOR_ADMIN_EMAILS }}
+          FREE_USAGE_CAP_CENTS=${{ vars.FREE_USAGE_CAP_CENTS }}
           EOF
 
       - name: Build and push backend to ECR

@@ -27,7 +27,8 @@ class ChatSession(BaseModel):
     chat_model: ModelOption | None = None
     estimated_input_tokens: int | None = None
 
-    # Error messages are sent over SSE when they happen, but not stored in the db
+    # Errors are sent over SSE when they happen, but not stored in the db
+    error_id: str | None = None
     error_message: str | None = None
 
 

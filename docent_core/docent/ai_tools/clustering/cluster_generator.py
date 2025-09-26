@@ -5,8 +5,8 @@ from typing import Callable, TypedDict, TypeVar, cast
 import numpy as np
 
 from docent.data_models._tiktoken_util import truncate_to_token_limit
-from docent_core._llm_util.prod_llms import get_llm_completions_async
 from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES
+from docent_core.docent.services.llms import LLMService
 
 LARGE_CLUSTER_GUIDANCE = "Use as many clusters as you need to capture the variation in the items; we recommend generating between 5 and 10 clusters but sometimes more is necessary."
 
@@ -62,6 +62,7 @@ T = TypeVar("T")  # ClusterType Object
 
 async def propose_clusters(
     items: list[str],
+    llm_svc: LLMService,
     extra_instructions_list: list[str],
     feedback_list: list[ClusterFeedback] | None = None,
     random_seed: int = 42,
@@ -119,9 +120,9 @@ async def propose_clusters(
         )
 
     # Make a single batch call to get_llm_completions_async
-    outputs = await get_llm_completions_async(
-        [prompt],
-        PROVIDER_PREFERENCES.propose_clusters,
+    outputs = await llm_svc.get_completions(
+        inputs=[prompt],
+        model_options=PROVIDER_PREFERENCES.propose_clusters,
         max_new_tokens=8192,
         temperature=1.0,
         timeout=180.0,

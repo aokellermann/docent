@@ -7,6 +7,7 @@ from tests.integration.fixtures.database import (
     mono_service,
     override_db,
     redis_client,
+    session_cm_factory,
     test_collection_id,
     test_user,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "db_session",
     "db_service",
     "mono_service",
+    "session_cm_factory",
     "test_collection_id",
     "test_user",
     "charts_service",

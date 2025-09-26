@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal, cast
 from uuid import uuid4
 
+import sqlalchemy
 from pgvector.sqlalchemy import Vector
 from pydantic_core import to_jsonable_python
 from sqlalchemy import (
@@ -27,7 +28,6 @@ from docent._log_util import get_logger
 from docent.data_models.agent_run import AgentRun
 from docent.data_models.transcript import Transcript, TranscriptGroup
 from docent_core._db_service.schemas.base import SQLABase
-from docent_core.docent.ai_tools.search import SearchResult
 from docent_core.docent.db.filters import ComplexFilter, parse_filter_dict
 from docent_core.docent.db.schemas.auth_models import Organization, User
 
@@ -61,6 +61,7 @@ TABLE_USER_PROFILE = "user_profiles"
 TABLE_MODEL_API_KEYS = "model_api_keys"
 TABLE_TELEMETRY_ACCUMULATION = "telemetry_accumulation"
 TABLE_TELEMETRY_AGENT_RUN_STATUS = "telemetry_agent_run_status"
+TABLE_MODEL_USAGE = "model_usage"
 
 
 def sanitize_pg_text(text: str) -> str:
@@ -508,33 +509,6 @@ class SQLASearchResult(SQLABase):
         ),
     )
 
-    @classmethod
-    def from_search_result(
-        cls,
-        search_result: SearchResult,
-        collection_id: str,
-    ):
-        value = search_result.value
-        if value is not None:
-            value = sanitize_pg_text(value)
-        return cls(
-            id=search_result.id,
-            collection_id=collection_id,
-            agent_run_id=search_result.agent_run_id,
-            search_query_id=search_result.search_query_id,
-            search_result_idx=search_result.search_result_idx,
-            value=value,
-        )
-
-    def to_search_result(self) -> SearchResult:
-        return SearchResult(
-            id=self.id,
-            agent_run_id=self.agent_run_id,
-            search_query_id=self.search_query_id,
-            search_result_idx=self.search_result_idx,
-            value=self.value,
-        )
-
 
 class SQLASearchQuery(SQLABase):
     __tablename__ = TABLE_SEARCH_QUERIES
@@ -896,3 +870,27 @@ class SQLATelemetryAccumulation(SQLABase):
 
     # Composite index for efficient queries by key and data type
     __table_args__ = (Index("idx_telemetry_accumulation_key_type", "key", "data_type"),)
+
+
+class SQLAModelUsage(SQLABase):
+    __tablename__ = TABLE_MODEL_USAGE
+
+    id = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id = mapped_column(String(36), ForeignKey(f"{TABLE_USER}.id"), nullable=False, index=True)
+    api_key_id = mapped_column(
+        String(36), ForeignKey(f"{TABLE_MODEL_API_KEYS}.id"), nullable=True, index=True
+    )
+    model = mapped_column(JSONB, nullable=False)
+    bucket_start = mapped_column(DateTime, nullable=False, index=True)
+    metric_name = mapped_column(Text, nullable=False)
+    value = mapped_column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        Index(
+            "idx_model_usage_free_window",
+            "user_id",
+            "bucket_start",
+            postgresql_where=sqlalchemy.text("api_key_id IS NULL"),
+        ),
+        Index("idx_model_usage_byok_window", "user_id", "api_key_id", "bucket_start"),
+    )

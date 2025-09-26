@@ -53,6 +53,7 @@ from docent_core._llm_util.data_models.llm_output import (
     LLMOutput,
     LLMOutputPartial,
     ToolCallPartial,
+    UsageMetrics,
     finalize_llm_output_partial,
 )
 from docent_core._llm_util.providers.common import (
@@ -273,7 +274,7 @@ def update_llm_output(
     Thus there can only be one completion.
     """
 
-    total_tokens: int | None = llm_output_partial.total_tokens if llm_output_partial else None
+    usage: UsageMetrics = llm_output_partial.usage if llm_output_partial else UsageMetrics()
 
     if llm_output_partial is not None:
         cur_text: str | None = llm_output_partial.completions[0].text
@@ -341,11 +342,11 @@ def update_llm_output(
         if stop_reason := chunk.delta.stop_reason:
             cur_finish_reason = FINISH_REASON_MAP.get(stop_reason)
         # These token counts are cumulative
-        total_tokens = (
-            chunk.usage.output_tokens
-            + (chunk.usage.input_tokens or 0)
-            + (chunk.usage.cache_creation_input_tokens or 0)
-            + (chunk.usage.cache_read_input_tokens or 0)
+        usage = UsageMetrics(
+            input=chunk.usage.input_tokens,
+            output=chunk.usage.output_tokens,
+            cache_read=chunk.usage.cache_read_input_tokens,
+            cache_write=chunk.usage.cache_creation_input_tokens,
         )
 
     completions: list[LLMCompletionPartial] = []
@@ -359,7 +360,11 @@ def update_llm_output(
     )
 
     assert cur_model is not None, "First chunk should always set the cur_model"
-    return LLMOutputPartial(completions=completions, model=cur_model, total_tokens=total_tokens)  # type: ignore[arg-type]
+    return LLMOutputPartial(
+        completions=completions,  # type: ignore[arg-type]
+        model=cur_model,
+        usage=usage,
+    )
 
 
 @backoff.on_exception(
@@ -487,7 +492,12 @@ def parse_anthropic_completion(message: Message | None, model: str) -> LLMOutput
         else:
             raise ValueError(f"Unknown block type: {block.type}")
 
-    total_tokens = message.usage.input_tokens + message.usage.output_tokens
+    usage = UsageMetrics(
+        input=message.usage.input_tokens,
+        output=message.usage.output_tokens,
+        cache_read=message.usage.cache_read_input_tokens,
+        cache_write=message.usage.cache_creation_input_tokens,
+    )
 
     return LLMOutput(
         model=model,
@@ -499,7 +509,7 @@ def parse_anthropic_completion(message: Message | None, model: str) -> LLMOutput
                 finish_reason=finish_reason,  # type: ignore
             )
         ],
-        total_tokens=total_tokens,
+        usage=usage,
     )
 
 

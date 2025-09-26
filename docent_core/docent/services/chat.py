@@ -21,7 +21,6 @@ from docent.data_models.citation import (
 )
 from docent.data_models.remove_invalid_citation_ranges import remove_invalid_citation_ranges
 from docent_core._llm_util.data_models.llm_output import LLMOutput
-from docent_core._llm_util.prod_llms import get_llm_completions_async
 from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES, ModelOption
 from docent_core._server._broker.redis_client import (
     STATE_KEY_FORMAT,
@@ -39,6 +38,7 @@ from docent_core.docent.ai_tools.rubric.rubric import JudgeRunLabel, Rubric
 from docent_core.docent.db.contexts import ViewContext
 from docent_core.docent.db.schemas.chat import ChatSession, SQLAChatSession
 from docent_core.docent.db.schemas.tables import JobStatus, SQLAJob
+from docent_core.docent.services.llms import LLMService
 from docent_core.docent.services.monoservice import MonoService
 from docent_core.docent.services.rubric import RubricService
 
@@ -137,11 +137,13 @@ class ChatService:
         session_cm_factory: Callable[[], AsyncContextManager[AsyncSession]],
         mono_svc: MonoService,
         rubric_svc: RubricService,
+        llm_svc: LLMService,
     ):
         self.session = session
         self.session_cm_factory = session_cm_factory
         self.mono_svc = mono_svc
         self.rubric_svc = rubric_svc
+        self.llm_svc = llm_svc
 
     async def get_session_by_id(self, session_id: str) -> SQLAChatSession | None:
         result = await self.session.execute(
@@ -444,6 +446,9 @@ class ChatService:
 
         raw_chat_session = sqla_session.to_pydantic()
 
+        if ctx.user is None:
+            raise ValueError("User is required to run a chat job")
+
         context_messages, agent_run, rubric = await self._get_chat_context(
             ctx, sqla_session, raw_chat_session.messages
         )
@@ -500,23 +505,25 @@ class ChatService:
                     ctx, sqla_session, raw_messages
                 )
 
-                outputs = await get_llm_completions_async(
-                    [context_messages],
-                    [session_model],
+                outputs = await self.llm_svc.get_completions(
+                    inputs=[context_messages],
+                    model_options=[session_model],
                     max_new_tokens=8192,
                     timeout=120.0,
                     use_cache=True,
                     streaming_callback=_llm_streaming_callback,
                     tools=tools,
                     tool_choice=tool_choice,
-                    api_key_overrides=await self.mono_svc.get_api_key_overrides(ctx.user),
                 )
                 result = outputs[0]
 
                 # Handle provider errors first by surfacing an error state via sse_callback
                 if result.did_error:
                     error_state = raw_chat_session.model_copy(
-                        update={"error_message": result.errors[0].user_message}
+                        update={
+                            "error_id": result.errors[0].error_type_id,
+                            "error_message": result.errors[0].user_message,
+                        }
                     )
                     if sse_callback:
                         await sse_callback(error_state)
@@ -542,8 +549,9 @@ class ChatService:
                 raw_messages.append(assistant_msg)
 
                 # Store real token count from API response if available
-                if result.total_tokens is not None:
-                    sqla_session.estimated_input_tokens = result.total_tokens
+                total_tokens = result.usage.total_tokens
+                if total_tokens > 0:
+                    sqla_session.estimated_input_tokens = total_tokens
 
             # If assistant with tool calls: execute tool calls
             elif last_message.role == "assistant" and (tool_calls := last_message.tool_calls):
@@ -606,22 +614,24 @@ class ChatService:
         final_parsed = _parse_citations_in_messages(raw_messages, run=agent_run, streaming=False)
         return raw_chat_session.model_copy(update={"messages": final_parsed})
 
-    async def cleanup_old_chat_sessions(self, days_old: int = 7) -> int:
-        """
-        Delete chat sessions that haven't been updated in the specified number of days.
 
-        Args:
-            days_old: Number of days after which sessions are considered old (default: 7)
+async def cleanup_old_chat_sessions(session: AsyncSession, days_old: int = 7) -> int:
+    """
+    Delete chat sessions that haven't been updated in the specified number of days.
+    This exists outside ChatService to avoid setting up RubricService and LLMService.
 
-        Returns:
-            Number of sessions deleted
-        """
-        cutoff_date = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days_old)
+    Args:
+        days_old: Number of days after which sessions are considered old (default: 7)
 
-        result = await self.session.execute(
-            delete(SQLAChatSession).where(SQLAChatSession.updated_at < cutoff_date)
-        )
-        # Ensure the deletion is persisted
-        await self.session.commit()
-        deleted_count = result.rowcount or 0
-        return deleted_count
+    Returns:
+        Number of sessions deleted
+    """
+    cutoff_date = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days_old)
+
+    result = await session.execute(
+        delete(SQLAChatSession).where(SQLAChatSession.updated_at < cutoff_date)
+    )
+    # Ensure the deletion is persisted
+    await session.commit()
+    deleted_count = result.rowcount or 0
+    return deleted_count

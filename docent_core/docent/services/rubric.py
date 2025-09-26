@@ -8,16 +8,11 @@ from sqlalchemy import and_, delete, exists, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from docent._log_util import get_logger
-from docent.data_models.agent_run import AgentRun
 from docent_core._db_service.batched_writer import BatchedWriter
-from docent_core._llm_util.providers.preferences import (
-    PROVIDER_PREFERENCES,
-)
 from docent_core._server._broker.redis_client import enqueue_job
 from docent_core._worker.constants import WorkerFunction
 from docent_core.docent.ai_tools.clustering.cluster_assigner import (
-    DEFAULT_ASSIGNER,
-    assign_with_backend,
+    assign,
 )
 from docent_core.docent.ai_tools.clustering.cluster_generator import (
     ClusterFeedback,
@@ -25,14 +20,12 @@ from docent_core.docent.ai_tools.clustering.cluster_generator import (
 )
 from docent_core.docent.ai_tools.rubric.rubric import (
     JudgeResult,
-    JudgeResultStreamingCallback,
     JudgeRunLabel,
     ResultType,
     Rubric,
     evaluate_rubric,
 )
 from docent_core.docent.db.contexts import ViewContext
-from docent_core.docent.db.schemas.auth_models import User
 from docent_core.docent.db.schemas.rubric import (
     SQLAJudgeResult,
     SQLAJudgeResultCentroid,
@@ -46,6 +39,7 @@ from docent_core.docent.db.schemas.tables import (
     SQLAJob,
 )
 from docent_core.docent.services.job import JobService
+from docent_core.docent.services.llms import LLMService
 from docent_core.docent.services.monoservice import MonoService
 
 logger = get_logger(__name__)
@@ -57,6 +51,7 @@ class RubricService:
         session: AsyncSession,
         session_cm_factory: Callable[[], AsyncContextManager[AsyncSession]],
         service: MonoService,
+        llm_svc: LLMService,
     ):
         """The `session_cm_factory` creates new sessions that commit writes immediately.
         This is helpful if you don't want to wait for results to be written."""
@@ -64,6 +59,7 @@ class RubricService:
         self.session = session
         self.session_cm_factory = session_cm_factory
         self.service = service
+        self.llm_svc = llm_svc
         self.job_svc = JobService(session, session_cm_factory)
 
     ###############
@@ -256,36 +252,11 @@ class RubricService:
         )
         return result.scalars().all()
 
-    async def evaluate_rubric_for_user(
-        self,
-        agent_runs: list[AgentRun],
-        rubric: Rubric,
-        user: User | None = None,
-        callback: JudgeResultStreamingCallback | None = None,
-        max_recall: bool = False,
-    ) -> list[dict[str, Any] | None]:
-        """Helper to evaluate a rubric with the appropriate API keys for a user.
-        Raises an error if trying to call a non-default model without a custom API key.
-        """
-        api_key_overrides = await self.service.get_api_key_overrides(user)
-
-        is_default = rubric.judge_model in PROVIDER_PREFERENCES.default_judge_models
-        if not is_default and not api_key_overrides.get(rubric.judge_model.provider):
-            raise ValueError(
-                f"Rubric {rubric.id} uses a non-default model {rubric.judge_model.model_name} "
-                f"but no API key override was provided for provider {rubric.judge_model.provider}"
-            )
-
-        return await evaluate_rubric(
-            agent_runs,
-            rubric,
-            callback=callback,
-            api_key_overrides=api_key_overrides,
-            max_recall=max_recall,
-        )
-
     async def run_rubric_job(self, ctx: ViewContext, job: SQLAJob):
         """Run a rubric job. Should only be called by the worker."""
+
+        if ctx.user is None:
+            raise ValueError("User is required to run a rubric job")
 
         # Get the rubric
         rubric_id = job.job_json["rubric_id"]
@@ -389,10 +360,10 @@ class RubricService:
 
                 # Run the search, saving data to the database as we go
                 try:
-                    await self.evaluate_rubric_for_user(
+                    await evaluate_rubric(
                         agent_runs,
                         rubric.to_pydantic(),
-                        user=ctx.user,
+                        llm_svc=self.llm_svc,
                         callback=_callback,
                     )
                 except anyio.get_cancelled_exc_class():
@@ -547,14 +518,18 @@ class RubricService:
         centroids_feedback = job.job_json.get("clustering_feedback", None)
         recluster = bool(job.job_json.get("recluster", False))
 
+        if ctx.user is None:
+            raise ValueError("User is required to propose centroids")
+
         # Propose centroids
-        await self.propose_centroids(sq_rubric, recluster, centroids_feedback)
+        await self.propose_centroids(sq_rubric, ctx.user.id, recluster, centroids_feedback)
         # Assign centroids
-        await self.assign_centroids(sq_rubric)
+        await self.assign_centroids(sq_rubric, ctx.user.id)
 
     async def propose_centroids(
         self,
         sq_rubric: SQLARubric,
+        user_id: str,
         recluster: bool,
         feedback: str | None = None,
     ) -> Sequence[SQLARubricCentroid]:
@@ -599,6 +574,7 @@ class RubricService:
             guidance = f"These are results for the rubric: {rubric.rubric_text}"
             centroids: list[str] = await propose_clusters(
                 [json.dumps(j.output) for j in judge_results if j.result_type == result_type],
+                self.llm_svc,
                 extra_instructions_list=[guidance],
                 feedback_list=(
                     [
@@ -663,6 +639,7 @@ class RubricService:
     async def assign_centroids(
         self,
         sqla_rubric: SQLARubric,
+        user_id: str,
     ):
         sqla_centroids = await self.get_centroids(sqla_rubric.id, sqla_rubric.version)
         if len(sqla_centroids) == 0:
@@ -733,10 +710,10 @@ class RubricService:
                 )
                 await writer.add_all([judge_result_cluster])
 
-            await assign_with_backend(
-                DEFAULT_ASSIGNER,
+            await assign(
                 results_to_assign,
                 centroids_to_assign,
+                self.llm_svc,
                 assignment_callback=record_assignment,
             )
 

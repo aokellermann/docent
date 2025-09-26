@@ -16,8 +16,10 @@ from docent_core.docent.services.chat import (
     ChatService,
     ChatSession,
 )
+from docent_core.docent.services.llms import LLMService
 from docent_core.docent.services.monoservice import MonoService
 from docent_core.docent.services.rubric import RubricService
+from docent_core.docent.services.usage import UsageService
 
 logger = get_logger(__name__)
 
@@ -26,9 +28,14 @@ async def chat_job(ctx: ViewContext, job: SQLAJob):
     db = await DocentDB.init()
     mono_svc = await MonoService.init()
 
+    if ctx.user is None:
+        raise ValueError("User is required to run a chat job")
+
     async with db.session() as session:
-        rubric_svc = RubricService(session, db.session, mono_svc)
-        chat_svc = ChatService(session, db.session, mono_svc, rubric_svc)
+        usage_svc = UsageService(session, db.session)
+        llm_svc = LLMService(session, db.session, ctx.user, usage_svc)
+        rubric_svc = RubricService(session, db.session, mono_svc, llm_svc)
+        chat_svc = ChatService(session, db.session, mono_svc, rubric_svc, llm_svc)
 
         sqla_chat_session = await chat_svc.get_session_by_id(job.job_json["session_id"])
         if sqla_chat_session is None:

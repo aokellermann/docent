@@ -1,13 +1,12 @@
 import re
 from abc import abstractmethod
-from typing import Callable, Literal, Protocol
-
-import anyio
+from typing import Callable, Protocol
 
 from docent._log_util import get_logger
 from docent_core._llm_util.data_models.llm_output import LLMOutput
-from docent_core._llm_util.prod_llms import MessagesInput, get_llm_completions_async
+from docent_core._llm_util.prod_llms import MessagesInput
 from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES, ModelOption
+from docent_core.docent.services.llms import LLMService
 
 logger = get_logger(__name__)
 
@@ -68,6 +67,7 @@ class ClusterAssigner:
         self,
         items: list[str],
         clusters: list[str],
+        llm_svc: LLMService,
         assignment_callback: AssignmentStreamingCallback | None = None,
     ) -> list[tuple[bool, str] | None]:
         """For each (item, cluster, attribute), determines whether
@@ -100,16 +100,6 @@ class LlmApiClusterAssigner(ClusterAssigner):
         self.temperature = temperature
 
     @classmethod
-    def from_o3_mini(cls, assign_prompt_fn: Callable[[str, str], str] | None = None):
-        return cls(
-            system_prompt=None,
-            max_new_tokens=8192,
-            temperature=1,
-            model_options=PROVIDER_PREFERENCES.cluster_assign_o3_mini,
-            assign_prompt_fn=assign_prompt_fn,
-        )
-
-    @classmethod
     def from_o4_mini(cls, assign_prompt_fn: Callable[[str, str], str] | None = None):
         return cls(
             system_prompt=None,
@@ -119,32 +109,11 @@ class LlmApiClusterAssigner(ClusterAssigner):
             assign_prompt_fn=assign_prompt_fn,
         )
 
-    @classmethod
-    def from_sonnet_4_thinking(cls, assign_prompt_fn: Callable[[str, str], str] | None = None):
-        return cls(
-            system_prompt=None,
-            max_new_tokens=4096,
-            temperature=1.0,
-            model_options=PROVIDER_PREFERENCES.cluster_assign_sonnet_4_thinking,
-            assign_prompt_fn=assign_prompt_fn,
-        )
-
-    async def skip_queries(self, items: list[str], cluster: str) -> None:
-        raise NotImplementedError
-
-    @classmethod
-    def from_gemini_flash(cls):
-        return cls(
-            system_prompt=None,
-            max_new_tokens=8192,
-            temperature=1.0,
-            model_options=PROVIDER_PREFERENCES.cluster_assign_gemini_flash,
-        )
-
     async def assign(
         self,
         items: list[str],
         clusters: list[str],
+        llm_svc: LLMService,
         assignment_callback: AssignmentStreamingCallback | None = None,
     ) -> list[tuple[bool, str] | None]:
         assert len(items) == len(
@@ -177,8 +146,8 @@ class LlmApiClusterAssigner(ClusterAssigner):
             else None
         )
 
-        outputs = await get_llm_completions_async(
-            queries,
+        outputs = await llm_svc.get_completions(
+            inputs=queries,
             model_options=self.model_options,
             max_new_tokens=self.max_new_tokens,
             temperature=self.temperature,
@@ -189,63 +158,16 @@ class LlmApiClusterAssigner(ClusterAssigner):
         return [_parse_llm_output(output) for output in outputs]
 
 
-BaseAssignerType = Literal[
-    "o3-mini", "o4-mini", "sonnet-4-thinking", "modernbert-ft", "gemini-flash"
-]
-BASE_ASSIGNERS: dict[BaseAssignerType, ClusterAssigner] = {}
-
-
-async def _get_base_assigner(backend: BaseAssignerType) -> ClusterAssigner:
-    if backend in BASE_ASSIGNERS:
-        return BASE_ASSIGNERS[backend]
-
-    async with anyio.Lock():
-        if backend == "o3-mini":
-            assigner = LlmApiClusterAssigner.from_o3_mini()
-        elif backend == "o4-mini":
-            assigner = LlmApiClusterAssigner.from_o4_mini()
-        elif backend == "sonnet-4-thinking":
-            assigner = LlmApiClusterAssigner.from_sonnet_4_thinking()
-        elif backend == "gemini-flash":
-            assigner = LlmApiClusterAssigner.from_gemini_flash()
-        else:
-            raise ValueError(f"Unknown backend: {backend}")
-
-        BASE_ASSIGNERS[backend] = assigner
-        return assigner
-
-
-AssignerType = BaseAssignerType | Literal["hybrid"]
-ASSIGNERS: dict[AssignerType, ClusterAssigner] = {}
-
-
-async def get_assigner(backend: AssignerType) -> ClusterAssigner:
-    if backend in ASSIGNERS:
-        return ASSIGNERS[backend]
-
-    async with anyio.Lock():
-        if backend == "hybrid":
-            raise NotImplementedError("Hybrid assigner not implemented")
-        else:
-            assigner = await _get_base_assigner(backend)
-
-        ASSIGNERS[backend] = assigner
-        return assigner
-
-
 ############
 # Defaults #
 ############
 
 
-async def assign_with_backend(
-    backend: AssignerType,
+async def assign(
     items: list[str],
     clusters: list[str],
+    llm_svc: LLMService,
     assignment_callback: AssignmentStreamingCallback | None = None,
 ) -> list[tuple[bool, str] | None]:
-    assigner = await get_assigner(backend)
-    return await assigner.assign(items, clusters, assignment_callback)
-
-
-DEFAULT_ASSIGNER: AssignerType = "o4-mini"
+    assigner = LlmApiClusterAssigner.from_o4_mini()
+    return await assigner.assign(items, clusters, llm_svc, assignment_callback)

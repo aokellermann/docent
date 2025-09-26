@@ -3,7 +3,7 @@
 import { usePathname, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { ArrowLeft, Key, Brain } from 'lucide-react';
+import { Key, Brain, Gauge } from 'lucide-react';
 
 interface SidebarItem {
   id: string;
@@ -25,6 +25,12 @@ const sidebarItems: SidebarItem[] = [
     href: '/settings/model-providers',
     icon: Brain,
   },
+  {
+    id: 'usage',
+    label: 'Usage',
+    href: '/settings/usage',
+    icon: Gauge,
+  },
 ];
 
 export default function SettingsSidebar() {
@@ -33,23 +39,10 @@ export default function SettingsSidebar() {
 
   return (
     <div className="w-64 space-y-6">
-      <div className="flex items-center space-x-4">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => router.push('/dashboard')}
-          className="flex items-center space-x-2"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          <span>Back to Dashboard</span>
-        </Button>
-      </div>
-
-      <div>
-        <h1 className="text-2xl font-bold mb-2">Settings</h1>
-      </div>
-
       <Card className="p-4">
+        <div>
+          <h1 className="text-2xl font-bold mb-2">Settings</h1>
+        </div>
         <nav className="space-y-2">
           {sidebarItems.map((item) => {
             const Icon = item.icon;

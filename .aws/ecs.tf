@@ -136,7 +136,7 @@ resource "aws_ecs_task_definition" "worker" {
         {
           name  = "DOCENT_REDIS_TLS"
           value = "true"
-        },
+        }
       ]
 
       logConfiguration = {

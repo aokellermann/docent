@@ -13,8 +13,7 @@ from docent_core._env_util import ENV, get_deployment_id, init_sentry_or_raise
 from docent_core._server._analytics.posthog import AnalyticsClient
 from docent_core._server._auth.session_middleware import SessionAuthMiddleware
 from docent_core._server._rest._all_routers import REST_ROUTERS
-from docent_core.docent.services.chat import ChatService
-from docent_core.docent.services.rubric import RubricService
+from docent_core.docent.services.chat import cleanup_old_chat_sessions
 
 logger = get_logger(__name__)
 
@@ -133,14 +132,7 @@ async def periodic_cleanup_task():
         try:
             mono_svc = await MonoService.init()
             async with mono_svc.db.session() as session:
-                rubric_svc = RubricService(session, mono_svc.db.session, mono_svc)
-                chat_svc = ChatService(
-                    session,
-                    mono_svc.db.session,
-                    mono_svc,
-                    rubric_svc,
-                )
-                deleted_count = await chat_svc.cleanup_old_chat_sessions()
+                deleted_count = await cleanup_old_chat_sessions(session)
             logger.info(f"Periodic cleanup: deleted {deleted_count} old chat sessions")
 
         except Exception as e:

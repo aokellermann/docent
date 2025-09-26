@@ -30,7 +30,7 @@ interface InputAreaProps {
   isSendingMessage?: boolean;
   inputHeaderElement?: ReactNode;
   footer?: ReactNode;
-  errorMessage?: string;
+  errorMessage?: ReactNode;
 }
 
 export default function InputArea({
@@ -226,7 +226,7 @@ export default function InputArea({
               'min-h-[24px] max-h-[calc(75dvh)] overflow-hidden p-0 border-none shadow-none resize-none focus-visible:ring-0',
               className
             )}
-            disabled={disabled || typeof errorMessage === 'string'}
+            disabled={disabled || errorMessage != undefined}
             rows={1}
             autoFocus
             onKeyDown={(event) => {

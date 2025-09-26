@@ -12,6 +12,7 @@ export interface ChatSession {
   chat_model: ModelOption;
   estimated_input_tokens: number;
   error_message?: string;
+  error_id?: string;
 }
 
 export const chatApi = createApi({
@@ -77,6 +78,7 @@ export const chatApi = createApi({
         isSSEConnected: boolean;
         messages: ChatMessage[];
         error_message?: string;
+        error_id?: string;
         estimated_input_tokens?: number;
       },
       { collectionId: string; runId: string; jobId: string }
@@ -102,6 +104,7 @@ export const chatApi = createApi({
             updateCachedData((draft) => {
               draft.messages = data.messages;
               draft.error_message = data.error_message;
+              draft.error_id = data.error_id;
               draft.estimated_input_tokens = data.estimated_input_tokens;
             });
           },

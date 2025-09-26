@@ -23,10 +23,16 @@ class NoResponseException(LLMException):
     user_message = "The model returned an empty response. Please try again later."
 
 
+class DocentUsageLimitException(LLMException):
+    error_type_id = "docent_usage_limit"
+    user_message = "Free daily usage limit reached. Add your own API key in settings or contact us for increased limits."
+
+
 LLM_ERROR_TYPES: list[type[LLMException]] = [
     LLMException,
     CompletionTooLongException,
     RateLimitException,
     ContextWindowException,
     NoResponseException,
+    DocentUsageLimitException,
 ]

@@ -11,7 +11,7 @@ from docent.data_models.chat.tool import (
     ToolParams,
 )
 from docent_core._llm_util.data_models.llm_output import LLMOutput
-from docent_core._llm_util.prod_llms import MessagesInput, get_llm_completions_async
+from docent_core._llm_util.prod_llms import MessagesInput
 from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES
 from docent_core.docent.ai_tools.rubric.rubric import (
     JudgeResult,
@@ -19,6 +19,7 @@ from docent_core.docent.ai_tools.rubric.rubric import (
     Rubric,
     validate_schema,
 )
+from docent_core.docent.services.llms import LLMService
 
 # TODO(mengk): if a user asks a statistical question, reframe it into a rubric question and then tell them to use the plotting functions to accomplish their goal.
 # TODO(mengk): ask for context on what the various transcripts are if it's not clear.
@@ -327,7 +328,11 @@ RUN_SUMMARY_TEMPLATE = """
 
 
 async def summarize_agent_runs(
-    rubric_text: str, agent_runs: list[AgentRun], completion_callback: SummaryStreamingCallback
+    rubric_text: str,
+    agent_runs: list[AgentRun],
+    user_id: str,
+    llm_svc: LLMService,
+    completion_callback: SummaryStreamingCallback,
 ) -> list[LLMOutput]:
     messages_batch: list[MessagesInput] = []
     for ar in agent_runs:
@@ -337,9 +342,9 @@ async def summarize_agent_runs(
         ]
         messages_batch.append(messages)
 
-    return await get_llm_completions_async(
-        messages_batch,
-        model_options=PROVIDER_PREFERENCES.handle_refinement_message,
+    return await llm_svc.get_completions(
+        inputs=messages_batch,
+        model_options=PROVIDER_PREFERENCES.summarize_for_refinement,
         max_new_tokens=8192,
         timeout=180.0,
         use_cache=True,

@@ -61,6 +61,7 @@ export function useTranscriptChat({
   const isSSEConnected = sse?.isSSEConnected ?? false;
   const sseMessages = sse?.messages ?? [];
   const sseError = sse?.error_message;
+  const sseErrorId = sse?.error_id;
   const estimatedInputTokens =
     sse?.estimated_input_tokens ?? chatState?.estimated_input_tokens;
 
@@ -209,6 +210,7 @@ export function useTranscriptChat({
     resetChat,
     chatState,
     errorMessage: sseError,
+    errorId: sseErrorId,
     estimatedInputTokens,
   };
 }

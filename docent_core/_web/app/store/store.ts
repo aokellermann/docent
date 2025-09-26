@@ -13,6 +13,7 @@ import rubricReducer from './rubricSlice';
 import { collectionApi } from '../api/collectionApi';
 import { refinementApi } from '../api/refinementApi';
 import { chatApi } from '../api/chatApi';
+import { settingsApi } from '../api/settingsApi';
 import { investigatorApi } from '../api/investigatorApi';
 import refinementReducer from './refinementSlice';
 
@@ -30,6 +31,7 @@ const store = configureStore({
     [collectionApi.reducerPath]: collectionApi.reducer,
     [refinementApi.reducerPath]: refinementApi.reducer,
     [chatApi.reducerPath]: chatApi.reducer,
+    [settingsApi.reducerPath]: settingsApi.reducer,
     [investigatorApi.reducerPath]: investigatorApi.reducer,
   },
   middleware: (getDefaultMiddleware) =>
@@ -48,6 +50,7 @@ const store = configureStore({
       .concat(collectionApi.middleware)
       .concat(refinementApi.middleware)
       .concat(chatApi.middleware)
+      .concat(settingsApi.middleware)
       .concat(investigatorApi.middleware),
 });
 

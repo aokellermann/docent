@@ -24,7 +24,7 @@ interface ChatAreaProps {
   __showThinkingSpacerAfterFirstMessage?: boolean;
   inputAreaFooter?: ReactNode;
   inputHeaderElement?: ReactNode;
-  inputErrorMessage?: string;
+  inputErrorMessage?: ReactNode;
   scrollContainerClassName?: string;
   inputAreaClassName?: string;
 }

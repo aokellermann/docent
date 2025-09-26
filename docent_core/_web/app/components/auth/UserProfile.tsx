@@ -71,11 +71,8 @@ export const UserProfile = () => {
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onClick={() => (window.location.href = '/settings')}
-          className="text-sm"
-        >
-          Settings
+        <DropdownMenuItem asChild className="text-sm">
+          <a href="/settings">Settings</a>
         </DropdownMenuItem>
         <DropdownMenuItem onClick={handleLogout} className="text-sm">
           Log out

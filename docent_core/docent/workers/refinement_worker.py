@@ -13,11 +13,13 @@ from docent_core._server._broker.redis_client import (
 from docent_core.docent.db.contexts import ViewContext
 from docent_core.docent.db.schemas.refinement import RefinementAgentSession
 from docent_core.docent.db.schemas.tables import SQLAJob
+from docent_core.docent.services.llms import LLMService
 from docent_core.docent.services.monoservice import MonoService
 from docent_core.docent.services.refinement import (
     RefinementService,
 )
 from docent_core.docent.services.rubric import RubricService
+from docent_core.docent.services.usage import UsageService
 
 logger = get_logger(__name__)
 
@@ -26,9 +28,14 @@ async def refinement_agent_job(ctx: ViewContext, job: SQLAJob):
     db = await DocentDB.init()
     mono_svc = await MonoService.init()
 
+    if ctx.user is None:
+        raise ValueError("User is required to run a refinement job")
+
     async with db.session() as session:
-        rubric_svc = RubricService(session, db.session, mono_svc)
-        refinement_svc = RefinementService(session, db.session, mono_svc, rubric_svc)
+        usage_svc = UsageService(session, db.session)
+        llm_svc = LLMService(session, db.session, ctx.user, usage_svc)
+        rubric_svc = RubricService(session, db.session, mono_svc, llm_svc)
+        refinement_svc = RefinementService(session, db.session, mono_svc, rubric_svc, llm_svc)
 
         sq_rsession = await refinement_svc.get_session_by_id(job.job_json["rsession_id"])
         if sq_rsession is None:

@@ -13,8 +13,9 @@ from docent.data_models.citation import parse_citations
 from docent.data_models.remove_invalid_citation_ranges import remove_invalid_citation_ranges
 from docent.data_models.transcript import TEXT_RANGE_CITE_INSTRUCTION
 from docent_core._llm_util.data_models.llm_output import LLMOutput
-from docent_core._llm_util.prod_llms import MessagesInput, get_llm_completions_async
+from docent_core._llm_util.prod_llms import MessagesInput
 from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES, ModelOption
+from docent_core.docent.services.llms import LLMService
 
 logger = get_logger(__name__)
 
@@ -250,7 +251,7 @@ def _get_prompt_resolver(rubric: Rubric, ar: AgentRun, prompt_template: str):
 async def evaluate_rubric(
     agent_runs: list[AgentRun],
     rubric: Rubric,
-    api_key_overrides: dict[str, str] | None = None,
+    llm_svc: LLMService,
     callback: JudgeResultStreamingCallback | None = None,
     max_recall: bool = False,
 ):
@@ -261,13 +262,12 @@ async def evaluate_rubric(
         _get_prompt_resolver(rubric, ar, rubric_prompt) for ar in agent_runs
     ]
 
-    outputs = await get_llm_completions_async(
-        prompt_resolvers,
-        [rubric.judge_model],
+    outputs = await llm_svc.get_completions(
+        inputs=prompt_resolvers,
+        model_options=[rubric.judge_model],
         max_new_tokens=8192,
         timeout=180.0,
         use_cache=True,
-        api_key_overrides=api_key_overrides,
         completion_callback=(
             _get_llm_callback(
                 rubric,

@@ -66,7 +66,7 @@ Follow these guidelines: {BLOCK_CITE_INSTRUCTION}. The citation should be as clo
     llm_streaming_callback = _get_llm_callback(streaming_callback)
     llm_completion_callback = _get_llm_callback(completion_callback)
     output = await get_llm_completions_async(
-        [
+        inputs=[
             [
                 {
                     "role": "user",
@@ -74,7 +74,7 @@ Follow these guidelines: {BLOCK_CITE_INSTRUCTION}. The citation should be as clo
                 },
             ]
         ],
-        PROVIDER_PREFERENCES.summarize_agent_actions,
+        model_options=PROVIDER_PREFERENCES.summarize_agent_actions,
         max_new_tokens=8192,
         timeout=180.0,
         streaming_callback=llm_streaming_callback,
@@ -196,7 +196,7 @@ comma-separated list of action unit indices
     llm_streaming_callback = _get_high_level_actions_llm_callback(streaming_callback, transcript)
 
     output = await get_llm_completions_async(
-        [
+        inputs=[
             [
                 {
                     "role": "user",
@@ -204,7 +204,7 @@ comma-separated list of action unit indices
                 },
             ]
         ],
-        PROVIDER_PREFERENCES.group_actions_into_high_level_steps,
+        model_options=PROVIDER_PREFERENCES.group_actions_into_high_level_steps,
         max_new_tokens=8192,
         timeout=180.0,
         streaming_callback=llm_streaming_callback,
@@ -336,7 +336,7 @@ The format for each observation should be:
     llm_completion_callback = _get_observations_llm_callback(completion_callback)
 
     output = await get_llm_completions_async(
-        [
+        inputs=[
             [
                 {
                     "role": "user",
@@ -344,7 +344,7 @@ The format for each observation should be:
                 },
             ]
         ],
-        PROVIDER_PREFERENCES.interesting_agent_observations,
+        model_options=PROVIDER_PREFERENCES.interesting_agent_observations,
         max_new_tokens=8192,
         timeout=180.0,
         streaming_callback=llm_streaming_callback,
@@ -376,16 +376,17 @@ def _parse_agent_observations(text: str) -> list[ObservationType]:
         category_str = match.group(1).lower()
 
         # Map the category string to the Literal type
+        category: ObservationCategory
         if category_str == "mistake":
-            category: ObservationCategory = "mistake"
+            category = "mistake"
         elif category_str == "critical_insight":
-            category: ObservationCategory = "critical_insight"
+            category = "critical_insight"
         elif category_str == "near_miss":
-            category: ObservationCategory = "near_miss"
+            category = "near_miss"
         elif category_str == "weird_behavior":
-            category: ObservationCategory = "weird_behavior"
+            category = "weird_behavior"
         elif category_str == "cheating":
-            category: ObservationCategory = "cheating"
+            category = "cheating"
         else:
             raise ValueError(f"Invalid category: {category_str}")
 

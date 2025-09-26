@@ -28,6 +28,7 @@ from tqdm.auto import tqdm
 from docent._log_util import get_logger
 from docent.data_models.chat import ChatMessage, ToolInfo, parse_chat_message
 from docent_core._llm_util.data_models.exceptions import (
+    DocentUsageLimitException,
     LLMException,
     RateLimitException,
 )
@@ -38,7 +39,7 @@ from docent_core._llm_util.data_models.llm_output import (
 )
 from docent_core._llm_util.llm_cache import LLMCache
 from docent_core._llm_util.providers.preferences import ModelOption
-from docent_core._llm_util.providers.registry import (
+from docent_core._llm_util.providers.provider_registry import (
     PROVIDERS,
     SingleOutputGetter,
     SingleStreamingOutputGetter,
@@ -119,8 +120,11 @@ async def _parallelize_calls(
     # Save resolved messages to avoid multiple resolutions
     resolved_messages: list[list[ChatMessage] | None] = [None] * len(inputs)
 
+    # Signal to indicate cancellation due to hitting a usage limit
+    cancelled_due_to_usage_limit: bool = False
+
     async def _limited_task(i: int, cur_input: MessagesInput, tg: TaskGroup):
-        nonlocal responses, pbar, resolved_messages
+        nonlocal responses, pbar, resolved_messages, cancelled_due_to_usage_limit
 
         async with semaphore or nullcontext():
             try:
@@ -165,6 +169,15 @@ async def _parallelize_calls(
                 # Always call the completion callback if provided
                 if completion_callback:
                     await completion_callback(i, result)
+            except DocentUsageLimitException as e:
+                # Cooperative cancellation: mark result for this index, cancel remaining tasks
+                result = LLMOutput(
+                    model=model_name,
+                    completions=[],
+                    errors=[e],
+                )
+                cancelled_due_to_usage_limit = True
+                tg.cancel_scope.cancel()
             except Exception as e:
                 if not isinstance(e, LLMException):
                     logger.warning(f"LLM call raised an exception that is not an LLMException: {e}")
@@ -236,7 +249,18 @@ async def _parallelize_calls(
         logger.info(
             f"Cancelled {len(inputs) - num_cached} unfinished LLM API calls; cached {num_cached} completed responses"
         )
-        raise
+        # If the cancellation was triggered by a usage limit, fill remaining responses
+        if cancelled_due_to_usage_limit:
+            for i in range(len(responses)):
+                if responses[i] is None:
+                    responses[i] = LLMOutput(
+                        model=model_name,
+                        completions=[],
+                        errors=[DocentUsageLimitException()],
+                    )
+        else:
+            # Propagate other cancellation causes
+            raise
 
     # Cache results if available
     _cache_responses()

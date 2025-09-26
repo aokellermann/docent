@@ -20,6 +20,7 @@ from docent_core._llm_util.data_models.llm_output import (
     AsyncSingleLLMOutputStreamingCallback,
     LLMCompletion,
     LLMOutput,
+    UsageMetrics,
 )
 from docent_core._llm_util.providers.common import (
     async_timeout_ctx,
@@ -184,12 +185,9 @@ async def get_google_chat_completion_streaming_async(
             accumulated_text = ""
             accumulated_tool_calls: list[ToolCall] = []
             finish_reason: str | None = None
-            total_tokens: int | None = None
+            usage = UsageMetrics()
 
             async for chunk in stream:
-                if chunk.usage_metadata and chunk.usage_metadata.total_token_count is not None:
-                    total_tokens = chunk.usage_metadata.total_token_count
-
                 candidate = chunk.candidates[0] if chunk.candidates else None
                 if candidate and candidate.content and candidate.content.parts:
                     for part in candidate.content.parts:
@@ -216,6 +214,13 @@ async def get_google_chat_completion_streaming_async(
                     else:
                         finish_reason = "error"
 
+                # Check for usage metadata in the chunk
+                if usage_metadata := chunk.usage_metadata:
+                    if usage_metadata.prompt_token_count is not None:
+                        usage["input"] = int(usage_metadata.prompt_token_count)
+                    if usage_metadata.candidates_token_count is not None:
+                        usage["output"] = int(usage_metadata.candidates_token_count)
+
                 if streaming_callback is not None:
                     await streaming_callback(
                         LLMOutput(
@@ -233,7 +238,7 @@ async def get_google_chat_completion_streaming_async(
                         finish_reason=finish_reason,
                     )
                 ],
-                total_tokens=total_tokens,
+                usage=usage,
             )
     except errors.APIError as e:
         if e2 := _convert_google_error(e):
@@ -376,10 +381,13 @@ def _parse_google_completion(message: types.GenerateContentResponse, model: str)
         else:
             raise ValueError(f"Unknown content part: {part}")
 
-    # Extract total tokens from usage metadata if available
-    total_tokens = None
-    if message.usage_metadata:
-        total_tokens = message.usage_metadata.total_token_count
+    # Extract usage metrics from the response
+    usage = UsageMetrics()
+    if usage_metadata := message.usage_metadata:
+        if usage_metadata.prompt_token_count is not None:
+            usage["input"] = int(usage_metadata.prompt_token_count)
+        if usage_metadata.candidates_token_count is not None:
+            usage["output"] = int(usage_metadata.candidates_token_count)
 
     return LLMOutput(
         model=model,
@@ -390,7 +398,7 @@ def _parse_google_completion(message: types.GenerateContentResponse, model: str)
                 tool_calls=(tool_calls or None),
             )
         ],
-        total_tokens=total_tokens,
+        usage=usage,
     )
 
 
