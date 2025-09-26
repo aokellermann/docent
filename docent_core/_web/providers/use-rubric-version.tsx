@@ -8,9 +8,10 @@ import {
 } from 'react';
 import {
   useGetLatestRubricVersionQuery,
+  useLazyGetResultByAgentRunQuery,
   useGetResultByIdQuery,
 } from '@/app/api/rubricApi';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { skipToken } from '@reduxjs/toolkit/query';
 
 interface RubricVersionContextValue {
@@ -44,9 +45,11 @@ export function RubricVersionProvider({
   collectionId,
   children,
 }: RubricVersionProviderProps) {
-  const { result_id: resultId } = useParams<{
+  const { result_id: resultId, agent_run_id: agentRunId } = useParams<{
     result_id?: string;
+    agent_run_id?: string;
   }>();
+  const router = useRouter();
 
   // Get the judge result if we're on a result page
   const { data: judgeResult } = useGetResultByIdQuery(
@@ -65,7 +68,37 @@ export function RubricVersionProvider({
   });
 
   // Refetch latest version helper
-  const [version, setVersion] = useState<number | null>(null);
+  const [version, _setVersion] = useState<number | null>(null);
+  const [getResultByAgentRun] = useLazyGetResultByAgentRunQuery();
+  const updateUrlIfResultExists = async (
+    oldVersion: number,
+    newVersion: number
+  ) => {
+    if (newVersion !== oldVersion && agentRunId) {
+      const { data: result } = await getResultByAgentRun({
+        collectionId,
+        rubricId,
+        agentRunId,
+        version: newVersion,
+      });
+
+      if (result) {
+        router.replace(
+          `/dashboard/${collectionId}/rubric/${rubricId}/agent_run/${agentRunId}/result/${result?.id}`
+        );
+      } else {
+        router.replace(
+          `/dashboard/${collectionId}/rubric/${rubricId}/agent_run/${agentRunId}`
+        );
+      }
+    }
+  };
+
+  const setVersion = async (newVersion: number | null) => {
+    _setVersion(newVersion);
+    if (version && newVersion) updateUrlIfResultExists(version, newVersion);
+  };
+
   const refetchLatestVersion = useCallback(async () => {
     const { data: version } = await refetch();
     setVersion(version ?? null);

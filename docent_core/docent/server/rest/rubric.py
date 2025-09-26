@@ -191,6 +191,34 @@ async def get_rubric_metrics(
     )
 
 
+@rubric_router.get("/{collection_id}/rubric/{rubric_id}/result/{agent_run_id}")
+async def get_result_by_agent_run(
+    collection_id: str,
+    rubric_id: str,
+    agent_run_id: str,
+    version: int,
+    rubric_svc: RubricService = Depends(get_rubric_service),
+    _: None = Depends(require_collection_permission(Permission.READ)),
+) -> JudgeResultWithCitations:
+    """Get a single judge result by agent run, rubric id, and rubric version.
+
+    Returns the result parsed with the rubric's output schema as citations.
+    """
+    # Fetch the judge result
+    result = await rubric_svc.get_rubric_result_by_agent_run(
+        agent_run_id=agent_run_id, rubric_id=rubric_id, rubric_version=version
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Judge result not found")
+
+    # Ensure rubric/version exists and use schema to parse citations
+    sqla_rubric = await rubric_svc.get_rubric(rubric_id, version)
+    if sqla_rubric is None:
+        raise HTTPException(status_code=404, detail="Rubric version not found")
+
+    return JudgeResultWithCitations.from_judge_result(result, sqla_rubric.output_schema)
+
+
 @rubric_router.delete("/{collection_id}/rubric/{rubric_id}")
 async def delete_rubric_all_versions(
     collection_id: str,

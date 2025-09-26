@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useState, useEffect, useMemo } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import {
   ChatArea,
   SuggestedMessage,
@@ -79,7 +79,6 @@ export default function TranscriptChat({
   className = 'flex flex-col h-full space-y-2',
 }: TranscriptChatProps) {
   const params = useParams();
-  const router = useRouter();
 
   // Use provided collectionId or extract from params
   const collectionId = propCollectionId || (params.collection_id as string);

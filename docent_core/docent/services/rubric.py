@@ -446,6 +446,28 @@ class RubricService:
             return None
         return sqla_result.to_pydantic()
 
+    async def get_rubric_result_by_agent_run(
+        self, agent_run_id: str, rubric_id: str, rubric_version: int
+    ) -> JudgeResult | None:
+        """Get the DIRECT_RESULT judge result for an agent run/rubric/version.
+
+        Returns None if a DIRECT_RESULT does not exist.
+        """
+        direct_res = await self.session.execute(
+            select(SQLAJudgeResult)
+            .where(
+                SQLAJudgeResult.agent_run_id == agent_run_id,
+                SQLAJudgeResult.rubric_id == rubric_id,
+                SQLAJudgeResult.rubric_version == rubric_version,
+                SQLAJudgeResult.result_type == ResultType.DIRECT_RESULT,
+            )
+            .limit(1)
+        )
+        sqla_direct = direct_res.scalar_one_or_none()
+        if sqla_direct is None:
+            return None
+        return sqla_direct.to_pydantic()
+
     async def cancel_active_rubric_eval_job(self, rubric_id: str):
         job = await self.get_active_job_for_rubric(rubric_id)
         if job:

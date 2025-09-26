@@ -21,6 +21,7 @@ import {
 } from '@/providers/use-refinement-tab';
 import { TextSelectionProvider } from '@/providers/use-text-selection';
 import { useAppSelector } from '@/app/store/hooks';
+import { useRouteGuard } from '@/hooks/use-route-guard';
 
 interface RubricLayoutBodyProps {
   collectionId: string;
@@ -37,9 +38,10 @@ function RubricLayoutBody({
     agent_run_id?: string;
     result_id?: string;
   }>();
-  const isOnResultRoute = !!resultId;
+  const isOnResultRoute = !!resultId || !!agentRunId;
 
   const { version } = useRubricVersion();
+  useRouteGuard({ version });
   const { data: rubricRunState } = useGetRubricRunStateQuery(
     {
       collectionId,

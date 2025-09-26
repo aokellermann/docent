@@ -8,7 +8,7 @@ import {
   PanelLeftOpen,
 } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter, useParams, usePathname } from 'next/navigation';
+import { useParams, usePathname } from 'next/navigation';
 import { useSelector } from 'react-redux';
 
 import { BASE_DOCENT_PATH } from '@/app/constants';
@@ -30,7 +30,6 @@ import {
 } from '../store/transcriptSlice';
 
 const Breadcrumbs: React.FC = () => {
-  const router = useRouter();
   const params = useParams();
   const pathname = usePathname();
   const dispatch = useAppDispatch();
@@ -44,7 +43,7 @@ const Breadcrumbs: React.FC = () => {
   const rubricId = params?.rubric_id as string | undefined;
   const resultId = params?.result_id as string | undefined;
   const isAgentRunView = !!agentRunId && !rubricId;
-  const isJudgeResultView = !!rubricId && !!resultId;
+  const isJudgeResultView = !!rubricId && (!!agentRunId || !!resultId);
 
   // Select left sidebar state based on route
   const leftSidebarOpen = useSelector((state: RootState) =>
@@ -119,7 +118,7 @@ const Breadcrumbs: React.FC = () => {
           )}
 
           {/* Transcript page */}
-          {agentRunId && !resultId && (
+          {agentRunId && !isJudgeResultView && (
             <>
               <ChevronRight size={18} />
               <span className="text-muted-foreground">
@@ -131,7 +130,7 @@ const Breadcrumbs: React.FC = () => {
           {rubricId && (
             <>
               <ChevronRight size={18} />
-              {resultId ? (
+              {isJudgeResultView ? (
                 <Link
                   href={`${BASE_DOCENT_PATH}/${effectiveCollectionId}/rubric/${rubricId}`}
                   className="text-blue-text hover:underline"
@@ -152,7 +151,7 @@ const Breadcrumbs: React.FC = () => {
           )}
 
           {/* Rubric result */}
-          {rubricId && resultId && (
+          {isJudgeResultView && (
             <>
               <ChevronRight size={18} />
               <span className="text-muted-foreground">Result</span>
