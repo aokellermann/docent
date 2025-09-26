@@ -31,6 +31,8 @@ export const useRouteGuard = ({ version }: UseRouteGuardProps) => {
   // - If re is null, redirect to rubric/[ru]/agent_run/[ar].
   // - If re' isn't null and re' != re, redirect to rubric/[ru]/agent_run/[ar]/result/[re'].
   useEffect(() => {
+    let cancelled = false;
+
     const check = async () => {
       // TODO Check whether ru exists
       // TODO Check whether ar exists
@@ -45,6 +47,8 @@ export const useRouteGuard = ({ version }: UseRouteGuardProps) => {
         agentRunId,
         version,
       });
+
+      if (cancelled) return;
 
       // No result exists on this (ru, ar, v) combination; redirect to rubric/[ru]/agent_run/[ar]
       if (!result) {
@@ -62,5 +66,16 @@ export const useRouteGuard = ({ version }: UseRouteGuardProps) => {
       }
     };
     check();
-  }, [agentRunId, version, collectionId, rubricId, resultId, router]);
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    agentRunId,
+    version,
+    collectionId,
+    rubricId,
+    resultId,
+    router,
+    getResultByAgentRun,
+  ]);
 };
