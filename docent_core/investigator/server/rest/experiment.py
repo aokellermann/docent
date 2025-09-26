@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, Literal, Optional, Union
 from uuid import uuid4
 
+from anthropic import AsyncAnthropic
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
@@ -501,35 +502,43 @@ async def list_available_models(
         # Set default base URLs based on provider
         base_url = request.base_url
         api_key = request.api_key
-        if request.provider == "openai":
-            base_url = base_url or "https://api.openai.com/v1/"
-            api_key = os.getenv("OPENAI_API_KEY")
-        elif request.provider == "anthropic":
-            base_url = base_url or "https://api.anthropic.com/v1/"
-            api_key = os.getenv("ANTHROPIC_API_KEY")
-        elif request.provider == "google":
-            base_url = base_url or "https://generativelanguage.googleapis.com/v1beta/openai/"
-            api_key = os.getenv("GOOGLE_API_KEY")
-        elif request.provider == "custom":
-            if not base_url:
-                raise HTTPException(
-                    status_code=400, detail="Base URL is required for custom provider"
-                )
+
+        if request.provider == "anthropic":
+            # Anthropic's OpenAI-compatible API doesn't support listing models
+            client = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+            models = await client.models.list()
+            model_names = [model.id for model in models.data]
+
         else:
-            raise HTTPException(status_code=400, detail=f"Unknown provider: {request.provider}")
+            if request.provider == "openai":
+                base_url = base_url or "https://api.openai.com/v1/"
+                api_key = os.getenv("OPENAI_API_KEY")
+            elif request.provider == "google":
+                base_url = base_url or "https://generativelanguage.googleapis.com/v1beta/openai/"
+                api_key = os.getenv("GOOGLE_API_KEY")
+            elif request.provider == "custom":
+                if not base_url:
+                    raise HTTPException(
+                        status_code=400, detail="Base URL is required for custom provider"
+                    )
+            else:
+                raise HTTPException(status_code=400, detail=f"Unknown provider: {request.provider}")
 
-        # Create OpenAI client with the configuration
-        client = AsyncOpenAI(
-            api_key=api_key
-            or "dummy-key",  # Some providers don't require API key for listing models
-            base_url=base_url,
-        )
+            # Create OpenAI client with the configuration
+            client = AsyncOpenAI(
+                api_key=api_key
+                or "dummy-key",  # Some providers don't require API key for listing models
+                base_url=base_url,
+            )
 
-        # List available models
-        models = await client.models.list()
+            models = await client.models.list()
 
-        # Extract model names
-        model_names = [model.id for model in models.data]
+            if request.provider == "google":
+                # for some reason, google's API lists model names starting with "models/".
+                # so we need to strip the prefix if present.
+                model_names = [model.id.replace("models/", "") for model in models.data]
+            else:
+                model_names = [model.id for model in models.data]
 
         return {"models": model_names}
     except Exception as e:
