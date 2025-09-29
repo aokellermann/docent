@@ -76,59 +76,60 @@ class LLMService:
         user_id = self.user.id
 
         async def usage_recording_callback(batch_index: int, llm_output: LLMOutput) -> None:
-            if completion_callback is not None:
-                await completion_callback(batch_index, llm_output)
+            try:
+                if completion_callback is not None:
+                    await completion_callback(batch_index, llm_output)
+            finally:
+                # Prevent double-counting: on partial failures the manager retries (model rotation)
+                # and re-invokes the completion callback for every index on each iteration
+                if batch_index in recorded_indices:
+                    return
+                recorded_indices.add(batch_index)
 
-            # Prevent double-counting: on partial failures the manager retries (model rotation)
-            # and re-invokes the completion callback for every index on each iteration
-            if batch_index in recorded_indices:
-                return
-            recorded_indices.add(batch_index)
+                # Skip cache hits for spend accounting
+                if llm_output.from_cache:
+                    return
 
-            # Skip cache hits for spend accounting
-            if llm_output.from_cache:
-                return
+                # Determine provider for this output by matching model_name
+                provider_for_output: str | None = None
+                for opt in model_options:
+                    # Do `in` rather than `==` because llm_output.model might include a specific version
+                    if opt.model_name in llm_output.model:
+                        provider_for_output = opt.provider
+                        break
 
-            # Determine provider for this output by matching model_name
-            provider_for_output: str | None = None
-            for opt in model_options:
-                # Do `in` rather than `==` because llm_output.model might include a specific version
-                if opt.model_name in llm_output.model:
-                    provider_for_output = opt.provider
-                    break
+                api_key_id: str | None = None
+                if provider_for_output is not None:
+                    api_key_id = saved_byok_ids.get(provider_for_output, None)
 
-            api_key_id: str | None = None
-            if provider_for_output is not None:
-                api_key_id = saved_byok_ids.get(provider_for_output, None)
+                # Collect usage data for deferred recording instead of immediate recording
+                metrics_raw = llm_output.usage.to_dict()
+                if metrics_raw:
+                    metrics: dict[TokenType, int] = {k: int(v) for k, v in metrics_raw.items()}
 
-            # Collect usage data for deferred recording instead of immediate recording
-            metrics_raw = llm_output.usage.to_dict()
-            if metrics_raw:
-                metrics: dict[TokenType, int] = {k: int(v) for k, v in metrics_raw.items()}
+                    # Track usage cost for real-time monitoring (only platform spend)
+                    if api_key_id is None:
+                        for metric_name, value in metrics.items():
+                            cents = estimate_cost_cents(llm_output.model, value, metric_name)
+                            pending_usage_cents_state["pending_usage_cents"] = (
+                                pending_usage_cents_state.get("pending_usage_cents", 0.0) + cents
+                            )
 
-                # Track usage cost for real-time monitoring (only platform spend)
-                if api_key_id is None:
-                    for metric_name, value in metrics.items():
-                        cents = estimate_cost_cents(llm_output.model, value, metric_name)
-                        pending_usage_cents_state["pending_usage_cents"] = (
-                            pending_usage_cents_state.get("pending_usage_cents", 0.0) + cents
-                        )
+                    # Check usage limits in real-time
+                    current_usage = initial_usage_cents + pending_usage_cents_state.get(
+                        "pending_usage_cents", 0.0
+                    )
 
-                # Check usage limits in real-time
-                current_usage = initial_usage_cents + pending_usage_cents_state.get(
-                    "pending_usage_cents", 0.0
-                )
+                    usage_data = {
+                        "user_id": user_id,
+                        "api_key_id": api_key_id,
+                        "model": {"model_name": llm_output.model, "provider": provider_for_output},
+                        "metrics": metrics,
+                    }
+                    pending_usage_data.append(usage_data)
 
-                usage_data = {
-                    "user_id": user_id,
-                    "api_key_id": api_key_id,
-                    "model": {"model_name": llm_output.model, "provider": provider_for_output},
-                    "metrics": metrics,
-                }
-                pending_usage_data.append(usage_data)
-
-                if not check_spend_within_limit(current_usage):
-                    raise DocentUsageLimitException("Usage limit exceeded during operation")
+                    if not check_spend_within_limit(current_usage):
+                        raise DocentUsageLimitException("Usage limit exceeded during operation")
 
         return usage_recording_callback
 
