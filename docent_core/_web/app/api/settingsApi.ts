@@ -49,6 +49,15 @@ export interface ModelApiKey {
   masked_api_key: string;
 }
 
+export interface ChangePasswordRequest {
+  old_password: string;
+  new_password: string;
+}
+
+export interface ChangePasswordResponse {
+  message: string;
+}
+
 export const settingsApi = createApi({
   reducerPath: 'settingsApi',
   baseQuery: fetchBaseQuery({
@@ -81,6 +90,16 @@ export const settingsApi = createApi({
         method: 'DELETE',
       }),
     }),
+    changePassword: build.mutation<
+      ChangePasswordResponse,
+      ChangePasswordRequest
+    >({
+      query: (body) => ({
+        url: `../change_password`,
+        method: 'POST',
+        body,
+      }),
+    }),
   }),
 });
 
@@ -89,4 +108,5 @@ export const {
   useGetModelApiKeysQuery,
   useUpsertModelApiKeyMutation,
   useDeleteModelApiKeyMutation,
+  useChangePasswordMutation,
 } = settingsApi;

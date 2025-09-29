@@ -2,7 +2,7 @@ name: pytest
 
 on:
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 permissions:
   contents: read
@@ -14,10 +14,12 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
+      DOCENT_PG_HOST: localhost
       DOCENT_PG_USER: docent_user
       DOCENT_PG_PASSWORD: docent_password
       DOCENT_PG_DATABASE: docent_db
       DOCENT_PG_PORT: 5432
+      DOCENT_REDIS_HOST: localhost
       DOCENT_REDIS_PORT: 6379
       PYTHONUNBUFFERED: "1"
 
@@ -34,10 +36,12 @@ jobs:
       - name: Create temporary .env file
         run: |
           cat > .env << EOF
+          DOCENT_PG_HOST=${DOCENT_PG_HOST}
           DOCENT_PG_USER=${DOCENT_PG_USER}
           DOCENT_PG_PASSWORD=${DOCENT_PG_PASSWORD}
           DOCENT_PG_DATABASE=${DOCENT_PG_DATABASE}
           DOCENT_PG_PORT=${DOCENT_PG_PORT}
+          DOCENT_REDIS_HOST=${DOCENT_REDIS_HOST}
           DOCENT_REDIS_PORT=${DOCENT_REDIS_PORT}
           EOF
 

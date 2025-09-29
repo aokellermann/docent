@@ -22,28 +22,35 @@ STREAM_KEY_FORMAT = "stream_{job_id}"
 STATE_KEY_FORMAT = "state_{job_id}"
 
 
+def get_redis_url() -> str:
+    host = ENV.get("DOCENT_REDIS_HOST")
+    port = ENV.get("DOCENT_REDIS_PORT")
+
+    if not host or not port:
+        raise ValueError("DOCENT_REDIS_HOST, DOCENT_REDIS_PORT must be set")
+
+    user = ENV.get("DOCENT_REDIS_USER")
+    password = ENV.get("DOCENT_REDIS_PASSWORD")
+    tls = (ENV.get("DOCENT_REDIS_TLS", "false") or "false").strip().lower() == "true"
+
+    protocol = "rediss" if tls else "redis"
+    auth = ""
+    if user and password:
+        auth = f"{user}:{password}@"
+    elif user:
+        auth = f"{user}@"
+    elif password:
+        auth = f":{password}@"
+
+    return f"{protocol}://{auth}{host}:{port}"
+
+
 async def get_redis_client():
     global _redis_client
 
     async with _redis_lock:
         if _redis_client is None:
-            REDIS_HOST = ENV.get("DOCENT_REDIS_HOST")
-            REDIS_PORT = ENV.get("DOCENT_REDIS_PORT")
-            REDIS_USER = ENV.get("DOCENT_REDIS_USER")
-            REDIS_PASSWORD = ENV.get("DOCENT_REDIS_PASSWORD")
-            REDIS_TLS = ENV.get("DOCENT_REDIS_TLS", "false").strip().lower() == "true"
-
-            if REDIS_HOST is None or REDIS_PORT is None:
-                raise ValueError("DOCENT_REDIS_HOST, DOCENT_REDIS_PORT must be set")
-
-            redis_protocol = "rediss" if REDIS_TLS else "redis"
-            REDIS_USER_STRING = (
-                f"{REDIS_USER}:{REDIS_PASSWORD}@"
-                if REDIS_USER is not None and REDIS_PASSWORD is not None
-                else ""
-            )
-            url = f"{redis_protocol}://{REDIS_USER_STRING}{REDIS_HOST}:{REDIS_PORT}"
-
+            url = get_redis_url()
             _redis_client = ArqRedis(connection_pool=redis.ConnectionPool.from_url(url, decode_responses=True))  # type: ignore
 
             logger.info(f"Checking Redis connection to {url}")

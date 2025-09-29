@@ -14,7 +14,8 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.ext.asyncio.engine import AsyncConnection
 
-from docent_core._db_service.db import DocentDB
+from docent_core._db_service.db import DocentDB, get_pg_params
+from docent_core._server._broker.redis_client import get_redis_url
 from docent_core._server.api import asgi_app
 from docent_core.docent.db.schemas.auth_models import User
 from docent_core.docent.db.schemas.tables import SQLABase
@@ -22,21 +23,24 @@ from docent_core.docent.server.dependencies.database import get_db, get_mono_svc
 from docent_core.docent.services.charts import ChartsService
 from docent_core.docent.services.monoservice import MonoService
 
+pgp = get_pg_params()
 TEST_DATABASE_URL = URL.create(
     drivername="postgresql+asyncpg",
-    username="docent_user",
-    password="docent_password",
-    host="localhost",
-    port=5432,
+    username=pgp.user,
+    password=pgp.password,
+    host=pgp.host,
+    port=int(pgp.port),
     database="_pytest_docent_test",
 )
-
-TEST_REDIS_URL = "redis://localhost:6379/1"  # Use database 1 for tests
+TEST_REDIS_URL = f"{get_redis_url()}/1"  # Use database 1 for tests
 
 
 # Function scope for this fixture may slow down tests, but avoids tricky asyncio problems
 @pytest_asyncio.fixture(scope="function")
 async def db_engine() -> AsyncGenerator[AsyncEngine, None]:
+    if "_pytest" not in (TEST_DATABASE_URL.database or ""):
+        raise ValueError("TEST_DATABASE_URL must contain '_pytest' in the database name")
+
     engine = create_async_engine(
         TEST_DATABASE_URL, pool_size=10, max_overflow=20, pool_pre_ping=True, echo=False
     )

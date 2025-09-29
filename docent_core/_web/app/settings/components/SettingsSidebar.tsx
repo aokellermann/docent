@@ -3,7 +3,7 @@
 import { usePathname, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Key, Brain, Gauge } from 'lucide-react';
+import { Key, Brain, Gauge, Lock } from 'lucide-react';
 
 interface SidebarItem {
   id: string;
@@ -18,6 +18,12 @@ const sidebarItems: SidebarItem[] = [
     label: 'Docent API Keys',
     href: '/settings/api-keys',
     icon: Key,
+  },
+  {
+    id: 'change-password',
+    label: 'Change Password',
+    href: '/settings/change-password',
+    icon: Lock,
   },
   {
     id: 'model-providers',

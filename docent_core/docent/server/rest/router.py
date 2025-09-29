@@ -146,6 +146,13 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ChangePasswordRequest(BaseModel):
+    """Request model for updating a user's password."""
+
+    old_password: str
+    new_password: str
+
+
 @public_router.post("/login")
 async def login(
     request: LoginRequest, response: Response, mono_svc: MonoService = Depends(get_mono_svc)
@@ -252,6 +259,27 @@ async def logout(
         await invalidate_user_session(session_id, response, mono_svc)
 
     return {"message": "Logged out successfully"}
+
+
+@user_router.post("/change_password")
+async def change_password(
+    request: ChangePasswordRequest,
+    user: User = Depends(get_authenticated_user),
+    mono_svc: MonoService = Depends(get_mono_svc),
+):
+    """
+    Change the authenticated user's password when the current password is provided correctly.
+    """
+    if not user.email:
+        raise HTTPException(status_code=400, detail="User email is required to change password")
+
+    updated = await mono_svc.change_user_password(
+        user.email, request.old_password, request.new_password
+    )
+    if not updated:
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    return {"message": "Password updated successfully"}
 
 
 ##############

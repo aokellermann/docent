@@ -11,7 +11,7 @@ from docent_core.docent.db.schemas.auth_models import User
 
 
 @pytest_asyncio.fixture(scope="function")
-async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
+async def unauthorized_client() -> AsyncGenerator[httpx.AsyncClient, None]:
     async with httpx.AsyncClient(
         transport=ASGITransport(app=asgi_app), base_url="http://test"
     ) as client:

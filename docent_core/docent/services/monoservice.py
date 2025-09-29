@@ -1470,6 +1470,32 @@ class MonoService:
 
             return None
 
+    async def change_user_password(self, email: str, old_password: str, new_password: str) -> bool:
+        """
+        Change a user's password if the provided current password is valid.
+
+        Args:
+            email: The email address of the user
+            old_password: The user's current password
+            new_password: The new password to set
+
+        Returns:
+            True if the password was changed, False otherwise
+        """
+        async with self.db.session() as session:
+            result = await session.execute(select(SQLAUser).where(SQLAUser.email == email))
+            sqla_user = result.scalar_one_or_none()
+            if not sqla_user:
+                return False
+
+            if not pwd_context.verify(old_password, sqla_user.password_hash):
+                return False
+
+            sqla_user.password_hash = pwd_context.hash(new_password)
+
+        logger.info(f"Password updated for user with email: {email}")
+        return True
+
     async def create_session(self, user_id: str, expires_in_days: int = 30) -> str:
         """
         Create a new session for a user.
