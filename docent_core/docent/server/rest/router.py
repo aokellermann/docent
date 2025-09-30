@@ -733,7 +733,10 @@ async def post_agent_runs(
     _: None = Depends(require_collection_permission(Permission.WRITE)),
 ):
     async with mono_svc.advisory_lock(collection_id, action_id="mutation"):
-        await mono_svc.check_space_for_runs(ctx, len(request.agent_runs))
+        try:
+            await mono_svc.check_space_for_runs(ctx, len(request.agent_runs))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"Cannot add agent runs: {str(e)}")
         await mono_svc.add_agent_runs(ctx, request.agent_runs)
 
     # Track with PostHog

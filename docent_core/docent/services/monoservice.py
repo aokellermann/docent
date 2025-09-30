@@ -394,8 +394,11 @@ class MonoService:
 
     async def check_space_for_runs(self, ctx: ViewContext, new_runs: int):
         existing_runs = await self.count_collection_agent_runs(ctx.collection_id)
-        if existing_runs + new_runs > 100_000:
-            raise ValueError("Number of agent runs in the current collection is too large")
+        agent_run_limit = 100_000
+        if existing_runs + new_runs > agent_run_limit:
+            raise ValueError(
+                f"Number of agent runs in the current collection is too large. Current limit: {agent_run_limit}, Current count: {existing_runs}, New runs: {new_runs}"
+            )
 
     async def add_agent_runs(
         self,
