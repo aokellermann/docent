@@ -10,9 +10,13 @@ from docent_core.investigator.db.schemas.experiment import (
     SQLASimpleRolloutExperimentConfig,
     SQLASimpleRolloutExperimentResult,
 )
+from docent_core.investigator.tools.backends.anthropic_compatible_backend import (
+    AnthropicCompatibleBackendConfig,
+)
 from docent_core.investigator.tools.backends.openai_compatible_backend import (
     OpenAICompatibleBackendConfig,
 )
+from docent_core.investigator.tools.backends.types import BackendConfig
 from docent_core.investigator.tools.common.types import ExperimentStatus, Grade, generate_uid
 from docent_core.investigator.tools.contexts.base_context import BaseContext
 from docent_core.investigator.tools.judges.rubric_judge import RubricJudgeConfig
@@ -32,7 +36,7 @@ class SimpleRolloutExperimentConfig(BaseModel):
     workspace_id: str
     created_at: datetime
     judge_config: Optional[RubricJudgeConfig] = None
-    openai_compatible_backends: list[OpenAICompatibleBackendConfig]
+    backends: list[BackendConfig]  # Can be mixed OpenAI and Anthropic backends
     base_context: BaseContext
 
     # Number of replicas to run
@@ -40,11 +44,9 @@ class SimpleRolloutExperimentConfig(BaseModel):
     # Maximum number of turns
     max_turns: int = 10
 
-    @field_validator("openai_compatible_backends")
+    @field_validator("backends")
     @classmethod
-    def validate_backends(
-        cls, v: list[OpenAICompatibleBackendConfig]
-    ) -> list[OpenAICompatibleBackendConfig]:
+    def validate_backends(cls, v: list[BackendConfig]) -> list[BackendConfig]:
         """Validate that at least 1 and at most 10 backends are provided."""
         if len(v) < 1:
             raise ValueError("At least one backend must be provided")
@@ -58,17 +60,21 @@ class SimpleRolloutExperimentConfig(BaseModel):
 
         # These should be loaded via eager loading or separate queries
         base_context = config.base_context_obj
-        backends = config.openai_compatible_backend_objs
+        openai_backends = config.openai_compatible_backend_objs
+        anthropic_backends = config.anthropic_compatible_backend_objs
         judge = config.judge_config_obj if config.judge_config_id else None
+
+        # Combine both backend types into a single list
+        backends: list[BackendConfig] = [
+            OpenAICompatibleBackendConfig.from_sql(backend) for backend in openai_backends
+        ] + [AnthropicCompatibleBackendConfig.from_sql(backend) for backend in anthropic_backends]
 
         return cls(
             id=config.id,
             workspace_id=config.workspace_id,
             created_at=config.created_at,
             judge_config=RubricJudgeConfig.from_sql(judge) if judge else None,
-            openai_compatible_backends=[
-                OpenAICompatibleBackendConfig.from_sql(backend) for backend in backends
-            ],
+            backends=backends,
             base_context=BaseContext.from_sql(base_context),
             num_replicas=config.num_replicas,
             max_turns=config.max_turns,

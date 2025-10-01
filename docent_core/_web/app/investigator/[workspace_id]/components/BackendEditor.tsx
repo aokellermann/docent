@@ -39,7 +39,10 @@ import { getNextForkName } from '@/lib/investigatorUtils';
 import { useListAvailableModelsMutation } from '@/app/api/investigatorApi';
 import { useDebounce } from '@/hooks/use-debounce';
 
-interface BackendData {
+type BackendType = 'openai_compatible' | 'anthropic_compatible';
+
+interface OpenAIBackendData {
+  backend_type: 'openai_compatible';
   name: string;
   provider: string;
   model: string;
@@ -47,8 +50,22 @@ interface BackendData {
   base_url?: string;
 }
 
+interface AnthropicBackendData {
+  backend_type: 'anthropic_compatible';
+  name: string;
+  provider: string;
+  model: string;
+  max_tokens: number;
+  thinking_type?: 'enabled' | 'disabled';
+  thinking_budget_tokens?: number;
+  api_key?: string;
+  base_url?: string;
+}
+
+type BackendData = OpenAIBackendData | AnthropicBackendData;
+
 interface BackendEditorProps {
-  initialValue?: BackendData;
+  initialValue?: Partial<BackendData>;
   readOnly?: boolean;
   onSave?: (data: BackendData) => void;
   onFork?: (data: BackendData) => void;
@@ -57,19 +74,30 @@ interface BackendEditorProps {
   onClose?: () => void;
 }
 
-const PROVIDER_OPTIONS = [
+// Provider options for OpenAI-compatible backends
+const OPENAI_COMPATIBLE_PROVIDER_OPTIONS = [
   { value: 'openai', label: 'OpenAI' },
-  { value: 'anthropic', label: 'Anthropic' },
   { value: 'google', label: 'Google' },
   { value: 'openrouter', label: 'OpenRouter' },
   { value: 'custom', label: 'Custom' },
 ];
 
-const PROVIDER_BASE_URLS: Record<string, string> = {
+// Provider options for Anthropic-compatible backends (only anthropic is supported)
+const ANTHROPIC_COMPATIBLE_PROVIDER_OPTIONS = [
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'custom', label: 'Custom' },
+];
+
+// Base URLs for OpenAI-compatible backends
+const OPENAI_COMPATIBLE_BASE_URLS: Record<string, string> = {
   openai: 'https://api.openai.com/v1/',
-  anthropic: 'https://api.anthropic.com/v1/',
   google: 'https://generativelanguage.googleapis.com/v1beta/openai/',
   openrouter: 'https://openrouter.ai/api/v1',
+};
+
+// Base URLs for Anthropic-compatible backends
+const ANTHROPIC_COMPATIBLE_BASE_URLS: Record<string, string> = {
+  anthropic: 'https://api.anthropic.com',
 };
 
 // Common models for each provider (fallback if API call fails)
@@ -104,11 +132,27 @@ export default function BackendEditor({
   onCancel,
   onClose,
 }: BackendEditorProps) {
+  const [backendType, setBackendType] = useState<BackendType>(
+    initialValue?.backend_type || 'openai_compatible'
+  );
   const [name, setName] = useState(initialValue?.name || '');
   const [provider, setProvider] = useState(initialValue?.provider || 'openai');
   const [model, setModel] = useState(initialValue?.model || '');
   const [apiKey, setApiKey] = useState(initialValue?.api_key || '');
   const [baseUrl, setBaseUrl] = useState(initialValue?.base_url || '');
+
+  // Anthropic-specific fields
+  const [maxTokens, setMaxTokens] = useState(
+    (initialValue as Partial<AnthropicBackendData>)?.max_tokens || 4000
+  );
+  const [thinkingType, setThinkingType] = useState<
+    'enabled' | 'disabled' | undefined
+  >((initialValue as Partial<AnthropicBackendData>)?.thinking_type);
+  const [thinkingBudgetTokens, setThinkingBudgetTokens] = useState(
+    (initialValue as Partial<AnthropicBackendData>)?.thinking_budget_tokens ||
+      2000
+  );
+
   const [modelOpen, setModelOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState('');
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -119,6 +163,8 @@ export default function BackendEditor({
     name?: string;
     model?: string;
     base_url?: string;
+    max_tokens?: string;
+    thinking_budget_tokens?: string;
   }>({});
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
@@ -134,12 +180,16 @@ export default function BackendEditor({
   const [listModels, { isLoading: isLoadingModels }] =
     useListAvailableModelsMutation();
 
-  // Update base URL when provider changes
+  // Update base URL when provider or backend type changes
   useEffect(() => {
     if (provider !== 'custom') {
-      setBaseUrl(PROVIDER_BASE_URLS[provider] || '');
+      if (backendType === 'anthropic_compatible') {
+        setBaseUrl(ANTHROPIC_COMPATIBLE_BASE_URLS[provider] || '');
+      } else {
+        setBaseUrl(OPENAI_COMPATIBLE_BASE_URLS[provider] || '');
+      }
     }
-  }, [provider]);
+  }, [provider, backendType]);
 
   // Sync name with model when checkbox is checked
   useEffect(() => {
@@ -211,22 +261,38 @@ export default function BackendEditor({
 
   const handleSave = () => {
     if (validateForm() && onSave) {
-      onSave({
-        name: name.trim(),
-        provider,
-        model: model.trim(),
-        api_key: apiKey.trim() || undefined,
-        base_url: baseUrl.trim() || undefined,
-      });
+      if (backendType === 'openai_compatible') {
+        onSave({
+          backend_type: 'openai_compatible',
+          name: name.trim(),
+          provider,
+          model: model.trim(),
+          api_key: apiKey.trim() || undefined,
+          base_url: baseUrl.trim() || undefined,
+        });
+      } else {
+        onSave({
+          backend_type: 'anthropic_compatible',
+          name: name.trim(),
+          provider,
+          model: model.trim(),
+          max_tokens: maxTokens,
+          thinking_type: thinkingType,
+          thinking_budget_tokens:
+            thinkingType === 'enabled' ? thinkingBudgetTokens : undefined,
+          api_key: apiKey.trim() || undefined,
+          base_url: baseUrl.trim() || undefined,
+        });
+      }
     }
   };
 
   const handleFork = () => {
-    if (onFork && initialValue) {
-      const forkedData: BackendData = {
+    if (onFork && initialValue && initialValue.name) {
+      const forkedData = {
         ...initialValue,
         name: getNextForkName(initialValue.name),
-      };
+      } as BackendData;
       onFork(forkedData);
     }
   };
@@ -273,6 +339,42 @@ export default function BackendEditor({
 
       {/* Form Content */}
       <div className="flex-1 overflow-y-auto py-4 space-y-4">
+        {/* Backend Type - show for all, selector only for new */}
+        <div className="space-y-2">
+          <Label htmlFor="backend-type">Backend Type</Label>
+          {readOnly || initialValue ? (
+            <div className="px-3 py-2 bg-muted rounded-md border text-sm">
+              {backendType === 'anthropic_compatible'
+                ? 'Anthropic-Compatible'
+                : 'OpenAI-Compatible'}
+            </div>
+          ) : (
+            <Select
+              value={backendType}
+              onValueChange={(value: BackendType) => {
+                setBackendType(value);
+                if (value === 'anthropic_compatible') {
+                  setProvider('anthropic');
+                } else {
+                  setProvider('openai');
+                }
+              }}
+            >
+              <SelectTrigger id="backend-type">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="openai_compatible">
+                  OpenAI-Compatible
+                </SelectItem>
+                <SelectItem value="anthropic_compatible">
+                  Anthropic-Compatible
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+
         {/* Provider Field */}
         <div className="space-y-2">
           <Label htmlFor="backend-provider">
@@ -280,8 +382,12 @@ export default function BackendEditor({
           </Label>
           {readOnly ? (
             <div className="px-3 py-2 bg-muted rounded-md border text-sm">
-              {PROVIDER_OPTIONS.find((p) => p.value === provider)?.label ||
-                provider}
+              {(backendType === 'anthropic_compatible'
+                ? ANTHROPIC_COMPATIBLE_PROVIDER_OPTIONS
+                : OPENAI_COMPATIBLE_PROVIDER_OPTIONS
+              ).find(
+                (p: { value: string; label: string }) => p.value === provider
+              )?.label || provider}
             </div>
           ) : (
             <Select value={provider} onValueChange={handleProviderChange}>
@@ -289,7 +395,10 @@ export default function BackendEditor({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {PROVIDER_OPTIONS.map((option) => (
+                {(backendType === 'anthropic_compatible'
+                  ? ANTHROPIC_COMPATIBLE_PROVIDER_OPTIONS
+                  : OPENAI_COMPATIBLE_PROVIDER_OPTIONS
+                ).map((option: { value: string; label: string }) => (
                   <SelectItem key={option.value} value={option.value}>
                     {option.label}
                   </SelectItem>
@@ -362,7 +471,15 @@ export default function BackendEditor({
               {provider !== 'custom' && (
                 <p className="text-xs text-muted-foreground">
                   API key is managed by the system for{' '}
-                  {PROVIDER_OPTIONS.find((p) => p.value === provider)?.label}
+                  {
+                    (backendType === 'anthropic_compatible'
+                      ? ANTHROPIC_COMPATIBLE_PROVIDER_OPTIONS
+                      : OPENAI_COMPATIBLE_PROVIDER_OPTIONS
+                    ).find(
+                      (p: { value: string; label: string }) =>
+                        p.value === provider
+                    )?.label
+                  }
                 </p>
               )}
             </>
@@ -463,6 +580,153 @@ export default function BackendEditor({
             </p>
           )}
         </div>
+
+        {/* Anthropic-specific fields */}
+        {backendType === 'anthropic_compatible' && (
+          <>
+            {/* Max Tokens Field */}
+            <div className="space-y-2">
+              <Label htmlFor="max-tokens">
+                {readOnly ? 'Max Tokens' : 'Max Tokens *'}
+              </Label>
+              {readOnly ? (
+                <div className="px-3 py-2 bg-muted rounded-md border text-sm">
+                  {maxTokens}
+                </div>
+              ) : (
+                <>
+                  <Input
+                    id="max-tokens"
+                    type="number"
+                    min={1}
+                    value={maxTokens || ''}
+                    onChange={(e) => {
+                      const value = parseInt(e.target.value);
+                      // Only update if it's a valid number, no bounds checking
+                      if (!isNaN(value)) {
+                        setMaxTokens(value);
+                      } else if (e.target.value === '') {
+                        // Allow clearing the field temporarily
+                        setMaxTokens(0);
+                      }
+                    }}
+                    onBlur={(e) => {
+                      // Set to 4000 if empty or invalid on blur
+                      const value = parseInt(e.target.value);
+                      if (isNaN(value) || value < 1) {
+                        setMaxTokens(4000);
+                      }
+                    }}
+                    className={errors.max_tokens ? 'border-red-500' : ''}
+                  />
+                  {errors.max_tokens && (
+                    <p className="text-xs text-red-500">{errors.max_tokens}</p>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Maximum number of tokens to generate
+                  </p>
+                </>
+              )}
+            </div>
+
+            {/* Thinking Configuration */}
+            <div className="space-y-2">
+              <Label htmlFor="thinking-type">Extended Thinking</Label>
+              {readOnly ? (
+                <div className="px-3 py-2 bg-muted rounded-md border text-sm">
+                  {thinkingType || 'Not configured'}
+                </div>
+              ) : (
+                <Select
+                  value={thinkingType || 'none'}
+                  onValueChange={(value) => {
+                    if (value === 'none') {
+                      setThinkingType(undefined);
+                    } else {
+                      setThinkingType(value as 'enabled' | 'disabled');
+                    }
+                  }}
+                >
+                  <SelectTrigger id="thinking-type">
+                    <SelectValue placeholder="Select thinking configuration" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    <SelectItem value="disabled">Disabled</SelectItem>
+                    <SelectItem value="enabled">Enabled</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
+            {/* Thinking Budget Tokens */}
+            {thinkingType === 'enabled' && (
+              <div className="space-y-2">
+                <Label htmlFor="thinking-budget-tokens">
+                  {readOnly
+                    ? 'Thinking Budget Tokens'
+                    : 'Thinking Budget Tokens *'}
+                </Label>
+                {readOnly ? (
+                  <div className="px-3 py-2 bg-muted rounded-md border text-sm">
+                    {thinkingBudgetTokens}
+                  </div>
+                ) : (
+                  <>
+                    <Input
+                      id="thinking-budget-tokens"
+                      type="number"
+                      min={1024}
+                      max={maxTokens - 1}
+                      value={thinkingBudgetTokens || ''}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value);
+                        // Only update if it's a valid number, no bounds checking
+                        if (!isNaN(value)) {
+                          setThinkingBudgetTokens(value);
+                        } else if (e.target.value === '') {
+                          // Allow clearing the field temporarily
+                          setThinkingBudgetTokens(0);
+                        }
+                      }}
+                      onBlur={(e) => {
+                        const value = parseInt(e.target.value);
+                        const minValue = 1024;
+                        const maxValue = maxTokens - 1;
+
+                        // If range is invalid, default to 2000
+                        if (maxTokens <= 1024) {
+                          setThinkingBudgetTokens(2000);
+                        } else if (isNaN(value) || value === 0) {
+                          // If empty or invalid, default to 2000 but clip to range
+                          setThinkingBudgetTokens(
+                            Math.min(Math.max(2000, minValue), maxValue)
+                          );
+                        } else {
+                          // Clip to valid range
+                          setThinkingBudgetTokens(
+                            Math.min(Math.max(value, minValue), maxValue)
+                          );
+                        }
+                      }}
+                      className={
+                        errors.thinking_budget_tokens ? 'border-red-500' : ''
+                      }
+                    />
+                    {errors.thinking_budget_tokens && (
+                      <p className="text-xs text-red-500">
+                        {errors.thinking_budget_tokens}
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Must be ≥1024 and less than max_tokens ({maxTokens})
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+          </>
+        )}
 
         {/* Backend Name Field */}
         <div className="space-y-2">

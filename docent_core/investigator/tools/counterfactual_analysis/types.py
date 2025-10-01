@@ -9,9 +9,13 @@ from docent_core.investigator.db.schemas.experiment import (
     SQLACounterfactualExperimentResult,
     SQLAExperimentIdea,
 )
+from docent_core.investigator.tools.backends.anthropic_compatible_backend import (
+    AnthropicCompatibleBackendConfig,
+)
 from docent_core.investigator.tools.backends.openai_compatible_backend import (
     OpenAICompatibleBackendConfig,
 )
+from docent_core.investigator.tools.backends.types import BackendConfig
 from docent_core.investigator.tools.common.types import ExperimentStatus, Grade, generate_uid
 from docent_core.investigator.tools.contexts.base_context import BaseContext
 from docent_core.investigator.tools.judges.rubric_judge import RubricJudgeConfig
@@ -72,7 +76,7 @@ class CounterfactualExperimentConfig(BaseModel):
     workspace_id: str
     created_at: datetime
     judge_config: RubricJudgeConfig
-    openai_compatible_backend: OpenAICompatibleBackendConfig
+    backend: BackendConfig  # Union of OpenAI and Anthropic backends
     idea: ExperimentIdea
     base_context: BaseContext
 
@@ -85,14 +89,30 @@ class CounterfactualExperimentConfig(BaseModel):
     def from_sql(
         cls, config: SQLACounterfactualExperimentConfig
     ) -> "CounterfactualExperimentConfig":
+        # Determine which backend type to use based on backend_type field
+        if config.backend_type == "openai_compatible":
+            if config.openai_compatible_backend_obj is None:
+                raise ValueError(
+                    "openai_compatible_backend_obj is None for openai_compatible backend_type"
+                )
+            backend = OpenAICompatibleBackendConfig.from_sql(config.openai_compatible_backend_obj)
+        elif config.backend_type == "anthropic_compatible":
+            if config.anthropic_compatible_backend_obj is None:
+                raise ValueError(
+                    "anthropic_compatible_backend_obj is None for anthropic_compatible backend_type"
+                )
+            backend = AnthropicCompatibleBackendConfig.from_sql(
+                config.anthropic_compatible_backend_obj
+            )
+        else:
+            raise ValueError(f"Unknown backend_type: {config.backend_type}")
+
         return cls(
             id=config.id,
             workspace_id=config.workspace_id,
             created_at=config.created_at,
             judge_config=RubricJudgeConfig.from_sql(config.judge_config_obj),
-            openai_compatible_backend=OpenAICompatibleBackendConfig.from_sql(
-                config.openai_compatible_backend_obj
-            ),
+            backend=backend,
             idea=ExperimentIdea.from_sql(config.idea_obj),
             base_context=BaseContext.from_sql(config.base_context_obj),
             num_counterfactuals=config.num_counterfactuals,

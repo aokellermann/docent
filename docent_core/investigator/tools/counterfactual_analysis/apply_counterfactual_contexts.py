@@ -55,7 +55,8 @@ Guidelines:
 - The counterfactual may apply to tools, tool calls, tool responses, or regular message content
 - The output should be a valid interaction that can be immediately used as input to another language model
 
-Output the modified interaction in JSON with the same structure as the base interaction:
+Output the modified interaction in JSON with the same structure as the base interaction, with no
+other text.
 
 {
     "tools": [
@@ -96,14 +97,13 @@ APPLY_COUNTERFACTUAL_IDEA_USER_PROMPT_TPL = Template(
     textwrap.dedent(
         """
         Here is the base interaction:
-        ```json
+
         $base_context
-        ```
 
         Here is the idea for the counterfactual experiment:
-        ```
+
         $idea
-        ```
+
     """
     ).strip()
 )
@@ -127,70 +127,95 @@ async def llm_apply_counterfactual_to_base_context(
         idea=counterfactual_idea.description,
     )
 
-    message_uid = generate_uid()
+    # Retry logic: up to 3 attempts
+    max_retries = 3
 
-    # Emit MessageStart
-    yield MessageStart(
-        message_id=message_uid,
-        role="assistant",
-        is_thinking=False,
-    )
+    for attempt in range(max_retries):
 
-    # Accumulate the full response
-    full_content = ""
+        message_uid = generate_uid()
 
-    async with limiter():
-        # Make the streaming API call
-        stream = await client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            max_tokens=20_000,
-            stream=True,
-            response_format={"type": "json_object"},
+        yield MessageStart(
+            message_id=message_uid,
+            role="assistant",
+            is_thinking=False,
         )
-        # Stream the response
-        async for chunk in stream:
-            if chunk.choices and chunk.choices[0].delta.content:
-                content = chunk.choices[0].delta.content
-                full_content += content
 
-                # Emit TokenDelta
-                yield TokenDelta(
+        try:
+            # Accumulate the full response
+            full_content = ""
+
+            async with limiter():
+                # Make the streaming API call
+                stream = await client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    max_tokens=20_000,
+                    stream=True,
+                    response_format={"type": "json_object"},
+                )
+                # Stream the response
+                async for chunk in stream:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        content = chunk.choices[0].delta.content
+                        full_content += content
+
+                        # Emit TokenDelta
+                        yield TokenDelta(
+                            message_id=message_uid,
+                            role="assistant",
+                            content=content,
+                        )
+
+                # Emit MessageEnd
+                yield MessageEnd(
                     message_id=message_uid,
-                    role="assistant",
-                    content=content,
                 )
 
-        # Emit MessageEnd
-        yield MessageEnd(
-            message_id=message_uid,
-        )
+                # Now parse the full response
+                if not full_content:
+                    raise ValueError("Empty response from the API")
 
-        # Now parse the full response
-        if not full_content:
-            raise ValueError("Empty response from the API")
+                # Extract and parse JSON using Pydantic
 
-        # Extract and parse JSON using Pydantic
-        interaction = CounterfactualInteraction.model_validate_json(full_content)
+                # Find the first '{' and last '}' to extract JSON content
+                first_brace = full_content.find("{")
+                last_brace = full_content.rfind("}")
 
-        # Convert the parsed messages to ChatMessage objects
-        chat_messages: list[ChatMessage] = []
-        for msg_data in interaction.messages:
-            if "role" not in msg_data or "content" not in msg_data:
-                raise ValueError("Message missing required fields: role and/or content")
-            chat_messages.append(parse_chat_message(msg_data))
+                if first_brace == -1 or last_brace == -1 or first_brace >= last_brace:
+                    raise ValueError("No valid JSON object found in response")
 
-        # Convert tools data if present
-        tools: list[ToolInfo] | None = None
-        if interaction.tools:
-            tools = []
-            for tool_data in interaction.tools:
-                tools.append(ToolInfo.model_validate(tool_data))
+                parsed_content = full_content[first_brace : last_brace + 1]
+                interaction = CounterfactualInteraction.model_validate_json(parsed_content)
 
-        yield DeterministicContextPolicyConfig(
-            messages=chat_messages,
-            tools=tools if tools else None,
-        )
+                # Convert the parsed messages to ChatMessage objects
+                chat_messages: list[ChatMessage] = []
+                for msg_data in interaction.messages:
+                    if "role" not in msg_data or "content" not in msg_data:
+                        raise ValueError("Message missing required fields: role and/or content")
+                    chat_messages.append(parse_chat_message(msg_data))
+
+                # Convert tools data if present
+                tools: list[ToolInfo] | None = None
+                if interaction.tools:
+                    tools = []
+                    for tool_data in interaction.tools:
+                        tools.append(ToolInfo.model_validate(tool_data))
+
+                yield DeterministicContextPolicyConfig(
+                    messages=chat_messages,
+                    tools=tools if tools else None,
+                )
+
+                # Success - break out of retry loop
+                break
+
+        except Exception:
+            if attempt < max_retries - 1:
+                # Not the last attempt, continue to retry
+                continue
+            else:
+                # Last attempt failed, re-raise the error
+                raise

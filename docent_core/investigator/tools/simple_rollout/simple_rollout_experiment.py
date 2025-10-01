@@ -21,13 +21,24 @@ from docent.data_models import AgentRun, Transcript
 from docent.data_models.chat import (
     AssistantMessage,
     ChatMessage,
+    ContentReasoning,
+    ContentText,
     SystemMessage,
     ToolMessage,
     UserMessage,
 )
 from docent.data_models.chat.tool import ToolCall
+from docent_core.investigator.tools.backends.anthropic_compatible_backend import (
+    AnthropicCompatibleBackendConfig,
+)
+from docent_core.investigator.tools.backends.anthropic_compatible_backend import (
+    ModelWithClient as AnthropicCompatibleModelWithClient,
+)
 from docent_core.investigator.tools.backends.openai_compatible_backend import (
-    ModelWithClient,
+    ModelWithClient as OpenAICompatibleModelWithClient,
+)
+from docent_core.investigator.tools.backends.openai_compatible_backend import (
+    OpenAICompatibleBackendConfig,
 )
 from docent_core.investigator.tools.common.types import (
     ExperimentStatus,
@@ -55,6 +66,9 @@ from docent_core.investigator.tools.simple_rollout.types import (
     SimpleRolloutExperimentConfig,
     SimpleRolloutExperimentResult,
 )
+from docent_core.investigator.tools.subject_models.anthropic_compatible_subject_model import (
+    AnthropicCompatibleSubjectModel,
+)
 from docent_core.investigator.tools.subject_models.openai_compatible_subject_model import (
     OpenAICompatibleSubjectModel,
 )
@@ -72,6 +86,9 @@ class RolloutState(BaseModel):
     transcript: Transcript
     metadata: SimpleRolloutAgentRunMetadata
     messages_by_id: dict[str, ChatMessage] = {}
+    # Track Content blocks for assistant messages (always use Content list format)
+    reasoning_blocks: dict[str, ContentReasoning] = {}
+    text_blocks: dict[str, ContentText] = {}
     tool_calls_by_message: dict[str, dict[int, dict[str, Any]]] = (
         {}
     )  # message_id -> index -> tool call data
@@ -95,9 +112,19 @@ class SimpleRolloutExperiment:
             base_policy_config=self.config.base_context.to_deterministic_context_policy_config(),
         )
 
-        self.subject_models_with_clients = [
-            backend.build_client() for backend in self.config.openai_compatible_backends
-        ]
+        # Build (model_with_client, subject_model_class) tuples for each backend
+        self.subject_models_info: list[
+            tuple[OpenAICompatibleModelWithClient | AnthropicCompatibleModelWithClient, type]
+        ] = []
+        for backend in self.config.backends:
+            model_with_client = backend.build_client()
+            if isinstance(backend, OpenAICompatibleBackendConfig):
+                subject_model_class = OpenAICompatibleSubjectModel
+            elif isinstance(backend, AnthropicCompatibleBackendConfig):  # type: ignore
+                subject_model_class = AnthropicCompatibleSubjectModel
+            else:
+                raise ValueError(f"Unknown backend type: {type(backend)}")
+            self.subject_models_info.append((model_with_client, subject_model_class))
 
         # Build judge client if needed (only if judge is configured)
         self.anthropic_client = None
@@ -137,12 +164,12 @@ class SimpleRolloutExperiment:
             return
 
         # Total rollouts is replicas × backends
-        total_rollouts = self.config.num_replicas * len(self.config.openai_compatible_backends)
+        total_rollouts = self.config.num_replicas * len(self.config.backends)
         if total_rollouts > 1024:
             error_message = (
                 f"Experiment configuration exceeds limits: "
                 f"{self.config.num_replicas} replicas × "
-                f"{len(self.config.openai_compatible_backends)} backends = {total_rollouts} rollouts. "
+                f"{len(self.config.backends)} backends = {total_rollouts} rollouts. "
                 f"Maximum allowed is 1024 total rollouts."
             )
             logger.error(error_message)
@@ -177,15 +204,16 @@ class SimpleRolloutExperiment:
             agent_run_id: str,
             replica_idx: int,
             backend_name: str,
-            subject_model_with_client: ModelWithClient,
+            model_with_client: OpenAICompatibleModelWithClient | AnthropicCompatibleModelWithClient,
+            subject_model_class: type,
             policy_config: DeterministicContextPolicyConfig,
         ):
             """Run a single rollout and stream events to the queue."""
             try:
                 # Build the policy and subject model for this rollout
                 policy = policy_config.build()
-                subject_model = OpenAICompatibleSubjectModel(
-                    subject_model_with_client,
+                subject_model = subject_model_class(
+                    model_with_client,
                     policy_config.tools,
                 )
 
@@ -220,8 +248,8 @@ class SimpleRolloutExperiment:
 
         # Start all rollouts concurrently (all backends × all replicas)
         async with anyio.create_task_group() as tg:
-            for backend_config, subject_model_with_client in zip(
-                self.config.openai_compatible_backends, self.subject_models_with_clients
+            for backend_config, (model_with_client, subject_model_class) in zip(
+                self.config.backends, self.subject_models_info
             ):
                 for replica_idx in range(self.config.num_replicas):
                     # Generate unique IDs for this rollout
@@ -230,7 +258,7 @@ class SimpleRolloutExperiment:
 
                     # Create metadata for this rollout
                     metadata = SimpleRolloutAgentRunMetadata(
-                        model=subject_model_with_client.model,
+                        model=model_with_client.model,
                         backend_name=backend_config.name,
                         replica_idx=replica_idx,
                     )
@@ -278,7 +306,8 @@ class SimpleRolloutExperiment:
                             agent_run_id,
                             replica_idx,
                             backend_config.name,
-                            subject_model_with_client,
+                            model_with_client,
+                            subject_model_class,
                             self.result.base_policy_config,
                         )
 
@@ -327,9 +356,18 @@ class SimpleRolloutExperiment:
                             content="",  # Start with empty content
                         )
                     elif event.role == "assistant":
+                        # Always use Content list format for assistant messages
+                        reasoning_block = ContentReasoning(type="reasoning", reasoning="")
+                        text_block = ContentText(type="text", text="")
+                        state.reasoning_blocks[event.message_id] = reasoning_block
+                        state.text_blocks[event.message_id] = text_block
+
                         msg = AssistantMessage(
                             id=event.message_id,
-                            content="",  # Start with empty content
+                            content=[
+                                reasoning_block,
+                                text_block,
+                            ],  # Start with empty Content blocks
                         )
                     elif event.role == "tool":
                         msg = ToolMessage(
@@ -348,10 +386,22 @@ class SimpleRolloutExperiment:
                     state.messages_by_id[event.message_id] = msg
 
                 elif isinstance(event, TokenDelta):
-                    # Update the specific message's content by looking it up by ID
-                    msg = state.messages_by_id.get(event.message_id)
-                    if msg and isinstance(msg.content, str):
-                        msg.content += event.content
+                    # Update Content blocks in real-time
+                    if event.is_thinking:
+                        # Append to reasoning block
+                        reasoning_block = state.reasoning_blocks.get(event.message_id)
+                        if reasoning_block:
+                            reasoning_block.reasoning += event.content
+                    else:
+                        # Append to text block or string content
+                        text_block = state.text_blocks.get(event.message_id)
+                        if text_block:
+                            text_block.text += event.content
+                        else:
+                            # For non-assistant messages (user, system, tool)
+                            msg = state.messages_by_id.get(event.message_id)
+                            if msg and isinstance(msg.content, str):
+                                msg.content += event.content
 
                 elif isinstance(event, ToolCallStart):
                     # Initialize tool call tracking for this message
@@ -429,8 +479,8 @@ class SimpleRolloutExperiment:
                     mark_run_completed(agent_run_id)
 
                 elif isinstance(event, RolloutEnd):
-
-                    # Mark as completed if not already errored
+                    # Content blocks are already updated in real-time, no conversion needed
+                    # Just mark as completed if not already errored
                     if metadata.state != "errored":
                         metadata.state = "completed"
 

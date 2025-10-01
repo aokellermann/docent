@@ -39,6 +39,9 @@ interface CreateJudgeConfigRequest {
   rubric: string;
 }
 
+// Backend type discriminator
+export type BackendType = 'openai_compatible' | 'anthropic_compatible';
+
 // OpenAI Compatible Backend types
 export interface OpenAICompatibleBackend {
   id: string;
@@ -58,6 +61,48 @@ interface CreateOpenAICompatibleBackendRequest {
   api_key?: string;
   base_url?: string;
 }
+
+// Anthropic Compatible Backend types
+export interface AnthropicCompatibleBackend {
+  id: string;
+  name: string;
+  provider: string; // anthropic, custom
+  model: string;
+  max_tokens: number;
+  thinking_type: 'enabled' | 'disabled' | null;
+  thinking_budget_tokens: number | null;
+  api_key: string | null;
+  base_url: string | null;
+  workspace_id: string;
+  created_at: string;
+}
+
+interface CreateAnthropicCompatibleBackendRequest {
+  name: string;
+  provider: string;
+  model: string;
+  max_tokens: number;
+  thinking_type?: 'enabled' | 'disabled';
+  thinking_budget_tokens?: number;
+  api_key?: string;
+  base_url?: string;
+}
+
+// Add type discriminator to backend interfaces
+export interface OpenAICompatibleBackendWithType
+  extends OpenAICompatibleBackend {
+  type: 'openai_compatible';
+}
+
+export interface AnthropicCompatibleBackendWithType
+  extends AnthropicCompatibleBackend {
+  type: 'anthropic_compatible';
+}
+
+// Union type for all backends with discriminator
+export type Backend =
+  | OpenAICompatibleBackendWithType
+  | AnthropicCompatibleBackendWithType;
 
 interface ListModelsRequest {
   provider: string;
@@ -149,7 +194,8 @@ export interface CounterfactualExperimentConfig extends BaseExperimentConfig {
   judge_config: JudgeConfig; // Contains judge_config.id
   idea: ExperimentIdea; // Contains idea.id
   base_context: BaseContext; // Contains base_context.id
-  openai_compatible_backend: OpenAICompatibleBackend; // Contains openai_compatible_backend.id
+  backend: Backend; // Can be either OpenAI or Anthropic backend
+  backend_type: BackendType; // Discriminator for backend type
   num_counterfactuals: number;
   num_replicas: number;
   max_turns: number;
@@ -158,7 +204,7 @@ export interface CounterfactualExperimentConfig extends BaseExperimentConfig {
 export interface SimpleRolloutExperimentConfig extends BaseExperimentConfig {
   type: 'simple_rollout';
   base_context: BaseContext; // Contains base_context.id
-  openai_compatible_backends: OpenAICompatibleBackend[]; // Array of backends
+  backends: Backend[]; // Array of mixed OpenAI and/or Anthropic backends
   judge_config?: JudgeConfig | null; // Optional - contains judge_config.id if present
   num_replicas: number;
   max_turns: number;
@@ -172,7 +218,9 @@ export type ExperimentConfig =
 interface CreateCounterfactualExperimentConfigRequest {
   type: 'counterfactual';
   judge_config_id: string;
-  openai_compatible_backend_id: string;
+  backend_type: BackendType;
+  openai_compatible_backend_id?: string;
+  anthropic_compatible_backend_id?: string;
   idea_id: string;
   base_context_id: string;
   num_counterfactuals: number;
@@ -183,7 +231,8 @@ interface CreateCounterfactualExperimentConfigRequest {
 interface CreateSimpleRolloutExperimentConfigRequest {
   type: 'simple_rollout';
   judge_config_id?: string | null;
-  openai_compatible_backend_ids: string[];
+  openai_compatible_backend_ids?: string[];
+  anthropic_compatible_backend_ids?: string[];
   base_context_id: string;
   num_replicas?: number;
   max_turns?: number;
@@ -213,6 +262,7 @@ export const investigatorApi = createApi({
     'Workspace',
     'JudgeConfig',
     'OpenAICompatibleBackend',
+    'AnthropicCompatibleBackend',
     'ExperimentIdea',
     'BaseContext',
     'ExperimentConfig',
@@ -321,6 +371,59 @@ export const investigatorApi = createApi({
         method: 'POST',
         body,
       }),
+    }),
+
+    // Anthropic Compatible Backend endpoints
+    getAnthropicCompatibleBackends: build.query<
+      AnthropicCompatibleBackend[],
+      string
+    >({
+      query: (workspaceId) =>
+        `/workspaces/${workspaceId}/anthropic-compatible-backends`,
+      providesTags: ['AnthropicCompatibleBackend'],
+    }),
+
+    createAnthropicCompatibleBackend: build.mutation<
+      { id: string },
+      { workspaceId: string } & CreateAnthropicCompatibleBackendRequest
+    >({
+      query: ({ workspaceId, ...body }) => ({
+        url: `/workspaces/${workspaceId}/anthropic-compatible-backends`,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['AnthropicCompatibleBackend'],
+    }),
+
+    deleteAnthropicCompatibleBackend: build.mutation<void, string>({
+      query: (backendId) => ({
+        url: `/anthropic-compatible-backends/${backendId}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['AnthropicCompatibleBackend'],
+    }),
+
+    // Unified Backend endpoints
+    getBackends: build.query<Backend[], string>({
+      query: (workspaceId) => `/workspaces/${workspaceId}/backends`,
+      providesTags: ['OpenAICompatibleBackend', 'AnthropicCompatibleBackend'],
+    }),
+
+    deleteBackend: build.mutation<
+      void,
+      { backendId: string; backendType: BackendType }
+    >({
+      query: ({ backendId, backendType }) => ({
+        url:
+          backendType === 'anthropic_compatible'
+            ? `/anthropic-compatible-backends/${backendId}`
+            : `/openai-compatible-backends/${backendId}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: [
+        'OpenAICompatibleBackend',
+        'AnthropicCompatibleBackend',
+      ],
     }),
 
     // Experiment Idea endpoints
@@ -516,6 +619,13 @@ export const {
   useCreateOpenAICompatibleBackendMutation,
   useDeleteOpenAICompatibleBackendMutation,
   useListAvailableModelsMutation,
+  // Anthropic Compatible Backend hooks
+  useGetAnthropicCompatibleBackendsQuery,
+  useCreateAnthropicCompatibleBackendMutation,
+  useDeleteAnthropicCompatibleBackendMutation,
+  // Unified Backend hooks
+  useGetBackendsQuery,
+  useDeleteBackendMutation,
   // Experiment Idea hooks
   useGetExperimentIdeasQuery,
   useCreateExperimentIdeaMutation,

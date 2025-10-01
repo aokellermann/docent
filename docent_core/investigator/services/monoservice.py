@@ -12,6 +12,7 @@ from docent._log_util import get_logger
 from docent_core._db_service.db import DocentDB
 from docent_core.docent.db.schemas.auth_models import User
 from docent_core.investigator.db.schemas.experiment import (
+    SQLAAnthropicCompatibleBackend,
     SQLABaseContext,
     SQLACounterfactualExperimentConfig,
     SQLAExperimentIdea,
@@ -286,6 +287,90 @@ class InvestigatorMonoService:
             return result.rowcount > 0
 
     #######################
+    # Anthropic Compatible Backends #
+    #######################
+
+    async def create_anthropic_compatible_backend(
+        self,
+        workspace_id: str,
+        name: str,
+        provider: str,
+        model: str,
+        max_tokens: int,
+        thinking_type: str | None = None,
+        thinking_budget_tokens: int | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        backend_id: str | None = None,
+    ) -> str:
+        """Create a new Anthropic-compatible backend config in a workspace."""
+        backend_id = backend_id or str(uuid4())
+
+        async with self.db.session() as session:
+            session.add(
+                SQLAAnthropicCompatibleBackend(
+                    id=backend_id,
+                    name=name,
+                    provider=provider,
+                    model=model,
+                    max_tokens=max_tokens,
+                    thinking_type=thinking_type,
+                    thinking_budget_tokens=thinking_budget_tokens,
+                    api_key=api_key,
+                    base_url=base_url,
+                    workspace_id=workspace_id,
+                )
+            )
+
+        logger.info(
+            f"Created AnthropicCompatibleBackend with ID: {backend_id} in workspace: {workspace_id}"
+        )
+        return backend_id
+
+    async def get_anthropic_compatible_backends(
+        self, workspace_id: str
+    ) -> Sequence[SQLAAnthropicCompatibleBackend]:
+        """List Anthropic-compatible backend configs in a workspace (excluding soft-deleted)."""
+        async with self.db.session() as session:
+            query = (
+                select(SQLAAnthropicCompatibleBackend)
+                .where(SQLAAnthropicCompatibleBackend.workspace_id == workspace_id)
+                .where(
+                    SQLAAnthropicCompatibleBackend.deleted_at.is_(None)
+                )  # Filter out soft-deleted
+                .order_by(SQLAAnthropicCompatibleBackend.created_at.desc())
+            )
+            result = await session.execute(query)
+            return result.scalars().all()
+
+    async def get_anthropic_compatible_backend(
+        self, backend_id: str
+    ) -> SQLAAnthropicCompatibleBackend | None:
+        """Fetch a single Anthropic-compatible backend if it has not been soft-deleted."""
+        async with self.db.session() as session:
+            query = (
+                select(SQLAAnthropicCompatibleBackend)
+                .where(SQLAAnthropicCompatibleBackend.id == backend_id)
+                .where(SQLAAnthropicCompatibleBackend.deleted_at.is_(None))
+            )
+            result = await session.execute(query)
+            return result.scalar_one_or_none()
+
+    async def delete_anthropic_compatible_backend(self, backend_id: str) -> bool:
+        """Soft delete an Anthropic-compatible backend config by setting deleted_at timestamp."""
+        async with self.db.session() as session:
+            result = await session.execute(
+                update(SQLAAnthropicCompatibleBackend)
+                .where(SQLAAnthropicCompatibleBackend.id == backend_id)
+                .where(
+                    SQLAAnthropicCompatibleBackend.deleted_at.is_(None)
+                )  # Only delete if not already deleted
+                .values(deleted_at=datetime.now(UTC).replace(tzinfo=None))
+            )
+            await session.commit()
+            return result.rowcount > 0
+
+    #######################
     # Experiment Ideas    #
     #######################
 
@@ -422,9 +507,11 @@ class InvestigatorMonoService:
         self,
         workspace_id: str,
         judge_config_id: str,
-        openai_compatible_backend_id: str,
+        backend_type: str,
         idea_id: str,
         base_context_id: str,
+        openai_compatible_backend_id: str | None = None,
+        anthropic_compatible_backend_id: str | None = None,
         num_counterfactuals: int = 1,
         num_replicas: int = 1,
         max_turns: int = 1,
@@ -444,8 +531,10 @@ class InvestigatorMonoService:
                 SQLACounterfactualExperimentConfig(
                     id=experiment_config_id,
                     workspace_id=workspace_id,
+                    backend_type=backend_type,
                     judge_config_id=judge_config_id,
                     openai_compatible_backend_id=openai_compatible_backend_id,
+                    anthropic_compatible_backend_id=anthropic_compatible_backend_id,
                     idea_id=idea_id,
                     base_context_id=base_context_id,
                     num_counterfactuals=num_counterfactuals,
@@ -545,8 +634,9 @@ class InvestigatorMonoService:
     async def create_simple_rollout_experiment_config(
         self,
         workspace_id: str,
-        openai_compatible_backend_ids: list[str],
         base_context_id: str,
+        openai_compatible_backend_ids: list[str] | None = None,
+        anthropic_compatible_backend_ids: list[str] | None = None,
         judge_config_id: str | None = None,
         num_replicas: int = 1,
         max_turns: int = 1,
@@ -554,9 +644,12 @@ class InvestigatorMonoService:
     ) -> str:
         """
         Create a new simple rollout experiment config in a workspace.
+        Can include OpenAI backends, Anthropic backends, or both.
         Note: Judge is optional for simple rollout experiments.
         """
         experiment_config_id = experiment_config_id or str(uuid4())
+        openai_compatible_backend_ids = openai_compatible_backend_ids or []
+        anthropic_compatible_backend_ids = anthropic_compatible_backend_ids or []
 
         async with self.db.session() as session:
             config = SQLASimpleRolloutExperimentConfig(
@@ -568,6 +661,7 @@ class InvestigatorMonoService:
                 max_turns=max_turns,
             )
 
+            # Add OpenAI backends
             for backend_id in openai_compatible_backend_ids:
                 result = await session.execute(
                     select(SQLAOpenAICompatibleBackend).where(
@@ -576,15 +670,28 @@ class InvestigatorMonoService:
                 )
                 backend = result.scalar_one_or_none()
                 if not backend:
-                    raise ValueError(f"Backend with ID {backend_id} not found")
+                    raise ValueError(f"OpenAI backend with ID {backend_id} not found")
                 config.openai_compatible_backend_objs.append(backend)
+
+            # Add Anthropic backends
+            for backend_id in anthropic_compatible_backend_ids:
+                result = await session.execute(
+                    select(SQLAAnthropicCompatibleBackend).where(
+                        SQLAAnthropicCompatibleBackend.id == backend_id
+                    )
+                )
+                backend = result.scalar_one_or_none()
+                if not backend:
+                    raise ValueError(f"Anthropic backend with ID {backend_id} not found")
+                config.anthropic_compatible_backend_objs.append(backend)
 
             session.add(config)
             await session.commit()
 
+        total_backends = len(openai_compatible_backend_ids) + len(anthropic_compatible_backend_ids)
         logger.info(
             f"Created SimpleRolloutExperimentConfig with ID: {experiment_config_id} "
-            f"with {len(openai_compatible_backend_ids)} backends in workspace: {workspace_id}"
+            f"with {total_backends} backends in workspace: {workspace_id}"
         )
         return experiment_config_id
 

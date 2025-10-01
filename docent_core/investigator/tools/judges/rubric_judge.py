@@ -16,6 +16,7 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+from docent.data_models.chat import ContentReasoning, ContentText
 from docent.data_models.chat.message import AssistantMessage, ChatMessage, UserMessage
 from docent_core.investigator.db.schemas.experiment import SQLAJudgeConfig
 from docent_core.investigator.tools.common.types import Grade, GradeEnd, GradeStart, GradeUpdate
@@ -108,8 +109,20 @@ class RubricJudge(JudgeBase):
         # Format the transcript, including tool calls if present
         conversation_parts: list[str] = []
         for msg in conversation_history:
-            # Add the main message content
-            conversation_parts.append(f"{msg.role.upper()}: {msg.content}")
+            # Format message content - handle both string and Content list
+            if isinstance(msg.content, str):
+                content_str = msg.content
+            else:
+                # Content list - format with reasoning and text separated
+                content_parts: list[str] = []
+                for content_item in msg.content:
+                    if isinstance(content_item, ContentReasoning) and content_item.reasoning:
+                        content_parts.append(f"[REASONING]\n{content_item.reasoning}\n[/REASONING]")
+                    elif isinstance(content_item, ContentText) and content_item.text:
+                        content_parts.append(content_item.text)
+                content_str = "\n\n".join(content_parts) if content_parts else ""
+
+            conversation_parts.append(f"{msg.role.upper()}: {content_str}")
 
             # If this is an assistant message with tool calls, add them
             if isinstance(msg, AssistantMessage) and msg.tool_calls:

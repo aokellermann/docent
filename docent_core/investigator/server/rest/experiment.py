@@ -129,6 +129,7 @@ class CreateOpenAICompatibleBackendRequest(BaseModel):
 class OpenAICompatibleBackendResponse(BaseModel):
     """Response model for OpenAI-compatible backend config."""
 
+    type: Literal["openai_compatible"] = "openai_compatible"
     id: str
     name: str
     provider: str
@@ -137,6 +138,47 @@ class OpenAICompatibleBackendResponse(BaseModel):
     base_url: Optional[str]
     workspace_id: str
     created_at: str
+
+
+class CreateAnthropicCompatibleBackendRequest(BaseModel):
+    """Request model for creating an Anthropic-compatible backend config."""
+
+    name: str
+    provider: str  # anthropic, custom
+    model: str
+    max_tokens: int = Field(ge=1, description="Maximum number of tokens to generate")
+    thinking_type: Optional[Literal["enabled", "disabled"]] = None
+    thinking_budget_tokens: Optional[int] = Field(
+        default=None,
+        ge=1024,
+        description="Thinking budget tokens (required if thinking_type is enabled)",
+    )
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+
+
+class AnthropicCompatibleBackendResponse(BaseModel):
+    """Response model for Anthropic-compatible backend config."""
+
+    type: Literal["anthropic_compatible"] = "anthropic_compatible"
+    id: str
+    name: str
+    provider: str
+    model: str
+    max_tokens: int
+    thinking_type: Optional[str]
+    thinking_budget_tokens: Optional[int]
+    api_key: Optional[str]
+    base_url: Optional[str]
+    workspace_id: str
+    created_at: str
+
+
+# Union type for all backends
+BackendResponse = Annotated[
+    Union[OpenAICompatibleBackendResponse, AnthropicCompatibleBackendResponse],
+    Discriminator("type"),
+]
 
 
 # =====================
@@ -226,7 +268,9 @@ class CreateCounterfactualExperimentConfigRequest(BaseModel):
 
     type: Literal["counterfactual"] = "counterfactual"
     judge_config_id: str
-    openai_compatible_backend_id: str
+    backend_type: Literal["openai_compatible", "anthropic_compatible"]
+    openai_compatible_backend_id: Optional[str] = None
+    anthropic_compatible_backend_id: Optional[str] = None
     idea_id: str
     base_context_id: str
     num_counterfactuals: int = 1
@@ -239,7 +283,8 @@ class CreateSimpleRolloutExperimentConfigRequest(BaseModel):
 
     type: Literal["simple_rollout"] = "simple_rollout"
     judge_config_id: Optional[str] = None
-    openai_compatible_backend_ids: list[str]
+    openai_compatible_backend_ids: list[str] = Field(default_factory=list)
+    anthropic_compatible_backend_ids: list[str] = Field(default_factory=list)
     base_context_id: str
     num_replicas: int = 1
     max_turns: int = 1
@@ -504,6 +549,159 @@ async def delete_openai_compatible_backend(
     if not deleted:
         raise HTTPException(status_code=404, detail="OpenAI-compatible backend not found")
     return {"message": "OpenAI-compatible backend deleted successfully"}
+
+
+# =====================
+# Anthropic Compatible Backend Endpoints
+# =====================
+
+
+@experiment_router.post("/workspaces/{workspace_id}/anthropic-compatible-backends")
+async def create_anthropic_compatible_backend(
+    workspace_id: str,
+    request: CreateAnthropicCompatibleBackendRequest,
+    user: User = Depends(get_authorized_investigator_user),
+    investigator_svc: InvestigatorMonoService = Depends(get_investigator_mono_svc),
+):
+    """Create a new Anthropic-compatible backend config in a workspace."""
+    # Check if user owns this workspace
+    if not await investigator_svc.user_owns_workspace(user, workspace_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Validate thinking parameters
+    if request.thinking_type == "enabled" and request.thinking_budget_tokens is None:
+        raise HTTPException(
+            status_code=400,
+            detail="thinking_budget_tokens is required when thinking_type is 'enabled'",
+        )
+    if request.thinking_type == "enabled" and request.thinking_budget_tokens:
+        if request.thinking_budget_tokens >= request.max_tokens:
+            raise HTTPException(
+                status_code=400,
+                detail=f"thinking_budget_tokens ({request.thinking_budget_tokens}) must be less than max_tokens ({request.max_tokens})",
+            )
+
+    backend_id = await investigator_svc.create_anthropic_compatible_backend(
+        workspace_id=workspace_id,
+        name=request.name,
+        provider=request.provider,
+        model=request.model,
+        max_tokens=request.max_tokens,
+        thinking_type=request.thinking_type,
+        thinking_budget_tokens=request.thinking_budget_tokens,
+        api_key=request.api_key,
+        base_url=request.base_url,
+    )
+    return {"id": backend_id}
+
+
+@experiment_router.get("/workspaces/{workspace_id}/anthropic-compatible-backends")
+async def get_anthropic_compatible_backends(
+    workspace_id: str,
+    user: User = Depends(get_authorized_investigator_user),
+    investigator_svc: InvestigatorMonoService = Depends(get_investigator_mono_svc),
+):
+    """List all Anthropic-compatible backend configs in a workspace."""
+    # Check if user owns this workspace
+    if not await investigator_svc.user_owns_workspace(user, workspace_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    configs = await investigator_svc.get_anthropic_compatible_backends(workspace_id)
+    return [
+        AnthropicCompatibleBackendResponse(
+            id=config.id,
+            name=config.name,
+            provider=config.provider,
+            model=config.model,
+            max_tokens=config.max_tokens,
+            thinking_type=config.thinking_type,
+            thinking_budget_tokens=config.thinking_budget_tokens,
+            api_key=config.api_key,
+            base_url=config.base_url,
+            workspace_id=config.workspace_id,
+            created_at=config.created_at.isoformat(),
+        )
+        for config in configs
+    ]
+
+
+@experiment_router.delete("/anthropic-compatible-backends/{backend_id}")
+async def delete_anthropic_compatible_backend(
+    backend_id: str,
+    user: User = Depends(get_authorized_investigator_user),
+    investigator_svc: InvestigatorMonoService = Depends(get_investigator_mono_svc),
+):
+    """Delete an Anthropic-compatible backend config."""
+    backend = await investigator_svc.get_anthropic_compatible_backend(backend_id)
+    if backend is None:
+        raise HTTPException(status_code=404, detail="Anthropic-compatible backend not found")
+
+    if not await investigator_svc.user_owns_workspace(user, backend.workspace_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    deleted = await investigator_svc.delete_anthropic_compatible_backend(backend_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Anthropic-compatible backend not found")
+    return {"message": "Anthropic-compatible backend deleted successfully"}
+
+
+# =====================
+# Unified Backend Endpoints (returns both types with discriminator)
+# =====================
+
+
+@experiment_router.get("/workspaces/{workspace_id}/backends")
+async def get_backends(
+    workspace_id: str,
+    user: User = Depends(get_authorized_investigator_user),
+    investigator_svc: InvestigatorMonoService = Depends(get_investigator_mono_svc),
+) -> list[BackendResponse]:
+    """List all backend configs (both OpenAI and Anthropic) in a workspace with type discriminator."""
+    # Check if user owns this workspace
+    if not await investigator_svc.user_owns_workspace(user, workspace_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Fetch both types of backends
+    openai_configs = await investigator_svc.get_openai_compatible_backends(workspace_id)
+    anthropic_configs = await investigator_svc.get_anthropic_compatible_backends(workspace_id)
+
+    # Convert to response models with type discriminator
+    results: list[BackendResponse] = []
+
+    for config in openai_configs:
+        results.append(
+            OpenAICompatibleBackendResponse(
+                type="openai_compatible",
+                id=config.id,
+                name=config.name,
+                provider=config.provider,
+                model=config.model,
+                api_key=config.api_key,
+                base_url=config.base_url,
+                workspace_id=config.workspace_id,
+                created_at=config.created_at.isoformat(),
+            )
+        )
+
+    for config in anthropic_configs:
+        results.append(
+            AnthropicCompatibleBackendResponse(
+                type="anthropic_compatible",
+                id=config.id,
+                name=config.name,
+                provider=config.provider,
+                model=config.model,
+                max_tokens=config.max_tokens,
+                thinking_type=config.thinking_type,
+                thinking_budget_tokens=config.thinking_budget_tokens,
+                api_key=config.api_key,
+                base_url=config.base_url,
+                workspace_id=config.workspace_id,
+                created_at=config.created_at.isoformat(),
+            )
+        )
+
+    return results
 
 
 class ListModelsRequest(BaseModel):
@@ -779,10 +977,27 @@ async def create_experiment_config(
                 detail=f"Total rollouts (({request.num_counterfactuals} + 1) × {request.num_replicas} = {total_rollouts}) exceeds maximum of 1024",
             )
 
+        # Validate backend configuration
+        if request.backend_type == "openai_compatible" and not request.openai_compatible_backend_id:
+            raise HTTPException(
+                status_code=400,
+                detail="openai_compatible_backend_id is required when backend_type is openai_compatible",
+            )
+        if (
+            request.backend_type == "anthropic_compatible"
+            and not request.anthropic_compatible_backend_id
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="anthropic_compatible_backend_id is required when backend_type is anthropic_compatible",
+            )
+
         experiment_config_id = await investigator_svc.create_counterfactual_experiment_config(
             workspace_id=workspace_id,
             judge_config_id=request.judge_config_id,
+            backend_type=request.backend_type,
             openai_compatible_backend_id=request.openai_compatible_backend_id,
+            anthropic_compatible_backend_id=request.anthropic_compatible_backend_id,
             idea_id=request.idea_id,
             base_context_id=request.base_context_id,
             num_counterfactuals=request.num_counterfactuals,
@@ -798,31 +1013,36 @@ async def create_experiment_config(
             )
 
         # Validate backends
-        if not request.openai_compatible_backend_ids:
+        total_backends = len(request.openai_compatible_backend_ids) + len(
+            request.anthropic_compatible_backend_ids
+        )
+
+        if total_backends == 0:
             raise HTTPException(
                 status_code=400,
                 detail="At least one backend must be selected",
             )
 
-        if len(request.openai_compatible_backend_ids) > 10:
+        if total_backends > 10:
             raise HTTPException(
                 status_code=400,
-                detail=f"Number of backends ({len(request.openai_compatible_backend_ids)}) exceeds maximum of 10",
+                detail=f"Number of backends ({total_backends}) exceeds maximum of 10",
             )
 
         # Total rollouts is replicas × backends
-        total_rollouts = request.num_replicas * len(request.openai_compatible_backend_ids)
+        total_rollouts = request.num_replicas * total_backends
         if total_rollouts > 1024:
             raise HTTPException(
                 status_code=400,
-                detail=f"Total rollouts ({request.num_replicas} × {len(request.openai_compatible_backend_ids)} = {total_rollouts}) exceeds maximum of 1024",
+                detail=f"Total rollouts ({request.num_replicas} × {total_backends} = {total_rollouts}) exceeds maximum of 1024",
             )
 
         experiment_config_id = await investigator_svc.create_simple_rollout_experiment_config(
             workspace_id=workspace_id,
-            judge_config_id=request.judge_config_id,
-            openai_compatible_backend_ids=request.openai_compatible_backend_ids,
             base_context_id=request.base_context_id,
+            openai_compatible_backend_ids=request.openai_compatible_backend_ids,
+            anthropic_compatible_backend_ids=request.anthropic_compatible_backend_ids,
+            judge_config_id=request.judge_config_id,
             num_replicas=request.num_replicas,
             max_turns=request.max_turns,
         )

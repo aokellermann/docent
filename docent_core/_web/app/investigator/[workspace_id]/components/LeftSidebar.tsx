@@ -161,10 +161,8 @@ function ExperimentItem({
       <div className="text-xs text-muted-foreground mb-1">
         <span className="font-medium">Subject:</span>{' '}
         {experiment.type === 'counterfactual'
-          ? experiment.openai_compatible_backend?.name
-          : experiment.openai_compatible_backends
-              ?.map((b) => b.name)
-              .join(', ') || 'N/A'}
+          ? experiment.backend?.name || 'N/A'
+          : experiment.backends?.map((b) => b.name).join(', ') || 'N/A'}
       </div>
 
       {/* Base context info */}

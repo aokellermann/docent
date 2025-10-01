@@ -30,7 +30,7 @@ import {
   useGetBaseContextsQuery,
   useGetJudgeConfigsQuery,
   useGetExperimentIdeasQuery,
-  useGetOpenAICompatibleBackendsQuery,
+  useGetBackendsQuery,
 } from '@/app/api/investigatorApi';
 
 interface TopPanelProps {
@@ -113,9 +113,9 @@ export default function TopPanel({
   const { data: experimentIdeas, isLoading: isLoadingExperimentIdeas } =
     useGetExperimentIdeasQuery(workspaceId);
 
-  // Fetch OpenAI compatible backends from the API
+  // Fetch all backends using unified endpoint (includes type discriminator)
   const { data: backends, isLoading: isLoadingBackends } =
-    useGetOpenAICompatibleBackendsQuery(workspaceId);
+    useGetBackendsQuery(workspaceId);
 
   // Find the name of the selected base context for display mode
   const selectedBaseContextName = baseContexts?.find(

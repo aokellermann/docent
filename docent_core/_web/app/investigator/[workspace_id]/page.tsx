@@ -22,21 +22,23 @@ import {
   useGetBaseContextsQuery,
   useGetJudgeConfigsQuery,
   useGetExperimentIdeasQuery,
-  useGetOpenAICompatibleBackendsQuery,
+  useGetBackendsQuery,
+  useCreateOpenAICompatibleBackendMutation,
+  useCreateAnthropicCompatibleBackendMutation,
+  useDeleteBackendMutation,
   useCreateBaseContextMutation,
   useDeleteBaseContextMutation,
   useCreateJudgeConfigMutation,
   useDeleteJudgeConfigMutation,
   useCreateExperimentIdeaMutation,
   useDeleteExperimentIdeaMutation,
-  useCreateOpenAICompatibleBackendMutation,
-  useDeleteOpenAICompatibleBackendMutation,
   useGetExperimentConfigsQuery,
   useCreateExperimentConfigMutation,
   useDeleteExperimentConfigMutation,
   useStartExperimentMutation,
   useCancelExperimentMutation,
   useGetActiveExperimentJobsQuery,
+  type Backend,
 } from '@/app/api/investigatorApi';
 import { toast } from '@/hooks/use-toast';
 
@@ -120,16 +122,24 @@ export default function WorkspacePage() {
     rubric: string;
   } | null>(null);
   const [backendToView, setBackendToView] = useState<{
+    backend_type: 'openai_compatible' | 'anthropic_compatible';
     name: string;
     provider: string;
     model: string;
+    max_tokens?: number;
+    thinking_type?: 'enabled' | 'disabled';
+    thinking_budget_tokens?: number;
     api_key?: string;
     base_url?: string;
   } | null>(null);
   const [backendToFork, setBackendToFork] = useState<{
+    backend_type: 'openai_compatible' | 'anthropic_compatible';
     name: string;
     provider: string;
     model: string;
+    max_tokens?: number;
+    thinking_type?: 'enabled' | 'disabled';
+    thinking_budget_tokens?: number;
     api_key?: string;
     base_url?: string;
   } | null>(null);
@@ -172,10 +182,15 @@ export default function WorkspacePage() {
     useGetExperimentIdeasQuery(workspaceId, {
       skip: !!workspaceError,
     });
-  const { data: backends, error: backendsError } =
-    useGetOpenAICompatibleBackendsQuery(workspaceId, {
+
+  // Use unified backends endpoint (returns both types with type discriminator)
+  const { data: backends, error: backendsError } = useGetBackendsQuery(
+    workspaceId,
+    {
       skip: !!workspaceError,
-    });
+    }
+  );
+
   const { data: experimentConfigs, error: experimentConfigsError } =
     useGetExperimentConfigsQuery(workspaceId, {
       skip: !!workspaceError,
@@ -188,8 +203,10 @@ export default function WorkspacePage() {
     useCreateJudgeConfigMutation();
   const [createExperimentIdea, { isLoading: isCreatingExperimentIdea }] =
     useCreateExperimentIdeaMutation();
-  const [createBackend, { isLoading: isCreatingBackend }] =
-    useCreateOpenAICompatibleBackendMutation();
+  const [createOpenAIBackend] = useCreateOpenAICompatibleBackendMutation();
+  const [createAnthropicBackend] =
+    useCreateAnthropicCompatibleBackendMutation();
+  const [deleteBackend] = useDeleteBackendMutation();
   const [createExperimentConfig, { isLoading: isCreatingExperimentConfig }] =
     useCreateExperimentConfigMutation();
   const [deleteExperimentConfig, { isLoading: isDeletingExperimentConfig }] =
@@ -228,8 +245,6 @@ export default function WorkspacePage() {
     useDeleteJudgeConfigMutation();
   const [deleteExperimentIdea, { isLoading: isDeletingExperimentIdea }] =
     useDeleteExperimentIdeaMutation();
-  const [deleteBackend, { isLoading: isDeletingBackend }] =
-    useDeleteOpenAICompatibleBackendMutation();
 
   // Sync selected IDs when experiment changes
   useEffect(() => {
@@ -240,13 +255,13 @@ export default function WorkspacePage() {
       );
 
       if (selectedExperiment.type === 'counterfactual') {
-        setSelectedBackendId(selectedExperiment.openai_compatible_backend.id);
+        setSelectedBackendId(selectedExperiment.backend.id);
         setSelectedCounterfactualIdeaId(selectedExperiment.idea.id);
         setNumCounterfactuals(selectedExperiment.num_counterfactuals);
       } else {
         setSelectedCounterfactualIdeaId(undefined);
         setSelectedBackendIds(
-          selectedExperiment.openai_compatible_backends?.map((b) => b.id) || []
+          selectedExperiment.backends?.map((b: Backend) => b.id) || []
         );
       }
 
@@ -314,13 +329,13 @@ export default function WorkspacePage() {
 
       // Handle type-specific fields
       if (experiment.type === 'counterfactual') {
-        setSelectedBackendId(experiment.openai_compatible_backend?.id);
+        setSelectedBackendId(experiment.backend?.id);
         setSelectedJudgeConfigId(experiment.judge_config?.id);
         setSelectedCounterfactualIdeaId(experiment.idea?.id);
         setNumCounterfactuals(experiment.num_counterfactuals);
       } else if (experiment.type === 'simple_rollout') {
         setSelectedBackendIds(
-          experiment.openai_compatible_backends?.map((b) => b.id) || []
+          experiment.backends?.map((b: Backend) => b.id) || []
         );
         setSelectedJudgeConfigId(experiment.judge_config?.id || undefined);
         setSelectedCounterfactualIdeaId(undefined);
@@ -360,13 +375,13 @@ export default function WorkspacePage() {
 
     // Handle type-specific fields
     if (selectedExperiment.type === 'counterfactual') {
-      setSelectedBackendId(selectedExperiment.openai_compatible_backend?.id);
+      setSelectedBackendId(selectedExperiment.backend?.id);
       setSelectedJudgeConfigId(selectedExperiment.judge_config?.id);
       setSelectedCounterfactualIdeaId(selectedExperiment.idea?.id);
       setNumCounterfactuals(selectedExperiment.num_counterfactuals);
     } else if (selectedExperiment.type === 'simple_rollout') {
       setSelectedBackendIds(
-        selectedExperiment.openai_compatible_backends?.map((b) => b.id) || []
+        selectedExperiment.backends?.map((b: Backend) => b.id) || []
       );
       // Judge is optional for simple rollout
       setSelectedJudgeConfigId(
@@ -445,12 +460,26 @@ export default function WorkspacePage() {
             return;
           }
 
+          // Get backend type from the type discriminator
+          const selectedBackend = backends?.find(
+            (b) => b.id === selectedBackendId
+          );
+          const backendType = selectedBackend?.type || 'openai_compatible';
+
           created = await createExperimentConfig({
             workspaceId,
             type: 'counterfactual',
             base_context_id: selectedBaseContextId,
             judge_config_id: selectedJudgeConfigId,
-            openai_compatible_backend_id: selectedBackendId,
+            backend_type: backendType,
+            openai_compatible_backend_id:
+              backendType === 'openai_compatible'
+                ? selectedBackendId
+                : undefined,
+            anthropic_compatible_backend_id:
+              backendType === 'anthropic_compatible'
+                ? selectedBackendId
+                : undefined,
             idea_id: selectedCounterfactualIdeaId,
             num_counterfactuals: numCounterfactuals,
             num_replicas: numReplicas,
@@ -471,12 +500,24 @@ export default function WorkspacePage() {
             return;
           }
 
+          // Separate backend IDs by type using the type discriminator
+          const openaiBackendIds = selectedBackendIds.filter(
+            (id) =>
+              backends?.find((b) => b.id === id)?.type === 'openai_compatible'
+          );
+          const anthropicBackendIds = selectedBackendIds.filter(
+            (id) =>
+              backends?.find((b) => b.id === id)?.type ===
+              'anthropic_compatible'
+          );
+
           created = await createExperimentConfig({
             workspaceId,
             type: 'simple_rollout',
             base_context_id: selectedBaseContextId,
             judge_config_id: selectedJudgeConfigId || undefined,
-            openai_compatible_backend_ids: selectedBackendIds,
+            openai_compatible_backend_ids: openaiBackendIds,
+            anthropic_compatible_backend_ids: anthropicBackendIds,
             num_replicas: numReplicas,
             max_turns: 1,
           }).unwrap();
@@ -668,13 +709,30 @@ export default function WorkspacePage() {
     if (selectedBackendId && backends) {
       const selectedBackend = backends.find((b) => b.id === selectedBackendId);
       if (selectedBackend) {
-        setBackendToFork({
-          name: getNextForkName(selectedBackend.name),
-          provider: selectedBackend.provider,
-          model: selectedBackend.model,
-          api_key: selectedBackend.api_key ?? undefined,
-          base_url: selectedBackend.base_url ?? undefined,
-        });
+        // Use the type discriminator from the API response
+        if (selectedBackend.type === 'anthropic_compatible') {
+          setBackendToFork({
+            backend_type: 'anthropic_compatible',
+            name: getNextForkName(selectedBackend.name),
+            provider: selectedBackend.provider,
+            model: selectedBackend.model,
+            max_tokens: selectedBackend.max_tokens,
+            thinking_type: selectedBackend.thinking_type ?? undefined,
+            thinking_budget_tokens:
+              selectedBackend.thinking_budget_tokens ?? undefined,
+            api_key: selectedBackend.api_key ?? undefined,
+            base_url: selectedBackend.base_url ?? undefined,
+          });
+        } else {
+          setBackendToFork({
+            backend_type: 'openai_compatible',
+            name: getNextForkName(selectedBackend.name),
+            provider: selectedBackend.provider,
+            model: selectedBackend.model,
+            api_key: selectedBackend.api_key ?? undefined,
+            base_url: selectedBackend.base_url ?? undefined,
+          });
+        }
         setEditingComponent('backend');
       }
     } else {
@@ -689,28 +747,52 @@ export default function WorkspacePage() {
       backendId ||
       selectedBackendId ||
       (selectedExperiment?.type === 'counterfactual'
-        ? selectedExperiment?.openai_compatible_backend?.id
+        ? selectedExperiment?.backend?.id
         : undefined);
 
     if (backendIdToView && backends) {
       const selectedBackend = backends.find((b) => b.id === backendIdToView);
       if (selectedBackend) {
-        setBackendToView({
-          name: selectedBackend.name,
-          provider: selectedBackend.provider,
-          model: selectedBackend.model,
-          api_key: selectedBackend.api_key ?? undefined,
-          base_url: selectedBackend.base_url ?? undefined,
-        });
+        // Use the type discriminator from the API response
+        if (selectedBackend.type === 'anthropic_compatible') {
+          setBackendToView({
+            backend_type: 'anthropic_compatible',
+            name: selectedBackend.name,
+            provider: selectedBackend.provider,
+            model: selectedBackend.model,
+            max_tokens: selectedBackend.max_tokens,
+            thinking_type: selectedBackend.thinking_type
+              ? selectedBackend.thinking_type
+              : undefined,
+            thinking_budget_tokens: selectedBackend.thinking_budget_tokens
+              ? selectedBackend.thinking_budget_tokens
+              : undefined,
+            api_key: selectedBackend.api_key || undefined,
+            base_url: selectedBackend.base_url || undefined,
+          });
+        } else {
+          setBackendToView({
+            backend_type: 'openai_compatible',
+            name: selectedBackend.name,
+            provider: selectedBackend.provider,
+            model: selectedBackend.model,
+            api_key: selectedBackend.api_key ?? undefined,
+            base_url: selectedBackend.base_url ?? undefined,
+          });
+        }
         setEditingComponent('view-backend');
       }
     }
   };
 
   const handleForkBackendConfig = (data: {
+    backend_type: 'openai_compatible' | 'anthropic_compatible';
     name: string;
     provider: string;
     model: string;
+    max_tokens?: number;
+    thinking_type?: 'enabled' | 'disabled';
+    thinking_budget_tokens?: number;
     api_key?: string;
     base_url?: string;
   }) => {
@@ -722,7 +804,18 @@ export default function WorkspacePage() {
     if (!selectedBackendId) return;
 
     try {
-      await deleteBackend(selectedBackendId).unwrap();
+      // Find the backend to get its type from the type discriminator
+      const selectedBackend = backends?.find((b) => b.id === selectedBackendId);
+      if (!selectedBackend) {
+        throw new Error(`Backend not found: ${selectedBackendId}`);
+      }
+
+      // Use the type discriminator to delete the correct backend
+      await deleteBackend({
+        backendId: selectedBackendId,
+        backendType: selectedBackend.type,
+      }).unwrap();
+
       setSelectedBackendId(undefined);
       setBackendToView(null);
       setEditingComponent(null);
@@ -941,14 +1034,29 @@ export default function WorkspacePage() {
 
   const handleSaveBackend = async (data: any) => {
     try {
-      const result = await createBackend({
-        workspaceId,
-        name: data.name,
-        provider: data.provider,
-        model: data.model,
-        api_key: data.api_key,
-        base_url: data.base_url,
-      }).unwrap();
+      let result;
+      if (data.backend_type === 'anthropic_compatible') {
+        result = await createAnthropicBackend({
+          workspaceId,
+          name: data.name,
+          provider: data.provider,
+          model: data.model,
+          max_tokens: data.max_tokens,
+          thinking_type: data.thinking_type,
+          thinking_budget_tokens: data.thinking_budget_tokens,
+          api_key: data.api_key,
+          base_url: data.base_url,
+        }).unwrap();
+      } else {
+        result = await createOpenAIBackend({
+          workspaceId,
+          name: data.name,
+          provider: data.provider,
+          model: data.model,
+          api_key: data.api_key,
+          base_url: data.base_url,
+        }).unwrap();
+      }
 
       // Only update selection if creating a new experiment
       if (isCreatingNew) {
@@ -1097,13 +1205,16 @@ export default function WorkspacePage() {
               backendConfig={
                 selectedBackendId ||
                 (selectedExperiment?.type === 'counterfactual'
-                  ? selectedExperiment?.openai_compatible_backend?.id
+                  ? selectedExperiment?.backend?.id
                   : undefined)
               }
               backendConfigs={
                 (isCreatingNew && experimentType === 'simple_rollout') ||
                 selectedExperiment?.type === 'simple_rollout'
-                  ? selectedBackendIds
+                  ? selectedBackendIds ||
+                    (selectedExperiment?.type === 'simple_rollout'
+                      ? selectedExperiment.backends?.map((b: Backend) => b.id)
+                      : undefined)
                   : undefined
               }
               counterfactualIdea={
@@ -1187,14 +1298,14 @@ export default function WorkspacePage() {
             )}
             {editingComponent === 'backend' && (
               <BackendEditor
-                initialValue={backendToFork || undefined}
+                initialValue={backendToFork as any}
                 onSave={handleSaveBackend}
                 onCancel={handleCancelEdit}
               />
             )}
             {editingComponent === 'view-backend' && backendToView && (
               <BackendEditor
-                initialValue={backendToView}
+                initialValue={backendToView as any}
                 readOnly={true}
                 onFork={handleForkBackendConfig}
                 onDelete={handleDeleteBackendConfig}

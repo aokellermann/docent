@@ -59,6 +59,9 @@ class CounterfactualService:
                 .options(
                     selectinload(SQLACounterfactualExperimentConfig.judge_config_obj),
                     selectinload(SQLACounterfactualExperimentConfig.openai_compatible_backend_obj),
+                    selectinload(
+                        SQLACounterfactualExperimentConfig.anthropic_compatible_backend_obj
+                    ),
                     selectinload(SQLACounterfactualExperimentConfig.idea_obj),
                     selectinload(SQLACounterfactualExperimentConfig.base_context_obj),
                 )
@@ -392,22 +395,19 @@ class CounterfactualService:
                 .options(
                     selectinload(SQLACounterfactualExperimentResult.experiment_config).selectinload(
                         SQLACounterfactualExperimentConfig.judge_config_obj
-                    )
-                )
-                .options(
+                    ),
                     selectinload(SQLACounterfactualExperimentResult.experiment_config).selectinload(
                         SQLACounterfactualExperimentConfig.openai_compatible_backend_obj
-                    )
-                )
-                .options(
+                    ),
+                    selectinload(SQLACounterfactualExperimentResult.experiment_config).selectinload(
+                        SQLACounterfactualExperimentConfig.anthropic_compatible_backend_obj
+                    ),
                     selectinload(SQLACounterfactualExperimentResult.experiment_config).selectinload(
                         SQLACounterfactualExperimentConfig.idea_obj
-                    )
-                )
-                .options(
+                    ),
                     selectinload(SQLACounterfactualExperimentResult.experiment_config).selectinload(
                         SQLACounterfactualExperimentConfig.base_context_obj
-                    )
+                    ),
                 )
             )
             sqla_result = result.scalar_one_or_none()

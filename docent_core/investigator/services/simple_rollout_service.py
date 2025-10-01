@@ -59,6 +59,9 @@ class SimpleRolloutService:
                 .options(
                     selectinload(SQLASimpleRolloutExperimentConfig.judge_config_obj),
                     selectinload(SQLASimpleRolloutExperimentConfig.openai_compatible_backend_objs),
+                    selectinload(
+                        SQLASimpleRolloutExperimentConfig.anthropic_compatible_backend_objs
+                    ),
                     selectinload(SQLASimpleRolloutExperimentConfig.base_context_obj),
                 )
             )
@@ -243,6 +246,9 @@ class SimpleRolloutService:
                     ),
                     selectinload(SQLASimpleRolloutExperimentResult.experiment_config).selectinload(
                         SQLASimpleRolloutExperimentConfig.openai_compatible_backend_objs
+                    ),
+                    selectinload(SQLASimpleRolloutExperimentResult.experiment_config).selectinload(
+                        SQLASimpleRolloutExperimentConfig.anthropic_compatible_backend_objs
                     ),
                     selectinload(SQLASimpleRolloutExperimentResult.experiment_config).selectinload(
                         SQLASimpleRolloutExperimentConfig.judge_config_obj

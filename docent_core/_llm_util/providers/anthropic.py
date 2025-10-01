@@ -97,7 +97,7 @@ def _parse_message_content(content: str | list[Content]) -> str | list[TextBlock
         return result
 
 
-def _parse_chat_messages(messages: list[ChatMessage]) -> tuple[str | None, list[MessageParam]]:
+def parse_chat_messages(messages: list[ChatMessage]) -> tuple[str | None, list[MessageParam]]:
     result: list[MessageParam] = []
     system_prompt: str | None = None
 
@@ -157,7 +157,7 @@ def _parse_chat_messages(messages: list[ChatMessage]) -> tuple[str | None, list[
     return system_prompt, result
 
 
-def _parse_tools(tools: list[ToolInfo]) -> list[ToolParam]:
+def parse_tools(tools: list[ToolInfo]) -> list[ToolParam]:
     return [
         ToolParam(
             name=tool.name,
@@ -213,8 +213,8 @@ async def get_anthropic_chat_completion_streaming_async(
             "We have not implemented logprobs or top_logprobs for Anthropic yet."
         )
 
-    system, input_messages = _parse_chat_messages(messages)
-    input_tools = _parse_tools(tools) if tools else NOT_GIVEN
+    system, input_messages = parse_chat_messages(messages)
+    input_tools = parse_tools(tools) if tools else NOT_GIVEN
 
     try:
         async with async_timeout_ctx(timeout):
@@ -402,8 +402,8 @@ async def get_anthropic_chat_completion_async(
             "We have not implemented logprobs or top_logprobs for Anthropic yet."
         )
 
-    system, input_messages = _parse_chat_messages(messages)
-    input_tools = _parse_tools(tools) if tools else NOT_GIVEN
+    system, input_messages = parse_chat_messages(messages)
+    input_tools = parse_tools(tools) if tools else NOT_GIVEN
 
     try:
         async with async_timeout_ctx(timeout):

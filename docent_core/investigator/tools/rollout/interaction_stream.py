@@ -4,6 +4,8 @@ from typing import Any, AsyncIterator, TypedDict
 from docent.data_models.chat import (
     AssistantMessage,
     ChatMessage,
+    ContentReasoning,
+    ContentText,
     SystemMessage,
     ToolCall,
     ToolMessage,
@@ -202,7 +204,9 @@ async def generate_interaction_stream(
         # Generate subject model response
         if policy_turn_messages:
             subject_model_turn_messages: list[ChatMessage] = []
-            current_message_content = ""
+            # Always use Content list for assistant messages to support thinking
+            current_reasoning_content: ContentReasoning | None = None
+            current_text_content: ContentText | None = None
             current_message_id = None
             tool_calls_data: dict[int, ToolCallTrackingData] = {}  # Track tool calls by index
 
@@ -211,11 +215,19 @@ async def generate_interaction_stream(
             ):
                 if isinstance(event, MessageStart):
                     current_message_id = event.message_id
-                    current_message_content = ""
+                    # Initialize Content blocks
+                    current_reasoning_content = ContentReasoning(type="reasoning", reasoning="")
+                    current_text_content = ContentText(type="text", text="")
                     tool_calls_data = {}  # Reset tool calls for new message
                     yield event
                 elif isinstance(event, TokenDelta):
-                    current_message_content += event.content
+                    # Append to the appropriate content block
+                    if event.is_thinking:
+                        if current_reasoning_content:
+                            current_reasoning_content.reasoning += event.content
+                    else:
+                        if current_text_content:
+                            current_text_content.text += event.content
                     yield event
                 elif isinstance(event, ToolCallStart):
                     # Initialize tool call tracking
@@ -266,10 +278,21 @@ async def generate_interaction_stream(
                                 )
                             )
 
-                    # Create assistant message with content and/or tool calls
+                    # Always use Content list format for assistant messages
+                    content_list: list[ContentText | ContentReasoning] = []
+
+                    # Add reasoning block if present
+                    if current_reasoning_content and current_reasoning_content.reasoning:
+                        content_list.append(current_reasoning_content)
+
+                    # Add text block if present
+                    if current_text_content and current_text_content.text:
+                        content_list.append(current_text_content)
+
+                    # Create assistant message with Content list
                     assistant_message = AssistantMessage(
                         id=current_message_id,
-                        content=current_message_content if current_message_content else "",
+                        content=content_list if content_list else "",
                         tool_calls=tool_calls,
                     )
                     subject_model_turn_messages.append(assistant_message)

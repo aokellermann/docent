@@ -50,11 +50,19 @@ from docent.data_models import AgentRun, Transcript
 from docent.data_models.chat import (
     AssistantMessage,
     ChatMessage,
+    ContentReasoning,
+    ContentText,
     SystemMessage,
     ToolMessage,
     UserMessage,
 )
 from docent.data_models.chat.tool import ToolCall
+from docent_core.investigator.tools.backends.anthropic_compatible_backend import (
+    AnthropicCompatibleBackendConfig,
+)
+from docent_core.investigator.tools.backends.openai_compatible_backend import (
+    OpenAICompatibleBackendConfig,
+)
 from docent_core.investigator.tools.common.types import (
     ExperimentStatus,
     GradeEnd,
@@ -89,6 +97,9 @@ from docent_core.investigator.tools.counterfactual_analysis.types import (
     DeterministicContextPolicyConfig,
 )
 from docent_core.investigator.tools.rollout.interaction_stream import generate_interaction_stream
+from docent_core.investigator.tools.subject_models.anthropic_compatible_subject_model import (
+    AnthropicCompatibleSubjectModel,
+)
 from docent_core.investigator.tools.subject_models.openai_compatible_subject_model import (
     OpenAICompatibleSubjectModel,
 )
@@ -115,6 +126,9 @@ class RolloutState(BaseModel):
     transcript: Transcript
     metadata: CounterfactualAgentRunMetadata
     messages_by_id: dict[str, ChatMessage] = {}
+    # Track Content blocks for assistant messages (always use Content list format)
+    reasoning_blocks: dict[str, ContentReasoning] = {}
+    text_blocks: dict[str, ContentText] = {}
     tool_calls_by_message: dict[str, dict[int, ToolCallTrackingData]] = (
         {}
     )  # message_id -> index -> tool call data
@@ -149,7 +163,16 @@ class CounterfactualExperiment:
             api_key=os.getenv("GOOGLE_API_KEY"),
             base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
         )
-        self.subject_model_with_client = self.config.openai_compatible_backend.build_client()
+
+        # Build the appropriate subject model based on backend type
+        if isinstance(self.config.backend, OpenAICompatibleBackendConfig):
+            self.subject_model_with_client = self.config.backend.build_client()
+            self.subject_model_class = OpenAICompatibleSubjectModel
+        elif isinstance(self.config.backend, AnthropicCompatibleBackendConfig):  # type: ignore
+            self.subject_model_with_client = self.config.backend.build_client()
+            self.subject_model_class = AnthropicCompatibleSubjectModel
+        else:
+            raise ValueError(f"Unknown backend type: {type(self.config.backend)}")
 
         self.openai_limiter = LimiterRegistry("openai")
         self.anthropic_limiter = LimiterRegistry("anthropic")
@@ -385,7 +408,10 @@ class CounterfactualExperiment:
                 cf_id, event = await event_queue.get()
 
                 # Stream token updates into the appropriate buffer and yield incremental results
-                if isinstance(event, TokenDelta):
+                if isinstance(event, MessageStart):
+                    # Clear the output buffer when starting a new message (e.g., on retry)
+                    self.result.counterfactual_context_output[cf_id] = ""
+                elif isinstance(event, TokenDelta):
                     self.result.counterfactual_context_output[cf_id] += event.content
                 elif isinstance(event, DeterministicContextPolicyConfig):
                     completed.add(cf_id)
@@ -456,8 +482,8 @@ class CounterfactualExperiment:
             try:
                 # Build the policy, subject model, and judge for this rollout
                 policy = policy_config.build()
-                subject_model = OpenAICompatibleSubjectModel(
-                    self.subject_model_with_client, policy_config.tools
+                subject_model = self.subject_model_class(
+                    self.subject_model_with_client, policy_config.tools  # type: ignore
                 )
                 judge = self.config.judge_config.build(
                     client=self.anthropic_client, limiter=self.anthropic_limiter
@@ -599,9 +625,18 @@ class CounterfactualExperiment:
                             content="",  # Start with empty content
                         )
                     elif event.role == "assistant":
+                        # Always use Content list format for assistant messages
+                        reasoning_block = ContentReasoning(type="reasoning", reasoning="")
+                        text_block = ContentText(type="text", text="")
+                        state.reasoning_blocks[event.message_id] = reasoning_block
+                        state.text_blocks[event.message_id] = text_block
+
                         msg = AssistantMessage(
                             id=event.message_id,
-                            content="",  # Start with empty content
+                            content=[
+                                reasoning_block,
+                                text_block,
+                            ],  # Start with empty Content blocks
                         )
                     elif event.role == "tool":
                         msg = ToolMessage(
@@ -620,11 +655,22 @@ class CounterfactualExperiment:
                     state.messages_by_id[event.message_id] = msg
 
                 elif isinstance(event, TokenDelta):
-                    # Update the specific message's content by looking it up by ID
-                    msg = state.messages_by_id[event.message_id]
-                    # We created all messages with string content, so we can safely append
-                    if isinstance(msg.content, str):
-                        msg.content += event.content
+                    # Update Content blocks in real-time
+                    if event.is_thinking:
+                        # Append to reasoning block
+                        reasoning_block = state.reasoning_blocks.get(event.message_id)
+                        if reasoning_block:
+                            reasoning_block.reasoning += event.content
+                    else:
+                        # Append to text block or string content
+                        text_block = state.text_blocks.get(event.message_id)
+                        if text_block:
+                            text_block.text += event.content
+                        else:
+                            # For non-assistant messages (user, system, tool)
+                            msg = state.messages_by_id.get(event.message_id)
+                            if msg and isinstance(msg.content, str):
+                                msg.content += event.content
 
                 elif isinstance(event, ToolCallStart):
                     # Initialize tool call tracking for this message

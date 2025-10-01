@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from typing import Optional
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Table, Text
+from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Integer, String, Table, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -20,8 +20,10 @@ TABLE_COUNTERFACTUAL_EXPERIMENT_RESULT = "counterfactual_experiment_results"
 TABLE_SIMPLE_ROLLOUT_EXPERIMENT_CONFIG = "simple_rollout_experiment_configs"
 TABLE_SIMPLE_ROLLOUT_EXPERIMENT_RESULT = "simple_rollout_experiment_results"
 TABLE_SIMPLE_ROLLOUT_CONFIG_BACKENDS = "simple_rollout_experiment_config_backends"
+TABLE_SIMPLE_ROLLOUT_CONFIG_ANTHROPIC_BACKENDS = "simple_rollout_config_anthropic_backends"
 TABLE_JUDGE_CONFIG = "judge_configs"
 TABLE_OPENAI_COMPATIBLE_BACKEND = "openai_compatible_backends"
+TABLE_ANTHROPIC_COMPATIBLE_BACKEND = "anthropic_compatible_backends"
 TABLE_EXPERIMENT_IDEA = "experiment_ideas"
 TABLE_BASE_CONTEXT = "base_contexts"
 TABLE_TMP_INVESTIGATOR_AUTHORIZED_USERS = "tmp_investigator_authorized_users"
@@ -39,6 +41,23 @@ simple_rollout_experiment_config_backends = Table(
         "backend_id",
         String(36),
         ForeignKey(f"{TABLE_OPENAI_COMPATIBLE_BACKEND}.id"),
+        primary_key=True,
+    ),
+)
+
+simple_rollout_config_anthropic_backends = Table(
+    TABLE_SIMPLE_ROLLOUT_CONFIG_ANTHROPIC_BACKENDS,
+    SQLABase.metadata,
+    Column(
+        "experiment_config_id",
+        String(36),
+        ForeignKey(f"{TABLE_SIMPLE_ROLLOUT_EXPERIMENT_CONFIG}.id"),
+        primary_key=True,
+    ),
+    Column(
+        "backend_id",
+        String(36),
+        ForeignKey(f"{TABLE_ANTHROPIC_COMPATIBLE_BACKEND}.id"),
         primary_key=True,
     ),
 )
@@ -78,6 +97,9 @@ class SQLAInvestigatorWorkspace(SQLABase):
     )
     openai_compatible_backends: Mapped[list["SQLAOpenAICompatibleBackend"]] = relationship(
         "SQLAOpenAICompatibleBackend", back_populates="workspace", cascade="all, delete-orphan"
+    )
+    anthropic_compatible_backends: Mapped[list["SQLAAnthropicCompatibleBackend"]] = relationship(
+        "SQLAAnthropicCompatibleBackend", back_populates="workspace", cascade="all, delete-orphan"
     )
     experiment_ideas: Mapped[list["SQLAExperimentIdea"]] = relationship(
         "SQLAExperimentIdea", back_populates="workspace", cascade="all, delete-orphan"
@@ -172,6 +194,60 @@ class SQLAOpenAICompatibleBackend(SQLABase):
     )
 
 
+class SQLAAnthropicCompatibleBackend(SQLABase):
+    """SQL schema for Anthropic-compatible backend configurations."""
+
+    __tablename__ = TABLE_ANTHROPIC_COMPATIBLE_BACKEND
+    __table_args__ = (
+        CheckConstraint(
+            "(thinking_type != 'enabled' OR thinking_budget_tokens IS NOT NULL)",
+            name="check_thinking_budget_required",
+        ),
+    )
+
+    id = mapped_column(String(36), primary_key=True)
+    name = mapped_column(Text, nullable=False)
+    provider = mapped_column(Text, nullable=False)  # anthropic, custom
+    model = mapped_column(Text, nullable=False)
+    max_tokens = mapped_column(Integer, nullable=False)  # Required for Anthropic API
+
+    # Extended thinking parameters
+    thinking_type = mapped_column(Text, nullable=True)  # "enabled" or "disabled" or null
+    thinking_budget_tokens = mapped_column(
+        Integer, nullable=True
+    )  # Required when thinking_type="enabled"
+
+    api_key = mapped_column(Text, nullable=True)
+    base_url = mapped_column(Text, nullable=True)
+
+    # Workspace that owns this config
+    workspace_id = mapped_column(
+        String(36), ForeignKey(f"{TABLE_INVESTIGATOR_WORKSPACE}.id"), nullable=False, index=True
+    )
+
+    created_at = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False
+    )
+
+    # Soft delete - null means active, timestamp means deleted
+    deleted_at = mapped_column(DateTime, nullable=True, index=True)
+
+    # Relationships
+    workspace: Mapped["SQLAInvestigatorWorkspace"] = relationship(
+        "SQLAInvestigatorWorkspace", back_populates="anthropic_compatible_backends"
+    )
+    experiment_configs: Mapped[list["SQLACounterfactualExperimentConfig"]] = relationship(
+        "SQLACounterfactualExperimentConfig", back_populates="anthropic_compatible_backend_obj"
+    )
+    simple_rollout_experiment_configs: Mapped[list["SQLASimpleRolloutExperimentConfig"]] = (
+        relationship(
+            "SQLASimpleRolloutExperimentConfig",
+            secondary=simple_rollout_config_anthropic_backends,
+            back_populates="anthropic_compatible_backend_objs",
+        )
+    )
+
+
 class SQLAExperimentIdea(SQLABase):
     """SQL schema for experiment ideas."""
 
@@ -249,6 +325,16 @@ class SQLACounterfactualExperimentConfig(SQLABase):
     """SQLAlchemy model for counterfactual experiment configurations."""
 
     __tablename__ = TABLE_COUNTERFACTUAL_EXPERIMENT_CONFIG
+    __table_args__ = (
+        CheckConstraint(
+            """
+            (backend_type = 'openai_compatible' AND openai_compatible_backend_id IS NOT NULL AND anthropic_compatible_backend_id IS NULL)
+            OR
+            (backend_type = 'anthropic_compatible' AND anthropic_compatible_backend_id IS NOT NULL AND openai_compatible_backend_id IS NULL)
+            """,
+            name="check_backend_type_consistency",
+        ),
+    )
 
     id = mapped_column(String(36), primary_key=True)
 
@@ -261,12 +347,22 @@ class SQLACounterfactualExperimentConfig(SQLABase):
         DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False
     )
 
+    # Backend type: 'openai_compatible' or 'anthropic_compatible'
+    backend_type = mapped_column(String(50), nullable=False)
+
     # Foreign keys to related configs (all must be in same workspace)
     judge_config_id = mapped_column(
         String(36), ForeignKey(f"{TABLE_JUDGE_CONFIG}.id"), nullable=False, index=True
     )
+    # Exactly one of these must be non-null based on backend_type
     openai_compatible_backend_id = mapped_column(
-        String(36), ForeignKey(f"{TABLE_OPENAI_COMPATIBLE_BACKEND}.id"), nullable=False, index=True
+        String(36), ForeignKey(f"{TABLE_OPENAI_COMPATIBLE_BACKEND}.id"), nullable=True, index=True
+    )
+    anthropic_compatible_backend_id = mapped_column(
+        String(36),
+        ForeignKey(f"{TABLE_ANTHROPIC_COMPATIBLE_BACKEND}.id"),
+        nullable=True,
+        index=True,
     )
     idea_id = mapped_column(
         String(36), ForeignKey(f"{TABLE_EXPERIMENT_IDEA}.id"), nullable=False, index=True
@@ -290,8 +386,11 @@ class SQLACounterfactualExperimentConfig(SQLABase):
     judge_config_obj: Mapped["SQLAJudgeConfig"] = relationship(
         "SQLAJudgeConfig", back_populates="experiment_configs"
     )
-    openai_compatible_backend_obj: Mapped["SQLAOpenAICompatibleBackend"] = relationship(
+    openai_compatible_backend_obj: Mapped[Optional["SQLAOpenAICompatibleBackend"]] = relationship(
         "SQLAOpenAICompatibleBackend", back_populates="experiment_configs"
+    )
+    anthropic_compatible_backend_obj: Mapped[Optional["SQLAAnthropicCompatibleBackend"]] = (
+        relationship("SQLAAnthropicCompatibleBackend", back_populates="experiment_configs")
     )
     idea_obj: Mapped["SQLAExperimentIdea"] = relationship(
         "SQLAExperimentIdea", back_populates="experiment_configs"
@@ -407,6 +506,13 @@ class SQLASimpleRolloutExperimentConfig(SQLABase):
         "SQLAOpenAICompatibleBackend",
         secondary=simple_rollout_experiment_config_backends,
         back_populates="simple_rollout_experiment_configs",
+    )
+    anthropic_compatible_backend_objs: Mapped[list["SQLAAnthropicCompatibleBackend"]] = (
+        relationship(
+            "SQLAAnthropicCompatibleBackend",
+            secondary=simple_rollout_config_anthropic_backends,
+            back_populates="simple_rollout_experiment_configs",
+        )
     )
     base_context_obj: Mapped["SQLABaseContext"] = relationship(
         "SQLABaseContext", back_populates="simple_rollout_experiment_configs"
