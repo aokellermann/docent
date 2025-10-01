@@ -609,43 +609,45 @@ export const AgentRunTable = memo(function AgentRunTable({
 
   return (
     <div className="relative flex flex-col h-full min-h-0 w-full space-y-3">
-      <div className="flex items-center gap-2">
+      <div className="relative flex flex-wrap items-start gap-2">
         {showFetchOverlay && (
-          <div className="pointer-events-none inline-flex items-center gap-2 rounded-full border border-muted/60 bg-background/90 px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-md backdrop-blur-sm">
+          <div className="pointer-events-none absolute left-0 top-0 inline-flex items-center gap-2 rounded-full border border-muted/60 bg-background/90 px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-md backdrop-blur-sm z-10">
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             Updating runs
           </div>
         )}
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-1 flex-wrap items-center gap-2 justify-end min-w-0">
           {/* Sorting controls */}
-          <div className="flex items-center gap-1.5">
-            <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
-            <Combobox
-              value={sortField ?? 'none'}
-              onChange={handleFieldChange}
-              options={sortOptions}
-              placeholder="Select field"
-              searchPlaceholder="Search fields..."
-              emptyMessage="No field found."
-              triggerClassName="bg-background font-mono text-muted-foreground max-w-lg justify-between"
-              valueClassName="truncate flex-1 min-w-0 text-left"
-              commandInputClassName="h-8 text-xs"
-              commandListClassName="custom-scrollbar"
-              optionClassName="font-mono text-muted-foreground text-xs"
-              popoverClassName="w-64"
-              popoverAlign="start"
-              renderValue={(selected) =>
-                sortField ? (selected?.label ?? sortField) : 'Select field'
-              }
-            />
+          <div className="flex flex-1 flex-wrap items-center gap-1.5 justify-end min-w-0">
+            <ArrowUpDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+            <div className="flex-1 min-w-0 basis-[8rem] max-w-[18rem]">
+              <Combobox
+                value={sortField ?? 'none'}
+                onChange={handleFieldChange}
+                options={sortOptions}
+                placeholder="Select field"
+                searchPlaceholder="Search fields..."
+                emptyMessage="No field found."
+                triggerClassName="bg-background font-mono text-muted-foreground max-w-full min-w-0 justify-between"
+                valueClassName="truncate flex-1 min-w-0 text-left"
+                commandInputClassName="h-8 text-xs"
+                commandListClassName="custom-scrollbar"
+                optionClassName="font-mono text-muted-foreground text-xs"
+                popoverClassName="w-64"
+                popoverAlign="start"
+                renderValue={(selected) =>
+                  sortField ? (selected?.label ?? sortField) : 'Select field'
+                }
+              />
+            </div>
 
             {sortField && (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleDirectionChange}
-                className="h-7 text-xs bg-background font-mono text-muted-foreground border-border hover:bg-muted-foreground/10 flex items-center gap-1 px-2 w-16"
+                className="h-7 flex-shrink-0 text-xs bg-background font-mono text-muted-foreground border-border hover:bg-muted-foreground/10 flex items-center gap-1 px-2 w-16"
               >
                 {sortDirection === 'asc' ? 'asc' : 'desc'}
                 {sortDirection === 'asc' ? (
@@ -663,7 +665,7 @@ export const AgentRunTable = memo(function AgentRunTable({
               <Button
                 variant="outline"
                 size="sm"
-                className="h-7 gap-1 text-xs text-muted-foreground"
+                className="h-7 gap-1 text-xs text-muted-foreground flex-shrink-0"
               >
                 <Columns3 className="h-3 w-3" />
                 Columns
