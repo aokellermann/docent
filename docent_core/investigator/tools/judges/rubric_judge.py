@@ -148,7 +148,7 @@ class RubricJudge(JudgeBase):
         grader_prompt_formatted = self.grader_prompt.format(conversation_text=conversation_text)
         grader_response = ""
 
-        @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=4, max=10))
+        @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=6))
         async def create_stream():
             async with self.limiter():
                 return await self.client.chat.completions.create(
