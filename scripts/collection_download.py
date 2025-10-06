@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Semaphore, local
@@ -73,6 +74,9 @@ def main(
                 out[agent_run_id] = agent_run
 
     out_prc = [json.loads(item.model_dump_json()) for item in out.values()]
+
+    if os.path.exists(output_path):
+        raise FileExistsError(f"Output file already exists: {output_path}")
 
     with open(output_path, "w") as f:
         json.dump(out_prc, f)
