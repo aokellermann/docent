@@ -2155,12 +2155,6 @@ class MonoService:
         all_fields: dict[str, FilterableField] = {}
 
         async with self.db.session() as session:
-            # Log the compiled SQL query for debugging
-            compiled_query = stmt.compile(compile_kwargs={"literal_binds": True})
-            print("SQL Query for get_agent_run_metadata_fields:")
-            print(compiled_query)
-            print("=" * 80)
-
             result = await session.execute(stmt)
             for row in result:
                 field_type = _infer_filter_type_from_types(row.value_types)
