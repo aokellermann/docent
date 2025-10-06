@@ -21,13 +21,7 @@ def main(
     server_url = ENV.get("NEXT_PUBLIC_API_HOST")
     if not server_url:
         raise ValueError("NEXT_PUBLIC_API_HOST is not set")
-
-    # Initialize Docent client
-    api_key = os.getenv("DOCENT_API_KEY")
-    docent_client = Docent(
-        api_key=api_key,
-        server_url=server_url,
-    )
+    docent_client = Docent(server_url=server_url)
 
     # Determine collection_id: either use existing or create new
     if collection_name is not None:
