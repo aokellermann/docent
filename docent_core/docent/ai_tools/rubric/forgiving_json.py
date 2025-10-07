@@ -1,5 +1,4 @@
 import json
-import re
 from typing import Any
 
 
@@ -32,6 +31,16 @@ def _repair_json(text: str) -> str:
         char = text[i]
 
         if escape_next:
+            if in_string:
+                # Check if this is a valid escape sequence
+                is_valid_escape = char in '\\/bfnrt"' or (
+                    char == "u"
+                    and i + 4 < len(text)
+                    and all(c in "0123456789abcdefABCDEF" for c in text[i + 1 : i + 5])
+                )
+                if not is_valid_escape:
+                    # Invalid escape sequence - add another backslash to escape it
+                    result.append("\\")
             result.append(char)
             escape_next = False
             continue
@@ -89,15 +98,11 @@ def forgiving_json_loads(text: str) -> Any:
     Repairs applied:
     - Strip leading/trailing non-JSON text
     - Escape unescaped quotes and newlines inside strings
-    - Fix invalid escape sequences
+    - Fix invalid escape sequences inside strings
     """
     if not text or not text.strip():
         raise ValueError("Empty or whitespace-only input")
 
     text = _repair_json(text)
-
-    # Fix invalid escape sequences by escaping the backslash (e.g. \\x -> \\\\x).
-    invalid_escape_pattern = r'\\(?![\\"/bfnrt]|u[0-9a-fA-F]{4})'
-    text = re.sub(invalid_escape_pattern, lambda m: "\\\\" + m.group(0)[1:], text)
 
     return json.loads(text)
