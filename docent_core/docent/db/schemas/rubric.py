@@ -163,11 +163,13 @@ class SQLAJudgeResult(SQLABase):
     rubric_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     rubric_version: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
 
+    # Outputs
+    output: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    result_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    result_type: Mapped[ResultType] = mapped_column(Enum(ResultType), nullable=False)
+
     # Deprecated
     value: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    output: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    result_type: Mapped[ResultType] = mapped_column(Enum(ResultType), nullable=False)
 
     # Composite foreign key constraint
     __table_args__ = (
@@ -198,9 +200,10 @@ class SQLAJudgeResult(SQLABase):
             agent_run_id=judge_result.agent_run_id,
             rubric_id=judge_result.rubric_id,
             rubric_version=judge_result.rubric_version,
-            value=judge_result.value,
-            result_type=judge_result.result_type,
             output=judge_result.output,
+            result_metadata=judge_result.result_metadata,
+            result_type=judge_result.result_type,
+            value=judge_result.value,
         )
 
     def to_pydantic(self) -> JudgeResult:
@@ -209,9 +212,10 @@ class SQLAJudgeResult(SQLABase):
             agent_run_id=self.agent_run_id,
             rubric_id=self.rubric_id,
             rubric_version=self.rubric_version,
-            value=self.value,
-            result_type=self.result_type,
             output=self.output,
+            result_metadata=self.result_metadata,
+            result_type=self.result_type,
+            value=self.value,
         )
 
 

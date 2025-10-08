@@ -14,8 +14,8 @@ async def centroid_assignment_job(ctx: ViewContext, job: SQLAJob):
     async with db.session() as session:
         if ctx.user is None:
             raise ValueError("User is required to assign centroids")
-        usage_svc = UsageService(session, db.session)
-        llm_svc = LLMService(session, db.session, ctx.user, usage_svc)
+        usage_svc = UsageService(db.session)
+        llm_svc = LLMService(db.session, ctx.user, usage_svc)
         rs = RubricService(session, db.session, mono_svc, llm_svc)
         sqla_rubric = await rs.get_rubric(job.job_json["rubric_id"], version=None)
         if sqla_rubric is None:
@@ -30,7 +30,7 @@ async def clustering_job(ctx: ViewContext, job: SQLAJob):
     async with db.session() as session:
         if ctx.user is None:
             raise ValueError("User is required to run clustering job")
-        usage_svc = UsageService(session, db.session)
-        llm_svc = LLMService(session, db.session, ctx.user, usage_svc)
+        usage_svc = UsageService(db.session)
+        llm_svc = LLMService(db.session, ctx.user, usage_svc)
         rs = RubricService(session, db.session, mono_svc, llm_svc)
         await rs.run_clustering_job(ctx, job)

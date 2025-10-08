@@ -24,23 +24,21 @@ from docent_core.docent.services.usage import UsageService
 
 
 def get_usage_svc(
-    session: AsyncSession = Depends(get_session),
     session_cm_factory: Callable[[], AsyncContextManager[AsyncSession]] = Depends(
         get_session_cm_factory
     ),
 ) -> UsageService:
-    return UsageService(session, session_cm_factory)
+    return UsageService(session_cm_factory)
 
 
 def get_llm_svc(
-    session: AsyncSession = Depends(get_session),
     session_cm_factory: Callable[[], AsyncContextManager[AsyncSession]] = Depends(
         get_session_cm_factory
     ),
     user: User = Depends(get_user_anonymous_ok),
     usage_service: UsageService = Depends(get_usage_svc),
 ) -> LLMService:
-    return LLMService(session, session_cm_factory, user, usage_service)
+    return LLMService(session_cm_factory, user, usage_service)
 
 
 def get_rubric_service(

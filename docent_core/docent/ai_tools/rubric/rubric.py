@@ -1,10 +1,14 @@
 import enum
 import json
-from typing import Any, Callable, Protocol, cast
+import time
+from collections import Counter
+from typing import Any, Callable, Literal, Protocol, cast
 from uuid import uuid4
 
+import anyio
 import jsonschema
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import BaseModel, Field, field_serializer, field_validator
+from tqdm.auto import tqdm
 
 from docent._log_util import get_logger
 from docent.data_models.agent_run import AgentRun
@@ -14,9 +18,9 @@ from docent.data_models.remove_invalid_citation_ranges import remove_invalid_cit
 from docent.data_models.transcript import TEXT_RANGE_CITE_INSTRUCTION
 from docent_core._llm_util.data_models.exceptions import ValidationFailedException
 from docent_core._llm_util.data_models.llm_output import LLMOutput
-from docent_core._llm_util.prod_llms import MessagesInput
 from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES, ModelOption
 from docent_core.docent.ai_tools.rubric.forgiving_json import forgiving_json_loads
+from docent_core.docent.ai_tools.rubric.meta_schema import validate_judge_result_schema
 from docent_core.docent.services.llms import LLMService
 
 logger = get_logger(__name__)
@@ -48,8 +52,8 @@ Double quotes (`"`) in the middle of a string in the JSON object must be escaped
 DEFAULT_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
-        "explanation": {"type": "string", "citations": True},
         "label": {"type": "string", "enum": ["match", "no match"]},
+        "explanation": {"type": "string", "citations": True},
     },
     # Require these properties to be present
     "required": ["label", "explanation"],
@@ -85,6 +89,17 @@ class Rubric(BaseModel):
     judge_model: ModelOption = DEFAULT_JUDGE_MODEL
     output_schema: dict[str, Any] = DEFAULT_OUTPUT_SCHEMA
 
+    @field_validator("output_schema")
+    @classmethod
+    def validate_output_schema(cls, output_schema: dict[str, Any]):
+        """
+        Raises:
+            jsonschema.ValidationError: If the schema is invalid
+            jsonschema.SchemaError: If the schema is not a valid 2020-12 schema
+        """
+        validate_judge_result_schema(output_schema)
+        return output_schema
+
 
 class ResultType(enum.Enum):
     """Enum for the type of result that a judge result can have."""
@@ -98,10 +113,14 @@ class JudgeResult(BaseModel):
     agent_run_id: str
     rubric_id: str
     rubric_version: int
-    output: dict[str, Any]
 
-    value: str | None = None  # deprecated
+    # Outputs
+    output: dict[str, Any]
+    result_metadata: dict[str, Any] | None = None
     result_type: ResultType
+
+    # Deprecated
+    value: str | None = None
 
     @field_serializer("result_type")
     def serialize_result_type(self, result_type: ResultType) -> str:
@@ -189,7 +208,7 @@ def _validate_rubric_output(
     def _validate_citation_string(text: str) -> str:
         validated_text = remove_invalid_citation_ranges(text, agent_run)
         if validated_text != text:
-            logger.info(
+            logger.warning(
                 f"Citation validation removed invalid text range from citation in judge result. "
                 f"Agent run ID: {agent_run.id}, "
                 f"Original text: {text}, "
@@ -250,50 +269,6 @@ def _parse_and_validate_llm_output(
     return _validate_rubric_output(cast(dict[str, Any], output), output_schema, agent_run)
 
 
-def _get_validation_callback(
-    rubric: Rubric,
-    agent_runs: list[AgentRun],
-):
-    """Validation callback that throws ValidationFailedException if output is invalid."""
-
-    async def _validation_callback(batch_index: int, llm_output: LLMOutput):
-        _parse_and_validate_llm_output(llm_output, rubric.output_schema, agent_runs[batch_index])
-
-    return _validation_callback
-
-
-def _get_completion_callback(
-    rubric: Rubric,
-    agent_run_ids: list[str],
-    agent_runs: list[AgentRun],
-    callback: JudgeResultStreamingCallback,
-    result_type: ResultType,
-):
-    """Completion callback that handles final results (success or error)."""
-
-    async def _completion_callback(batch_index: int, llm_output: LLMOutput):
-        if llm_output.did_error:
-            await callback(batch_index, None)
-        else:
-            validated_output = _parse_and_validate_llm_output(
-                llm_output, rubric.output_schema, agent_runs[batch_index]
-            )
-            await callback(
-                batch_index,
-                [
-                    JudgeResult(
-                        agent_run_id=agent_run_ids[batch_index],
-                        rubric_id=rubric.id,
-                        rubric_version=rubric.version,
-                        result_type=result_type,
-                        output=validated_output,
-                    )
-                ],
-            )
-
-    return _completion_callback
-
-
 def construct_rubric_prompt(rubric: Rubric, agent_run: AgentRun, prompt_template: str) -> str:
     """Construct the full prompt text for rubric evaluation.
 
@@ -326,39 +301,359 @@ def _get_prompt_resolver(rubric: Rubric, ar: AgentRun, prompt_template: str):
     return _prompt_resolver
 
 
+def _parse_and_validate_output(
+    output: str,
+    rubric: Rubric,
+    agent_run: AgentRun,
+) -> dict[str, Any] | None:
+    try:
+        parsed_output = json.loads(output)
+    except json.JSONDecodeError:
+        logger.error(f"Failed to parse JSON for judge result:\n{output}")
+        return None
+    if not isinstance(parsed_output, dict):
+        return None
+    parsed_output = cast(dict[str, Any], parsed_output)
+
+    # Validate dict against the output schema
+    # This returns None if the output is invalid
+    validated_output = _validate_rubric_output(parsed_output, rubric.output_schema, agent_run)
+
+    return validated_output
+
+
+def get_agreement_keys(schema: dict[str, Any]) -> list[str]:
+    """Get list of top-level keys in schema that we want to measure agreement on.
+
+    This includes enum, bool, and int fields. We skip float and strings.
+
+    Args:
+        schema: JSON schema dict
+
+    Returns:
+        List of field names (keys) that should be used for measuring agreement
+    """
+    agreement_keys: list[str] = []
+
+    properties = schema.get("properties", {})
+    assert isinstance(properties, dict)
+    properties = cast(dict[str, Any], properties)
+
+    for key, field_schema in properties.items():
+        assert isinstance(field_schema, dict)
+        field_schema = cast(dict[str, Any], field_schema)
+
+        field_type = field_schema.get("type")
+        assert isinstance(field_type, str)
+
+        # Include boolean fields
+        if field_type == "boolean":
+            agreement_keys.append(key)
+        # Include integer fields
+        elif field_type == "integer":
+            agreement_keys.append(key)
+        # Include enum fields (even strings)
+        elif "enum" in field_schema:
+            agreement_keys.append(key)
+
+    return agreement_keys
+
+
+def find_modal_result(indep_results: list[dict[str, Any]], agreement_keys: list[str]):
+    """Find the result that best matches modal values across agreement keys.
+
+    Args:
+        indep_results: List of independent results to analyze
+        agreement_keys: Keys to measure agreement on
+
+    Returns:
+        Tuple of (max_idx, agt_key_modes_and_counts) where:
+        - max_idx is the index of the result that best matches modal values
+        - agt_key_modes_and_counts maps each key to (modal_value, count) or None if no values exist for that key
+
+    Raises:
+        ValueError: If no results are provided
+    """
+    if not indep_results:
+        raise ValueError("No results to score")
+
+    # For each agreement key, compute the mode and count (or None, if no values exist for that key)
+    agt_key_modes_and_counts: dict[str, tuple[str | bool | int, int] | None] = {}
+    for key in agreement_keys:
+        key_modes = Counter(v for r in indep_results if (v := r.get(key)) is not None)
+        if most_common_one := key_modes.most_common(1):
+            agt_key_modes_and_counts[key] = most_common_one[0]
+        else:
+            agt_key_modes_and_counts[key] = None
+
+    # Score each rollout based on how many agreement keys they match
+    # If there is no mode for a key, or if a certain result doesn't have that key, it doesn't count.
+    # TODO(mengk): This may bias towards results that have more keys.
+    indep_result_scores: list[int] = []
+    for r in indep_results:
+        score = 0
+        for key in agreement_keys:
+            mode_and_count = agt_key_modes_and_counts[key]
+            if mode_and_count and r.get(key) == mode_and_count[0]:
+                score += 1
+        indep_result_scores.append(score)
+
+    # Argmax
+    max_idx = indep_result_scores.index(max(indep_result_scores))
+
+    return max_idx, agt_key_modes_and_counts
+
+
+async def _evaluate_single_run_majority(
+    *,
+    agent_run: AgentRun,
+    rubric: Rubric,
+    rubric_prompt: str,
+    llm_svc: LLMService,
+    n_rollouts: int,
+    result_type: ResultType,
+    max_concurrency: int,
+) -> JudgeResult | None:
+    async def _validation_callback(batch_index: int, llm_output: LLMOutput):
+        _parse_and_validate_llm_output(llm_output, rubric.output_schema, agent_run)
+
+    prompt_resolver = _get_prompt_resolver(rubric, agent_run, rubric_prompt)
+    outputs = await llm_svc.get_completions(
+        inputs=[prompt_resolver for _ in range(n_rollouts)],
+        model_options=[rubric.judge_model],
+        max_new_tokens=16384,
+        timeout=180.0,
+        use_cache=False,
+        validation_callback=_validation_callback,
+        max_concurrency=max_concurrency,
+    )
+
+    # Process each rollout independently
+    indep_results: list[dict[str, Any]] = []
+    for output in outputs:
+        if output.first_text is None:
+            continue
+        if validated_output := _parse_and_validate_output(output.first_text, rubric, agent_run):
+            indep_results.append(validated_output)
+
+    if not indep_results:
+        return None
+
+    # Get a list of the keys that we want to measure agreement on
+    agreement_keys = get_agreement_keys(rubric.output_schema)
+
+    # Find the result that best matches modal values
+    final_max_idx, final_agt_key_modes_and_counts = find_modal_result(indep_results, agreement_keys)
+    final_output = indep_results[final_max_idx]
+
+    return JudgeResult(
+        agent_run_id=agent_run.id,
+        rubric_id=rubric.id,
+        rubric_version=rubric.version,
+        output=final_output,
+        result_metadata={
+            "agt_keys": agreement_keys,
+            # Final measurements
+            "final_results": indep_results,
+            "final_agt_key_modes_and_counts": final_agt_key_modes_and_counts,
+            "final_max_idx": final_max_idx,
+        },
+        result_type=result_type,
+    )
+
+
+async def _evaluate_single_run_multi_reflect(
+    *,
+    agent_run: AgentRun,
+    rubric: Rubric,
+    rubric_prompt: str,
+    llm_svc: LLMService,
+    n_rollouts: int,
+    result_type: ResultType,
+    max_concurrency: int,
+) -> JudgeResult | None:
+    async def _validation_callback(batch_index: int, llm_output: LLMOutput):
+        _parse_and_validate_llm_output(llm_output, rubric.output_schema, agent_run)
+
+    # Run several independent rollouts
+    prompt_resolver = _get_prompt_resolver(rubric, agent_run, rubric_prompt)
+    outputs = await llm_svc.get_completions(
+        inputs=[prompt_resolver for _ in range(n_rollouts)],
+        model_options=[rubric.judge_model],
+        max_new_tokens=16384,
+        timeout=180.0,
+        use_cache=False,
+        validation_callback=_validation_callback,
+        max_concurrency=max_concurrency,
+    )
+
+    # Process each rollout
+    indep_results: list[dict[str, Any]] = []
+    for output in outputs:
+        if output.first_text is None:
+            continue
+        if v_output := _parse_and_validate_output(output.first_text, rubric, agent_run):
+            indep_results.append(v_output)
+
+    if not indep_results:
+        return None
+
+    # Compute initial modes
+    agreement_keys = get_agreement_keys(rubric.output_schema)
+    indep_max_idx, indep_agt_key_modes_and_counts = find_modal_result(indep_results, agreement_keys)
+
+    def _get_reflection_prompt_resolver(cur_index: int) -> Any:
+        # Current result
+        result = indep_results[cur_index]
+        # Get other results (excluding the current one)
+        other_results = [r for j, r in enumerate(indep_results) if j != cur_index]
+
+        # Create the reflection message
+        other_results_text = "\n\n".join(
+            [f"Answer {j+1}:\n{json.dumps(r, indent=2)}" for j, r in enumerate(other_results)]
+        )
+
+        reflection_instruction = (
+            f"Here are {len(other_results)} other independent answers to the same rubric evaluation:\n\n"
+            f"{other_results_text}\n\n"
+            f"Please reflect on these other answers and your own answer. "
+            f"Consider if any of them have identified important aspects you missed, or if there are disagreements that should be resolved. "
+            f"Then provide your final answer in the same JSON format as before."
+        )
+
+        def _prompt_resolver():
+            """Function that lazily materializes the prompt, when the LLM is invoked."""
+
+            # Construct the multi-message prompt
+            # 1. Original user message
+            # 2. Assistant message with the rollout's result
+            # 3. New user message asking for reflection
+            reflection_prompt = [
+                *prompt_resolver(),  # Original user message(s)
+                {"role": "assistant", "content": json.dumps(result, indent=2)},
+                {"role": "user", "content": reflection_instruction},
+            ]
+            return reflection_prompt
+
+        return _prompt_resolver
+
+    final_results = indep_results.copy()  # Shallow copy
+    if len(indep_results) > 1:
+        # Ask the judge to reflect on the others' results
+        reflection_outputs = await llm_svc.get_completions(
+            inputs=[_get_reflection_prompt_resolver(i) for i in range(len(indep_results))],
+            model_options=[rubric.judge_model],
+            max_new_tokens=16384,
+            timeout=180.0,
+            use_cache=False,
+            validation_callback=_validation_callback,
+            max_concurrency=max_concurrency,
+        )
+
+        # Process reflection outputs in the same way as the initial rollouts
+        reflected_results: list[dict[str, Any]] = []
+        for output in reflection_outputs:
+            if output.first_text is None:
+                continue
+            if v_output := _parse_and_validate_output(output.first_text, rubric, agent_run):
+                reflected_results.append(v_output)
+
+        # Use reflected results if we got any, otherwise fall back to original results
+        if reflected_results:
+            final_results = reflected_results
+
+    final_max_idx, final_agt_key_modes_and_counts = find_modal_result(final_results, agreement_keys)
+    return JudgeResult(
+        agent_run_id=agent_run.id,
+        rubric_id=rubric.id,
+        rubric_version=rubric.version,
+        output=final_results[final_max_idx],
+        result_metadata={
+            "agt_keys": agreement_keys,
+            # Final measurements
+            "final_results": final_results,
+            "final_agt_key_modes_and_counts": final_agt_key_modes_and_counts,
+            "final_max_idx": final_max_idx,
+            # Also include initial measurements
+            "indep_results": indep_results,
+            "indep_max_idx": indep_max_idx,
+            "indep_agt_key_modes_and_counts": indep_agt_key_modes_and_counts,
+        },
+        result_type=result_type,
+    )
+
+
 async def evaluate_rubric(
     agent_runs: list[AgentRun],
     rubric: Rubric,
     llm_svc: LLMService,
     callback: JudgeResultStreamingCallback | None = None,
     max_recall: bool = False,
+    rollouts_per_input: int = 1,
+    max_concurrent_llm_calls: int = 100,
+    variant: Literal["majority", "multi-reflect"] = "majority",
 ):
     rubric_prompt = RUBRIC_MAX_RECALL_PROMPT if max_recall else RUBRIC_PROMPT
     result_type = ResultType.NEAR_MISS if max_recall else ResultType.DIRECT_RESULT
 
-    prompt_resolvers: list[MessagesInput] = [
-        _get_prompt_resolver(rubric, ar, rubric_prompt) for ar in agent_runs
-    ]
+    if max_concurrent_llm_calls <= 0:
+        raise ValueError("max_concurrent_llm_calls must be greater than 0")
+    if rollouts_per_input <= 0:
+        raise ValueError("rollouts_per_input must be greater than 0")
 
-    await llm_svc.get_completions(
-        inputs=prompt_resolvers,
-        model_options=[rubric.judge_model],
-        max_new_tokens=16384,
-        timeout=180.0,
-        use_cache=True,
-        validation_callback=_get_validation_callback(rubric, agent_runs),
-        completion_callback=(
-            _get_completion_callback(
-                rubric,
-                [ar.id for ar in agent_runs],
-                agent_runs,
-                callback,
-                result_type,
-            )
-            if callback is not None
-            else None
-        ),
+    max_concurrent_rubrics = max(1, max_concurrent_llm_calls // rollouts_per_input)
+    semaphore = anyio.Semaphore(max_concurrent_rubrics)
+
+    agent_results: list[JudgeResult | None] = [None for _ in agent_runs]
+    progress_bar = tqdm(
+        total=len(agent_runs),
+        desc="Running rubric on agent runs",
+        disable=not agent_runs,
     )
+
+    async def _run_single_judge(index: int, agent_run: AgentRun):
+        async with semaphore:
+            if variant == "majority":
+                fn = _evaluate_single_run_majority
+            elif variant == "multi-reflect":
+                fn = _evaluate_single_run_multi_reflect
+            else:
+                raise ValueError(f"Invalid variant: {variant}")
+
+            start_perf_counter = time.perf_counter()
+            result = await fn(
+                agent_run=agent_run,
+                rubric=rubric,
+                rubric_prompt=rubric_prompt,
+                llm_svc=llm_svc,
+                n_rollouts=rollouts_per_input,
+                result_type=result_type,
+                max_concurrency=min(rollouts_per_input, max_concurrent_llm_calls),
+            )
+            duration_seconds = time.perf_counter() - start_perf_counter
+
+        if result is not None:
+            result = result.model_copy(
+                update={
+                    "result_metadata": (result.result_metadata or {})
+                    | {"duration_seconds": duration_seconds}
+                }
+            )
+
+        agent_results[index] = result
+
+        if callback is not None:
+            await callback(index, [result] if result is not None else None)
+        progress_bar.update()
+
+    try:
+        async with anyio.create_task_group() as tg:
+            for index, agent_run in enumerate(agent_runs):
+                tg.start_soon(_run_single_judge, index, agent_run)
+    finally:
+        progress_bar.close()
+
+    return agent_results
 
 
 RUBRIC_MAX_RECALL_PROMPT = """

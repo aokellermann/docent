@@ -534,12 +534,13 @@ class RefinementService:
                                 )
 
                             # Apply tool update and message
-                            updated_rubric = current_sq_rubric.to_pydantic().model_copy(deep=True)
-                            tool_result_msg = execute_set_rubric(updated_rubric, tc)
+                            updated_rubric, tool_result_msg = execute_set_rubric(
+                                current_sq_rubric.to_pydantic(), tc
+                            )
                             rsession.messages.append(tool_result_msg)
 
                             # If the output schema is invalid, don't persist the new version
-                            if not isinstance(tool_result_msg.error, dict):
+                            if updated_rubric:
                                 # Cancel existing eval rubric job
                                 await self.rubric_svc.cancel_active_rubric_eval_job(
                                     current_sq_rubric.id

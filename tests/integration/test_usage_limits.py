@@ -83,9 +83,7 @@ async def test_usage_limit_blocks_platform_providers(
     test_user: User,
 ) -> None:
     """Users over usage limit get blocked when using platform providers."""
-    llm_service = LLMService(
-        db_session, session_cm_factory, test_user, UsageService(db_session, session_cm_factory)
-    )
+    llm_service = LLMService(session_cm_factory, test_user, UsageService(session_cm_factory))
 
     with mock_usage_check(within_limit=False):
         outputs = await llm_service.get_completions(
@@ -106,9 +104,7 @@ async def test_usage_limit_allows_when_under_limit(
     test_user: User,
 ) -> None:
     """Users under usage limit can proceed normally."""
-    llm_service = LLMService(
-        db_session, session_cm_factory, test_user, UsageService(db_session, session_cm_factory)
-    )
+    llm_service = LLMService(session_cm_factory, test_user, UsageService(session_cm_factory))
 
     with mock_usage_check(within_limit=True), mock_llm_call() as mock_llm:
         outputs = await llm_service.get_completions(
@@ -127,9 +123,7 @@ async def test_byok_users_bypass_usage_limits(
 ) -> None:
     """BYOK users bypass usage limits even when over free cap."""
     api_key = await create_byok_key(db_session, test_user)
-    llm_service = LLMService(
-        db_session, session_cm_factory, test_user, UsageService(db_session, session_cm_factory)
-    )
+    llm_service = LLMService(session_cm_factory, test_user, UsageService(session_cm_factory))
     model_options = [ModelOption(provider="anthropic", model_name="claude-sonnet-4")]
 
     with mock_usage_check(within_limit=False), mock_llm_call() as mock_llm:
@@ -163,10 +157,8 @@ async def test_old_usage_outside_window_not_counted(
     db_session.add(high_usage)
     await db_session.commit()
 
-    llm_service = LLMService(
-        db_session, session_cm_factory, test_user, UsageService(db_session, session_cm_factory)
-    )
-    usage_service = UsageService(db_session, session_cm_factory)
+    llm_service = LLMService(session_cm_factory, test_user, UsageService(session_cm_factory))
+    usage_service = UsageService(session_cm_factory)
     model_options = [ModelOption(provider="anthropic", model_name="claude-sonnet-4")]
 
     with mock_llm_call() as mock_llm:

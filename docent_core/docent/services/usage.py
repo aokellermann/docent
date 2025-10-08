@@ -46,10 +46,8 @@ def _truncate_datetime(ts: datetime) -> datetime:
 class UsageService:
     def __init__(
         self,
-        session: AsyncSession,
         session_cm_factory: Callable[[], AsyncContextManager[AsyncSession]],
     ):
-        self.session = session
         self.session_cm_factory = session_cm_factory
 
     async def get_free_spend_cents(
@@ -64,10 +62,12 @@ class UsageService:
                 SQLAModelUsage.bucket_start >= cutoff,
             )
         )
-        result = await self.session.execute(stmt)
+        async with self.session_cm_factory() as session:
+            result = await session.execute(stmt)
+            results = result.fetchall()
 
         total_cost_cents = 0
-        for model_json, metric_name, value in result.fetchall():
+        for model_json, metric_name, value in results:
             model_name = model_json.get("model_name")
             total_cost_cents += estimate_cost_cents(model_name, value, metric_name)
 
@@ -94,42 +94,44 @@ class UsageService:
     ) -> None:
         bucket_start = _truncate_datetime(when or datetime.now(UTC).replace(tzinfo=None))
 
-        for metric_name, raw_value in metrics.items():
-            value = int(raw_value)
-            stmt = insert(SQLAModelUsage).values(
-                user_id=user_id,
-                api_key_id=api_key_id,
-                model=dict(model),
-                bucket_start=bucket_start,
-                metric_name=metric_name,
-                value=value,
-            )
-            if api_key_id is None:
-                # Match partial unique index for free usage (api_key_id IS NULL)
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=[
-                        SQLAModelUsage.user_id,
-                        SQLAModelUsage.bucket_start,
-                        SQLAModelUsage.metric_name,
-                        SQLAModelUsage.model,
-                    ],
-                    index_where=SQLAModelUsage.api_key_id.is_(None),
-                    set_={"value": SQLAModelUsage.value + value},
+        async with self.session_cm_factory() as session:
+            for metric_name, raw_value in metrics.items():
+                value = int(raw_value)
+                stmt = insert(SQLAModelUsage).values(
+                    user_id=user_id,
+                    api_key_id=api_key_id,
+                    model=dict(model),
+                    bucket_start=bucket_start,
+                    metric_name=metric_name,
+                    value=value,
                 )
-            else:
-                # Match partial unique index for BYOK usage (api_key_id IS NOT NULL)
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=[
-                        SQLAModelUsage.user_id,
-                        SQLAModelUsage.api_key_id,
-                        SQLAModelUsage.bucket_start,
-                        SQLAModelUsage.metric_name,
-                        SQLAModelUsage.model,
-                    ],
-                    index_where=SQLAModelUsage.api_key_id.is_not(None),
-                    set_={"value": SQLAModelUsage.value + value},
-                )
-            await self.session.execute(stmt)
+                if api_key_id is None:
+                    # Match partial unique index for free usage (api_key_id IS NULL)
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=[
+                            SQLAModelUsage.user_id,
+                            SQLAModelUsage.bucket_start,
+                            SQLAModelUsage.metric_name,
+                            SQLAModelUsage.model,
+                        ],
+                        index_where=SQLAModelUsage.api_key_id.is_(None),
+                        set_={"value": SQLAModelUsage.value + value},
+                    )
+                else:
+                    # Match partial unique index for BYOK usage (api_key_id IS NOT NULL)
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=[
+                            SQLAModelUsage.user_id,
+                            SQLAModelUsage.api_key_id,
+                            SQLAModelUsage.bucket_start,
+                            SQLAModelUsage.metric_name,
+                            SQLAModelUsage.model,
+                        ],
+                        index_where=SQLAModelUsage.api_key_id.is_not(None),
+                        set_={"value": SQLAModelUsage.value + value},
+                    )
+
+                await session.execute(stmt)
 
     async def get_free_usage_breakdown(
         self, user_id: str, window_seconds: int
@@ -150,12 +152,14 @@ class UsageService:
                 SQLAModelUsage.bucket_start >= cutoff,
             )
         )
-        result = await self.session.execute(stmt)
+        async with self.session_cm_factory() as session:
+            result = await session.execute(stmt)
+            results = result.fetchall()
 
         # Aggregate by model/metric
         by_model: defaultdict[str, float] = defaultdict(float)
         total_cents = 0.0
-        for model_json, metric_name, value in result.fetchall():
+        for model_json, metric_name, value in results:
             model_name = self._extract_model_name(model_json)
             cost = estimate_cost_cents(model_name, int(value), metric_name)  # type: ignore[arg-type]
             by_model[model_name] += cost
@@ -201,11 +205,13 @@ class UsageService:
                 SQLAModelUsage.bucket_start >= cutoff,
             )
         )
-        result = await self.session.execute(stmt)
+        async with self.session_cm_factory() as session:
+            result = await session.execute(stmt)
+            results = result.fetchall()
 
         # Aggregate into nested structure {api_key_id: {model: {input, output}}}
         by_key: dict[str, dict[str, dict[str, int]]] = {}
-        for api_key_id, model_json, metric_name, value in result.fetchall():
+        for api_key_id, model_json, metric_name, value in results:
             if api_key_id is None:
                 continue
             model_name = self._extract_model_name(model_json)

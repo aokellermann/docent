@@ -32,8 +32,8 @@ async def refinement_agent_job(ctx: ViewContext, job: SQLAJob):
         raise ValueError("User is required to run a refinement job")
 
     async with db.session() as session:
-        usage_svc = UsageService(session, db.session)
-        llm_svc = LLMService(session, db.session, ctx.user, usage_svc)
+        usage_svc = UsageService(db.session)
+        llm_svc = LLMService(db.session, ctx.user, usage_svc)
         rubric_svc = RubricService(session, db.session, mono_svc, llm_svc)
         refinement_svc = RefinementService(session, db.session, mono_svc, rubric_svc, llm_svc)
 

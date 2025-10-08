@@ -181,34 +181,29 @@ LABEL_TEMPLATE = """
 """.strip()
 
 
-def execute_set_rubric(rubric: Rubric, tool_call: ToolCall) -> ToolMessage:
-    rubric.rubric_text = tool_call.arguments.get("text", rubric.rubric_text)
-    output_schema: dict[str, Any] | None = tool_call.arguments.get("output_schema")
+def execute_set_rubric(
+    old_rubric: Rubric, tool_call: ToolCall
+) -> tuple[Rubric | None, ToolMessage]:
+    updates: dict[str, Any] = {}
 
-    # Output schema was not edited
-    if output_schema is None:
-        rubric.version += 1
-        return ToolMessage(
-            content=str(rubric.version),
-            tool_call_id=tool_call.id,
-            function=tool_call.function,
-            error=None,
-        )
+    # Update the rubric version, text, and schema
+    updates["version"] = old_rubric.version + 1
+    if t := tool_call.arguments.get("text"):
+        updates["rubric_text"] = t
+    if s := tool_call.arguments.get("output_schema"):
+        updates["output_schema"] = s
 
-    # Output schema was edited: validate, set, and increment
+    # Attempt to construct the new rubric. If validation fails, return an error.
     try:
-        jsonschema.Draft202012Validator.check_schema(output_schema)
-
-        rubric.output_schema = output_schema
-        rubric.version += 1
-        return ToolMessage(
+        rubric = Rubric.model_validate(old_rubric.model_dump() | updates)
+        return rubric, ToolMessage(
             content=str(rubric.version),
             tool_call_id=tool_call.id,
             function=tool_call.function,
             error=None,
         )
-    except jsonschema.SchemaError as e:
-        return ToolMessage(
+    except (jsonschema.ValidationError, jsonschema.SchemaError) as e:
+        return None, ToolMessage(
             content=f"Invalid output schema: {e}",
             error={"detail": e},
             tool_call_id=tool_call.id,

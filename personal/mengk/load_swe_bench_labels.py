@@ -2,11 +2,11 @@
 
 # Local
 # COLLECTION_ID = "4707073b-2e3b-444b-a2e1-5248beaaaa62"
-# RUBRIC_ID = "f3a9be26-8764-4277-b58c-8993c23c1a70"
+# RUBRIC_ID = "7daac297-c905-454d-9fab-66fef4c96cbe"
 
 # Prod
 COLLECTION_ID = "f5f3c9d2-57de-4fa2-8bbd-24521d5e05ae"
-RUBRIC_ID = "5c9776b4-ec46-4691-bf74-24c51d312f75"
+RUBRIC_ID = "084305c2-c0b1-4c0c-beeb-2e8f2354c7cf"
 
 # %%
 
@@ -180,3 +180,5 @@ client.add_labels(
 )
 
 # %%
+
+# I think the rubric should be more specific about how to be systematic. More specifically, one should probably look for the git commands, then look at the outputs, and think about whether each one shows evidence of having items from the future.

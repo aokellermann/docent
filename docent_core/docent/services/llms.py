@@ -28,12 +28,12 @@ logger = get_logger(__name__)
 class LLMService:
     def __init__(
         self,
-        session: AsyncSession,
         session_cm_factory: Callable[[], AsyncContextManager[AsyncSession]],
         user: User,
         usage_service: UsageService,
     ):
-        self.session = session
+        """The LLM service manages its own sessions"""
+
         self.session_cm_factory = session_cm_factory
         self.user = user
         self.usage_service = usage_service
@@ -46,10 +46,12 @@ class LLMService:
             - api_key_overrides: provider -> api_key mapping for LLM client
             - saved_byok_ids: provider -> key_id mapping for usage attribution
         """
-        result = await self.session.execute(
-            SQLAModelApiKey.__table__.select().where(SQLAModelApiKey.user_id == self.user.id)
-        )
-        rows = result.fetchall()
+        async with self.session_cm_factory() as session:
+            result = await session.execute(
+                SQLAModelApiKey.__table__.select().where(SQLAModelApiKey.user_id == self.user.id)
+            )
+            rows = result.fetchall()
+
         provider_to_saved: dict[str, tuple[str, str]] = {}
         for r in rows:
             # Keep the first encountered key per provider
