@@ -6,11 +6,11 @@ from openai.types.chat import (
     ChatCompletionMessageParam,
 )
 
+from docent._llm_util.providers.openai import parse_chat_messages, parse_tools
 from docent.data_models.chat import AssistantMessage, ChatMessage, ToolCall
 from docent.data_models.chat.tool import (
     ToolInfo,
 )
-from docent_core._llm_util.providers.openai import parse_chat_messages, parse_tools
 from docent_core.investigator.tools.backends.openai_compatible_backend import (
     ModelWithClient,
 )

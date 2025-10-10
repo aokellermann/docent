@@ -7,33 +7,28 @@ from google import genai
 from google.genai import errors, types
 from google.genai.client import AsyncClient as AsyncGoogle
 
-from docent._log_util import get_logger
-from docent.data_models.chat import ChatMessage, Content, ToolCall, ToolInfo
-from docent_core._env_util import ENV
-from docent_core._llm_util.data_models.exceptions import (
+from docent._llm_util.data_models.exceptions import (
     CompletionTooLongException,
     ContextWindowException,
     NoResponseException,
     RateLimitException,
 )
-from docent_core._llm_util.data_models.llm_output import (
+from docent._llm_util.data_models.llm_output import (
     AsyncSingleLLMOutputStreamingCallback,
     LLMCompletion,
     LLMOutput,
     UsageMetrics,
 )
-from docent_core._llm_util.providers.common import (
+from docent._llm_util.providers.common import (
     async_timeout_ctx,
     coerce_tool_args,
     reasoning_budget,
 )
+from docent._log_util import get_logger
+from docent.data_models.chat import ChatMessage, Content, ToolCall, ToolInfo
 
 
 def get_google_client_async(api_key: str | None = None) -> AsyncGoogle:
-    # Ensure environment variables are loaded.
-    # Technically you don't have to run this, but just makes clear where the envvars are used
-    _ = ENV
-
     if api_key:
         return genai.Client(api_key=api_key).aio
     return genai.Client().aio

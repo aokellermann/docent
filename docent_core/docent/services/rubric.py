@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from docent._log_util import get_logger
 from docent.data_models.judge import JudgeRunLabel
+from docent.judges import JudgeResult, ResultType, Rubric
 from docent_core._db_service.batched_writer import BatchedWriter
 from docent_core._server._broker.redis_client import enqueue_job
 from docent_core._worker.constants import WorkerFunction
@@ -20,12 +21,7 @@ from docent_core.docent.ai_tools.clustering.cluster_generator import (
     ClusterFeedback,
     propose_clusters,
 )
-from docent_core.docent.ai_tools.rubric.rubric import (
-    JudgeResult,
-    ResultType,
-    Rubric,
-    evaluate_rubric,
-)
+from docent_core.docent.ai_tools.rubric.rubric import evaluate_rubric
 from docent_core.docent.db.contexts import ViewContext
 from docent_core.docent.db.schemas.rubric import (
     SQLAJudgeResult,
@@ -921,9 +917,9 @@ class RubricService:
                 - total_input_tokens: Total estimated input tokens
                 - total_cost_cents: Total estimated cost in cents
         """
+        from docent._llm_util.model_registry import estimate_cost_cents
         from docent._log_util.logger import get_logger
         from docent.data_models._tiktoken_util import get_token_count
-        from docent_core._llm_util.model_registry import estimate_cost_cents
 
         logger = get_logger(__name__)
 
@@ -966,13 +962,11 @@ class RubricService:
             }
 
         # Estimate tokens for sample runs using the canonical prompt construction
-        from docent_core.docent.ai_tools.rubric.rubric import RUBRIC_PROMPT, construct_rubric_prompt
-
         rubric_pydantic = sqla_rubric.to_pydantic()
         total_sample_tokens = 0
         for agent_run in sample_agent_runs:
             # Use the canonical prompt construction function
-            prompt = construct_rubric_prompt(rubric_pydantic, agent_run, RUBRIC_PROMPT)
+            prompt = rubric_pydantic.materialize_system_prompt(agent_run)
             tokens = get_token_count(prompt)
             total_sample_tokens += tokens
 

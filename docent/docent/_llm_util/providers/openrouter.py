@@ -1,27 +1,27 @@
 """OpenRouter provider implementation using aiohttp library."""
 
 import json
+import os
 from typing import Any, Literal
 
 import aiohttp
 import backoff
 from backoff.types import Details
 
-from docent._log_util import get_logger
-from docent.data_models.chat import ChatMessage, Content, ToolCall, ToolInfo
-from docent_core._env_util import ENV
-from docent_core._llm_util.data_models.exceptions import (
+from docent._llm_util.data_models.exceptions import (
     CompletionTooLongException,
     ContextWindowException,
     NoResponseException,
     RateLimitException,
 )
-from docent_core._llm_util.data_models.llm_output import (
+from docent._llm_util.data_models.llm_output import (
     AsyncSingleLLMOutputStreamingCallback,
     LLMCompletion,
     LLMOutput,
     UsageMetrics,
 )
+from docent._log_util import get_logger
+from docent.data_models.chat import ChatMessage, Content, ToolCall, ToolInfo
 
 logger = get_logger(__name__)
 
@@ -32,7 +32,7 @@ class OpenRouterClient:
     """Async client for OpenRouter API using aiohttp."""
 
     def __init__(self, api_key: str | None = None):
-        self.api_key = api_key or ENV.get("OPENROUTER_API_KEY")
+        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
         self.base_url = OPENROUTER_API_BASE
 
     def _get_headers(self) -> dict[str, str]:
@@ -92,7 +92,6 @@ class OpenRouterClient:
 
 
 def get_openrouter_client_async(api_key: str | None = None) -> OpenRouterClient:
-    _ = ENV
     return OpenRouterClient(api_key=api_key)
 
 

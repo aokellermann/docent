@@ -7,10 +7,10 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+from docent._llm_util.providers.preference_types import ModelOption
 from docent._log_util import get_logger
 from docent.data_models.chat.message import ChatMessage, parse_chat_message
 from docent_core._db_service.schemas.base import SQLABase
-from docent_core._llm_util.providers.preferences import ModelOption
 from docent_core.docent.db.schemas.rubric import TABLE_JUDGE_RESULT
 from docent_core.docent.db.schemas.tables import TABLE_AGENT_RUN, TABLE_USER
 

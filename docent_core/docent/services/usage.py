@@ -8,9 +8,9 @@ from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from docent._llm_util.model_registry import estimate_cost_cents
 from docent._log_util import get_logger
 from docent_core._env_util import ENV
-from docent_core._llm_util.model_registry import estimate_cost_cents
 from docent_core.docent.db.schemas.tables import SQLAModelUsage
 
 logger = get_logger(__name__)

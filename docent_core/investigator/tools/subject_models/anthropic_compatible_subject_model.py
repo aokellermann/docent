@@ -19,13 +19,13 @@ from anthropic.types.thinking_config_disabled_param import ThinkingConfigDisable
 from anthropic.types.thinking_config_enabled_param import ThinkingConfigEnabledParam
 from anthropic.types.thinking_config_param import ThinkingConfigParam
 
-from docent.data_models.chat import AssistantMessage, ChatMessage, ToolCall
-from docent.data_models.chat.content import Content, ContentReasoning, ContentText
-from docent.data_models.chat.tool import ToolInfo
-from docent_core._llm_util.providers.anthropic import (
+from docent._llm_util.providers.anthropic import (
     parse_chat_messages,
     parse_tools,
 )
+from docent.data_models.chat import AssistantMessage, ChatMessage, ToolCall
+from docent.data_models.chat.content import Content, ContentReasoning, ContentText
+from docent.data_models.chat.tool import ToolInfo
 from docent_core.investigator.tools.backends.anthropic_compatible_backend import (
     ModelWithClient,
 )

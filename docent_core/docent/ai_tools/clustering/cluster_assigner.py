@@ -2,11 +2,11 @@ import re
 from abc import abstractmethod
 from typing import Callable, Protocol
 
+from docent._llm_util.data_models.llm_output import LLMOutput
+from docent._llm_util.prod_llms import MessagesInput
+from docent._llm_util.providers.preference_types import ModelOption
 from docent._log_util import get_logger
-from docent_core._llm_util.data_models.llm_output import LLMOutput
-from docent_core._llm_util.prod_llms import MessagesInput
-from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES, ModelOption
-from docent_core.docent.services.llms import LLMService
+from docent_core.docent.services.llms import PROVIDER_PREFERENCES, LLMService
 
 logger = get_logger(__name__)
 

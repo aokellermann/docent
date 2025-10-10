@@ -5,8 +5,7 @@ from typing import Callable, TypedDict, TypeVar, cast
 import numpy as np
 
 from docent.data_models._tiktoken_util import truncate_to_token_limit
-from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES
-from docent_core.docent.services.llms import LLMService
+from docent_core.docent.services.llms import PROVIDER_PREFERENCES, LLMService
 
 LARGE_CLUSTER_GUIDANCE = "Use as many clusters as you need to capture the variation in the items; we recommend generating between 5 and 10 clusters but sometimes more is necessary."
 

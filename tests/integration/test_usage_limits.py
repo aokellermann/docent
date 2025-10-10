@@ -8,10 +8,10 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from docent_core._llm_util.data_models.exceptions import DocentUsageLimitException
-from docent_core._llm_util.data_models.llm_output import LLMCompletion, LLMOutput
-from docent_core._llm_util.prod_llms import MessagesInput
-from docent_core._llm_util.providers.preferences import ModelOption
+from docent._llm_util.data_models.exceptions import DocentUsageLimitException
+from docent._llm_util.data_models.llm_output import LLMCompletion, LLMOutput
+from docent._llm_util.prod_llms import MessagesInput
+from docent._llm_util.providers.preference_types import ModelOption
 from docent_core.docent.db.schemas.auth_models import User
 from docent_core.docent.db.schemas.tables import SQLAModelApiKey, SQLAModelUsage
 from docent_core.docent.services.llms import LLMService

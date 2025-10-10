@@ -42,6 +42,8 @@ Important notes:
 - Citations are self-contained. Do NOT label them as citation or evidence. Just insert the citation by itself at the appropriate place in the text.
 - Citations must come immediately after the part of a claim that they support. This may be in the middle of a sentence.
 - Each pair of brackets must contain only one citation. To cite multiple blocks, use multiple pairs of brackets, like [T0B0] [T0B1].
+- Outside of citations, do not refer to transcript numbers or block numbers.
+- Outside of citations, avoid quoting or paraphrasing the transcript.
 """
 
 BLOCK_CITE_INSTRUCTION = """Each transcript and each block has a unique index. Cite the relevant indices in brackets when relevant, like [T<idx>B<idx>]. Use multiple tags to cite multiple blocks, like [T<idx1>B<idx1>][T<idx2>B<idx2>]. Remember to cite specific blocks and NOT action units."""

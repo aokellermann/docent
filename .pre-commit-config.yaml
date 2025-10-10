@@ -51,7 +51,7 @@ repos:
     rev: v1.1.396
     hooks:
       - id: pyright
-        files: ^(docent/|docent_core/).*\.py$
+        files: ^(docent/|docent_core/|tests/).*\.py$
         args: ["--pythonpath", ".venv/bin/python"]
 
   - repo: https://github.com/pre-commit/mirrors-prettier
@@ -59,7 +59,13 @@ repos:
     hooks:
       - id: prettier
         name: prettier
-        args: [--semi=true, --single-quote=true, --tab-width=2, --trailing-comma=es5]
+        args:
+          [
+            --semi=true,
+            --single-quote=true,
+            --tab-width=2,
+            --trailing-comma=es5,
+          ]
         files: ^docent_core/_web/.*\.(ts|tsx|js|jsx)$
 
   - repo: local

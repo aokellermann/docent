@@ -4,6 +4,8 @@ from typing import Any, Protocol
 
 import jsonschema
 
+from docent._llm_util.data_models.llm_output import LLMOutput
+from docent._llm_util.prod_llms import MessagesInput
 from docent.data_models.agent_run import AgentRun
 from docent.data_models.chat.message import ChatMessage, SystemMessage, ToolMessage, UserMessage
 from docent.data_models.chat.tool import (
@@ -13,11 +15,8 @@ from docent.data_models.chat.tool import (
     ToolParams,
 )
 from docent.data_models.judge import JudgeRunLabel
-from docent_core._llm_util.data_models.llm_output import LLMOutput
-from docent_core._llm_util.prod_llms import MessagesInput
-from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES
 from docent_core.docent.ai_tools.rubric.rubric import JudgeResult, Rubric
-from docent_core.docent.services.llms import LLMService
+from docent_core.docent.services.llms import PROVIDER_PREFERENCES, LLMService
 
 # TODO(mengk): if a user asks a statistical question, reframe it into a rubric question and then tell them to use the plotting functions to accomplish their goal.
 # TODO(mengk): ask for context on what the various transcripts are if it's not clear.

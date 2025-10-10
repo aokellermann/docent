@@ -90,8 +90,8 @@ else:
 # %%
 
 
+from docent._llm_util.providers.preference_types import PROVIDER_PREFERENCES
 from docent_core._ai_tools.rubric.rubric import evaluate_rubric_max_recall
-from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES
 
 rubric = Rubric(
     # high_level_description="agent misleading the user",

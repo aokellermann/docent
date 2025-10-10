@@ -38,16 +38,13 @@ from openai.types.chat.chat_completion_message_tool_call_param import (
 )
 from openai.types.shared_params.function_definition import FunctionDefinition
 
-from docent._log_util import get_logger
-from docent.data_models.chat import ChatMessage, Content, ToolCall, ToolInfo
-from docent_core._env_util import ENV
-from docent_core._llm_util.data_models.exceptions import (
+from docent._llm_util.data_models.exceptions import (
     CompletionTooLongException,
     ContextWindowException,
     NoResponseException,
     RateLimitException,
 )
-from docent_core._llm_util.data_models.llm_output import (
+from docent._llm_util.data_models.llm_output import (
     AsyncEmbeddingStreamingCallback,
     AsyncSingleLLMOutputStreamingCallback,
     FinishReasonType,
@@ -59,7 +56,9 @@ from docent_core._llm_util.data_models.llm_output import (
     UsageMetrics,
     finalize_llm_output_partial,
 )
-from docent_core._llm_util.providers.common import async_timeout_ctx
+from docent._llm_util.providers.common import async_timeout_ctx
+from docent._log_util import get_logger
+from docent.data_models.chat import ChatMessage, Content, ToolCall, ToolInfo
 
 logger = get_logger(__name__)
 DEFAULT_TIKTOKEN_ENCODING = "cl100k_base"
@@ -435,18 +434,10 @@ async def get_openai_chat_completion_async(
 
 
 def get_openai_client_async(api_key: str | None = None) -> AsyncOpenAI:
-    # Ensure environment variables are loaded.
-    # Technically you don't have to run this, but just makes clear where the envvars are used
-    _ = ENV
-
     return AsyncOpenAI(api_key=api_key) if api_key else AsyncOpenAI()
 
 
 def get_azure_openai_client_async(api_key: str | None = None) -> AsyncAzureOpenAI:
-    # Ensure environment variables are loaded.
-    # Technically you don't have to run this, but just makes clear where the envvars are used
-    _ = ENV
-
     return AsyncAzureOpenAI(api_key=api_key) if api_key else AsyncAzureOpenAI()
 
 

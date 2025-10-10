@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/meta/mini-schema",
+  "title": "Meta-schema for Docent judge outputs. Makes some restrictions to 2020-12.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": { "const": "object" },
+    "additionalProperties": { "const": false },
+    "required": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+
+    "properties": {
+      "type": "object",
+      "propertyNames": { "type": "string" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type"],
+
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["string", "integer", "number", "boolean"]
+          },
+          "description": {
+            "type": "string"
+          },
+          "citations": {
+            "type": "boolean"
+          },
+          "enum": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "date-time",
+              "date",
+              "time",
+              "email",
+              "hostname",
+              "ipv4",
+              "ipv6",
+              "uri",
+              "uuid"
+            ]
+          },
+          "minLength": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxLength": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "minimum": {
+            "type": "number"
+          },
+          "maximum": {
+            "type": "number"
+          },
+          "exclusiveMinimum": {
+            "type": "number"
+          },
+          "exclusiveMaximum": {
+            "type": "number"
+          },
+          "multipleOf": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        }
+      }
+    }
+  },
+  "required": ["type", "properties"]
+}

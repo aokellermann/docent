@@ -1,14 +1,14 @@
 import hashlib
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 
+from docent._llm_util.data_models.llm_output import LLMOutput
 from docent._log_util import get_logger
 from docent.data_models.chat import ChatMessage, ToolInfo
-from docent_core._env_util import ENV
-from docent_core._llm_util.data_models.llm_output import LLMOutput
 
 logger = get_logger(__name__)
 
@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 class LLMCache:
     def __init__(self, db_path: str | None = None):
         if db_path is None:
-            llm_cache_path = ENV.get("LLM_CACHE_PATH")
+            llm_cache_path = os.getenv("LLM_CACHE_PATH")
             if llm_cache_path is None or llm_cache_path == "":
                 raise ValueError("LLM_CACHE_PATH is not set")
             else:

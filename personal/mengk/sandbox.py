@@ -91,8 +91,8 @@ docent_client.get_cluster_assignments(
 # %%
 
 
-from docent_core._llm_util.prod_llms import get_llm_completions_async
-from docent_core._llm_util.providers.preferences import ModelOption
+from docent._llm_util.prod_llms import get_llm_completions_async
+from docent._llm_util.providers.preference_types import ModelOption
 
 
 async def test():

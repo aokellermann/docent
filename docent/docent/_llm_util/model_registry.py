@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Optional
 
+from docent._llm_util.data_models.llm_output import TokenType
 from docent._log_util import get_logger
-from docent_core._llm_util.data_models.llm_output import TokenType
 
 logger = get_logger(__name__)
 

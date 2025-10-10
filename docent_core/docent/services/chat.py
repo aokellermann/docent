@@ -7,6 +7,8 @@ import tiktoken
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from docent._llm_util.data_models.llm_output import LLMOutput
+from docent._llm_util.providers.preference_types import ModelOption
 from docent._log_util import get_logger
 from docent.data_models.agent_run import AgentRun
 from docent.data_models.chat.message import (
@@ -21,8 +23,6 @@ from docent.data_models.citation import (
 )
 from docent.data_models.judge import JudgeRunLabel
 from docent.data_models.remove_invalid_citation_ranges import remove_invalid_citation_ranges
-from docent_core._llm_util.data_models.llm_output import LLMOutput
-from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES, ModelOption
 from docent_core._server._broker.redis_client import (
     STATE_KEY_FORMAT,
     STREAM_KEY_FORMAT,
@@ -39,7 +39,7 @@ from docent_core.docent.ai_tools.rubric.rubric import Rubric
 from docent_core.docent.db.contexts import ViewContext
 from docent_core.docent.db.schemas.chat import ChatSession, SQLAChatSession
 from docent_core.docent.db.schemas.tables import JobStatus, SQLAJob
-from docent_core.docent.services.llms import LLMService
+from docent_core.docent.services.llms import PROVIDER_PREFERENCES, LLMService
 from docent_core.docent.services.monoservice import MonoService
 from docent_core.docent.services.rubric import RubricService
 

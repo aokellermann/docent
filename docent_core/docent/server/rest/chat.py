@@ -3,13 +3,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
-from docent._log_util import get_logger
-from docent_core._llm_util.providers.preferences import (
-    PROVIDER_PREFERENCES,
+from docent._llm_util.providers.preference_types import (
     ModelOption,
     ModelOptionWithContext,
     merge_models_with_byok,
 )
+from docent._log_util import get_logger
 from docent_core._server._analytics.posthog import AnalyticsClient
 from docent_core._server.util import generator_to_sse_stream
 from docent_core.docent.db.contexts import ViewContext
@@ -27,6 +26,7 @@ from docent_core.docent.server.dependencies.user import (
     get_user_anonymous_ok,
 )
 from docent_core.docent.services.chat import ChatService
+from docent_core.docent.services.llms import PROVIDER_PREFERENCES
 from docent_core.docent.services.monoservice import MonoService
 
 logger = get_logger(__name__)

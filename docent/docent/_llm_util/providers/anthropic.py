@@ -36,16 +36,13 @@ from anthropic.types import (
 )
 from backoff.types import Details
 
-from docent._log_util import get_logger
-from docent.data_models.chat import ChatMessage, Content, ToolCall, ToolInfo
-from docent_core._env_util import ENV
-from docent_core._llm_util.data_models.exceptions import (
+from docent._llm_util.data_models.exceptions import (
     CompletionTooLongException,
     ContextWindowException,
     NoResponseException,
     RateLimitException,
 )
-from docent_core._llm_util.data_models.llm_output import (
+from docent._llm_util.data_models.llm_output import (
     AsyncSingleLLMOutputStreamingCallback,
     FinishReasonType,
     LLMCompletion,
@@ -56,10 +53,12 @@ from docent_core._llm_util.data_models.llm_output import (
     UsageMetrics,
     finalize_llm_output_partial,
 )
-from docent_core._llm_util.providers.common import (
+from docent._llm_util.providers.common import (
     async_timeout_ctx,
     reasoning_budget,
 )
+from docent._log_util import get_logger
+from docent.data_models.chat import ChatMessage, Content, ToolCall, ToolInfo
 
 logger = get_logger(__name__)
 
@@ -440,10 +439,6 @@ async def get_anthropic_chat_completion_async(
 
 
 def get_anthropic_client_async(api_key: str | None = None) -> AsyncAnthropic:
-    # Ensure environment variables are loaded.
-    # Technically you don't have to run this, but just makes clear where the envvars are used
-    _ = ENV
-
     return AsyncAnthropic(api_key=api_key) if api_key else AsyncAnthropic()
 
 

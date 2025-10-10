@@ -158,6 +158,7 @@ else:
 
 from copy import deepcopy
 
+from docent._llm_util.providers.preference_types import PROVIDER_PREFERENCES
 from docent._log_util import get_logger
 from docent.data_models.agent_run import AgentRun
 from docent_core._ai_tools.rubric.rubric import (
@@ -167,7 +168,6 @@ from docent_core._ai_tools.rubric.rubric import (
     propose_rules_post_hoc,
     refine_rubric_with_qa,
 )
-from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES
 from docent_core.services.rubric import RubricService
 
 logger = get_logger(__name__)

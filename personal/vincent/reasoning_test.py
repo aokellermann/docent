@@ -2,12 +2,12 @@ import asyncio
 import re
 from typing import Any, Coroutine, Literal
 
+from docent._llm_util.data_models.llm_output import LLMOutput
+from docent._llm_util.prod_llms import get_llm_completions_async
+from docent._llm_util.providers.preference_types import PROVIDER_PREFERENCES, ModelOption
 from docent.data_models.agent_run import AgentRun
 from docent.data_models.transcript import SINGLE_RUN_CITE_INSTRUCTION
 from docent_core._ai_tools.search import execute_search_2
-from docent_core._llm_util.data_models.llm_output import LLMOutput
-from docent_core._llm_util.prod_llms import get_llm_completions_async
-from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES, ModelOption
 from docent_core._loader.load_inspect import load_inspect_eval
 
 LOG_DIR_PREFIX = "/home/ubuntu/inspect_logs"

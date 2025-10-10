@@ -1,6 +1,6 @@
 import pytest
 
-from docent_core.docent.ai_tools.rubric.rubric import find_modal_result, get_agreement_keys
+from docent.judges.util.voting import find_modal_result, get_agreement_keys
 
 
 def test_find_modal_result_prefers_result_matching_most_modes():

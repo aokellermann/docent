@@ -5,13 +5,13 @@ from typing import Any, Literal, Protocol, cast
 from openai.types.chat.chat_completion_token_logprob import TopLogprob
 from pydantic import BaseModel
 
-from docent._log_util import get_logger
-from docent.data_models.chat import ToolCall
-from docent_core._llm_util.data_models.exceptions import (
+from docent._llm_util.data_models.exceptions import (
     LLM_ERROR_TYPES,
     CompletionTooLongException,
     LLMException,
 )
+from docent._log_util import get_logger
+from docent.data_models.chat import ToolCall
 
 logger = get_logger(__name__)
 

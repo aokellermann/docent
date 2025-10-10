@@ -23,26 +23,26 @@ import anyio
 from anyio.abc import TaskGroup
 from tqdm.auto import tqdm
 
-from docent._log_util import get_logger
-from docent.data_models.chat import ChatMessage, ToolInfo, parse_chat_message
-from docent_core._llm_util.data_models.exceptions import (
+from docent._llm_util.data_models.exceptions import (
     DocentUsageLimitException,
     LLMException,
     RateLimitException,
     ValidationFailedException,
 )
-from docent_core._llm_util.data_models.llm_output import (
+from docent._llm_util.data_models.llm_output import (
     AsyncLLMOutputStreamingCallback,
     AsyncSingleLLMOutputStreamingCallback,
     LLMOutput,
 )
-from docent_core._llm_util.llm_cache import LLMCache
-from docent_core._llm_util.providers.preferences import ModelOption
-from docent_core._llm_util.providers.provider_registry import (
+from docent._llm_util.llm_cache import LLMCache
+from docent._llm_util.providers.preference_types import ModelOption
+from docent._llm_util.providers.provider_registry import (
     PROVIDERS,
     SingleOutputGetter,
     SingleStreamingOutputGetter,
 )
+from docent._log_util import get_logger
+from docent.data_models.chat import ChatMessage, ToolInfo, parse_chat_message
 
 MAX_VALIDATION_ATTEMPTS = 3
 

@@ -33,12 +33,12 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.sql import lateral, text
 from sqlalchemy.types import Numeric
 
+from docent._llm_util.data_models.llm_output import AsyncEmbeddingStreamingCallback
+from docent._llm_util.providers.openai import get_chunked_openai_embeddings_async
 from docent._log_util import get_logger
 from docent.data_models.agent_run import AgentRun, FilterableField
 from docent.data_models.transcript import Transcript, TranscriptGroup
 from docent_core._db_service.db import DocentDB
-from docent_core._llm_util.data_models.llm_output import AsyncEmbeddingStreamingCallback
-from docent_core._llm_util.providers.openai import get_chunked_openai_embeddings_async
 from docent_core._server._broker.redis_client import enqueue_job
 from docent_core.docent.db.contexts import ViewContext
 from docent_core.docent.db.filters import ComplexFilter

@@ -103,7 +103,7 @@ pprint(matched_labels)
 
 from pathlib import Path
 
-from docent_core._llm_util.providers.preferences import ModelOption
+from docent._llm_util.providers.preference_types import ModelOption
 from personal.mengk.var_reduce_lib import (
     RubricEvaluationParams,
     compute_measurements,
@@ -182,25 +182,25 @@ tests: list[RubricEvaluationParams] = [
     #     judge_variant="multi-reflect",
     #     judge_model=ModelOption(provider="openai", model_name="gpt-5", reasoning_effort="low"),
     # ),
-    # RubricEvaluationParams(
-    #     rollouts_per_input=5,
-    #     judge_variant="majority",
-    #     judge_model=ModelOption(provider="openai", model_name="gpt-5", reasoning_effort="medium"),
-    # ),
     RubricEvaluationParams(
-        rollouts_per_input=10,
+        rollouts_per_input=5,
+        judge_variant="majority",
+        judge_model=ModelOption(provider="openai", model_name="gpt-5", reasoning_effort="medium"),
+    ),
+    RubricEvaluationParams(
+        rollouts_per_input=5,
         judge_variant="multi-reflect",
         judge_model=ModelOption(provider="openai", model_name="gpt-5", reasoning_effort="medium"),
     ),
-    # RubricEvaluationParams(
-    #     rollouts_per_input=5,
-    #     judge_variant="majority",
-    #     judge_model=ModelOption(
-    #         provider="anthropic",
-    #         model_name="claude-sonnet-4-5-20250929",
-    #         reasoning_effort="medium",
-    #     ),
-    # ),
+    RubricEvaluationParams(
+        rollouts_per_input=5,
+        judge_variant="majority",
+        judge_model=ModelOption(
+            provider="anthropic",
+            model_name="claude-sonnet-4-5-20250929",
+            reasoning_effort="medium",
+        ),
+    ),
     # RubricEvaluationParams(
     #     rollouts_per_input=5,
     #     judge_variant="multi-reflect",
@@ -220,7 +220,7 @@ experiment_results = await run_experiments(
     rubric_text=rubric_text,
     rubric_output_schema=rubric_output_schema,
     all_params=tests,
-    result_fpath=Path(__file__).with_name("var_reduce_results_throw_gitignore.json"),
+    result_fpath=Path(__file__).with_name("var_reduce_results_throww_gitignore.json"),
 )
 
 # %%
@@ -229,7 +229,7 @@ fpaths_to_combine = [
     # Path(__file__).with_name("var_reduce_results2_gitignore.json"),
     # Path(__file__).with_name("var_reduce_results_good_gitignore.json"),
     # Path(__file__).with_name("var_reduce_results_ant_gitignore.json"),
-    Path(__file__).with_name("var_reduce_results_throw_gitignore.json"),
+    Path(__file__).with_name("var_reduce_results_throww_gitignore.json"),
 ]
 
 experiment_results = {}

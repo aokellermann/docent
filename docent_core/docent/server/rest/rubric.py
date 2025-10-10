@@ -4,17 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from docent._llm_util.providers.preference_types import merge_models_with_byok
 from docent._log_util.logger import get_logger
 from docent.data_models.judge import JudgeRunLabel
-from docent_core._llm_util.providers.preferences import (
-    PROVIDER_PREFERENCES,
-    merge_models_with_byok,
-)
+from docent.judges import JudgeResultWithCitations, Rubric
 from docent_core._server._analytics.posthog import AnalyticsClient
-from docent_core.docent.ai_tools.rubric.rubric import (
-    JudgeResultWithCitations,
-    Rubric,
-)
 from docent_core.docent.db.contexts import ViewContext
 from docent_core.docent.db.schemas.auth_models import User
 from docent_core.docent.db.schemas.rubric import SQLARubric
@@ -38,6 +32,7 @@ from docent_core.docent.server.dependencies.user import (
 )
 from docent_core.docent.services import monoservice
 from docent_core.docent.services.job import JobService
+from docent_core.docent.services.llms import PROVIDER_PREFERENCES
 from docent_core.docent.services.monoservice import MonoService
 from docent_core.docent.services.rubric import RubricService
 

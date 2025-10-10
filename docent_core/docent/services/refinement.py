@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
+from docent._llm_util.data_models.llm_output import LLMOutput
 from docent._log_util import get_logger
 from docent.data_models.chat.message import (
     AssistantMessage,
@@ -17,8 +18,6 @@ from docent.data_models.chat.message import (
     ToolMessage,
     UserMessage,
 )
-from docent_core._llm_util.data_models.llm_output import LLMOutput
-from docent_core._llm_util.providers.preferences import PROVIDER_PREFERENCES
 from docent_core._server._broker.redis_client import (
     STATE_KEY_FORMAT,
     STREAM_KEY_FORMAT,
@@ -45,7 +44,7 @@ from docent_core.docent.db.schemas.refinement import (
     SQLARefinementAgentSession,
 )
 from docent_core.docent.db.schemas.tables import JobStatus, SQLAJob
-from docent_core.docent.services.llms import LLMService
+from docent_core.docent.services.llms import PROVIDER_PREFERENCES, LLMService
 from docent_core.docent.services.monoservice import MonoService
 from docent_core.docent.services.rubric import RubricService, SQLARubric
 

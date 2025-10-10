@@ -1,20 +1,23 @@
 from __future__ import annotations
 
+from functools import cached_property
 from typing import Any, AsyncContextManager, Callable, Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from docent._log_util import get_logger
-from docent.data_models.chat import ToolInfo
-from docent_core._llm_util.data_models.exceptions import DocentUsageLimitException
-from docent_core._llm_util.data_models.llm_output import (
+from docent._llm_util.data_models.exceptions import DocentUsageLimitException
+from docent._llm_util.data_models.llm_output import (
     AsyncLLMOutputStreamingCallback,
     LLMOutput,
     TokenType,
 )
-from docent_core._llm_util.model_registry import estimate_cost_cents
-from docent_core._llm_util.prod_llms import MessagesInput, get_llm_completions_async
-from docent_core._llm_util.providers.preferences import ModelOption
+from docent._llm_util.data_models.simple_svc import BaseLLMService
+from docent._llm_util.model_registry import estimate_cost_cents
+from docent._llm_util.prod_llms import MessagesInput, get_llm_completions_async
+from docent._llm_util.providers.preference_types import ModelOption, PublicProviderPreferences
+from docent._log_util import get_logger
+from docent.data_models.chat import ToolInfo
+from docent_core._env_util import ENV
 from docent_core.docent.db.schemas.auth_models import User
 from docent_core.docent.db.schemas.tables import SQLAModelApiKey
 from docent_core.docent.services.usage import (
@@ -25,7 +28,7 @@ from docent_core.docent.services.usage import (
 logger = get_logger(__name__)
 
 
-class LLMService:
+class LLMService(BaseLLMService):
     def __init__(
         self,
         session_cm_factory: Callable[[], AsyncContextManager[AsyncSession]],
@@ -33,6 +36,10 @@ class LLMService:
         usage_service: UsageService,
     ):
         """The LLM service manages its own sessions"""
+
+        # Ensure environment variables are loaded before we get completions
+        # This is only required because the backend relies on envvars to specify keys
+        _ = ENV
 
         self.session_cm_factory = session_cm_factory
         self.user = user
@@ -227,3 +234,210 @@ class LLMService:
         await self._record_pending_usage(pending_usage_data)
 
         return outputs
+
+
+class ProviderPreferences(PublicProviderPreferences):
+    """Manages model preferences for different docent functions.
+
+    This class provides access to configured model options for each
+    function that requires LLM capabilities in the docent system.
+    """
+
+    @cached_property
+    def default_chat_models(self) -> list[ModelOption]:
+        """Models that can be used for chat if the user does not provide their own API key."""
+        return [
+            ModelOption(
+                provider="openai",
+                model_name="gpt-5",
+                reasoning_effort="medium",
+            ),
+            ModelOption(
+                provider="openai",
+                model_name="gpt-5",
+                reasoning_effort="low",
+            ),
+            ModelOption(
+                provider="openai",
+                model_name="gpt-5",
+                reasoning_effort="high",
+            ),
+            ModelOption(
+                provider="anthropic",
+                model_name="claude-sonnet-4-20250514",
+            ),
+            ModelOption(
+                provider="anthropic",
+                model_name="claude-sonnet-4-20250514",
+                reasoning_effort="medium",
+            ),
+        ]
+
+    @cached_property
+    def byok_chat_models(self) -> list[ModelOption]:
+        """Models that can be used for chat if the user provides their own API key."""
+        return [
+            ModelOption(
+                provider="google",
+                model_name="gemini-2.5-flash-lite",
+                reasoning_effort="low",
+            ),
+        ]
+
+    @cached_property
+    def summarize_agent_actions(self) -> list[ModelOption]:
+        """Get model options for the summarize_agent_actions function.
+
+        Returns:
+            List of configured model options for this function.
+        """
+        return [
+            ModelOption(
+                provider="anthropic",
+                model_name="claude-sonnet-4-20250514",
+                reasoning_effort="low",
+            ),
+            ModelOption(
+                provider="google",
+                model_name="gemini-2.5-flash-preview-05-20",
+                reasoning_effort="low",
+            ),
+            ModelOption(
+                provider="openai",
+                model_name="gpt-5",
+                reasoning_effort="low",
+            ),
+        ]
+
+    @cached_property
+    def group_actions_into_high_level_steps(self) -> list[ModelOption]:
+        """Get model options for the group_actions_into_high_level_steps function.
+
+        Returns:
+            List of configured model options for this function.
+        """
+        return [
+            ModelOption(
+                provider="anthropic",
+                model_name="claude-sonnet-4-20250514",
+                reasoning_effort="low",
+            ),
+            ModelOption(
+                provider="google",
+                model_name="gemini-2.5-flash-preview-05-20",
+                reasoning_effort="low",
+            ),
+            ModelOption(
+                provider="openai",
+                model_name="gpt-5",
+                reasoning_effort="low",
+            ),
+        ]
+
+    @cached_property
+    def interesting_agent_observations(self) -> list[ModelOption]:
+        """Get model options for the interesting_agent_observations function.
+
+        Returns:
+            List of configured model options for this function.
+        """
+        return [
+            ModelOption(
+                provider="anthropic",
+                model_name="claude-sonnet-4-20250514",
+                reasoning_effort="medium",
+            ),
+            ModelOption(
+                provider="google",
+                model_name="gemini-2.5-flash-preview-05-20",
+                reasoning_effort="medium",
+            ),
+            ModelOption(
+                provider="openai",
+                model_name="gpt-5",
+                reasoning_effort="medium",
+            ),
+        ]
+
+    @cached_property
+    def propose_clusters(self) -> list[ModelOption]:
+        """Get model options for the propose_clusters function.
+
+        Returns:
+            List of configured model options for this function.
+        """
+        return [
+            ModelOption(
+                provider="anthropic",
+                model_name="claude-sonnet-4-20250514",
+            ),
+            ModelOption(
+                provider="google",
+                model_name="gemini-2.5-flash-preview-05-20",
+            ),
+            ModelOption(
+                provider="openai",
+                model_name="gpt-4o-2024-08-06",
+            ),
+        ]
+
+    @cached_property
+    def refine_agent(self) -> list[ModelOption]:
+        """Get model options for the refinement agent
+
+        Returns:
+            List of configured model options for this function.
+        """
+        return [
+            ModelOption(
+                provider="openai",
+                model_name="gpt-5",
+                reasoning_effort="medium",
+            ),
+        ]
+
+    @cached_property
+    def cluster_assign_o4_mini(self) -> list[ModelOption]:
+        """Get model options for the cluster_assign_o4-mini function.
+
+        Returns:
+            List of configured model options for this function.
+        """
+        return [
+            ModelOption(
+                provider="openai",
+                model_name="o4-mini",
+                reasoning_effort="medium",
+            ),
+        ]
+
+    @cached_property
+    def summarize_for_refinement(self) -> list[ModelOption]:
+        """Get model options for summarizing agent runs for the refinement agent.
+        Returns:
+            List of configured model options for this function.
+        """
+        return [
+            ModelOption(
+                provider="openai",
+                model_name="gpt-5",
+                reasoning_effort="low",
+            ),
+        ]
+
+    @cached_property
+    def byok_judge_models(self) -> list[ModelOption]:
+        """Judge models that require a user to provide their own API key, e.g. because they're
+        expensive, or our rate limits are low"""
+
+        return [
+            ModelOption(
+                provider="google",
+                model_name="gemini-2.5-flash",
+                reasoning_effort="medium",
+            )
+        ]
+
+
+# Initialize the singleton preferences object
+PROVIDER_PREFERENCES = ProviderPreferences()

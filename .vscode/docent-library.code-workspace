@@ -1,13 +1,13 @@
 {
   "folders": [
     {
-      "path": "../",
-      "name": "docent"
+      "path": "../docent",
+      "name": "docent-library"
     }
   ],
   "settings": {
     "jupyter.allowUnauthorizedRemoteConnection": true,
-    "python.defaultInterpreterPath": ".venv/bin/python",
+    "python.defaultInterpreterPath": "../docent/.venv/bin/python",
     "[python]": {
       "editor.defaultFormatter": "ms-python.black-formatter",
       "editor.formatOnSave": true,

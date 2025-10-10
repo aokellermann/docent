@@ -9,10 +9,10 @@ import anyio
 from pydantic import BaseModel, Field
 from tqdm.auto import tqdm
 
+from docent._llm_util.providers.preference_types import ModelOption
 from docent._log_util import get_logger
 from docent.data_models.agent_run import AgentRun
 from docent_core._db_service.db import DocentDB
-from docent_core._llm_util.providers.preferences import ModelOption
 from docent_core.docent.ai_tools.rubric.rubric import JudgeResult, Rubric, evaluate_rubric
 from docent_core.docent.services.llms import LLMService, UsageService
 from docent_core.docent.services.monoservice import MonoService

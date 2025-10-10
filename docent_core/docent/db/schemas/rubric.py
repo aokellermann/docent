@@ -16,19 +16,15 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from docent._llm_util.providers.preference_types import ModelOption
 from docent._log_util.logger import get_logger
-from docent_core._llm_util.providers.preferences import ModelOption
 
 if TYPE_CHECKING:
     from docent_core.docent.db.schemas.refinement import SQLARefinementAgentSession
 
 from docent.data_models.judge import JudgeRunLabel
+from docent.judges import JudgeResult, ResultType, Rubric
 from docent_core._db_service.schemas.base import SQLABase
-from docent_core.docent.ai_tools.rubric.rubric import (
-    JudgeResult,
-    ResultType,
-    Rubric,
-)
 from docent_core.docent.db.schemas.tables import TABLE_AGENT_RUN, TABLE_COLLECTION
 
 TABLE_RUBRIC = "rubrics"
@@ -51,6 +47,11 @@ class SQLARubric(SQLABase):
 
     rubric_text: Mapped[str] = mapped_column(Text, nullable=False)
     judge_model: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+    # New fields that track other information about the rubric
+    # Both nullable for backwards compatibility
+    system_prompt_template: Mapped[str | None] = mapped_column(Text, nullable=True)
+    citation_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Follows https://json-schema.org standard
     output_schema: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
@@ -96,19 +97,30 @@ class SQLARubric(SQLABase):
             collection_id=collection_id,
             rubric_text=rubric.rubric_text,
             judge_model=rubric.judge_model.model_dump(),
+            system_prompt_template=rubric.system_prompt_template,
+            citation_instructions=rubric.citation_instructions,
             output_schema=rubric.output_schema,
         )
 
     def to_pydantic(self) -> Rubric:
         jm = ModelOption.model_validate(self.judge_model)
 
-        return Rubric(
-            id=self.id,
-            version=self.version,
-            rubric_text=self.rubric_text,
-            judge_model=jm,
-            output_schema=self.output_schema,
-        )
+        kwargs: dict[str, Any] = {
+            "id": self.id,
+            "version": self.version,
+            "rubric_text": self.rubric_text,
+            "judge_model": jm,
+            "output_schema": self.output_schema,
+        }
+
+        # Necessary for backwards compatibility
+        # i.e., do not fill the field if they don't exist in the DB; use defaults.
+        if self.system_prompt_template is not None:
+            kwargs["system_prompt_template"] = self.system_prompt_template
+        if self.citation_instructions is not None:
+            kwargs["citation_instructions"] = self.citation_instructions
+
+        return Rubric(**kwargs)
 
     @property
     def short_name(self) -> str:
