@@ -1,8 +1,8 @@
 import jsonschema
 import pytest
 
-from docent_core.docent.ai_tools.rubric.meta_schema import validate_judge_result_schema
-from docent_core.docent.ai_tools.rubric.rubric import Rubric
+from docent.judges.types import Rubric
+from docent.judges.util.meta_schema import validate_judge_result_schema
 
 
 def _valid_schema() -> dict[str, object]:

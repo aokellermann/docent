@@ -1,6 +1,6 @@
 import pytest
 
-from docent_core.docent.ai_tools.rubric.forgiving_json import forgiving_json_loads
+from docent.judges.util.forgiving_json import forgiving_json_loads
 
 
 class TestForgivingJsonLoads:
