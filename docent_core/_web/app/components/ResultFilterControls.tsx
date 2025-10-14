@@ -88,8 +88,13 @@ function FilterControls({ setIsPopoverOpen }: FilterControlsProps) {
     const { path, op, value } = state;
     if (!path || !op) return;
 
+    let filterValue: any = value;
+    if (property?.type === 'number' || property?.type === 'integer') {
+      filterValue = Number(value);
+    }
+
     const existingFilter = filters.find(
-      (f) => f.path === path && f.op === op && f.value === value
+      (f) => f.path === path && f.op === op && f.value === filterValue
     );
     if (existingFilter) {
       toast({
@@ -97,12 +102,12 @@ function FilterControls({ setIsPopoverOpen }: FilterControlsProps) {
         description: 'Please enter a different filter',
       });
     } else {
-      setFilters([...filters, { path, op, value }]);
+      setFilters([...filters, { path, op, value: filterValue }]);
 
       posthog.capture('filter_added', {
         path,
         op,
-        value,
+        value: filterValue,
       });
     }
 

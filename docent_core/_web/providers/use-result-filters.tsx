@@ -139,7 +139,7 @@ export function ResultFilterControlsProvider({
       return ['==', '!='];
     }
 
-    if (property.type === 'integer') {
+    if (property.type === 'integer' || property.type === 'number') {
       return ['==', '!=', '<', '<=', '>', '>='];
     }
 
