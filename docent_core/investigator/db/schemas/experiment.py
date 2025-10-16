@@ -34,13 +34,13 @@ simple_rollout_experiment_config_backends = Table(
     Column(
         "experiment_config_id",
         String(36),
-        ForeignKey(f"{TABLE_SIMPLE_ROLLOUT_EXPERIMENT_CONFIG}.id"),
+        ForeignKey(f"{TABLE_SIMPLE_ROLLOUT_EXPERIMENT_CONFIG}.id", ondelete="CASCADE"),
         primary_key=True,
     ),
     Column(
         "backend_id",
         String(36),
-        ForeignKey(f"{TABLE_OPENAI_COMPATIBLE_BACKEND}.id"),
+        ForeignKey(f"{TABLE_OPENAI_COMPATIBLE_BACKEND}.id", ondelete="CASCADE"),
         primary_key=True,
     ),
 )
@@ -51,13 +51,13 @@ simple_rollout_config_anthropic_backends = Table(
     Column(
         "experiment_config_id",
         String(36),
-        ForeignKey(f"{TABLE_SIMPLE_ROLLOUT_EXPERIMENT_CONFIG}.id"),
+        ForeignKey(f"{TABLE_SIMPLE_ROLLOUT_EXPERIMENT_CONFIG}.id", ondelete="CASCADE"),
         primary_key=True,
     ),
     Column(
         "backend_id",
         String(36),
-        ForeignKey(f"{TABLE_ANTHROPIC_COMPATIBLE_BACKEND}.id"),
+        ForeignKey(f"{TABLE_ANTHROPIC_COMPATIBLE_BACKEND}.id", ondelete="CASCADE"),
         primary_key=True,
     ),
 )

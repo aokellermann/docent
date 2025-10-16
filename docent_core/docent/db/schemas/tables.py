@@ -890,10 +890,22 @@ class SQLAModelUsage(SQLABase):
 
     __table_args__ = (
         Index(
-            "idx_model_usage_free_window",
+            "uq_model_usage_bucket_free",
             "user_id",
             "bucket_start",
+            "metric_name",
+            "model",
+            unique=True,
             postgresql_where=sqlalchemy.text("api_key_id IS NULL"),
         ),
-        Index("idx_model_usage_byok_window", "user_id", "api_key_id", "bucket_start"),
+        Index(
+            "uq_model_usage_bucket_byok",
+            "user_id",
+            "api_key_id",
+            "bucket_start",
+            "metric_name",
+            "model",
+            unique=True,
+            postgresql_where=sqlalchemy.text("api_key_id IS NOT NULL"),
+        ),
     )

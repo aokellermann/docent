@@ -4,5 +4,6 @@ import docent_core.docent.db.schemas.chat as chat
 import docent_core.docent.db.schemas.refinement as refinement
 import docent_core.docent.db.schemas.rubric as rubric
 import docent_core.docent.db.schemas.tables as tables
+import docent_core.investigator.db.schemas.experiment as investigator_experiment
 
-__all__ = ["base", "rubric", "refinement", "chart", "tables", "chat"]
+__all__ = ["base", "rubric", "refinement", "chart", "tables", "chat", "investigator_experiment"]
