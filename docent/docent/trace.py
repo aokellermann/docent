@@ -43,6 +43,7 @@ class Instruments(Enum):
     ANTHROPIC = "anthropic"
     BEDROCK = "bedrock"
     LANGCHAIN = "langchain"
+    GOOGLE_GENERATIVEAI = "google_generativeai"
 
 
 class DocentTracer:
@@ -391,6 +392,23 @@ class DocentTracer:
                         logger.info("Instrumented LangChain")
                 except Exception as e:
                     logger.warning(f"Failed to instrument LangChain: {e}")
+
+            # Instrument Google Generative AI with our isolated tracer provider
+            if Instruments.GOOGLE_GENERATIVEAI in enabled_instruments:
+                try:
+                    if is_package_installed("google-generativeai") or is_package_installed(
+                        "google-genai"
+                    ):
+                        from opentelemetry.instrumentation.google_generativeai import (
+                            GoogleGenerativeAiInstrumentor,
+                        )
+
+                        GoogleGenerativeAiInstrumentor().instrument(
+                            tracer_provider=self._tracer_provider
+                        )
+                        logger.info("Instrumented Google Generative AI")
+                except Exception as e:
+                    logger.warning(f"Failed to instrument Google Generative AI: {e}")
 
             # Register cleanup handlers
             self._register_cleanup()

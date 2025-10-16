@@ -1,7 +1,7 @@
 [project]
 name = "docent-python"
 description = "Docent SDK"
-version = "0.1.21-alpha"
+version = "0.1.22-alpha"
 authors = [
   { name="Transluce", email="info@transluce.org" },
 ]
@@ -28,11 +28,12 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-grpc>=1.34.1",
     "opentelemetry-exporter-otlp-proto-http>=1.34.1",
     # Instrumentation
+    "opentelemetry-instrumentation-threading>=0.55b1",
     "opentelemetry-instrumentation-anthropic>=0.40.14",
     "opentelemetry-instrumentation-bedrock>=0.40.14",
     "opentelemetry-instrumentation-langchain>=0.40.14",
     "opentelemetry-instrumentation-openai>=0.40.14",
-    "opentelemetry-instrumentation-threading>=0.55b1",
+    "opentelemetry-instrumentation-google-generativeai>=0.40.14",
 ]
 
 [build-system]
