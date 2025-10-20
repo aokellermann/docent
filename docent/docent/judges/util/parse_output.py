@@ -1,4 +1,3 @@
-import json
 from typing import Any, cast
 
 import jsonschema
@@ -73,7 +72,7 @@ def parse_and_validate_output_str(
 
     try:
         output = forgiving_json_loads(output_str)
-    except json.JSONDecodeError as e:
+    except Exception as e:
         raise ValidationFailedException(
             f"Failed to parse JSON: {e}. Raw text: `{output_str}`",
             failed_output=output_str,
