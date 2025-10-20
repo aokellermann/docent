@@ -10,8 +10,9 @@ IPython.get_ipython().run_line_magic("autoreload", "2")
 
 # %%
 
+from docent._llm_util.llm_svc import BaseLLMService
 from docent.data_models import AgentRun, Transcript
-from docent.data_models.chat import AssistantMessage, UserMessage
+from docent.data_models.chat import AssistantMessage, SystemMessage, UserMessage
 
 # What rob has
 messages = [
@@ -48,6 +49,13 @@ cfg = Rubric(
     n_rollouts_per_input=3,
 )
 
+# %%
+
+j = MajorityVotingJudge(cfg=cfg, llm_svc=BaseLLMService())
+prompt = [SystemMessage(content=cfg.materialize_system_prompt(agent_runs[0]))]
+await j.agent_one_turn(prompt, max_steps_per_turn=10)
+
+# %%
 
 # %%
 

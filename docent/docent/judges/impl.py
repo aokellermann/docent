@@ -1,6 +1,7 @@
 import random
+import re
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Sequence
 
 import anyio
 import yaml
@@ -11,8 +12,15 @@ from docent._llm_util.data_models.llm_output import LLMOutput
 from docent._llm_util.llm_svc import BaseLLMService
 from docent._log_util import get_logger
 from docent.data_models.agent_run import AgentRun
+from docent.data_models.chat.message import (
+    AssistantMessage,
+    ChatMessage,
+    SystemMessage,
+    ToolMessage,
+)
+from docent.data_models.chat.tool import ToolInfo
 from docent.judges.types import JudgeResult, JudgeVariant, ResultType, Rubric
-from docent.judges.util.parse_output import parse_and_validate_llm_output
+from docent.judges.util.parse_output import parse_and_validate_output_str
 from docent.judges.util.voting import (
     JudgeOutputDistribution,
     compute_output_distributions,
@@ -40,11 +48,76 @@ class BaseJudge(ABC):
 
     def _get_validation_callback(self, agent_run: AgentRun):
         async def _validation_callback(batch_index: int, llm_output: LLMOutput):
-            parse_and_validate_llm_output(llm_output, self.cfg.output_schema, agent_run)
+            validated_output = self._validate_first_response_tag_or_entire_output(
+                llm_output.first_text or "", agent_run
+            )
+            if validated_output is None:
+                raise ValidationFailedException(
+                    "Validation failed", failed_output=llm_output.first_text
+                )
 
         return _validation_callback
 
-    async def single_rollout(self, agent_run: AgentRun) -> dict[str, Any] | None:
+    async def one_rollout(
+        self, agent_run: AgentRun
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        if self.cfg.rollout_type == "multi_turn":
+            output, metadata = await self.one_multi_turn_rollout(
+                agent_run, max_turns=10, max_steps_per_turn=5
+            )
+        elif self.cfg.rollout_type == "single_turn":
+            output, metadata = await self.one_single_turn_rollout(agent_run)
+        else:
+            raise ValueError(f"Invalid rollout type: {self.cfg.rollout_type}")
+
+        return output, metadata
+
+    def _validate_first_response_tag_or_entire_output(
+        self, output_str: str, agent_run: AgentRun
+    ) -> dict[str, Any] | None:
+        """Validate the first <response> tag in the output string.
+        For backward compatibility, also try to validate the entire output as JSON, for
+            old system prompts that don't ask for <response> tags.
+
+        Args:
+            output_str: The output string to validate
+            agent_run: The agent run to validate against
+
+        Returns:
+            The validated output if successful, None otherwise
+        """
+        response_matches = re.findall(r"<response>(.*?)</response>", output_str, re.DOTALL)
+
+        # Try to validate any match; take the first
+        for response_text in response_matches:
+            try:
+                validated_output = parse_and_validate_output_str(
+                    response_text, self.cfg.output_schema, agent_run
+                )
+                return validated_output
+            except ValidationFailedException:
+                continue  # Try the next match if validation fails
+
+        # Try to validate the entire output as JSON
+        # But only if the output _didn't_ contain a <response>...</response> tag
+        if not response_matches:
+            try:
+                validated_output = parse_and_validate_output_str(
+                    output_str, self.cfg.output_schema, agent_run
+                )
+                return validated_output
+            except ValidationFailedException:
+                pass
+
+        return None
+
+    ########################
+    # Single turn rollouts #
+    ########################
+
+    async def one_single_turn_rollout(
+        self, agent_run: AgentRun
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
         prompt = [{"role": "system", "content": self.cfg.materialize_system_prompt(agent_run)}]
         outputs = await self.llm_svc.get_completions(
             inputs=[prompt],
@@ -54,15 +127,88 @@ class BaseJudge(ABC):
             use_cache=False,
             validation_callback=self._get_validation_callback(agent_run),
         )
-        output = outputs[0]
+        output_str = outputs[0].first_text
 
-        try:
-            validated_output = parse_and_validate_llm_output(
-                output, self.cfg.output_schema, agent_run
+        # Extract all <response>...</response> tags from the current message
+        validated_output = self._validate_first_response_tag_or_entire_output(
+            output_str or "", agent_run
+        )
+        if validated_output is not None:
+            return validated_output, {"full_output": output_str}
+        else:
+            return None, None
+
+    #######################
+    # Multi-turn rollouts #
+    #######################
+
+    async def one_multi_turn_rollout(
+        self, agent_run: AgentRun, max_turns: int, max_steps_per_turn: int
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        msgs = [SystemMessage(content=self.cfg.materialize_system_prompt(agent_run))]
+        for _ in range(max_turns):
+            msgs = await self.agent_one_turn(msgs, max_steps_per_turn=max_steps_per_turn)
+
+            last_msg_content = msgs[-1].text if msgs else None
+            # Extract all <response>...</response> tags from the current message
+            # Return if we find a valid response; otherwise, continue
+            validated_output = self._validate_first_response_tag_or_entire_output(
+                last_msg_content or "", agent_run
             )
-            return validated_output
-        except ValidationFailedException:
-            return None
+            if validated_output is not None:
+                # When returning, strip out the system message, which duplicates the agent run
+                # content many times.
+                return validated_output, {"rollout_messages": msgs[1:]}
+
+        # No <response>...</response> tags with valid JSON,so return None
+        return None, None
+
+    async def agent_one_turn(self, init_msgs: Sequence[ChatMessage], max_steps_per_turn: int):
+        """Given a list of messages, run one turn of the agent.
+        The agent may invoke tools, so we loop until there are no more to handle.
+        """
+
+        msgs = list(init_msgs)  # Shallow copy is fine
+        for _ in range(max_steps_per_turn):
+            last_msg = msgs[-1]
+            if last_msg.role == "system" or last_msg.role == "user" or last_msg.role == "tool":
+                outputs = await self.llm_svc.get_completions(
+                    inputs=[msgs],
+                    model_options=[self.cfg.judge_model],
+                    tools=[
+                        ToolInfo(
+                            name="step_finished",
+                            description="Call this tool to indicate that you have finished one step in the decision procedure",
+                        )
+                    ],
+                    max_new_tokens=16384,
+                    timeout=180.0,
+                    use_cache=False,
+                )
+                output = outputs[0].first
+                if output is None:
+                    # FIXME(mengk): handle empty completion
+                    raise ValueError("Empty completion in agent one turn")
+                new_assistant_msg = AssistantMessage(
+                    content=output.text or "", tool_calls=output.tool_calls
+                )
+                msgs.append(new_assistant_msg)
+            elif last_msg.role == "assistant":
+                if last_msg.tool_calls is not None:
+                    msgs.extend(
+                        [
+                            ToolMessage(
+                                content="Step completed",
+                                tool_call_id=tool_call.id,
+                            )
+                            for tool_call in last_msg.tool_calls
+                        ]
+                    )
+                else:
+                    break  # Terminate if there are no more tool calls to handle
+            else:
+                raise ValueError(f"Unknown message role: {last_msg.role}")
+        return msgs
 
 
 class SingleRolloutJudge(BaseJudge):
@@ -72,7 +218,7 @@ class SingleRolloutJudge(BaseJudge):
         super().__init__(cfg, llm_svc)
 
     async def __call__(self, agent_run: AgentRun) -> JudgeResult | None:
-        output = await self.single_rollout(agent_run)
+        output, metadata = await self.one_rollout(agent_run)
         if output is None:
             return None
         else:
@@ -81,6 +227,7 @@ class SingleRolloutJudge(BaseJudge):
                 rubric_id=self.cfg.id,
                 rubric_version=self.cfg.version,
                 output=output,
+                result_metadata={"rollout_metadata": metadata},
                 result_type=ResultType.DIRECT_RESULT,
             )
 
@@ -93,11 +240,13 @@ class MajorityVotingJudge(BaseJudge):
 
     async def __call__(self, agent_run: AgentRun) -> JudgeResult | None:
         indep_results: list[dict[str, Any]] = []
+        indep_rollout_metadata: list[dict[str, Any] | None] = []
 
         async def _execute():
-            result = await self.single_rollout(agent_run)
+            result, metadata = await self.one_rollout(agent_run)
             if result is not None:
                 indep_results.append(result)
+                indep_rollout_metadata.append(metadata)
 
         # Run rollouts concurrently
         async with anyio.create_task_group() as tg:
@@ -132,6 +281,7 @@ class MajorityVotingJudge(BaseJudge):
                 "final_agt_key_modes_and_counts": final_agt_key_modes_and_counts,
                 "final_max_idx": final_max_idx,
                 "final_output_distributions": final_output_distributions,
+                "final_rollout_metadata": indep_rollout_metadata,
             },
             result_type=ResultType.DIRECT_RESULT,
         )
@@ -145,12 +295,14 @@ class MajorityVotingJudge(BaseJudge):
             )
 
         indep_results: list[dict[str, Any]] = []
-        pbar = tqdm(total=n_initial_rollouts_to_sample, desc="Independent rollouts")
+        indep_rollout_metadata: list[dict[str, Any] | None] = []
+        pbar = tqdm(total=n_initial_rollouts_to_sample, desc="Independent rollouts", leave=False)
 
         async def _execute():
-            result = await self.single_rollout(agent_run)
+            result, metadata = await self.one_rollout(agent_run)
             if result is not None:
                 indep_results.append(result)
+                indep_rollout_metadata.append(metadata)
             pbar.update(1)
 
         # Run rollouts concurrently
@@ -168,7 +320,10 @@ class MajorityVotingJudge(BaseJudge):
             indep_results, self.cfg.output_schema, get_agreement_keys(self.cfg.output_schema)
         )
 
-        return distributions, {"first_step_rollouts": indep_results}
+        return distributions, {
+            "first_step_rollouts": indep_results,
+            "first_step_rollout_metadata": indep_rollout_metadata,
+        }
 
 
 class MultiReflectionJudge(BaseJudge):
@@ -177,9 +332,13 @@ class MultiReflectionJudge(BaseJudge):
     def __init__(self, cfg: Rubric, llm_svc: BaseLLMService):
         super().__init__(cfg, llm_svc)
 
-    async def single_rollout_second_stage(
+    async def one_rollout_second_stage(
         self, agent_run: AgentRun, first_stage_results: list[dict[str, Any]]
-    ) -> dict[str, Any] | None:
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """Reflect on the results of the first stage of rollouts.
+        TODO(mengk): this is only done in a single-turn way. We should generalize this to multi-turn.
+        """
+
         # Construct *single* reflection prompt
         first_stage_results_text = "\n\n".join(
             [
@@ -209,25 +368,27 @@ class MultiReflectionJudge(BaseJudge):
             use_cache=False,
             validation_callback=self._get_validation_callback(agent_run),
         )
-        output = outputs[0]
+        output_str = outputs[0].first_text
 
-        try:
-            validated_output = parse_and_validate_llm_output(
-                output, self.cfg.output_schema, agent_run
-            )
-            return validated_output
-        except ValidationFailedException:
-            return None
+        validated_output = self._validate_first_response_tag_or_entire_output(
+            output_str or "", agent_run
+        )
+        if validated_output is not None:
+            return validated_output, None
+        else:
+            return None, None
 
     async def __call__(self, agent_run: AgentRun) -> JudgeResult | None:
         rubric = self.cfg
 
         indep_results: list[dict[str, Any]] = []
+        indep_rollout_metadata: list[dict[str, Any] | None] = []
 
         async def _execute():
-            result = await self.single_rollout(agent_run)
+            result, metadata = await self.one_rollout(agent_run)
             if result is not None:
                 indep_results.append(result)
+                indep_rollout_metadata.append(metadata)
 
         # Stage 1: run rollouts concurrently
         async with anyio.create_task_group() as tg:
@@ -243,14 +404,18 @@ class MultiReflectionJudge(BaseJudge):
         )
 
         # Stage 2: reflect on the results
-        final_results = indep_results.copy()  # Shallow copy
+        # Shallow copies are fine
+        final_results = indep_results.copy()
+        final_rollout_metadata = indep_rollout_metadata.copy()
         if len(indep_results) > 1:
             candidate_final_results: list[dict[str, Any]] = []
+            candidate_final_rollout_metadata: list[dict[str, Any] | None] = []
 
             async def _execute_second_stage():
-                result = await self.single_rollout_second_stage(agent_run, indep_results)
+                result, metadata = await self.one_rollout_second_stage(agent_run, indep_results)
                 if result is not None:
                     candidate_final_results.append(result)
+                    candidate_final_rollout_metadata.append(metadata)
 
             async with anyio.create_task_group() as tg:
                 for _ in range(self.cfg.n_rollouts_per_input):
@@ -259,6 +424,7 @@ class MultiReflectionJudge(BaseJudge):
             # Use reflected results if we got any, otherwise fall back to original results
             if candidate_final_results:
                 final_results = candidate_final_results
+                final_rollout_metadata = candidate_final_rollout_metadata
             else:
                 logger.warning("No reflected results found, falling back to original results")
 
@@ -276,10 +442,12 @@ class MultiReflectionJudge(BaseJudge):
                 "final_results": final_results,
                 "final_agt_key_modes_and_counts": final_agt_key_modes_and_counts,
                 "final_max_idx": final_max_idx,
+                "final_rollout_metadata": final_rollout_metadata,
                 # Also include initial measurements
                 "indep_results": indep_results,
                 "indep_max_idx": indep_max_idx,
                 "indep_agt_key_modes_and_counts": indep_agt_key_modes_and_counts,
+                "indep_rollout_metadata": indep_rollout_metadata,
             },
             result_type=ResultType.DIRECT_RESULT,
         )
@@ -303,19 +471,24 @@ class MultiReflectionJudge(BaseJudge):
             )
 
         first_step_rollouts: list[dict[str, Any]] = []
+        first_step_rollout_metadata: list[dict[str, Any] | None] = []
         first_step_combinations: list[list[dict[str, Any]]] = []
         second_step_rollouts: list[list[dict[str, Any]]] = []
+        second_step_rollout_metadata: list[list[dict[str, Any] | None]] = []
 
         ##########
         # Step 1 #
         ##########
 
-        pbar_first = tqdm(total=n_initial_rollouts_to_sample, desc="Stage 1: Initial rollouts")
+        pbar_first = tqdm(
+            total=n_initial_rollouts_to_sample, desc="Stage 1: Initial rollouts", leave=False
+        )
 
         async def _execute_first_stage():
-            result = await self.single_rollout(agent_run)
+            result, metadata = await self.one_rollout(agent_run)
             if result is not None:
                 first_step_rollouts.append(result)
+                first_step_rollout_metadata.append(metadata)
             pbar_first.update(1)
 
         # Collect rollouts of the first stage
@@ -333,12 +506,15 @@ class MultiReflectionJudge(BaseJudge):
             combination = random.sample(first_step_rollouts, self.cfg.n_rollouts_per_input)
             first_step_combinations.append(combination)
             second_step_rollouts.append([])
+            second_step_rollout_metadata.append([])
 
         ##########
         # Step 2 #
         ##########
 
-        pbar_second = tqdm(total=n_combinations_to_sample, desc="Stage 2: Combinations")
+        pbar_second = tqdm(
+            total=n_combinations_to_sample, desc="Stage 2: Combinations", leave=False
+        )
 
         async with anyio.create_task_group() as tg_second:
 
@@ -346,12 +522,14 @@ class MultiReflectionJudge(BaseJudge):
                 pbar_third = tqdm(
                     total=n_reflection_rollouts_to_sample,
                     desc=f"Stage 2: Combination {i+1}/{n_combinations_to_sample}",
+                    leave=False,
                 )
 
                 async def _execute_second_stage_inner():
-                    result = await self.single_rollout_second_stage(agent_run, combination)
+                    result, metadata = await self.one_rollout_second_stage(agent_run, combination)
                     if result is not None:
                         second_step_rollouts[i].append(result)
+                        second_step_rollout_metadata[i].append(metadata)
                     pbar_third.update(1)
 
                 async with anyio.create_task_group() as tg:
@@ -374,8 +552,10 @@ class MultiReflectionJudge(BaseJudge):
 
         return output_distributions, {
             "first_step_rollouts": first_step_rollouts,
+            "first_step_rollout_metadata": first_step_rollout_metadata,
             "first_step_combinations": first_step_combinations,
             "second_step_rollouts": second_step_rollouts,
+            "second_step_rollout_metadata": second_step_rollout_metadata,
         }
 
 

@@ -1,3 +1,4 @@
+import time
 import traceback
 from functools import partial
 from typing import (
@@ -127,6 +128,7 @@ async def _parallelize_calls(
 
             retry_count = 0
             result = None
+            call_started_at: float | None = None
 
             # Check if there's a cached result
             cached_result = (
@@ -148,6 +150,7 @@ async def _parallelize_calls(
                 if streaming_callback is not None:
                     await streaming_callback(i, result)
             else:
+                call_started_at = time.perf_counter()
                 while retry_count < MAX_VALIDATION_ATTEMPTS:
                     try:
                         if streaming_callback is None:
@@ -181,7 +184,7 @@ async def _parallelize_calls(
                                 errors=[e],
                             )
                             break
-                    except DocentUsageLimitException as e:
+                    except DocentUsageLimitException as _:
                         result = LLMOutput(
                             model=model_name,
                             completions=[],
@@ -212,6 +215,10 @@ async def _parallelize_calls(
                             errors=[llm_exception],
                         )
                         break
+
+            # Only store the elapsed time if we didn't hit the cache and the call was successful
+            if cached_result is None and result is not None and call_started_at is not None:
+                result.duration = time.perf_counter() - call_started_at
 
             # Always call completion callback with final result (success or error)
             if completion_callback and result is not None:

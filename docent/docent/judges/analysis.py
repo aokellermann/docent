@@ -1,4 +1,5 @@
 import json
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ from docent._log_util import get_logger
 from docent.data_models.agent_run import AgentRun
 from docent.judges.impl import BaseJudge
 from docent.judges.util.voting import JudgeOutputDistribution
+from docent.trace import agent_run_context, agent_run_metadata, initialize_tracing
 
 logger = get_logger(__name__)
 
@@ -21,10 +23,12 @@ class MultiReflectRollouts(BaseModel):
     agent_run_id: str
 
     first_step_rollouts: list[dict[str, Any]]
+    first_step_rollout_metadata: list[dict[str, Any] | None]
     # Each index in second_step_rollouts corresponds to an index in first_step_combinations
     # Step 2 rollouts are computed by passing each step 1 combo into the judge several times
     first_step_combinations: list[list[dict[str, Any]]] | None = None
     second_step_rollouts: list[list[dict[str, Any]]] | None = None
+    second_step_rollout_metadata: list[list[dict[str, Any] | None]] | None = None
 
     distributions: dict[str, JudgeOutputDistribution]
 
@@ -35,6 +39,7 @@ async def collect_judge_pvs(
     *,
     results_path: Path,
     estimate_output_distrs_kwargs: dict[str, Any],
+    docent_collection_id: str | None = None,
 ):
     if results_path.exists():
         raise FileExistsError(f"Results path already exists: {results_path}")
@@ -49,11 +54,16 @@ async def collect_judge_pvs(
             with open(str(results_path), "w") as f:
                 json.dump(to_jsonable_python(results), f, indent=2)
 
+    if docent_collection_id is not None:
+        initialize_tracing(collection_id=docent_collection_id)
+
     async def _execute_for_agent_run(agent_run: AgentRun):
-        result = await judge.estimate_output_distrs(agent_run, **estimate_output_distrs_kwargs)
-        if result is None:
-            pbar.update(1)
-            return
+        with agent_run_context() if docent_collection_id is not None else nullcontext():
+            result = await judge.estimate_output_distrs(agent_run, **estimate_output_distrs_kwargs)
+            if result is None:
+                pbar.update(1)
+                return
+            agent_run_metadata({"agent_run_id": agent_run.id})
 
         distrs, metadata = result
         results[agent_run.id] = MultiReflectRollouts.model_validate(
