@@ -89,10 +89,10 @@ export default function AgentRunPage() {
             className="h-full flex flex-col"
           >
             <TabsList className="grid w-full grid-cols-2 h-8">
-              <TabsTrigger value="agent" className="text-xs">
+              <TabsTrigger value="agent" className="text-xs py-0.5">
                 Summary
               </TabsTrigger>
-              <TabsTrigger value="chat" className="text-xs">
+              <TabsTrigger value="chat" className="text-xs py-0.5">
                 Chat
               </TabsTrigger>
             </TabsList>

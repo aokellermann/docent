@@ -27,6 +27,7 @@ dependencies = [
     "greenlet>=3.2.1",
     "alembic>=1.16.4",
     "passlib[argon2]>=1.7.4",
+    "sqlglot>=25.20.0",
     # # Cluster assignment
     # "modal>=0.64.213",
     # "torch",

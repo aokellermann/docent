@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Type, Union
 from uuid import uuid4
 
 from pydantic import BaseModel, Discriminator, Field, field_validator
 from sqlalchemy import Boolean, ColumnElement, Float, String, and_, case, cast, or_
+from sqlalchemy.orm import aliased
 
 from docent._log_util import get_logger
 
@@ -12,6 +14,48 @@ if TYPE_CHECKING:
     from docent_core.docent.db.schemas.tables import SQLAAgentRun
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class FilterJoinSpec:
+    """Describes a join that must be applied for rubric-backed filters."""
+
+    rubric_id: str
+    alias: Any
+    onclause: ColumnElement[bool]
+
+
+class FilterSQLContext:
+    """Tracks join requirements while compiling filters to SQLAlchemy clauses."""
+
+    def __init__(
+        self,
+        base_table: Type["SQLAAgentRun"],
+    ) -> None:
+        self._base_table = base_table
+        self._rubric_aliases: dict[str, FilterJoinSpec] = {}
+
+    def ensure_rubric_join(self, rubric_id: str) -> FilterJoinSpec:
+        spec = self._rubric_aliases.get(rubric_id)
+        if spec is not None:
+            return spec
+
+        from docent_core.docent.db.schemas.rubric import SQLAJudgeResult
+
+        alias = aliased(SQLAJudgeResult, name=f"judge_result_{len(self._rubric_aliases)}")
+        onclause = and_(
+            getattr(alias, "agent_run_id") == getattr(self._base_table, "id"),
+            getattr(alias, "rubric_id") == rubric_id,
+        )
+        spec = FilterJoinSpec(rubric_id=rubric_id, alias=alias, onclause=onclause)
+        self._rubric_aliases[rubric_id] = spec
+        return spec
+
+    def get_rubric_alias(self, rubric_id: str) -> FilterJoinSpec:
+        return self.ensure_rubric_join(rubric_id)
+
+    def required_joins(self) -> tuple[FilterJoinSpec, ...]:
+        return tuple(self._rubric_aliases.values())
 
 
 def safe_bool(col: Any) -> Any:
@@ -37,7 +81,12 @@ class BaseCollectionFilter(BaseModel):
     supports_sql: bool = True  # All filters must support SQL
     disabled: bool = False
 
-    def to_sqla_where_clause(self, table: Type["SQLAAgentRun"]) -> ColumnElement[bool] | None:
+    def to_sqla_where_clause(
+        self,
+        table: Type["SQLAAgentRun"],
+        *,
+        context: FilterSQLContext | None = None,
+    ) -> ColumnElement[bool] | None:
         """Convert this filter to a SQLAlchemy WHERE clause.
 
         All filters must implement this method to support SQL execution.
@@ -55,30 +104,47 @@ class PrimitiveFilter(BaseCollectionFilter):
     value: Any
     op: Literal[">", ">=", "<", "<=", "==", "!=", "~*", "!~*"]
 
-    def to_sqla_where_clause(self, table: Type["SQLAAgentRun"]) -> ColumnElement[bool] | None:
+    def to_sqla_where_clause(
+        self,
+        table: Type["SQLAAgentRun"],
+        *,
+        context: FilterSQLContext | None = None,
+    ) -> ColumnElement[bool] | None:
         """Convert this filter to a SQLAlchemy WHERE clause."""
 
         if self.disabled:
             return None
 
         mode = self.key_path[0]
+        json_keys: list[str] | None = None
 
-        # Extract value from JSONB using the table parameter
+        # Extract value from appropriate source
         if mode == "text":
             sqla_value = table.text_for_search  # type: ignore
         elif mode == "created_at":
             sqla_value = cast(table.created_at, String)  # type: ignore
         elif mode == "metadata":
             sqla_value = table.metadata_json  # type: ignore
+            json_keys = self.key_path[1:]
+        elif mode == "rubric":
+            if context is None:
+                raise ValueError("Rubric filters require a SQL compilation context.")
+            if len(self.key_path) < 3:
+                raise ValueError("Rubric filters must include a JSON field path.")
+            join_spec = context.get_rubric_alias(self.key_path[1])
+            sqla_value = join_spec.alias.output  # type: ignore[attr-defined]
+            json_keys = self.key_path[2:]
         else:
             raise ValueError(f"Unsupported mode: {mode}")
 
-        for key in self.key_path[1:]:
-            sqla_value = sqla_value[key]
+        if json_keys is not None:
+            if not json_keys:
+                raise ValueError(f"JSON path required for mode '{mode}'.")
+            for key in json_keys:
+                sqla_value = sqla_value[key]
 
-        # Cast the extracted value to the correct type
-        # This is only necessary for metadata which is JSONB
-        if mode == "metadata":
+        # Cast JSONB values to the correct type
+        if mode in {"metadata", "rubric"}:
             if isinstance(self.value, str):
                 sqla_value = sqla_value.as_string()
             elif isinstance(self.value, bool):
@@ -122,7 +188,12 @@ class ComplexFilter(BaseCollectionFilter):
             raise ValueError("ComplexFilter must have at least one filter")
         return v
 
-    def to_sqla_where_clause(self, table: Type["SQLAAgentRun"]) -> ColumnElement[bool] | None:
+    def to_sqla_where_clause(
+        self,
+        table: Type["SQLAAgentRun"],
+        *,
+        context: FilterSQLContext | None = None,
+    ) -> ColumnElement[bool] | None:
         """Convert this filter to a SQLAlchemy WHERE clause."""
 
         if self.disabled:
@@ -131,7 +202,7 @@ class ComplexFilter(BaseCollectionFilter):
         # Get WHERE clauses for all sub-filters
         where_clauses: list[ColumnElement[bool]] = []
         for filter_obj in self.filters:
-            where_clause = filter_obj.to_sqla_where_clause(table)
+            where_clause = filter_obj.to_sqla_where_clause(table, context=context)
             if where_clause is not None:
                 where_clauses.append(where_clause)
 
@@ -162,7 +233,12 @@ class AgentRunIdFilter(BaseCollectionFilter):
             raise ValueError("AgentRunIdFilter must have at least one agent run ID")
         return v
 
-    def to_sqla_where_clause(self, table: Type["SQLAAgentRun"]) -> ColumnElement[bool] | None:
+    def to_sqla_where_clause(
+        self,
+        table: Type["SQLAAgentRun"],
+        *,
+        context: FilterSQLContext | None = None,
+    ) -> ColumnElement[bool] | None:
         """Convert to SQLAlchemy WHERE clause for agent run ID filtering."""
         if self.disabled:
             return None
@@ -176,7 +252,12 @@ class SearchResultPredicateFilter(BaseCollectionFilter):
     predicate: str
     search_query: str
 
-    def to_sqla_where_clause(self, table: Type["SQLAAgentRun"]) -> ColumnElement[bool] | None:
+    def to_sqla_where_clause(
+        self,
+        table: Type["SQLAAgentRun"],
+        *,
+        context: FilterSQLContext | None = None,
+    ) -> ColumnElement[bool] | None:
         """Convert to SQLAlchemy WHERE clause for search result filtering."""
         if self.disabled:
             return None
@@ -192,7 +273,12 @@ class SearchResultExistsFilter(BaseCollectionFilter):
     type: Literal["search_result_exists"] = "search_result_exists"
     search_query: str
 
-    def to_sqla_where_clause(self, table: Type["SQLAAgentRun"]) -> ColumnElement[bool] | None:
+    def to_sqla_where_clause(
+        self,
+        table: Type["SQLAAgentRun"],
+        *,
+        context: FilterSQLContext | None = None,
+    ) -> ColumnElement[bool] | None:
         """Convert to SQLAlchemy WHERE clause for search result existence filtering."""
         if self.disabled:
             return None

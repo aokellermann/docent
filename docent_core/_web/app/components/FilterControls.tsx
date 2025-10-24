@@ -22,6 +22,7 @@ import { FilterChips } from './FilterChips';
 import { SmartValueInput } from './SmartValueInput';
 import { Combobox } from './Combobox';
 import { StepFilter } from './StepFilter';
+import { formatFilterFieldLabel } from '../utils/formatMetadataField';
 
 export const toggleFilterDisabledState = (
   filterGroup: ComplexFilter | null,
@@ -355,7 +356,7 @@ export const FilterControls = ({
             onChange={handleFieldChange}
             options={metadataFields.map((field) => ({
               value: field.name,
-              label: field.name,
+              label: formatFilterFieldLabel(field.name),
             }))}
             placeholder="Select field"
             searchPlaceholder="Search fields..."

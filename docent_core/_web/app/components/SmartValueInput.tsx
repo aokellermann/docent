@@ -93,7 +93,8 @@ export const SmartValueInput = React.forwardRef<
     const debouncedSearch = useDebounce(inputValue, 300);
 
     // Only enable dropdown/search for metadata fields
-    const isMetadataField = fieldName.startsWith('metadata.');
+    const isMetadataField =
+      fieldName.startsWith('metadata.') || fieldName.startsWith('rubric.');
 
     const { data: fieldValuesData, isFetching } = useGetFieldValuesQuery(
       {

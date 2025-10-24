@@ -22,6 +22,37 @@ from docent_core.investigator.db.contexts import WorkspaceContext
 
 logger = get_logger(__name__)
 
+JOB_COMPLETION_WAIT_ENV_VAR = "DOCENT_WORKER_SHUTDOWN_WAIT_SECONDS"
+DEFAULT_JOB_COMPLETION_WAIT_SECONDS = 3600
+
+
+def _resolve_job_completion_wait_seconds() -> int:
+    raw_value = ENV.get(JOB_COMPLETION_WAIT_ENV_VAR)
+    if not raw_value:
+        return DEFAULT_JOB_COMPLETION_WAIT_SECONDS
+
+    try:
+        value = int(raw_value)
+    except ValueError:
+        logger.warning(
+            "Invalid %s=%r; defaulting to %s seconds",
+            JOB_COMPLETION_WAIT_ENV_VAR,
+            raw_value,
+            DEFAULT_JOB_COMPLETION_WAIT_SECONDS,
+        )
+        return DEFAULT_JOB_COMPLETION_WAIT_SECONDS
+
+    if value < 0:
+        logger.warning(
+            "Negative %s=%s; defaulting to %s seconds",
+            JOB_COMPLETION_WAIT_ENV_VAR,
+            value,
+            DEFAULT_JOB_COMPLETION_WAIT_SECONDS,
+        )
+        return DEFAULT_JOB_COMPLETION_WAIT_SECONDS
+
+    return value
+
 
 async def run_job(_: Any, ctx: ViewContext | WorkspaceContext, job_id: str):
     mono_svc = await MonoService.init()
@@ -148,6 +179,12 @@ def run():
             ssl=REDIS_TLS,
         )
 
+    job_completion_wait_seconds = _resolve_job_completion_wait_seconds()
+    logger.info(
+        "Worker shutdown waits up to %s seconds for in-flight jobs",
+        job_completion_wait_seconds,
+    )
+
     run_worker(
         {
             "functions": [run_job],
@@ -155,5 +192,6 @@ def run():
             "queue_name": WORKER_QUEUE_NAME,
             "max_jobs": 1,  # per worker
             "job_timeout": JOB_TIMEOUT_SECONDS,
+            "job_completion_wait": job_completion_wait_seconds,
         }
     )

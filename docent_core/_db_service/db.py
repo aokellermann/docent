@@ -55,6 +55,32 @@ def get_pg_params() -> PGParams:
     )
 
 
+def get_dql_pg_params(base: PGParams) -> PGParams | None:
+    """Return dedicated read-only credentials for DQL if they are configured."""
+
+    dql_user = ENV.get("DOCENT_PG_DQL_USER")
+    dql_password = ENV.get("DOCENT_PG_DQL_PASSWORD")
+    if not dql_user and not dql_password:
+        return None
+    if not dql_user or not dql_password:
+        raise ValueError(
+            "Both DOCENT_PG_DQL_USER and DOCENT_PG_DQL_PASSWORD must be set to enable "
+            "the read-only DQL connection."
+        )
+
+    dql_host = ENV.get("DOCENT_PG_DQL_HOST") or base.host
+    dql_port = ENV.get("DOCENT_PG_DQL_PORT") or base.port
+    dql_database = ENV.get("DOCENT_PG_DQL_DATABASE") or base.database
+
+    return PGParams(
+        host=dql_host,
+        port=dql_port,
+        user=dql_user,
+        password=dql_password,
+        database=dql_database,
+    )
+
+
 def get_sync_engine():
     """Only used for database migrations, since alembic doesn't have great async support"""
     p = get_pg_params()
@@ -82,9 +108,31 @@ class DocentDB:
         self,
         engine: AsyncEngine,
         Session: async_sessionmaker[AsyncSession],
+        *,
+        dql_engine: AsyncEngine | None = None,
+        dql_session_factory: async_sessionmaker[AsyncSession] | None = None,
     ):
         self.engine = engine
         self._Session = Session
+        self._dql_engine = dql_engine or engine
+        self._DQLSession = dql_session_factory or Session
+
+    @asynccontextmanager
+    async def _session_scope(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[AsyncSession]:
+        session = session_factory()
+        try:
+            yield session
+            await session.commit()
+        except SQLAlchemyError:
+            await session.rollback()
+            logger.error("Rolled back database transaction")
+            raise
+        finally:
+            with anyio.CancelScope(shield=True):
+                await session.close()
 
     @classmethod
     async def init(cls):
@@ -121,15 +169,16 @@ class DocentDB:
             connection_url = url.set(database=target_database)
             logger.info(f"Using database connection: {connection_url}")
 
-            # Initialize engine with connection pooling
-            engine = create_async_engine(
-                connection_url,
+            engine_kwargs = dict(
                 pool_size=25,
                 max_overflow=25,
                 pool_timeout=30,
                 pool_recycle=1800,  # Recycle connections after 30 minutes
                 pool_pre_ping=True,  # Check connection validity before use
             )
+
+            # Initialize engine with connection pooling
+            engine = create_async_engine(connection_url, **engine_kwargs)
 
             # Create session factory
             Session = async_sessionmaker(
@@ -138,12 +187,38 @@ class DocentDB:
                 expire_on_commit=False,
             )
 
+            dql_params = get_dql_pg_params(p)
+            if dql_params:
+                dql_url = URL.create(
+                    drivername="postgresql+asyncpg",
+                    username=dql_params.user,
+                    password=dql_params.password,
+                    host=dql_params.host,
+                    port=int(dql_params.port),
+                    database=dql_params.database,
+                )
+                logger.info(f"Using dedicated DQL connection: {dql_url}")
+                dql_engine = create_async_engine(dql_url, **engine_kwargs)
+                dql_session_factory = async_sessionmaker(
+                    bind=dql_engine,
+                    autoflush=False,
+                    expire_on_commit=False,
+                )
+            else:
+                dql_engine = engine
+                dql_session_factory = Session
+
             # Initialize database tables if they don't exist
             # await cls._setup_target_database(engine)
             # TODO(mengk): please create tables manually.
 
             # Cache and return the singleton instance
-            cls._instance = cls(engine, Session)
+            cls._instance = cls(
+                engine,
+                Session,
+                dql_engine=dql_engine,
+                dql_session_factory=dql_session_factory,
+            )
             return cls._instance
 
     @staticmethod
@@ -205,21 +280,18 @@ class DocentDB:
         async with self.engine.begin() as conn:
             await conn.run_sync(tables.base.SQLABase.metadata.drop_all)
 
-    @asynccontextmanager
-    async def session(self) -> AsyncIterator[AsyncSession]:
-        """Provide a transactional scope around a series of operations."""
-        session = self._Session()
-        try:
-            yield session
-            await session.commit()
-        except SQLAlchemyError:
-            await session.rollback()
-            logger.error("Rolled back database transaction")
-            raise
-        finally:
-            with anyio.CancelScope(shield=True):
-                await session.close()
-
     async def _get_test_session(self) -> AsyncSession:
         logger.warning("Using test session. This is not recommended for production.")
         return self._Session()
+
+    @asynccontextmanager
+    async def session(self) -> AsyncIterator[AsyncSession]:
+        """Provide a transactional scope around a series of operations."""
+        async with self._session_scope(self._Session) as session:
+            yield session
+
+    @asynccontextmanager
+    async def dql_session(self) -> AsyncIterator[AsyncSession]:
+        """Return a session scoped to the read-only DQL connection."""
+        async with self._session_scope(self._DQLSession) as session:
+            yield session

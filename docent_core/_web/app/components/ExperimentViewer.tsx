@@ -12,6 +12,7 @@ import { skipToken } from '@reduxjs/toolkit/query';
 
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 
@@ -21,6 +22,7 @@ import UploadRunsButton from './UploadRunsButton';
 import UploadRunsDialog from './UploadRunsDialog';
 
 import { TranscriptFilterControls } from './TranscriptFilterControls';
+import DQLEditor, { DEFAULT_DQL_QUERY } from './DQLEditor';
 
 import {
   setSorting,
@@ -41,6 +43,7 @@ import { INTERNAL_BASE_URL } from '@/app/constants';
 import { navToAgentRun } from '@/lib/nav';
 import { useRouter } from 'next/navigation';
 import posthog from 'posthog-js';
+import type { DqlExecuteResponse } from '@/app/types/dqlTypes';
 
 const processAgentRunMetadata = (
   structuredMetadata: Record<string, unknown> | null | undefined
@@ -83,6 +86,9 @@ type CachedExperimentViewerState = {
   loadingMetadataIds: string[];
   discoveredColumns: string[];
   scrollPosition?: number;
+  dqlQuery?: string;
+  dqlResult?: DqlExecuteResponse | null;
+  dqlError?: string | null;
 };
 
 const experimentViewerCache = new Map<string, CachedExperimentViewerState>();
@@ -104,6 +110,107 @@ export default function ExperimentViewer({
     }
     return experimentViewerCache.get(collectionId);
   }, [collectionId]);
+
+  const tabStorageKey = useMemo(() => {
+    if (!collectionId) {
+      return null;
+    }
+    return `experiment-viewer-tab-${collectionId}`;
+  }, [collectionId]);
+
+  const [activeTab, setActiveTab] = useState<'filters' | 'dql'>(() => {
+    if (typeof window === 'undefined') {
+      return 'filters';
+    }
+    const stored = tabStorageKey
+      ? window.localStorage.getItem(tabStorageKey)
+      : null;
+    return stored === 'dql' ? 'dql' : 'filters';
+  });
+
+  useEffect(() => {
+    if (!tabStorageKey) {
+      setActiveTab('filters');
+      return;
+    }
+    try {
+      const stored = window.localStorage.getItem(tabStorageKey);
+      setActiveTab(stored === 'dql' ? 'dql' : 'filters');
+    } catch (error) {
+      console.warn('Failed to restore experiment viewer tab state', error);
+      setActiveTab('filters');
+    }
+  }, [tabStorageKey]);
+
+  const handleTabChange = useCallback(
+    (value: string) => {
+      const nextValue: 'filters' | 'dql' = value === 'dql' ? 'dql' : 'filters';
+      setActiveTab(nextValue);
+      if (!tabStorageKey) {
+        return;
+      }
+      try {
+        window.localStorage.setItem(tabStorageKey, nextValue);
+      } catch (error) {
+        console.warn('Failed to persist experiment viewer tab state', error);
+      }
+    },
+    [tabStorageKey]
+  );
+
+  const dqlStorageKey = useMemo(() => {
+    if (!collectionId) {
+      return null;
+    }
+    return `dql-editor-state-${collectionId}`;
+  }, [collectionId]);
+
+  const [dqlQuery, setDqlQuery] = useState<string>(
+    () => cachedState?.dqlQuery ?? DEFAULT_DQL_QUERY
+  );
+  const [dqlResult, setDqlResult] = useState<DqlExecuteResponse | null>(
+    () => cachedState?.dqlResult ?? null
+  );
+  const [dqlErrorMessage, setDqlErrorMessage] = useState<string | null>(
+    () => cachedState?.dqlError ?? null
+  );
+
+  useEffect(() => {
+    if (!dqlStorageKey) {
+      return;
+    }
+    if (typeof window === 'undefined') {
+      return;
+    }
+    try {
+      const stored = window.localStorage.getItem(dqlStorageKey);
+      if (!stored) {
+        return;
+      }
+      const parsed = JSON.parse(stored) as {
+        query?: unknown;
+      };
+      if (typeof parsed.query === 'string') {
+        setDqlQuery(parsed.query);
+      }
+    } catch (error) {
+      console.warn('Failed to restore DQL editor preferences', error);
+    }
+  }, [dqlStorageKey]);
+
+  useEffect(() => {
+    if (!dqlStorageKey || typeof window === 'undefined') {
+      return;
+    }
+    try {
+      const payload = JSON.stringify({
+        query: dqlQuery,
+      });
+      window.localStorage.setItem(dqlStorageKey, payload);
+    } catch (error) {
+      console.warn('Failed to persist DQL editor preferences', error);
+    }
+  }, [dqlStorageKey, dqlQuery]);
 
   // Local state for scroll position
   const [experimentViewerScrollPosition, setExperimentViewerScrollPosition] =
@@ -403,6 +510,9 @@ export default function ExperimentViewer({
       setRequestedMetadataIds(new Set<string>());
       setExperimentViewerScrollPosition(undefined);
       setScrollPosition(undefined);
+      setDqlQuery(DEFAULT_DQL_QUERY);
+      setDqlResult(null);
+      setDqlErrorMessage(null);
       previousCollectionIdRef.current = collectionId;
       return;
     }
@@ -413,6 +523,9 @@ export default function ExperimentViewer({
     setRequestedMetadataIds(new Set(cached?.requestedMetadataIds ?? []));
     setExperimentViewerScrollPosition(cached?.scrollPosition);
     setScrollPosition(cached?.scrollPosition);
+    setDqlQuery(cached?.dqlQuery ?? DEFAULT_DQL_QUERY);
+    setDqlResult(cached?.dqlResult ?? null);
+    setDqlErrorMessage(cached?.dqlError ?? null);
     previousCollectionIdRef.current = collectionId;
   }, [collectionId]);
 
@@ -457,6 +570,9 @@ export default function ExperimentViewer({
       loadingMetadataIds: Array.from(loadingMetadataIds),
       discoveredColumns: Array.from(discoveredColumns),
       scrollPosition: experimentViewerScrollPosition,
+      dqlQuery,
+      dqlResult,
+      dqlError: dqlErrorMessage,
     });
   }, [
     collectionId,
@@ -465,6 +581,9 @@ export default function ExperimentViewer({
     loadingMetadataIds,
     discoveredColumns,
     experimentViewerScrollPosition,
+    dqlQuery,
+    dqlResult,
+    dqlErrorMessage,
   ]);
 
   // Use debouncing to prevent too many updates
@@ -653,50 +772,83 @@ export default function ExperimentViewer({
 
       <ChartsArea />
 
-      {/* Agent run list */}
-      <div className="flex flex-row items-center justify-between">
-        <div className="flex flex-col">
-          <div className="text-sm font-semibold">Agent Run List</div>
-          <div className="text-xs text-muted-foreground">
-            {agentRunIds?.length || 0} agent runs matching the current view
+      <Tabs
+        value={activeTab}
+        onValueChange={handleTabChange}
+        className="flex-1 flex flex-col mt-3 space-y-3 min-h-0"
+      >
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+          <div className="flex flex-col">
+            <div className="text-sm font-semibold">
+              {activeTab === 'filters' ? 'Agent Run List' : 'DQL Explorer'}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {activeTab === 'filters'
+                ? `${agentRunIds?.length || 0} agent runs matching the current view`
+                : 'Query collection data with Docent Query Language'}
+            </div>
           </div>
+          <TabsList className="grid grid-cols-2 h-8">
+            <TabsTrigger value="filters" className="py-0.5">
+              Filters
+            </TabsTrigger>
+            <TabsTrigger value="dql" className="py-0.5">
+              DQL
+            </TabsTrigger>
+          </TabsList>
         </div>
-
-        <UploadRunsButton
-          onImportSuccess={handleUploadSuccess}
-          disabled={!hasWritePermission}
-        />
-      </div>
-
-      {/* Filtering controls */}
-      <TranscriptFilterControls metadataData={metadataData} />
-
-      {/* Agent run table */}
-      <div className="flex-1 min-w-0 min-h-0 flex">
-        <AgentRunTable
-          agentRunIds={agentRunIds}
-          metadataData={metadataData}
-          loadingMetadataIds={loadingMetadataIds}
-          requestedMetadataIds={requestedMetadataIds}
-          availableColumns={availableColumns}
-          selectedColumns={selectedColumns}
-          onSelectedColumnsChange={setSelectedColumns}
-          sortableColumns={sortableColumns}
-          sortField={sortField}
-          sortDirection={sortDirection}
-          onSortChange={handleSortingChange}
-          activeRunId={activeRunId}
-          requestMetadataForIds={requestMetadataForIds}
-          dropZoneHandlers={dropZoneHandlers}
-          isDragActive={isDragActive}
-          isOverDropZone={isOverDropZone}
-          scrollContainerRef={setScrollContainer}
-          isLoadingAgentRuns={isLoadingAgentRuns}
-          isFetchingAgentRuns={isFetchingAgentRuns}
-          onRowMouseDown={handleRowMouseDown}
-          emptyState={emptyStateContent}
-        />
-      </div>
+        <TabsContent
+          value="filters"
+          className="mt-0 flex-1 flex flex-col gap-3 min-h-0 data-[state=active]:flex data-[state=inactive]:hidden"
+        >
+          <div className="flex justify-end">
+            <UploadRunsButton
+              onImportSuccess={handleUploadSuccess}
+              disabled={!hasWritePermission}
+            />
+          </div>
+          <TranscriptFilterControls metadataData={metadataData} />
+          <div className="flex-1 min-w-0 min-h-0 flex">
+            <AgentRunTable
+              agentRunIds={agentRunIds}
+              metadataData={metadataData}
+              loadingMetadataIds={loadingMetadataIds}
+              requestedMetadataIds={requestedMetadataIds}
+              availableColumns={availableColumns}
+              selectedColumns={selectedColumns}
+              onSelectedColumnsChange={setSelectedColumns}
+              sortableColumns={sortableColumns}
+              sortField={sortField}
+              sortDirection={sortDirection}
+              onSortChange={handleSortingChange}
+              activeRunId={activeRunId}
+              requestMetadataForIds={requestMetadataForIds}
+              dropZoneHandlers={dropZoneHandlers}
+              isDragActive={isDragActive}
+              isOverDropZone={isOverDropZone}
+              scrollContainerRef={setScrollContainer}
+              isLoadingAgentRuns={isLoadingAgentRuns}
+              isFetchingAgentRuns={isFetchingAgentRuns}
+              onRowMouseDown={handleRowMouseDown}
+              emptyState={emptyStateContent}
+            />
+          </div>
+        </TabsContent>
+        <TabsContent
+          value="dql"
+          className="mt-0 flex-1 flex flex-col min-h-0 data-[state=active]:flex data-[state=inactive]:hidden"
+        >
+          <DQLEditor
+            collectionId={collectionId ?? undefined}
+            initialQuery={dqlQuery}
+            onQueryChange={setDqlQuery}
+            initialResult={dqlResult}
+            onResultChange={setDqlResult}
+            initialErrorMessage={dqlErrorMessage}
+            onErrorMessageChange={setDqlErrorMessage}
+          />
+        </TabsContent>
+      </Tabs>
 
       <UploadRunsDialog
         isOpen={uploadDialogOpen}

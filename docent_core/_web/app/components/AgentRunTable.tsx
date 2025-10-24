@@ -53,9 +53,10 @@ import {
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 import { useDebounce } from '@/hooks/use-debounce';
-import { Combobox } from './Combobox';
 import { useParams } from 'next/navigation';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Combobox } from './Combobox';
+import { TableContainer } from './TableContainer';
 
 export type AgentRunTableRow = {
   agentRunId: string;
@@ -720,155 +721,12 @@ export const AgentRunTable = memo(function AgentRunTable({
         </div>
       </div>
 
-      <div className="border rounded-md flex-1 flex flex-col min-h-0 relative">
-        <div
-          className="flex-1 min-h-0 overflow-auto custom-scrollbar relative"
-          ref={combinedScrollRef}
-          onScroll={handleScroll}
-          {...dropZoneHandlers}
-        >
-          <Table className="min-w-full">
-            <TableHeader className="sticky top-0 z-20 bg-secondary">
-              {table.getHeaderGroups().map((headerGroup) => (
-                <TableRow key={headerGroup.id}>
-                  {headerGroup.headers.map((header, index) => (
-                    <TableHead
-                      key={header.id}
-                      className={`text-xs truncate ${index === 0 ? 'sticky left-0 z-10 bg-secondary' : ''}`}
-                      style={{
-                        height: ROW_HEIGHT_PX,
-                        width: header.column.columnDef.size,
-                        maxWidth:
-                          header.column.columnDef.maxSize ||
-                          header.column.columnDef.size,
-                      }}
-                    >
-                      {header.isPlaceholder
-                        ? null
-                        : flexRender(
-                            header.column.columnDef.header,
-                            header.getContext()
-                          )}
-                    </TableHead>
-                  ))}
-                </TableRow>
-              ))}
-            </TableHeader>
-            <TableBody>
-              {showSkeletonRows ? (
-                <>
-                  {Array.from({ length: skeletonRowCount }).map((_, index) => (
-                    <TableRow
-                      key={`skeleton-${index}`}
-                      className="text-xs select-none"
-                      style={{ height: ROW_HEIGHT_PX }}
-                    >
-                      {visibleColumns.map((column, columnIndex) => (
-                        <TableCell
-                          key={`${column.id}-${index}`}
-                          className={`py-1.5 ${
-                            columnIndex === 0
-                              ? 'sticky left-0 z-10 bg-background'
-                              : ''
-                          }`}
-                          style={{
-                            width: column.columnDef.size,
-                            maxWidth:
-                              column.columnDef.maxSize ?? column.columnDef.size,
-                          }}
-                        >
-                          <div>
-                            <Skeleton
-                              className={`h-4 ${
-                                columnIndex === 0 ? 'w-16' : 'w-full'
-                              }`}
-                            />
-                          </div>
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  ))}
-                </>
-              ) : !hasRows ? (
-                <TableRow>
-                  <TableCell colSpan={columnCount} className="py-4">
-                    <div className="flex flex-col items-center justify-center text-center text-xs text-foreground py-10">
-                      {emptyState}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                <>
-                  {paddingTop > 0 && (
-                    <TableRow>
-                      <TableCell
-                        colSpan={columnCount}
-                        style={{ height: paddingTop, padding: 0 }}
-                      />
-                    </TableRow>
-                  )}
-                  {table
-                    .getRowModel()
-                    .rows.slice(startIndex, endIndex)
-                    .map((row) => {
-                      const runId = row.original.agentRunId;
-                      const isActive = activeRunId === runId;
-                      return (
-                        <TableRow
-                          key={row.id}
-                          data-state={isActive ? 'active' : undefined}
-                          onMouseDown={(event) => onRowMouseDown(runId, event)}
-                          className={cn(
-                            'text-xs cursor-pointer select-none transition-colors duration-150 group',
-                            isActive
-                              ? 'bg-indigo-bg/80 border-l-2 border-indigo-border'
-                              : 'hover:bg-muted'
-                          )}
-                          style={{ height: ROW_HEIGHT_PX }}
-                          tabIndex={0}
-                        >
-                          {row.getVisibleCells().map((cell, index) => (
-                            <TableCell
-                              key={cell.id}
-                              className={`py-1.5 ${
-                                index === 0
-                                  ? `sticky left-0 z-10 ${
-                                      isActive
-                                        ? 'bg-indigo-bg/80'
-                                        : 'bg-background group-hover:bg-muted transition-colors duration-150'
-                                    }`
-                                  : ''
-                              }`}
-                              style={{
-                                width: cell.column.columnDef.size,
-                                maxWidth:
-                                  cell.column.columnDef.maxSize ||
-                                  cell.column.columnDef.size,
-                              }}
-                            >
-                              {flexRender(
-                                cell.column.columnDef.cell,
-                                cell.getContext()
-                              )}
-                            </TableCell>
-                          ))}
-                        </TableRow>
-                      );
-                    })}
-                  {paddingBottom > 0 && (
-                    <TableRow>
-                      <TableCell
-                        colSpan={columnCount}
-                        style={{ height: paddingBottom, padding: 0 }}
-                      />
-                    </TableRow>
-                  )}
-                </>
-              )}
-            </TableBody>
-          </Table>
-
-          {isDragActive && (
+      <TableContainer
+        scrollRef={combinedScrollRef}
+        onScroll={handleScroll}
+        dropZoneHandlers={dropZoneHandlers}
+        overlay={
+          isDragActive ? (
             <div
               className={cn(
                 'absolute inset-0 flex flex-col items-center justify-center z-50 transition-all duration-200 border-2 rounded',
@@ -883,9 +741,150 @@ export const AgentRunTable = memo(function AgentRunTable({
                 Drop Inspect logs to upload
               </div>
             </div>
-          )}
-        </div>
-      </div>
+          ) : null
+        }
+      >
+        <Table className="min-w-full">
+          <TableHeader className="sticky top-0 z-20 bg-secondary">
+            {table.getHeaderGroups().map((headerGroup) => (
+              <TableRow key={headerGroup.id}>
+                {headerGroup.headers.map((header, index) => (
+                  <TableHead
+                    key={header.id}
+                    className={`text-xs truncate ${index === 0 ? 'sticky left-0 z-10 bg-secondary' : ''}`}
+                    style={{
+                      height: ROW_HEIGHT_PX,
+                      width: header.column.columnDef.size,
+                      maxWidth:
+                        header.column.columnDef.maxSize ||
+                        header.column.columnDef.size,
+                    }}
+                  >
+                    {header.isPlaceholder
+                      ? null
+                      : flexRender(
+                          header.column.columnDef.header,
+                          header.getContext()
+                        )}
+                  </TableHead>
+                ))}
+              </TableRow>
+            ))}
+          </TableHeader>
+          <TableBody>
+            {showSkeletonRows ? (
+              <>
+                {Array.from({ length: skeletonRowCount }).map((_, index) => (
+                  <TableRow
+                    key={`skeleton-${index}`}
+                    className="text-xs select-none"
+                    style={{ height: ROW_HEIGHT_PX }}
+                  >
+                    {visibleColumns.map((column, columnIndex) => (
+                      <TableCell
+                        key={`${column.id}-${index}`}
+                        className={`py-1.5 ${
+                          columnIndex === 0
+                            ? 'sticky left-0 z-10 bg-background'
+                            : ''
+                        }`}
+                        style={{
+                          width: column.columnDef.size,
+                          maxWidth:
+                            column.columnDef.maxSize ?? column.columnDef.size,
+                        }}
+                      >
+                        <div>
+                          <Skeleton
+                            className={`h-4 ${
+                              columnIndex === 0 ? 'w-16' : 'w-full'
+                            }`}
+                          />
+                        </div>
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </>
+            ) : !hasRows ? (
+              <TableRow>
+                <TableCell colSpan={columnCount} className="py-4">
+                  <div className="flex flex-col items-center justify-center text-center text-xs text-foreground py-10">
+                    {emptyState}
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : (
+              <>
+                {paddingTop > 0 && (
+                  <TableRow>
+                    <TableCell
+                      colSpan={columnCount}
+                      style={{ height: paddingTop, padding: 0 }}
+                    />
+                  </TableRow>
+                )}
+                {table
+                  .getRowModel()
+                  .rows.slice(startIndex, endIndex)
+                  .map((row) => {
+                    const runId = row.original.agentRunId;
+                    const isActive = activeRunId === runId;
+                    return (
+                      <TableRow
+                        key={row.id}
+                        data-state={isActive ? 'active' : undefined}
+                        onMouseDown={(event) => onRowMouseDown(runId, event)}
+                        className={cn(
+                          'text-xs cursor-pointer select-none transition-colors duration-150 group',
+                          isActive
+                            ? 'bg-indigo-bg/80 border-l-2 border-indigo-border'
+                            : 'hover:bg-muted'
+                        )}
+                        style={{ height: ROW_HEIGHT_PX }}
+                        tabIndex={0}
+                      >
+                        {row.getVisibleCells().map((cell, index) => (
+                          <TableCell
+                            key={cell.id}
+                            className={`py-1.5 ${
+                              index === 0
+                                ? `sticky left-0 z-10 ${
+                                    isActive
+                                      ? 'bg-indigo-bg/80'
+                                      : 'bg-background group-hover:bg-muted transition-colors duration-150'
+                                  }`
+                                : ''
+                            }`}
+                            style={{
+                              width: cell.column.columnDef.size,
+                              maxWidth:
+                                cell.column.columnDef.maxSize ||
+                                cell.column.columnDef.size,
+                            }}
+                          >
+                            {flexRender(
+                              cell.column.columnDef.cell,
+                              cell.getContext()
+                            )}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    );
+                  })}
+                {paddingBottom > 0 && (
+                  <TableRow>
+                    <TableCell
+                      colSpan={columnCount}
+                      style={{ height: paddingBottom, padding: 0 }}
+                    />
+                  </TableRow>
+                )}
+              </>
+            )}
+          </TableBody>
+        </Table>
+      </TableContainer>
     </div>
   );
 });

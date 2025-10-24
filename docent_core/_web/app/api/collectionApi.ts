@@ -1,6 +1,11 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import { BASE_URL } from '@/app/constants';
 import { Collection, ComplexFilter } from '@/app/types/collectionTypes';
+import {
+  DqlExecutePayload,
+  DqlExecuteResponse,
+  DqlSchemaResponse,
+} from '@/app/types/dqlTypes';
 import { TranscriptMetadataField } from '@/app/types/experimentViewerTypes';
 import { AgentRun, BaseAgentRunMetadata } from '@/app/types/transcriptTypes';
 import sseService from '../services/sseService';
@@ -57,6 +62,7 @@ export const collectionApi = createApi({
     'AgentRunMetadataRange',
     'BaseFilter',
     'AgentRunIds',
+    'DqlSchema',
   ],
   endpoints: (build) => ({
     getCollectionName: build.query<{ name: string | null }, string>({
@@ -190,6 +196,20 @@ export const collectionApi = createApi({
         method: 'GET',
       }),
     }),
+    getDqlSchema: build.query<DqlSchemaResponse, string>({
+      query: (collectionId) => `/dql/${collectionId}/schema`,
+      providesTags: ['DqlSchema'],
+    }),
+    executeDqlQuery: build.mutation<
+      DqlExecuteResponse,
+      { collectionId: string } & DqlExecutePayload
+    >({
+      query: ({ collectionId, dql }) => ({
+        url: `/dql/${collectionId}/execute`,
+        method: 'POST',
+        body: { dql },
+      }),
+    }),
     previewImportRunsFromFile: build.mutation<
       {
         status: string;
@@ -288,6 +308,8 @@ export const {
   useGetFieldValuesQuery,
   useGetAgentRunMetadataQuery,
   useGetAgentRunIdsQuery,
+  useGetDqlSchemaQuery,
+  useExecuteDqlQueryMutation,
   usePreviewImportRunsFromFileMutation,
   useImportRunsFromFileStreamQuery,
   useLazyImportRunsFromFileStreamQuery,

@@ -7,6 +7,7 @@ import {
   ComplexFilter,
 } from '@/app/types/collectionTypes';
 import { cn } from '@/lib/utils';
+import { formatFilterFieldLabel } from '../utils/formatMetadataField';
 
 interface FilterChipsProps {
   filters: ComplexFilter | undefined | null;
@@ -50,11 +51,12 @@ export const FilterChips = ({
             {(() => {
               if (subFilter.type === 'primitive') {
                 const filterCast = subFilter as PrimitiveFilter;
+                const displayKey = formatFilterFieldLabel(
+                  filterCast.key_path.join('.')
+                );
                 return (
                   <>
-                    <span className="font-mono">
-                      {filterCast.key_path.join('.')}
-                    </span>
+                    <span className="font-mono">{displayKey}</span>
                     <span
                       className={cn(
                         'font-mono',

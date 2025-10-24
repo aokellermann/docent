@@ -5,7 +5,7 @@ from sqlalchemy import Numeric, and_, case, cast, func, select
 from sqlalchemy.sql import Select
 from sqlalchemy.sql.sqltypes import Text
 
-from docent_core.docent.db.filters import ComplexFilter
+from docent_core.docent.db.filters import ComplexFilter, FilterSQLContext
 from docent_core.docent.db.schemas.rubric import (
     SQLAJudgeResult,
     SQLARubric,
@@ -80,13 +80,21 @@ def generate_chart_query(
     unique_dimensions = list({dim.key: dim for dim in all_dimensions}.values())
 
     # Only get runs that are in the collection and match the filter
+    filter_context: FilterSQLContext | None = None
     where_clause = SQLAAgentRun.collection_id == collection_id
     if runs_filter:
-        runs_filter_clause = runs_filter.to_sqla_where_clause(SQLAAgentRun)
+        filter_context = FilterSQLContext(SQLAAgentRun)
+        runs_filter_clause = runs_filter.to_sqla_where_clause(
+            SQLAAgentRun,
+            context=filter_context,
+        )
         if runs_filter_clause is not None:
             where_clause = and_(where_clause, runs_filter_clause)
 
     from_clause: Any = SQLAAgentRun.__table__
+    if filter_context:
+        for join_spec in filter_context.required_joins():
+            from_clause = from_clause.join(join_spec.alias, join_spec.onclause)
 
     column_map: dict[str, Any] = {"id": SQLAAgentRun.id}
     metadata_dims = [d for d in unique_dimensions if isinstance(d, RunMetadataDimension)]

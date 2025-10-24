@@ -306,7 +306,13 @@ class RubricService:
             .order_by(func.count(SQLAJudgeRunLabel.id).desc())
         )
 
-        query = query.where(ctx.get_base_where_clause(SQLAAgentRun))
+        filter_context, base_clause = await self.service._prepare_base_filter(
+            self.session,
+            ctx,
+        )
+        query = self.service._apply_filter_context_to_select(query, filter_context)
+        if base_clause is not None:
+            query = query.where(base_clause)
 
         result = await self.session.execute(query)
         agent_run_ids = cast(list[str], result.scalars().all())
