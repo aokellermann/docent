@@ -124,6 +124,12 @@ class JsonFieldInfo:
     labels: Mapping[str, str] = field(default_factory=dict)  # type: ignore[reportUnknownVariableType]
 
 
+@dataclass(frozen=True)
+class _ParameterBinding:
+    value: Any
+    pg_type: str | None = None
+
+
 CollectionPredicateFactory = Callable[[str, str], SqlGlotExpression]
 QueryParameters: TypeAlias = dict[str, Any]
 SqlAndParameters: TypeAlias = tuple[str, QueryParameters]
@@ -205,6 +211,15 @@ ALLOWED_EXPRESSION_TYPES: tuple[type[exp.Expression], ...] = (
     exp.JSONPathSelector,
     exp.JSONPathFilter,
     exp.Lambda,
+    exp.Add,
+    exp.Sub,
+    exp.Mul,
+    exp.Div,
+    exp.Mod,
+    exp.Pow,
+    exp.Floor,
+    exp.Ceil,
+    exp.Round,
 )
 
 
@@ -480,22 +495,22 @@ def _render_sql(expression: SqlGlotExpression, sql_dialect: str) -> str:
     return str(rendered)
 
 
-def _literal_to_python(literal: exp.Literal) -> Any:
+def _literal_to_binding(literal: exp.Literal) -> _ParameterBinding:
     value = literal.this
     if literal.is_string:
-        return value
+        return _ParameterBinding(value=value, pg_type=None)
     if literal.is_number:
         text_value = str(value)
         try:
             if any(sep in text_value.lower() for sep in (".", "e")):
-                return float(text_value)
-            return int(text_value)
+                return _ParameterBinding(value=float(text_value), pg_type="numeric")
+            return _ParameterBinding(value=int(text_value), pg_type="integer")
         except ValueError:
             try:
-                return float(text_value)
+                return _ParameterBinding(value=float(text_value), pg_type="numeric")
             except ValueError:
-                return text_value
-    return value
+                return _ParameterBinding(value=text_value, pg_type=None)
+    return _ParameterBinding(value=value, pg_type=None)
 
 
 def parameterize_expression(
@@ -504,17 +519,26 @@ def parameterize_expression(
 ) -> SqlAndParameters:
     cloned = expression.copy()
     params: QueryParameters = {}
+    cast_hints: dict[str, str] = {}
 
     literals: list[exp.Literal] = list(cloned.find_all(exp.Literal))
     for index, literal in enumerate(literals, start=1):
         param_name = f"__dql_param_{index}"
-        params[param_name] = _literal_to_python(literal)
+        binding = _literal_to_binding(literal)
+        params[param_name] = binding.value
+        if binding.pg_type is not None:
+            cast_hints[param_name] = binding.pg_type
         literal.replace(exp.Parameter(this=param_name))
 
     sql = _render_sql(cloned, sql_dialect)
     if params:
         for name in params:
-            sql = sql.replace(f"${name}", f":{name}")
+            cast_type = cast_hints.get(name)
+            if cast_type is not None:
+                replacement = f"(:{name})::{cast_type}"
+            else:
+                replacement = f":{name}"
+            sql = sql.replace(f"${name}", replacement)
     return sql, params
 
 
