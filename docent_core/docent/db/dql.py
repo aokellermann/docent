@@ -260,7 +260,7 @@ def _judge_result_collection_predicate(table_alias: str, collection_id: str) -> 
     """Filter judge results by ensuring their linked agent run belongs to the collection."""
 
     subquery = (
-        exp.select("1")  # type: ignore[reportUnknownMemberType]
+        exp.select(exp.Literal.string("1"))  # type: ignore[reportUnknownMemberType]
         .from_(SQLAAgentRun.__tablename__)  # type: ignore[reportUnknownMemberType]
         .where(  # type: ignore[reportUnknownMemberType]
             exp.and_(  # type: ignore[reportUnknownMemberType]
