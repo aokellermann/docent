@@ -425,6 +425,45 @@ class Docent:
         logger.info(f"Successfully shared Collection '{collection_id}' with {email}")
         return response.json()
 
+    def get_dql_schema(self, collection_id: str) -> dict[str, Any]:
+        """Retrieve the DQL schema for a collection.
+
+        Args:
+            collection_id: ID of the Collection.
+
+        Returns:
+            dict: Dictionary containing available tables, columns, and metadata for DQL queries.
+
+        Raises:
+            requests.exceptions.HTTPError: If the API request fails.
+        """
+        url = f"{self._server_url}/dql/{collection_id}/schema"
+        response = self._session.get(url)
+        self._handle_response_errors(response)
+        return response.json()
+
+    def execute_dql(self, collection_id: str, dql: str) -> dict[str, Any]:
+        """Execute a DQL query against a collection.
+
+        Args:
+            collection_id: ID of the Collection.
+            dql: The DQL query string to execute.
+
+        Returns:
+            dict: Query execution results including rows, columns, execution metadata, and selected columns.
+
+        Raises:
+            ValueError: If `dql` is empty.
+            requests.exceptions.HTTPError: If the API request fails or the query is invalid.
+        """
+        if not dql.strip():
+            raise ValueError("dql must be a non-empty string")
+
+        url = f"{self._server_url}/dql/{collection_id}/execute"
+        response = self._session.post(url, json={"dql": dql})
+        self._handle_response_errors(response)
+        return response.json()
+
     def list_agent_run_ids(self, collection_id: str) -> list[str]:
         """Get all agent run IDs for a collection.
 

@@ -46,6 +46,13 @@ docent_client = Docent(api_key=ENV.get("DOCENT_API_KEY"), server_url="http://loc
 
 # %%
 
+collection_id = "4707073b-2e3b-444b-a2e1-5248beaaaa62"
+docent_client.get_dql_schema(collection_id)
+# docent_client.execute_dql(collection_id, "SELECT id FROM agent_runs")
+
+
+# %%
+
 collection_id = docent_client.create_collection(
     name="inspect example", description="example inspect log that comes with the Docent repo"
 )
