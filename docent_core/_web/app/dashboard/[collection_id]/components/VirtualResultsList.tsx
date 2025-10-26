@@ -86,7 +86,7 @@ const VirtualResultsList = ({
         overflowY: 'auto',
         contain: 'strict',
       }}
-      className="grow"
+      className="grow custom-scrollbar"
     >
       <div
         style={{
