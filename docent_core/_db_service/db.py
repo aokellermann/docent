@@ -66,7 +66,8 @@ def get_sync_engine():
             host=p.host,
             port=int(p.port),
             database=p.database,
-        )
+        ),
+        pool_size=75,
     )
 
 
