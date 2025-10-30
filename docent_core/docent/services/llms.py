@@ -371,6 +371,20 @@ class ProviderPreferences(PublicProviderPreferences):
             )
         ]
 
+    @cached_property
+    def judge_reflection(self) -> list[ModelOption]:
+        """Get model options for the reflection agent
+        Returns:
+            List of configured model options for this function.
+        """
+        return [
+            ModelOption(provider="openai", model_name="gpt-5", reasoning_effort="low"),
+            ModelOption(provider="google", model_name="gemini-2.5-flash", reasoning_effort="low"),
+            ModelOption(
+                provider="anthropic", model_name="claude-haiku-4-5", reasoning_effort="low"
+            ),
+        ]
+
 
 # Initialize the singleton preferences object
 PROVIDER_PREFERENCES = ProviderPreferences()

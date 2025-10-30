@@ -1,5 +1,5 @@
 import { LabelSet, useGetLabelSetsQuery } from '@/app/api/labelApi';
-import { createContext, useContext, useMemo, useEffect } from 'react';
+import { createContext, useContext, useMemo, useEffect, useState } from 'react';
 import { useLocalStorage } from 'usehooks-ts';
 
 interface LabelSetsContextValue {
@@ -35,9 +35,14 @@ export function LabelSetsProvider({
   rubricId: string;
   collectionId: string;
 }) {
+  const [isHydrated, setIsHydrated] = useState(false);
   const [labelSetsByRubric, setLabelSetsByRubric] = useLocalStorage<
     Record<string, LabelSet | null>
   >('activeLabelSetByRubric', {});
+
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   // Fetch all available label sets to validate stored references
   const { data: availableLabelSets, isFetching } = useGetLabelSetsQuery({
@@ -45,8 +50,8 @@ export function LabelSetsProvider({
   });
 
   const activeLabelSet = useMemo(
-    () => labelSetsByRubric[rubricId] || null,
-    [labelSetsByRubric, rubricId]
+    () => (isHydrated ? labelSetsByRubric[rubricId] || null : null),
+    [isHydrated, labelSetsByRubric, rubricId]
   );
 
   // Validate and sync label set data with server

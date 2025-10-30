@@ -20,8 +20,7 @@ import {
 } from '@/providers/use-refinement-tab';
 import { TextSelectionProvider } from '@/providers/use-text-selection';
 import { useAppSelector } from '@/app/store/hooks';
-import { useRouteGuard } from '@/hooks/use-route-guard';
-import { LabelSetsProvider } from '@/providers/use-label-sets';
+import { LabelSetsProvider, useLabelSets } from '@/providers/use-label-sets';
 
 interface RubricLayoutBodyProps {
   collectionId: string;
@@ -41,17 +40,20 @@ function RubricLayoutBody({
   const isOnResultRoute = !!resultId || !!agentRunId;
 
   const { version } = useRubricVersion();
-  useRouteGuard({ version });
+  const { activeLabelSet } = useLabelSets();
   const { data: rubricRunState } = useGetRubricRunStateQuery(
     {
       collectionId,
       rubricId,
       version: version ?? null,
+      labelSetId: activeLabelSet?.id ?? null,
     },
     { skip: !isOnResultRoute }
   );
-  const currentResult = isOnResultRoute
-    ? rubricRunState?.results?.find((r) => r.id === resultId)
+
+  // Find the agent_run group that contains the current result
+  const currentAgentRunGroup = isOnResultRoute
+    ? rubricRunState?.results?.find((arr) => arr.agent_run_id === agentRunId)
     : null;
 
   const { activeTab, setActiveTab } = useRefinementTab();
@@ -188,8 +190,9 @@ function RubricLayoutBody({
                   <TranscriptChat
                     runId={agentRunId}
                     collectionId={collectionId}
-                    judgeResult={currentResult}
-                    showEmptyResultMessage={!currentResult}
+                    agentRunResults={currentAgentRunGroup}
+                    selectedResultId={resultId}
+                    showEmptyResultMessage={!currentAgentRunGroup}
                     className="flex flex-col min-w-0 h-full"
                   />
                 )}

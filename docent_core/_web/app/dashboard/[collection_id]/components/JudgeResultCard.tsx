@@ -33,8 +33,15 @@ import {
   CitationNavigationContext,
 } from '@/app/dashboard/[collection_id]/rubric/[rubric_id]/NavigateToCitationContext';
 import { useLabelSets } from '@/providers/use-label-sets';
+import { AgentRunJudgeResults } from '@/app/api/rubricApi';
 import { cn } from '@/lib/utils';
 import LabelSetsDialog from './LabelSetsDialog';
+import {
+  TooltipContent,
+  Tooltip,
+  TooltipTrigger,
+  TooltipProvider,
+} from '@/components/ui/tooltip';
 
 interface LabelSetMenuItemsProps {
   onLabelSetCreated: (labelSetId: string) => void;
@@ -185,6 +192,31 @@ const LabelBadge = React.forwardRef<
   );
 });
 LabelBadge.displayName = 'LabelBadge';
+interface AgreementDisplayProps {
+  agreed: number;
+  total: number;
+}
+
+const AgreementDisplay = ({ agreed, total }: AgreementDisplayProps) => {
+  if (total <= 1) return null;
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="text-muted-foreground mr-1">
+            {agreed}/{total}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>
+            {agreed} of {total} results agree with this value
+          </p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+};
 
 interface EnumInputProps {
   propertyKey: string;
@@ -195,6 +227,7 @@ interface EnumInputProps {
   onClearLabel: (labelSetId: string) => void;
   schema: SchemaDefinition;
   isRequiredWarning?: boolean;
+  agreement?: { agreed: number; total: number };
 }
 
 const EnumInput = ({
@@ -206,6 +239,7 @@ const EnumInput = ({
   onClearLabel,
   schema,
   isRequiredWarning = false,
+  agreement,
 }: EnumInputProps) => {
   const hasLabel = labelValue !== undefined;
   const { activeLabelSetId } = useLabelSets();
@@ -220,6 +254,9 @@ const EnumInput = ({
         {propertyKey}:
       </label>
       <span className="mr-1">{resultValue}</span>
+      {agreement && (
+        <AgreementDisplay agreed={agreement.agreed} total={agreement.total} />
+      )}
       <DropdownMenu
         onOpenChange={(open) => {
           if (!open) setTempLabelSetId(null);
@@ -708,24 +745,39 @@ const normalizeLabelsWithCitations = (
 //*****************
 
 interface JudgeResultCardProps {
+  agentRunResult: AgentRunJudgeResults;
   schema: SchemaDefinition;
-  judgeResult: JudgeResultWithCitations;
   labels: Label[];
-  agentRunId: string;
   activeLabelSetId: string | null;
 }
 
 const JudgeResultCard = ({
-  judgeResult,
+  agentRunResult,
   schema,
   labels,
-  agentRunId,
   activeLabelSetId,
 }: JudgeResultCardProps) => {
+  const agentRunId = agentRunResult.agent_run_id;
+  const firstResult = agentRunResult.results[0];
+
   const { collection_id: collectionId } = useParams<{
     collection_id: string;
   }>();
   const [createLabel] = useCreateLabelMutation();
+
+  const calculateAgreement = (
+    key: string
+  ): { agreed: number; total: number } | undefined => {
+    const results = agentRunResult.results;
+    if (results.length <= 1) return undefined;
+
+    const firstValue = firstResult.output[key];
+    const agreed = results.filter(
+      (result) => result.output[key] === firstValue
+    ).length;
+
+    return { agreed, total: results.length };
+  };
 
   const normalizedJudgeRunLabels = Object.fromEntries(
     labels.map((label) => [
@@ -873,7 +925,7 @@ const JudgeResultCard = ({
           return (
             <TextWithCitationsInput
               key={key}
-              judgeResult={judgeResult}
+              judgeResult={firstResult}
               labelValue={getLabelValue(key)}
               propertyKey={key}
               placeholder={'Enter an updated explanation.'}
@@ -891,12 +943,13 @@ const JudgeResultCard = ({
               key={key}
               propertyKey={key}
               options={property.enum}
-              resultValue={judgeResult.output[key]}
+              resultValue={firstResult.output[key]}
               labelValue={getLabelValue(key)}
               onSubmit={(labelSetId, value) => save(key, value)}
               onClearLabel={() => clearLabelField(key)}
               schema={schema}
               isRequiredWarning={isRequiredAndUnfilled(key)}
+              agreement={calculateAgreement(key)}
             />
           );
         }
@@ -906,7 +959,7 @@ const JudgeResultCard = ({
             <BooleanInput
               key={key}
               propertyKey={key}
-              resultValue={judgeResult.output[key] as boolean}
+              resultValue={firstResult.output[key] as boolean}
               labelValue={getLabelValue(key)}
               onSubmit={(labelSetId, value) => save(key, value)}
               onClearLabel={() => clearLabelField(key)}
@@ -925,7 +978,7 @@ const JudgeResultCard = ({
             <NumberInput
               key={key}
               propertyKey={key}
-              resultValue={judgeResult.output[key] as number}
+              resultValue={firstResult.output[key] as number}
               labelValue={getLabelValue(key)}
               maximum={property.maximum}
               minimum={property.minimum}
