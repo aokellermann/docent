@@ -325,7 +325,7 @@ export const FilterControls = ({
       const currentOp = metadataOp;
       const validOpsForType =
         selectedField.type === 'str'
-          ? ['~*', '==', '!=']
+          ? ['~*', '==', '!=', '<', '<=', '>', '>=']
           : ['==', '!=', '<', '<=', '>', '>='];
 
       if (validOpsForType.includes(currentOp)) {
@@ -413,9 +413,23 @@ export const FilterControls = ({
               </SelectTrigger>
               <SelectContent>
                 {metadataType === 'str' && (
-                  <SelectItem value="~*" className="font-mono text-xs">
-                    ~*
-                  </SelectItem>
+                  <>
+                    <SelectItem value="~*" className="font-mono text-xs">
+                      ~*
+                    </SelectItem>
+                    <SelectItem value="<" className="font-mono text-xs">
+                      &lt;
+                    </SelectItem>
+                    <SelectItem value="<=" className="font-mono text-xs">
+                      &lt;=
+                    </SelectItem>
+                    <SelectItem value=">" className="font-mono text-xs">
+                      &gt;
+                    </SelectItem>
+                    <SelectItem value=">=" className="font-mono text-xs">
+                      &gt;=
+                    </SelectItem>
+                  </>
                 )}
                 <SelectItem value="==" className="font-mono text-xs">
                   ==

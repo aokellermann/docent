@@ -1094,7 +1094,7 @@ class MonoService:
 
                     # Add created_at as a direct key
                     if created_at:
-                        structured_metadata["created_at"] = created_at.isoformat()
+                        structured_metadata["created_at"] = created_at.isoformat(sep=" ")
 
                     metadata_map[run_id] = structured_metadata
 

@@ -413,28 +413,13 @@ export const AgentRunTable = memo(function AgentRunTable({
             value = processedData?.[columnKey];
           }
 
-          // Special formatting for created_at
+          // Show raw value for created_at
           if (columnKey === 'created_at') {
-            if (!value || typeof value !== 'string') {
-              return <span className="text-xs text-muted-foreground">-</span>;
-            }
-            const date = new Date(value);
-            if (isNaN(date.getTime())) {
-              return <span className="text-xs text-muted-foreground">-</span>;
-            }
-            const formattedDate = date.toLocaleString('en-US', {
-              year: 'numeric',
-              month: '2-digit',
-              day: '2-digit',
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit',
-              timeZone: 'UTC',
-              timeZoneName: 'short',
-            });
+            const text =
+              value === null || value === undefined ? '-' : String(value);
             return (
               <span className="text-xs text-foreground truncate block">
-                {formattedDate}
+                {text}
               </span>
             );
           }
