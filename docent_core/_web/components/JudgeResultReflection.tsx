@@ -21,6 +21,7 @@ interface ReflectionProps {
   agentRunResults: AgentRunJudgeResults;
   selectedResultId?: string;
   collectionId: string;
+  rubricId: string;
   selectedRolloutIndex: number | null;
 }
 
@@ -172,9 +173,11 @@ function getMissingRolloutIndices(
 export default function Reflection({
   agentRunResults,
   selectedResultId,
+  rubricId,
   collectionId,
 }: ReflectionProps) {
-  const { activeLabelSetId } = useLabelSets();
+  const { activeLabelSet } = useLabelSets(rubricId);
+  const activeLabelSetId = activeLabelSet?.id;
   const { data: allLabels, isLoading: isLoadingLabels } =
     useGetLabelsInLabelSetQuery(
       activeLabelSetId

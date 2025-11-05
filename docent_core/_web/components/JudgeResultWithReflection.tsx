@@ -47,11 +47,13 @@ interface JudgeResultWithReflectionProps {
   agentRunResults: AgentRunJudgeResults;
   selectedResultId?: string;
   collectionId: string;
+  rubricId: string;
 }
 
 export default function JudgeResultWithReflection({
   agentRunResults,
   selectedResultId,
+  rubricId,
   collectionId,
 }: JudgeResultWithReflectionProps) {
   const selectedResult: JudgeResultWithCitations | undefined = useMemo(() => {
@@ -77,6 +79,7 @@ export default function JudgeResultWithReflection({
       <Reflection
         agentRunResults={agentRunResults}
         selectedResultId={selectedResultId}
+        rubricId={rubricId}
         collectionId={collectionId}
         selectedRolloutIndex={rolloutIndexFromUrl}
       />

@@ -23,8 +23,9 @@ import Link from 'next/link';
 const ESTIMATED_CHAT_MESSAGE_OUTPUT_TOKENS = 8192;
 
 export interface TranscriptChatProps {
-  runId: string;
+  agentRunId: string;
   collectionId?: string;
+  rubricId?: string;
 
   // Result-specific props
   agentRunResults?: AgentRunJudgeResults | null;
@@ -74,8 +75,9 @@ const resultSpecificSuggestedMessages: SuggestedMessage[] = [
 ];
 
 export default function TranscriptChat({
-  runId,
+  agentRunId,
   collectionId: propCollectionId,
+  rubricId,
   agentRunResults,
   selectedResultId,
   showEmptyResultMessage = false,
@@ -113,7 +115,7 @@ export default function TranscriptChat({
     errorMessage,
     errorId,
     estimatedInputTokens,
-  } = useTranscriptChat({ runId, collectionId, judgeResult });
+  } = useTranscriptChat({ agentRunId, collectionId, judgeResult });
 
   // Chat models state
   const { data: availableChatModels } = useGetChatModelsQuery();
@@ -276,16 +278,17 @@ export default function TranscriptChat({
           headerElement={
             <>
               {headerElement}
-              {agentRunResults ? (
+              {agentRunResults && rubricId ? (
                 <JudgeResultWithReflection
                   agentRunResults={agentRunResults}
                   selectedResultId={selectedResultId}
                   collectionId={collectionId}
+                  rubricId={rubricId}
                 />
               ) : showEmptyResultMessage ? (
                 <div className="text-xs text-muted-foreground flex items-center border rounded-lg bg-muted border-dashed h-24 justify-center p-2">
-                  Agent run {runId?.split('-')?.[0] || 'unknown'} has no result
-                  at this rubric version.
+                  Agent run {agentRunId?.split('-')?.[0] || 'unknown'} has no
+                  result at this rubric version.
                 </div>
               ) : null}
             </>

@@ -14,6 +14,7 @@ import { SchemaDefinition } from '@/app/types/schema';
 import { AgentRunJudgeResults } from '@/app/api/rubricApi';
 import { applyGeneralFilters } from '../utils/viewModeResults';
 import { useResultFilterControls } from '@/providers/use-result-filters';
+import { useParams } from 'next/navigation';
 
 interface AgreementPopoverProps {
   agentRunResults: AgentRunJudgeResults[];
@@ -26,7 +27,11 @@ export const AgreementPopover = ({
   labels,
   schema,
 }: AgreementPopoverProps) => {
-  const { activeLabelSet } = useLabelSets();
+  const { rubric_id: rubricId } = useParams<{
+    rubric_id: string;
+  }>();
+
+  const { activeLabelSet } = useLabelSets(rubricId);
 
   // Filter for properties that can be counted (statistics computed for)
   const countableProperties: string[] = useMemo(() => {

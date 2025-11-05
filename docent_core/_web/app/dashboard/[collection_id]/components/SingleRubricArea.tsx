@@ -58,7 +58,9 @@ export default function SingleRubricArea({
   ] = usePostRubricUpdateToRefinementSessionMutation();
   const hasWritePermission = useHasCollectionWritePermission();
 
-  const { activeLabelSetId } = useLabelSets();
+  const { activeLabelSet, setLabelSet: setActiveLabelSet } =
+    useLabelSets(rubricId);
+  const activeLabelSetId = activeLabelSet?.id;
 
   // Unsaved changes from the editor
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -86,7 +88,7 @@ export default function SingleRubricArea({
   } = useJobStatus({
     collectionId,
     rubricId,
-    labelSetId: activeLabelSetId,
+    labelSetId: activeLabelSetId ?? null,
   });
 
   // Get the remote rubric
@@ -97,7 +99,6 @@ export default function SingleRubricArea({
   });
   const schema = rubric?.output_schema;
 
-  const { activeLabelSet, setActiveLabelSet, clearLabelSets } = useLabelSets();
   const { data: labels = [], isLoading: isLabelsLoading } =
     useGetLabelsInLabelSetQuery(
       activeLabelSet
@@ -118,7 +119,7 @@ export default function SingleRubricArea({
   ) => {
     // Just unlink the labels from the current rubric.
     if (hasLabels && clearLabels) {
-      clearLabelSets();
+      setActiveLabelSet(null);
     }
 
     if (sessionId) {

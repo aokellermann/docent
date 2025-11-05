@@ -20,7 +20,7 @@ import {
 } from '@/providers/use-refinement-tab';
 import { TextSelectionProvider } from '@/providers/use-text-selection';
 import { useAppSelector } from '@/app/store/hooks';
-import { LabelSetsProvider, useLabelSets } from '@/providers/use-label-sets';
+import { useLabelSets } from '@/providers/use-label-sets';
 
 interface RubricLayoutBodyProps {
   collectionId: string;
@@ -40,7 +40,7 @@ function RubricLayoutBody({
   const isOnResultRoute = !!resultId || !!agentRunId;
 
   const { version } = useRubricVersion();
-  const { activeLabelSet } = useLabelSets();
+  const { activeLabelSet } = useLabelSets(rubricId);
   const { data: rubricRunState } = useGetRubricRunStateQuery(
     {
       collectionId,
@@ -179,7 +179,6 @@ function RubricLayoutBody({
 
               <TabsContent value="refine" className="flex-1 min-h-0">
                 <RefinementChat
-                  collectionId={collectionId}
                   sessionId={sessionId}
                   isOnResultRoute={isOnResultRoute}
                 />
@@ -188,7 +187,7 @@ function RubricLayoutBody({
               <TabsContent value="analyze" className="flex-1 min-h-0">
                 {isOnResultRoute && agentRunId && (
                   <TranscriptChat
-                    runId={agentRunId}
+                    agentRunId={agentRunId}
                     collectionId={collectionId}
                     agentRunResults={currentAgentRunGroup}
                     selectedResultId={resultId}
@@ -223,16 +222,11 @@ export default function RubricLayout({
             collectionId={collectionId}
             rubricId={rubricId}
           >
-            <LabelSetsProvider rubricId={rubricId} collectionId={collectionId}>
-              <TextSelectionProvider>
-                <RubricLayoutBody
-                  collectionId={collectionId}
-                  rubricId={rubricId}
-                >
-                  {children}
-                </RubricLayoutBody>
-              </TextSelectionProvider>
-            </LabelSetsProvider>
+            <TextSelectionProvider>
+              <RubricLayoutBody collectionId={collectionId} rubricId={rubricId}>
+                {children}
+              </RubricLayoutBody>
+            </TextSelectionProvider>
           </RefinementTabProvider>
         </RubricVersionProvider>
       </CitationNavigationProvider>

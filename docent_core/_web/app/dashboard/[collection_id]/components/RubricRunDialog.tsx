@@ -34,7 +34,7 @@ export default function RunRubricDialog({
   const [startEvaluation, { isLoading: isStarting }] =
     useStartEvaluationMutation();
   const { data: usageSummary } = useGetUsageSummaryQuery();
-  const { activeLabelSet } = useLabelSets();
+  const { activeLabelSet } = useLabelSets(rubricId);
   const handleRun = async () => {
     const maxResultsNum =
       runMode === 'all'

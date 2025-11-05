@@ -29,7 +29,7 @@ export default function JudgeResultPage() {
   const dispatch = useAppDispatch();
   const citationNav = useCitationNavigation();
   const { version } = useRubricVersion();
-  const { activeLabelSetId } = useLabelSets();
+  const { activeLabelSet } = useLabelSets(rubricId);
   const isResultRoute = !!resultId;
 
   // Get all results from rubric run state
@@ -38,7 +38,7 @@ export default function JudgeResultPage() {
       collectionId,
       rubricId,
       version: version ?? null,
-      labelSetId: activeLabelSetId ?? null,
+      labelSetId: activeLabelSet?.id ?? null,
     },
     { skip: !isResultRoute }
   );
