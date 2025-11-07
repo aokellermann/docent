@@ -486,7 +486,7 @@ export const FilterControls = ({
             className="h-7 text-xs whitespace-nowrap px-2"
             size="sm"
           >
-            Add Filter
+            Add filter
           </Button>
         </div>
       </div>
