@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy.dialects import postgresql
 
 from docent_core.docent.db.filters import FilterSQLContext, PrimitiveFilter
-from docent_core.docent.db.schemas import refinement  # noqa: F401
+from docent_core.docent.db.schemas import refinement  # type: ignore
 from docent_core.docent.db.schemas.tables import SQLAAgentRun
 
 

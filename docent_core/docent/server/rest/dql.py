@@ -75,7 +75,7 @@ class DQLExecuteResponse(BaseModel):
     selected_columns: list[DQLSelectedColumnModel]
 
 
-def _build_foreign_keys(column) -> list[DQLForeignKeySchema]:
+def _build_foreign_keys(column: Any) -> list[DQLForeignKeySchema]:
     foreign_keys: list[DQLForeignKeySchema] = []
     for fk in getattr(column, "foreign_keys", []):
         target_column = getattr(fk, "column", None)
