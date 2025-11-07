@@ -1,4 +1,5 @@
 'use client';
+import { BASE_DOCENT_PATH } from '@/app/constants';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,7 +15,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Share2, UserPlus } from 'lucide-react';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { copyToClipboard } from '@/lib/utils';
+import { Copy, Share2, UserPlus } from 'lucide-react';
 import CollaboratorsList from './CollaboratorsList';
 import { useState, useCallback } from 'react';
 import {
@@ -177,6 +184,29 @@ const ShareViewPopover = ({ collectionId }: { collectionId: string }) => {
   const hasAdminPermission = useHasCollectionAdminPermission();
   const hasWritePermission = useHasCollectionWritePermission();
   const accessButtonLabel = hasWritePermission ? 'Read-write' : 'Read-only';
+  const handleCopyCollectionLink = useCallback(async () => {
+    try {
+      if (typeof window === 'undefined') {
+        throw new Error('Window is undefined');
+      }
+      const shareUrl = `${window.location.origin}${BASE_DOCENT_PATH}/${collectionId}`;
+      const didCopy = await copyToClipboard(shareUrl);
+      if (!didCopy) {
+        throw new Error('Copy command failed');
+      }
+      toast({
+        title: 'Link copied',
+        description: 'Collection link copied to clipboard',
+      });
+    } catch (error) {
+      console.error('Failed to copy collection link:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to copy link to clipboard',
+        variant: 'destructive',
+      });
+    }
+  }, [collectionId]);
 
   if (!hasAdminPermission) {
     return (
@@ -202,7 +232,7 @@ const ShareViewPopover = ({ collectionId }: { collectionId: string }) => {
 
         {/* Section 2: Access settings */}
         <div className="border-t" />
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <div>
             <Label htmlFor="public-access" className="text-sm font-medium">
               Public access
@@ -211,11 +241,30 @@ const ShareViewPopover = ({ collectionId }: { collectionId: string }) => {
               Anyone with the link can access
             </p>
           </div>
-          <PublicPermissionDropdown
-            value={publicPermissionLevel}
-            onChange={handlePublicPermissionChange}
-            disabled={!hasAdminPermission}
-          />
+          <div className="flex items-center gap-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground"
+                  onClick={handleCopyCollectionLink}
+                  aria-label="Copy collection link"
+                >
+                  <Copy size={14} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                Click to copy the collection URL
+              </TooltipContent>
+            </Tooltip>
+            <PublicPermissionDropdown
+              value={publicPermissionLevel}
+              onChange={handlePublicPermissionChange}
+              disabled={!hasAdminPermission}
+            />
+          </div>
         </div>
 
         {/* Section 3: Collaborators */}
