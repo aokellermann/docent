@@ -13,7 +13,19 @@ from contextvars import ContextVar, Token
 from datetime import datetime, timezone
 from enum import Enum
 from importlib.metadata import Distribution, distributions
-from typing import Any, AsyncIterator, Callable, Dict, Iterator, List, Optional, Set, Union
+from typing import (
+    Any,
+    AsyncIterator,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Set,
+    Union,
+    cast,
+)
 
 import requests
 from opentelemetry import trace
@@ -29,12 +41,18 @@ from opentelemetry.sdk.trace.export import (
     SimpleSpanProcessor,
 )
 from opentelemetry.trace import Span
+from requests import Response
 
 logger = logging.getLogger(__name__)
 
 # Default configuration
 DEFAULT_ENDPOINT = "https://api.docent.transluce.org/rest/telemetry"
 DEFAULT_COLLECTION_NAME = "default-collection-name"
+ERROR_DETAIL_MAX_CHARS = 500
+
+
+class DocentTelemetryRequestError(RuntimeError):
+    """Raised when the Docent telemetry backend rejects a client request."""
 
 
 class Instruments(Enum):
@@ -538,7 +556,7 @@ class DocentTracer:
                 try:
                     self.send_agent_run_metadata(agent_run_id, metadata)
                 except Exception as e:
-                    logger.warning(f"Failed sending agent run metadata: {e}")
+                    logger.error(f"Failed sending agent run metadata: {e}")
 
             yield agent_run_id, transcript_id
         finally:
@@ -626,6 +644,12 @@ class DocentTracer:
             json.dumps(metadata)
         except (TypeError, ValueError) as exc:
             raise TypeError(f"{context} metadata must be JSON serializable") from exc
+        offending_path = self._find_null_character_path(metadata)
+        if offending_path is not None:
+            raise ValueError(
+                f"{context} metadata cannot contain null characters (found at {offending_path}). "
+                "Remove or replace '\\u0000' before calling Docent tracing APIs."
+            )
 
     def _post_json(self, path: str, data: Dict[str, Any]) -> None:
         self._post_json_sync(path, data)
@@ -637,8 +661,159 @@ class DocentTracer:
         try:
             resp = requests.post(url, json=data, headers=self._api_headers(), timeout=(10, 60))
             resp.raise_for_status()
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Failed POST {url}: {e}")
+        except requests.exceptions.RequestException as exc:
+            message = self._format_request_exception(url, exc)
+            raise DocentTelemetryRequestError(message) from exc
+
+    def _format_request_exception(self, url: str, exc: requests.exceptions.RequestException) -> str:
+        response: Optional[Response] = getattr(exc, "response", None)
+        message_parts: List[str] = [f"Failed POST {url}"]
+        suggestion: Optional[str]
+
+        if response is not None:
+            status_phrase = f"HTTP {response.status_code}"
+            if response.reason:
+                status_phrase = f"{status_phrase} {response.reason}"
+            message_parts.append(f"({status_phrase})")
+
+            detail = self._extract_response_detail(response)
+            if detail:
+                message_parts.append(f"- Backend detail: {detail}")
+
+            request_id = response.headers.get("x-request-id")
+            if request_id:
+                message_parts.append(f"(request-id: {request_id})")
+
+            suggestion = self._suggest_fix_for_status(response.status_code)
+        else:
+            message_parts.append(f"- {exc}")
+            suggestion = self._suggest_fix_for_status(None)
+
+        if suggestion:
+            message_parts.append(suggestion)
+
+        return " ".join(part for part in message_parts if part)
+
+    def _extract_response_detail(self, response: Response) -> Optional[str]:
+        try:
+            body = response.json()
+        except ValueError:
+            text = response.text.strip()
+            if not text:
+                return None
+            normalized = " ".join(text.split())
+            return self._truncate_error_message(normalized)
+
+        if isinstance(body, dict):
+            typed_body = cast(Dict[str, Any], body)
+            structured_message = self._structured_detail_message(typed_body)
+            if structured_message:
+                return self._truncate_error_message(structured_message)
+            return self._truncate_error_message(self._normalize_error_value(typed_body))
+
+        return self._truncate_error_message(self._normalize_error_value(body))
+
+    def _structured_detail_message(self, data: Dict[str, Any]) -> Optional[str]:
+        for key in ("detail", "message", "error"):
+            if key in data:
+                structured_value = self._structured_detail_value(data[key])
+                if structured_value:
+                    return structured_value
+        return self._structured_detail_value(data)
+
+    def _structured_detail_value(self, value: Any) -> Optional[str]:
+        if isinstance(value, Mapping):
+            mapping_value = cast(Mapping[str, Any], value)
+            message = mapping_value.get("message")
+            hint = mapping_value.get("hint")
+            error_code = mapping_value.get("error_code")
+            request_id = mapping_value.get("request_id")
+            fallback_detail = mapping_value.get("detail")
+
+            parts: List[str] = []
+            if isinstance(message, str) and message.strip():
+                parts.append(message.strip())
+            elif isinstance(fallback_detail, str) and fallback_detail.strip():
+                parts.append(fallback_detail.strip())
+
+            if isinstance(hint, str) and hint.strip():
+                parts.append(f"(hint: {hint.strip()})")
+            if isinstance(error_code, str) and error_code.strip():
+                parts.append(f"[code: {error_code.strip()}]")
+            if isinstance(request_id, str) and request_id.strip():
+                parts.append(f"(request-id: {request_id.strip()})")
+
+            return " ".join(parts) if parts else None
+
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+        return None
+
+    def _normalize_error_value(self, value: Any) -> str:
+        if isinstance(value, str):
+            return " ".join(value.split())
+
+        try:
+            serialized = json.dumps(value)
+        except (TypeError, ValueError):
+            serialized = str(value)
+
+        return " ".join(serialized.split())
+
+    def _truncate_error_message(self, message: str) -> str:
+        message = message.strip()
+        if len(message) <= ERROR_DETAIL_MAX_CHARS:
+            return message
+        return f"{message[:ERROR_DETAIL_MAX_CHARS]}..."
+
+    def _suggest_fix_for_status(self, status_code: Optional[int]) -> Optional[str]:
+        if status_code in (401, 403):
+            return (
+                "Verify that the Authorization header or DOCENT_API_KEY grants write access to the "
+                "target collection."
+            )
+        if status_code == 404:
+            return (
+                "Ensure the tracing endpoint passed to initialize_tracing matches the Docent server's "
+                "/rest/telemetry route."
+            )
+        if status_code in (400, 422):
+            return (
+                "Confirm the payload includes collection_id, agent_run_id, metadata, and timestamp in "
+                "the expected format."
+            )
+        if status_code and status_code >= 500:
+            return "Inspect the Docent backend logs for the referenced request."
+        if status_code is None:
+            return "Confirm the Docent telemetry endpoint is reachable from this process."
+        return None
+
+    def _find_null_character_path(self, value: Any, path: str = "") -> Optional[str]:
+        """Backend rejects NUL bytes, so detect them before we send metadata to the backend."""
+        return None
+        if isinstance(value, str):
+            if "\x00" in value or "\\u0000" in value or "\\x00" in value:
+                return path or "<root>"
+            return None
+
+        if isinstance(value, dict):
+            for key, item in value.items():
+                next_path = f"{path}.{key}" if path else str(key)
+                result = self._find_null_character_path(item, next_path)
+                if result:
+                    return result
+            return None
+
+        if isinstance(value, (list, tuple)):
+            for index, item in enumerate(value):
+                next_path = f"{path}[{index}]" if path else f"[{index}]"
+                result = self._find_null_character_path(item, next_path)
+                if result:
+                    return result
+            return None
+
+        return None
 
     def send_agent_run_score(
         self,
@@ -806,7 +981,7 @@ class DocentTracer:
                     transcript_id, name, description, transcript_group_id, metadata
                 )
             except Exception as e:
-                logger.warning(f"Failed sending transcript data: {e}")
+                logger.error(f"Failed sending transcript data: {e}")
 
             yield transcript_id
         finally:
@@ -868,7 +1043,7 @@ class DocentTracer:
                     transcript_id, name, description, transcript_group_id, metadata
                 )
             except Exception as e:
-                logger.warning(f"Failed sending transcript data: {e}")
+                logger.error(f"Failed sending transcript data: {e}")
 
             yield transcript_id
         finally:
@@ -1003,7 +1178,7 @@ class DocentTracer:
                     transcript_group_id, name, description, parent_transcript_group_id, metadata
                 )
             except Exception as e:
-                logger.warning(f"Failed sending transcript group data: {e}")
+                logger.error(f"Failed sending transcript group data: {e}")
 
             yield transcript_group_id
         finally:
@@ -1067,7 +1242,7 @@ class DocentTracer:
                     transcript_group_id, name, description, parent_transcript_group_id, metadata
                 )
             except Exception as e:
-                logger.warning(f"Failed sending transcript group data: {e}")
+                logger.error(f"Failed sending transcript group data: {e}")
 
             yield transcript_group_id
         finally:
@@ -1271,7 +1446,7 @@ def agent_run_metadata(metadata: Dict[str, Any]) -> None:
 
         tracer.send_agent_run_metadata(agent_run_id, metadata)
     except Exception as e:
-        logger.error(f"Failed to send metadata: {e}")
+        logger.error(f"Failed to send agent run metadata: {e}")
 
 
 def transcript_metadata(

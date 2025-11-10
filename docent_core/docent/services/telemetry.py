@@ -2,12 +2,14 @@ import base64
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Sequence, cast
+from typing import Any, Dict, List, Mapping, Optional, Sequence, cast
 from uuid import uuid4
 
 from google.protobuf.json_format import MessageToDict
 from opentelemetry.proto.collector.trace.v1 import trace_service_pb2
-from sqlalchemy import delete, or_, select, update
+from sqlalchemy import Integer, and_
+from sqlalchemy import cast as sa_cast
+from sqlalchemy import delete, func, not_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,7 +38,6 @@ from docent_core.docent.db.schemas.tables import (
     SQLATranscript,
     SQLATranscriptGroup,
     TelemetryAgentRunStatus,
-    sanitize_pg_text,
 )
 from docent_core.docent.services.monoservice import (
     MonoService,
@@ -66,12 +67,6 @@ class TelemetryService:
         collection_id: str | None = None,
     ) -> str:
         """Store telemetry log data in the database."""
-        # Sanitize the JSON data to remove null characters and other problematic Unicode sequences
-        # Convert to JSON string, sanitize, then parse back to dict
-        json_str = json.dumps(json_data)
-        sanitized_json_str = sanitize_pg_text(json_str)
-        sanitized_json_data = json.loads(sanitized_json_str)
-
         telemetry_id = str(uuid4())
         self.session.add(
             SQLATelemetryLog(
@@ -80,7 +75,7 @@ class TelemetryService:
                 collection_id=collection_id,
                 type=type,
                 version=version,
-                json_data=sanitized_json_data,
+                json_data=json_data,
             )
         )
         await self.session.commit()
@@ -184,12 +179,18 @@ class TelemetryService:
                     logger.error(f"Failed to process agent run {agent_run_id}")
                     # Mark agent run as errored on failure
                     await self._mark_agent_runs_as_errored(
-                        collection_id, {agent_run_id}, "Processing failed"
+                        collection_id,
+                        {agent_run_id: current_version},
+                        "Processing failed",
                     )
 
             except Exception as e:
                 # Mark agent run as needs_processing again if processing failed
-                await self._mark_agent_runs_as_errored(collection_id, {agent_run_id}, str(e))
+                await self._mark_agent_runs_as_errored(
+                    collection_id,
+                    {agent_run_id: current_version},
+                    str(e),
+                )
                 logger.error(f"Error processing agent run {agent_run_id}: {str(e)}")
                 continue
 
@@ -501,12 +502,7 @@ class TelemetryService:
             # Convert to dictionary for easier processing
             trace_data = MessageToDict(export_request, preserving_proto_field_name=True)
 
-            # Sanitize the trace data to remove null characters and other problematic Unicode sequences
-            # Convert to JSON string, sanitize, then parse back to dict
-            json_str = json.dumps(trace_data)
-            sanitized_json_str = sanitize_pg_text(json_str)
-            sanitized_trace_data = json.loads(sanitized_json_str)
-            return sanitized_trace_data
+            return trace_data
         except Exception as e:
             logger.error(f"Error parsing protobuf traces: {str(e)}")
             raise ValueError(f"Invalid protobuf format: {str(e)}")
@@ -716,12 +712,7 @@ class TelemetryService:
             }
         )
 
-        # Sanitize the processed span to remove null characters and other problematic Unicode sequences
-        # Convert to JSON string, sanitize, then parse back to dict
-        json_str = json.dumps(processed_span)
-        sanitized_json_str = sanitize_pg_text(json_str)
-        sanitized_span = json.loads(sanitized_json_str)
-        return sanitized_span
+        return processed_span
 
     async def accumulate_spans(
         self,
@@ -772,14 +763,32 @@ class TelemetryService:
             Dictionary mapping agent_run_id to current_version for successfully marked agent runs
         """
 
+        # Track the latest version that failed so new data can retry even if status is ERROR
+        errored_version = func.coalesce(
+            sa_cast(
+                SQLATelemetryAgentRunStatus.metadata_json["errored_version"].astext,
+                Integer,
+            ),
+            0,
+        )
+
         stmt = (
             update(SQLATelemetryAgentRunStatus)
             .where(
                 or_(
                     SQLATelemetryAgentRunStatus.status
                     == TelemetryAgentRunStatus.NEEDS_PROCESSING.value,
-                    SQLATelemetryAgentRunStatus.current_version
-                    > SQLATelemetryAgentRunStatus.processed_version,
+                    and_(
+                        SQLATelemetryAgentRunStatus.current_version
+                        > SQLATelemetryAgentRunStatus.processed_version,
+                        not_(
+                            and_(
+                                SQLATelemetryAgentRunStatus.status
+                                == TelemetryAgentRunStatus.ERROR.value,
+                                SQLATelemetryAgentRunStatus.current_version <= errored_version,
+                            ),
+                        ),
+                    ),
                 ),
                 SQLATelemetryAgentRunStatus.collection_id == collection_id,
             )
@@ -790,23 +799,19 @@ class TelemetryService:
             )
         )
 
-        # Log the SQL query for debugging
-        logger.info(f"SQL Query: {stmt.compile(compile_kwargs={'literal_binds': True})}")
-
         result = await self.session.execute(stmt)
         rows = result.fetchall()
 
         agent_run_versions = {row.agent_run_id: row.current_version for row in rows}
 
-        logger.info(
-            f"Atomically marked {len(agent_run_versions)} agent runs as processing in collection {collection_id}"
-        )
         return agent_run_versions
 
     async def has_remaining_work(self, collection_id: str) -> bool:
         """
         Check if there are agent runs that still need processing for a collection.
-        An agent run needs processing if it has status NEEDS_PROCESSING OR if its current_version > processed_version.
+        Work remains if an agent run is marked NEEDS_PROCESSING or has newer data
+        (current_version > processed_version) that is either not errored or newer
+        than the last errored version.
 
         Args:
             collection_id: The collection ID to check
@@ -814,6 +819,14 @@ class TelemetryService:
         Returns:
             True if there are agent runs that need processing, False otherwise
         """
+        errored_version = func.coalesce(
+            sa_cast(
+                SQLATelemetryAgentRunStatus.metadata_json["errored_version"].astext,
+                Integer,
+            ),
+            0,
+        )
+
         stmt = (
             select(SQLATelemetryAgentRunStatus.agent_run_id)
             .where(
@@ -821,8 +834,15 @@ class TelemetryService:
                 or_(
                     SQLATelemetryAgentRunStatus.status
                     == TelemetryAgentRunStatus.NEEDS_PROCESSING.value,
-                    SQLATelemetryAgentRunStatus.current_version
-                    > SQLATelemetryAgentRunStatus.processed_version,
+                    and_(
+                        SQLATelemetryAgentRunStatus.current_version
+                        > SQLATelemetryAgentRunStatus.processed_version,
+                        or_(
+                            SQLATelemetryAgentRunStatus.status
+                            != TelemetryAgentRunStatus.ERROR.value,
+                            SQLATelemetryAgentRunStatus.current_version > errored_version,
+                        ),
+                    ),
                 ),
             )
             .limit(1)
@@ -900,42 +920,70 @@ class TelemetryService:
                 )
 
     async def _mark_agent_runs_as_errored(
-        self, collection_id: str, agent_run_ids: set[str], error_message: str | None = None
+        self,
+        collection_id: str,
+        agent_run_versions: Mapping[str, int],
+        error_message: str | None = None,
     ) -> None:
         """
-        Mark agent runs as needs_processing after failed processing.
-        Also tracks error count and error messages.
+        Mark agent runs as errored after failed processing.
+        Also tracks error count, messages, and the version that failed so we only retain error data for the newest version.
 
         Args:
             collection_id: The collection ID
-            agent_run_ids: Set of agent run IDs to mark as needs_processing
+            agent_run_versions: Mapping of agent run IDs to the version that produced the error
             error_message: Optional error message to store
         """
-        if not agent_run_ids:
+        if not agent_run_versions:
             return
 
         # Update status and track error information
-        for agent_run_id in agent_run_ids:
-            # Get current metadata to update error count
+        for agent_run_id, provided_version in agent_run_versions.items():
+            # Get current metadata and version information for this agent run
             query = select(SQLATelemetryAgentRunStatus.metadata_json).where(
                 SQLATelemetryAgentRunStatus.agent_run_id == agent_run_id,
                 SQLATelemetryAgentRunStatus.collection_id == collection_id,
             )
             result = await self.session.execute(query)
-            current_metadata: dict[str, Any] = result.scalar_one_or_none() or {}
+            row = result.one_or_none()
+            if row is None:
+                logger.warning(
+                    f"No telemetry status row found for agent run {agent_run_id} in collection {collection_id}"
+                )
+                continue
+            stored_metadata: dict[str, Any] = row.metadata_json
 
-            # Update error count and message
-            error_count = current_metadata.get("error_count", 0) + 1
-            error_history = current_metadata.get("error_history", [])
+            previous_error_version = stored_metadata.get("errored_version", 0)
+
+            if previous_error_version == provided_version:
+                # Same version as last error, increment error count
+                error_count = int(stored_metadata.get("error_count", 0)) + 1
+                stored_history: list[dict[str, Any]] = stored_metadata.get("error_history", [])
+                error_history: list[dict[str, Any]] = list[dict[str, Any]](stored_history)
+            elif previous_error_version < provided_version:
+                # Newer version than last error, reset error count and history
+                error_count = 1
+                error_history = []
+            else:
+                # Older version than last error, error out and ignore
+                logger.error(
+                    f"Agent run {agent_run_id} has a newer version than the last error (DB version {previous_error_version} > provided version {provided_version})"
+                )
+                continue
+
             if error_message:
                 error_history.append({"error": error_message})
-
-            if len(error_history) > 5:
-                error_history = error_history[-5:]
+                if len(error_history) > 5:
+                    error_history = error_history[-5:]
 
             status = TelemetryAgentRunStatus.NEEDS_PROCESSING.value
             if error_count > 3:
                 status = TelemetryAgentRunStatus.ERROR.value
+            metadata_json = {
+                "errored_version": provided_version,
+                "error_count": error_count,
+                "error_history": error_history,
+            }
 
             update_stmt = (
                 update(SQLATelemetryAgentRunStatus)
@@ -945,10 +993,7 @@ class TelemetryService:
                 )
                 .values(
                     status=status,
-                    metadata_json={
-                        "error_count": error_count,
-                        "error_history": error_history,
-                    },
+                    metadata_json=metadata_json,
                 )
             )
 
@@ -957,7 +1002,7 @@ class TelemetryService:
         await self.session.commit()
 
         logger.info(
-            f"Marked {len(agent_run_ids)} agent runs as needs_processing after error in collection {collection_id}"
+            f"Marked {len(agent_run_versions)} agent runs as needs_processing after error in collection {collection_id}"
         )
 
     async def update_agent_runs_for_telemetry(

@@ -5,11 +5,10 @@ This service replaces Redis storage for spans, scores, metadata, and other telem
 that needs to be accumulated before processing.
 """
 
-import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 from uuid import uuid4
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +17,6 @@ from docent_core.docent.db.schemas.tables import (
     SQLATelemetryAccumulation,
     SQLATelemetryAgentRunStatus,
     TelemetryAgentRunStatus,
-    sanitize_pg_text,
 )
 
 logger = get_logger(__name__)
@@ -82,16 +80,10 @@ class TelemetryAccumulationService:
                 )
                 key = self._build_key(collection_id)
 
-            # Sanitize the span data to remove null characters and other problematic Unicode sequences
-            # Convert to JSON string, sanitize, then parse back to dict
-            json_str = json.dumps(span)
-            sanitized_json_str = sanitize_pg_text(json_str)
-            sanitized_span = json.loads(sanitized_json_str)
-
             accumulation_entry = SQLATelemetryAccumulation(
                 key=key,
                 data_type="spans",
-                data=sanitized_span,
+                data=span,
                 user_id=user_id,
             )
             self.session.add(accumulation_entry)
@@ -183,16 +175,10 @@ class TelemetryAccumulationService:
             "timestamp": timestamp,
         }
 
-        # Sanitize the score data to remove null characters and other problematic Unicode sequences
-        # Convert to JSON string, sanitize, then parse back to dict
-        json_str = json.dumps(score_data)
-        sanitized_json_str = sanitize_pg_text(json_str)
-        sanitized_score_data = json.loads(sanitized_json_str)
-
         accumulation_entry = SQLATelemetryAccumulation(
             key=key,
             data_type="scores",
-            data=sanitized_score_data,
+            data=score_data,
             user_id=user_id,
         )
         self.session.add(accumulation_entry)
@@ -285,16 +271,10 @@ class TelemetryAccumulationService:
             "timestamp": timestamp,
         }
 
-        # Sanitize the metadata data to remove null characters and other problematic Unicode sequences
-        # Convert to JSON string, sanitize, then parse back to dict
-        json_str = json.dumps(metadata_data)
-        sanitized_json_str = sanitize_pg_text(json_str)
-        sanitized_metadata_data = json.loads(sanitized_json_str)
-
         accumulation_entry = SQLATelemetryAccumulation(
             key=key,
             data_type="metadata",
-            data=sanitized_metadata_data,
+            data=metadata_data,
             user_id=user_id,
         )
         self.session.add(accumulation_entry)
@@ -554,8 +534,6 @@ class TelemetryAccumulationService:
             transcript_id=transcript_id,
         )
 
-        from sqlalchemy import delete
-
         result = await self.session.execute(
             delete(SQLATelemetryAccumulation).where(
                 SQLATelemetryAccumulation.key.like(f"{key_pattern}%")
@@ -566,6 +544,39 @@ class TelemetryAccumulationService:
         await self.session.commit()
 
         logger.info(f"Deleted {deleted_count} accumulation records matching {key_pattern}")
+        return deleted_count
+
+    async def delete_agent_run_accumulations(
+        self, collection_id: str, agent_run_ids: Sequence[str], *, chunk_size: int = 200
+    ) -> int:
+        """Delete accumulation records for multiple agent runs in as few statements as possible."""
+
+        unique_ids = [agent_run_id for agent_run_id in dict.fromkeys(agent_run_ids) if agent_run_id]
+        if not unique_ids:
+            return 0
+
+        deleted_count = 0
+        key_prefixes = [
+            self._build_key(collection_id, agent_run_id=agent_run_id) for agent_run_id in unique_ids
+        ]
+
+        for start in range(0, len(key_prefixes), chunk_size):
+            chunk = key_prefixes[start : start + chunk_size]
+            if not chunk:
+                continue
+
+            # Chunking keeps the generated predicate below common parameter limits when deleting large batches.
+            predicate = or_(
+                *[SQLATelemetryAccumulation.key.like(f"{key_prefix}%") for key_prefix in chunk]
+            )
+            result = await self.session.execute(delete(SQLATelemetryAccumulation).where(predicate))
+            deleted_count += result.rowcount or 0
+
+        await self.session.commit()
+
+        logger.info(
+            f"Deleted {deleted_count} accumulation records for {len(unique_ids)} agent runs in collection {collection_id}"
+        )
         return deleted_count
 
     async def _mark_agent_runs_for_processing(

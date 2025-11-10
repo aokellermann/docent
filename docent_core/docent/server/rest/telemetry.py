@@ -1,6 +1,8 @@
 import time
+from typing import Any, Dict, Optional, cast
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
 from docent._log_util import get_logger
@@ -26,6 +28,132 @@ logger = get_logger(__name__)
 telemetry_router = APIRouter()
 
 
+def _get_request_id(request: Request) -> str:
+    for header in ("x-docent-request-id", "x-request-id"):
+        value = request.headers.get(header)
+        if value:
+            return value
+    return str(uuid4())
+
+
+def _success_response(
+    content: Dict[str, Any], request_id: str, *, status_code: int = status.HTTP_200_OK
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content=content,
+        headers={"x-docent-request-id": request_id},
+    )
+
+
+def _telemetry_http_exception(
+    *,
+    request_id: str,
+    status_code: int,
+    message: str,
+    error_code: str,
+    hint: Optional[str] = None,
+) -> HTTPException:
+    detail: Dict[str, Any] = {
+        "message": message,
+        "error_code": error_code,
+        "request_id": request_id,
+    }
+    if hint:
+        detail["hint"] = hint
+    return HTTPException(
+        status_code=status_code,
+        detail=detail,
+        headers={"x-docent-request-id": request_id},
+    )
+
+
+def _http_exception_with_request_id(exc: HTTPException, request_id: str) -> HTTPException:
+    headers = dict(exc.headers or {})
+    headers.setdefault("x-docent-request-id", request_id)
+    detail_value = exc.detail
+    if isinstance(detail_value, dict):
+        detail_dict: Dict[str, Any] = detail_value
+        if "request_id" not in detail_dict:
+            detail_dict = {**detail_dict, "request_id": request_id}
+        detail_value = detail_dict
+    return HTTPException(status_code=exc.status_code, detail=detail_value, headers=headers)
+
+
+async def _parse_json_body(request: Request, request_id: str) -> Dict[str, Any]:
+    try:
+        payload = await request.json()
+    except ValueError as exc:
+        raise _telemetry_http_exception(
+            request_id=request_id,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            message="Request body must be valid JSON.",
+            hint=str(exc),
+            error_code="TELEMETRY_INVALID_JSON",
+        ) from exc
+
+    if not isinstance(payload, dict):
+        raise _telemetry_http_exception(
+            request_id=request_id,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            message="Request body must be a JSON object.",
+            hint="Send a JSON object that includes the documented telemetry fields.",
+            error_code="TELEMETRY_INVALID_JSON",
+        )
+
+    return cast(Dict[str, Any], payload)
+
+
+def _find_null_character_path(value: Any, path: str = "") -> Optional[str]:
+    if isinstance(value, str):
+        if "\x00" in value or "\\u0000" in value or "\\x00" in value:
+            return path or "<root>"
+        return None
+
+    if isinstance(value, dict):
+        value_dict: dict[Any, Any] = value
+        for key, nested in value_dict.items():
+            nested_path = f"{path}.{key}" if path else str(key)
+            result = _find_null_character_path(nested, nested_path)
+            if result:
+                return result
+        return None
+
+    if isinstance(value, list):
+        value_list: list[Any] = value
+        for index, nested in enumerate(value_list):
+            nested_path = f"{path}[{index}]" if path else f"[{index}]"
+            result = _find_null_character_path(nested, nested_path)
+            if result:
+                return result
+        return None
+
+    return None
+
+
+def _ensure_no_null_bytes(payload: Any, *, context: str, request_id: str) -> None:
+    offending_path = _find_null_character_path(payload)
+    if offending_path is not None:
+        raise _telemetry_http_exception(
+            request_id=request_id,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            message=f"{context} contains unsupported null characters at {offending_path}.",
+            hint="Remove '\\u0000' or '\\x00' before sending telemetry to Docent.",
+            error_code="TELEMETRY_NULL_CHARACTER",
+        )
+
+
+def _handle_unexpected_error(request_id: str, exc: Exception, context: str) -> None:
+    logger.error("%s failed (request_id=%s): %s", context, request_id, exc, exc_info=True)
+    raise _telemetry_http_exception(
+        request_id=request_id,
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        message=f"{context} failed: {exc}",
+        hint="Inspect Docent backend logs using the provided request ID.",
+        error_code="TELEMETRY_INTERNAL_ERROR",
+    ) from exc
+
+
 @telemetry_router.post("/v1/traces")
 async def trace_endpoint(
     request: Request,
@@ -42,27 +170,29 @@ async def trace_endpoint(
     Requires authentication via bearer token (API key) in the Authorization header.
     """
 
+    request_id = _get_request_id(request)
     start_time = time.time()
 
     try:
-        # Check content type
         content_type = request.headers.get("content-type", "")
-
-        # Read the request body
         body = await request.body()
 
-        # Handle compressed data if needed
         if request.headers.get("content-encoding") == "gzip":
             import gzip
 
             body = gzip.decompress(body)
 
-        if "application/x-protobuf" in content_type:
-            trace_data = telemetry_svc.parse_protobuf_traces(body)
-        else:
-            raise HTTPException(status_code=415, detail=f"Unsupported content type: {content_type}")
+        if "application/x-protobuf" not in content_type:
+            raise _telemetry_http_exception(
+                request_id=request_id,
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                message=f"Unsupported content type: {content_type or 'missing'}",
+                hint="Use application/x-protobuf payloads produced by the OTLP HTTP exporter.",
+                error_code="TELEMETRY_UNSUPPORTED_MEDIA_TYPE",
+            )
 
-        # Store the raw telemetry data for request
+        trace_data = telemetry_svc.parse_protobuf_traces(body)
+
         telemetry_id = await telemetry_svc.store_telemetry_log(
             user.id,
             type="traces",
@@ -70,19 +200,12 @@ async def trace_endpoint(
             json_data=trace_data,
         )
 
-        # Extract spans and accumulate them
         spans = await telemetry_svc.extract_spans(trace_data)
-
-        # Extract unique collection IDs from spans
         collection_ids, collection_names = telemetry_svc.extract_collection_info_from_spans(spans)
 
-        # Check permissions for all collections mentioned in spans
         await telemetry_svc.ensure_write_permission_for_collections(collection_ids, user)
-
-        # Ensure collections exist
         await telemetry_svc.ensure_collections_exist(collection_ids, collection_names, user)
 
-        # Update telemetry log with collection_id if we found any
         if collection_ids:
             primary_collection_id = next(iter(collection_ids))
             await telemetry_svc.update_telemetry_log_collection_id(
@@ -90,31 +213,30 @@ async def trace_endpoint(
             )
             await telemetry_svc.session.commit()
 
-        # Accumulate spans into database
         await telemetry_svc.accumulate_spans(spans, user.id, accumulation_service)
 
-        # Trigger background processing jobs for each collection
         for collection_id in collection_ids:
             try:
                 await telemetry_svc.mono_svc.add_and_enqueue_telemetry_processing_job(
                     collection_id, user
                 )
-            except Exception as e:
+            except Exception as exc:
                 logger.error(
-                    f"Failed to trigger telemetry processing job for collection {collection_id}: {str(e)}"
+                    "Failed to trigger telemetry processing job for collection %s: %s",
+                    collection_id,
+                    exc,
                 )
-                # Continue with other collections even if job creation fails
 
-        # Return success response
-        return JSONResponse(
-            status_code=200, content={"status": "success", "spans_accumulated": len(spans)}
-        )
-    except Exception as e:
+        return _success_response({"status": "success", "spans_accumulated": len(spans)}, request_id)
+    except HTTPException as exc:
+        raise _http_exception_with_request_id(exc, request_id)
+    except Exception as exc:
         processing_time = time.time() - start_time
-        logger.error(
-            f"Error processing traces after {processing_time:.3f}s: {str(e)}", exc_info=True
+        _handle_unexpected_error(
+            request_id,
+            exc,
+            f"Processing OTLP traces after {processing_time:.3f}s",
         )
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @telemetry_router.post("/v1/trace-done")
@@ -128,21 +250,26 @@ async def trace_done_endpoint(
 
     When called, we wait a bit to see if new spans come in, then process the trace.
     """
+    request_id = _get_request_id(request)
+
     try:
-        # Parse request body
-        body = await request.json()
+        body = await _parse_json_body(request, request_id)
+        _ensure_no_null_bytes(body, context="Trace completion payload", request_id=request_id)
+
         collection_id = body.get("collection_id")
 
-        if not collection_id:
-            raise HTTPException(status_code=400, detail="collection_id is required")
+        if not isinstance(collection_id, str) or not collection_id:
+            raise _telemetry_http_exception(
+                request_id=request_id,
+                status_code=status.HTTP_400_BAD_REQUEST,
+                message="collection_id is required.",
+                hint="Include collection_id in the JSON body when invoking /v1/trace-done.",
+                error_code="TELEMETRY_MISSING_FIELDS",
+            )
 
-        # Create collection with default name if it doesn't exist
         await telemetry_svc.ensure_collection_exists(collection_id, user)
-
-        # Check if collection exists and user has permissions
         await telemetry_svc.ensure_write_permission_for_collection(collection_id, user)
 
-        # Store telemetry log for this request
         telemetry_data = {
             "endpoint": "/v1/trace-done",
             "collection_id": collection_id,
@@ -156,23 +283,23 @@ async def trace_done_endpoint(
             collection_id=collection_id,
         )
 
-        # Trigger background processing job
         try:
             await telemetry_svc.mono_svc.add_and_enqueue_telemetry_processing_job(
                 collection_id, user
             )
-        except Exception as e:
+        except Exception as exc:
             logger.error(
-                f"Failed to trigger telemetry processing job for collection {collection_id}: {str(e)}"
+                "Failed to trigger telemetry processing job for collection %s: %s",
+                collection_id,
+                exc,
             )
 
-        return JSONResponse(
-            status_code=200, content={"status": "success", "collection_id": collection_id}
-        )
+        return _success_response({"status": "success", "collection_id": collection_id}, request_id)
 
-    except Exception as e:
-        logger.error(f"Error processing trace-done: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException as exc:
+        raise _http_exception_with_request_id(exc, request_id)
+    except Exception as exc:
+        _handle_unexpected_error(request_id, exc, "Processing trace-done request")
 
 
 @telemetry_router.post("/v1/scores")
@@ -189,28 +316,47 @@ async def add_score_endpoint(
 
     The score will be stored and applied when the collection is processed.
     """
+    request_id = _get_request_id(request)
+
     try:
-        # Parse request body
-        body = await request.json()
+        body = await _parse_json_body(request, request_id)
+        _ensure_no_null_bytes(body, context="Score payload", request_id=request_id)
+
         collection_id = body.get("collection_id")
         agent_run_id = body.get("agent_run_id")
         score_name = body.get("score_name")
         score_value = body.get("score_value")
         timestamp = body.get("timestamp")
 
-        if not all([collection_id, agent_run_id, score_name, score_value is not None, timestamp]):
-            raise HTTPException(
-                status_code=400,
-                detail="collection_id, agent_run_id, score_name, score_value, and timestamp are required",
+        missing_fields: list[str] = []
+        if not isinstance(collection_id, str) or not collection_id:
+            missing_fields.append("collection_id")
+        if not isinstance(agent_run_id, str) or not agent_run_id:
+            missing_fields.append("agent_run_id")
+        if not isinstance(score_name, str) or not score_name:
+            missing_fields.append("score_name")
+        if score_value is None:
+            missing_fields.append("score_value")
+        if not isinstance(timestamp, str) or not timestamp:
+            missing_fields.append("timestamp")
+
+        if missing_fields:
+            raise _telemetry_http_exception(
+                request_id=request_id,
+                status_code=status.HTTP_400_BAD_REQUEST,
+                message=f"Missing required fields: {', '.join(missing_fields)}.",
+                hint="Provide collection_id, agent_run_id, score_name, score_value, and timestamp.",
+                error_code="TELEMETRY_MISSING_FIELDS",
             )
 
-        # Create collection with default name if it doesn't exist
-        await telemetry_svc.ensure_collection_exists(collection_id, user)
+        collection_id = cast(str, collection_id)
+        agent_run_id = cast(str, agent_run_id)
+        score_name = cast(str, score_name)
+        timestamp = cast(str, timestamp)
 
-        # Check if collection exists and user has permissions
+        await telemetry_svc.ensure_collection_exists(collection_id, user)
         await telemetry_svc.ensure_write_permission_for_collection(collection_id, user)
 
-        # Store telemetry log for this request
         await telemetry_svc.store_telemetry_log(
             user.id,
             type="scores",
@@ -219,26 +365,27 @@ async def add_score_endpoint(
             collection_id=collection_id,
         )
 
-        # Store score in database
         await accumulation_service.add_score(
             collection_id, agent_run_id, score_name, score_value, timestamp, user.id
         )
 
-        # Trigger background processing job
         try:
             await telemetry_svc.mono_svc.add_and_enqueue_telemetry_processing_job(
                 collection_id, user
             )
-        except Exception as e:
+        except Exception as exc:
             logger.error(
-                f"Failed to trigger telemetry processing job for collection {collection_id}: {str(e)}"
+                "Failed to trigger telemetry processing job for collection %s: %s",
+                collection_id,
+                exc,
             )
 
-        return JSONResponse(status_code=200, content={"status": "success"})
+        return _success_response({"status": "success"}, request_id)
 
-    except Exception as e:
-        logger.error(f"Error adding score: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException as exc:
+        raise _http_exception_with_request_id(exc, request_id)
+    except Exception as exc:
+        _handle_unexpected_error(request_id, exc, "Adding agent run score")
 
 
 @telemetry_router.post("/v1/agent-run-metadata")
@@ -255,27 +402,44 @@ async def add_metadata_endpoint(
 
     The metadata will be stored and applied when the collection is processed.
     """
+    request_id = _get_request_id(request)
+
     try:
-        # Parse request body
-        body = await request.json()
+        body = await _parse_json_body(request, request_id)
+        _ensure_no_null_bytes(body, context="Agent run metadata payload", request_id=request_id)
+
         collection_id = body.get("collection_id")
         agent_run_id = body.get("agent_run_id")
         metadata = body.get("metadata")
         timestamp = body.get("timestamp")
 
-        if not all([collection_id, agent_run_id, metadata, timestamp]):
-            raise HTTPException(
-                status_code=400,
-                detail="collection_id, agent_run_id, metadata, and timestamp are required",
+        missing_fields: list[str] = []
+        if not isinstance(collection_id, str) or not collection_id:
+            missing_fields.append("collection_id")
+        if not isinstance(agent_run_id, str) or not agent_run_id:
+            missing_fields.append("agent_run_id")
+        if not isinstance(metadata, dict):
+            missing_fields.append("metadata")
+        if not isinstance(timestamp, str) or not timestamp:
+            missing_fields.append("timestamp")
+
+        if missing_fields:
+            raise _telemetry_http_exception(
+                request_id=request_id,
+                status_code=status.HTTP_400_BAD_REQUEST,
+                message=f"Missing required fields: {', '.join(missing_fields)}.",
+                hint="Provide collection_id, agent_run_id, metadata, and timestamp.",
+                error_code="TELEMETRY_MISSING_FIELDS",
             )
 
-        # Create collection with default name if it doesn't exist
-        await telemetry_svc.ensure_collection_exists(collection_id, user)
+        collection_id = cast(str, collection_id)
+        agent_run_id = cast(str, agent_run_id)
+        metadata = cast(Dict[str, Any], metadata)
+        timestamp = cast(str, timestamp)
 
-        # Check if collection exists and user has permissions
+        await telemetry_svc.ensure_collection_exists(collection_id, user)
         await telemetry_svc.ensure_write_permission_for_collection(collection_id, user)
 
-        # Store telemetry log for this request
         await telemetry_svc.store_telemetry_log(
             user.id,
             type="metadata",
@@ -284,26 +448,27 @@ async def add_metadata_endpoint(
             collection_id=collection_id,
         )
 
-        # Store metadata in database
         await accumulation_service.add_agent_run_metadata(
             collection_id, agent_run_id, metadata, timestamp, user.id
         )
 
-        # Trigger background processing job
         try:
             await telemetry_svc.mono_svc.add_and_enqueue_telemetry_processing_job(
                 collection_id, user
             )
-        except Exception as e:
+        except Exception as exc:
             logger.error(
-                f"Failed to trigger telemetry processing job for collection {collection_id}: {str(e)}"
+                "Failed to trigger telemetry processing job for collection %s: %s",
+                collection_id,
+                exc,
             )
 
-        return JSONResponse(status_code=200, content={"status": "success"})
+        return _success_response({"status": "success"}, request_id)
 
-    except Exception as e:
-        logger.error(f"Error adding metadata: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException as exc:
+        raise _http_exception_with_request_id(exc, request_id)
+    except Exception as exc:
+        _handle_unexpected_error(request_id, exc, "Adding agent run metadata")
 
 
 @telemetry_router.post("/v1/transcript-metadata")
@@ -320,9 +485,12 @@ async def add_transcript_metadata_endpoint(
 
     The metadata will be stored and applied when the collection is processed.
     """
+    request_id = _get_request_id(request)
+
     try:
-        # Parse request body
-        body = await request.json()
+        body = await _parse_json_body(request, request_id)
+        _ensure_no_null_bytes(body, context="Transcript metadata payload", request_id=request_id)
+
         collection_id = body.get("collection_id")
         transcript_id = body.get("transcript_id")
         name = body.get("name")
@@ -331,18 +499,30 @@ async def add_transcript_metadata_endpoint(
         metadata = body.get("metadata")
         timestamp = body.get("timestamp")
 
-        if not all([collection_id, transcript_id, timestamp]):
-            raise HTTPException(
-                status_code=400, detail="collection_id, transcript_id, and timestamp are required"
+        missing_fields: list[str] = []
+        if not isinstance(collection_id, str) or not collection_id:
+            missing_fields.append("collection_id")
+        if not isinstance(transcript_id, str) or not transcript_id:
+            missing_fields.append("transcript_id")
+        if not isinstance(timestamp, str) or not timestamp:
+            missing_fields.append("timestamp")
+
+        if missing_fields:
+            raise _telemetry_http_exception(
+                request_id=request_id,
+                status_code=status.HTTP_400_BAD_REQUEST,
+                message=f"Missing required fields: {', '.join(missing_fields)}.",
+                hint="Provide collection_id, transcript_id, and timestamp.",
+                error_code="TELEMETRY_MISSING_FIELDS",
             )
 
-        # Create collection with default name if it doesn't exist
-        await telemetry_svc.ensure_collection_exists(collection_id, user)
+        collection_id = cast(str, collection_id)
+        transcript_id = cast(str, transcript_id)
+        timestamp = cast(str, timestamp)
 
-        # Check if collection exists and user has permissions
+        await telemetry_svc.ensure_collection_exists(collection_id, user)
         await telemetry_svc.ensure_write_permission_for_collection(collection_id, user)
 
-        # Store telemetry log for this request
         await telemetry_svc.store_telemetry_log(
             user.id,
             type="transcript-metadata",
@@ -351,7 +531,6 @@ async def add_transcript_metadata_endpoint(
             collection_id=collection_id,
         )
 
-        # Store transcript metadata in database
         await accumulation_service.add_transcript_metadata(
             collection_id,
             transcript_id,
@@ -363,21 +542,23 @@ async def add_transcript_metadata_endpoint(
             user.id,
         )
 
-        # Trigger background processing job
         try:
             await telemetry_svc.mono_svc.add_and_enqueue_telemetry_processing_job(
                 collection_id, user
             )
-        except Exception as e:
+        except Exception as exc:
             logger.error(
-                f"Failed to trigger telemetry processing job for collection {collection_id}: {str(e)}"
+                "Failed to trigger telemetry processing job for collection %s: %s",
+                collection_id,
+                exc,
             )
 
-        return JSONResponse(status_code=200, content={"status": "success"})
+        return _success_response({"status": "success"}, request_id)
 
-    except Exception as e:
-        logger.error(f"Error adding transcript metadata: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException as exc:
+        raise _http_exception_with_request_id(exc, request_id)
+    except Exception as exc:
+        _handle_unexpected_error(request_id, exc, "Adding transcript metadata")
 
 
 @telemetry_router.post("/v1/transcript-group-metadata")
@@ -394,9 +575,14 @@ async def add_transcript_group_metadata_endpoint(
 
     The metadata will be stored and applied when the collection is processed.
     """
+    request_id = _get_request_id(request)
+
     try:
-        # Parse request body
-        body = await request.json()
+        body = await _parse_json_body(request, request_id)
+        _ensure_no_null_bytes(
+            body, context="Transcript group metadata payload", request_id=request_id
+        )
+
         collection_id = body.get("collection_id")
         agent_run_id = body.get("agent_run_id")
         transcript_group_id = body.get("transcript_group_id")
@@ -406,30 +592,33 @@ async def add_transcript_group_metadata_endpoint(
         metadata = body.get("metadata")
         timestamp = body.get("timestamp")
 
-        if not all([collection_id, transcript_group_id, agent_run_id, timestamp]):
-            missing_fields = [
-                field
-                for field, value in [
-                    ("collection_id", collection_id),
-                    ("transcript_group_id", transcript_group_id),
-                    ("agent_run_id", agent_run_id),
-                    ("timestamp", timestamp),
-                ]
-                if not value
-            ]
-            if missing_fields:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Missing required fields: {', '.join(missing_fields)}",
-                )
+        missing_fields: list[str] = []
+        if not isinstance(collection_id, str) or not collection_id:
+            missing_fields.append("collection_id")
+        if not isinstance(transcript_group_id, str) or not transcript_group_id:
+            missing_fields.append("transcript_group_id")
+        if not isinstance(agent_run_id, str) or not agent_run_id:
+            missing_fields.append("agent_run_id")
+        if not isinstance(timestamp, str) or not timestamp:
+            missing_fields.append("timestamp")
 
-        # Create collection with default name if it doesn't exist
+        if missing_fields:
+            raise _telemetry_http_exception(
+                request_id=request_id,
+                status_code=status.HTTP_400_BAD_REQUEST,
+                message=f"Missing required fields: {', '.join(missing_fields)}.",
+                hint="Provide collection_id, transcript_group_id, agent_run_id, and timestamp.",
+                error_code="TELEMETRY_MISSING_FIELDS",
+            )
+
+        collection_id = cast(str, collection_id)
+        agent_run_id = cast(str, agent_run_id)
+        transcript_group_id = cast(str, transcript_group_id)
+        timestamp = cast(str, timestamp)
+
         await telemetry_svc.ensure_collection_exists(collection_id, user)
-
-        # Check if collection exists and user has permissions
         await telemetry_svc.ensure_write_permission_for_collection(collection_id, user)
 
-        # Store telemetry log for this request
         await telemetry_svc.store_telemetry_log(
             user.id,
             type="transcript-group-metadata",
@@ -438,7 +627,6 @@ async def add_transcript_group_metadata_endpoint(
             collection_id=collection_id,
         )
 
-        # Store transcript group metadata in database
         await accumulation_service.add_transcript_group_metadata(
             collection_id,
             agent_run_id,
@@ -451,21 +639,23 @@ async def add_transcript_group_metadata_endpoint(
             user.id,
         )
 
-        # Trigger background processing job
         try:
             await telemetry_svc.mono_svc.add_and_enqueue_telemetry_processing_job(
                 collection_id, user
             )
-        except Exception as e:
+        except Exception as exc:
             logger.error(
-                f"Failed to trigger telemetry processing job for collection {collection_id}: {str(e)}"
+                "Failed to trigger telemetry processing job for collection %s: %s",
+                collection_id,
+                exc,
             )
 
-        return JSONResponse(status_code=200, content={"status": "success"})
+        return _success_response({"status": "success"}, request_id)
 
-    except Exception as e:
-        logger.error(f"Error adding transcript group metadata: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException as exc:
+        raise _http_exception_with_request_id(exc, request_id)
+    except Exception as exc:
+        _handle_unexpected_error(request_id, exc, "Adding transcript group metadata")
 
 
 @telemetry_router.post("/{collection_id}/ensure-telemetry-processing")
