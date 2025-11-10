@@ -10,6 +10,17 @@ IPython.get_ipython().run_line_magic("autoreload", "2")
 
 # %%
 
+from docent import Docent
+from docent_core._env_util import ENV
+
+docent_client = Docent(api_key=ENV.get("DOCENT_API_KEY"), server_url="http://localhost:8890")
+
+cid = "8f6467fa-cd1b-406e-b52a-9f88f54f4e98"
+print(docent_client.collection_exists(cid))
+print(docent_client.has_collection_permission(cid, "write"))
+
+# %%
+
 from docent_core._db_service.db import DocentDB
 
 db = await DocentDB.init()

@@ -319,6 +319,15 @@ async def get_collection_name(
     return {"name": collection.name if collection else None}
 
 
+@user_router.get("/{collection_id}/exists")
+async def collection_exists(
+    collection_id: str,
+    mono_svc: MonoService = Depends(get_mono_svc),
+) -> bool:
+    """Return true/false without raising 404 when checking collection existence."""
+    return await mono_svc.collection_exists(collection_id)
+
+
 class CreateCollectionRequest(BaseModel):
     collection_id: str | None = None
     name: str | None = None
@@ -901,6 +910,27 @@ async def get_user_by_email(email: str, mono_svc: MonoService = Depends(get_mono
 class UserPermissionsResponse(BaseModel):
     collection_permissions: dict[str, str | None]
     view_permissions: dict[str, str | None]
+
+
+class PermissionCheckResponse(BaseModel):
+    permission: Permission
+    has_permission: bool
+
+
+@user_router.get("/{collection_id}/has_permission")
+async def check_collection_permission(
+    permission: Permission = Permission.WRITE,
+    collection_id: str = Depends(require_collection_exists),
+    user: User = Depends(get_user_anonymous_ok),
+    mono_svc: MonoService = Depends(get_mono_svc),
+) -> PermissionCheckResponse:
+    allowed = await mono_svc.has_permission(
+        user=user,
+        resource_type=ResourceType.COLLECTION,
+        resource_id=collection_id,
+        permission=permission,
+    )
+    return PermissionCheckResponse(permission=permission, has_permission=allowed)
 
 
 @user_router.get("/{collection_id}/permissions")

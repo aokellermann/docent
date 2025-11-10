@@ -450,6 +450,38 @@ class Docent:
         logger.info(f"Successfully shared Collection '{collection_id}' with {email}")
         return response.json()
 
+    def collection_exists(self, collection_id: str) -> bool:
+        """Check if a collection exists without raising if it does not."""
+        url = f"{self._server_url}/{collection_id}/exists"
+        response = self._session.get(url)
+        self._handle_response_errors(response)
+        return bool(response.json())
+
+    def has_collection_permission(self, collection_id: str, permission: str = "write") -> bool:
+        """Check whether the authenticated user has a specific permission on a collection.
+
+        Args:
+            collection_id: Collection to check.
+            permission: Permission level to verify (`read`, `write`, or `admin`).
+
+        Returns:
+            bool: True if the current API key has the requested permission; otherwise False.
+
+        Raises:
+            ValueError: If an unsupported permission value is provided.
+            requests.exceptions.HTTPError: If the API request fails.
+        """
+        valid_permissions = {"read", "write", "admin"}
+        if permission not in valid_permissions:
+            raise ValueError(f"permission must be one of {sorted(valid_permissions)}")
+
+        url = f"{self._server_url}/{collection_id}/has_permission"
+        response = self._session.get(url, params={"permission": permission})
+        self._handle_response_errors(response)
+
+        payload = response.json()
+        return bool(payload.get("has_permission", False))
+
     def get_dql_schema(self, collection_id: str) -> dict[str, Any]:
         """Retrieve the DQL schema for a collection.
 
