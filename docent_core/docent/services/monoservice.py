@@ -740,14 +740,9 @@ class MonoService:
             )
 
             accumulation_service = TelemetryAccumulationService(session)
-            accumulation_count = 0
-            for agent_run_id in agent_run_ids:
-                count = 0
-                if agent_run_id:
-                    count = await accumulation_service.delete_accumulation_data(
-                        collection_id, agent_run_id=agent_run_id
-                    )
-                accumulation_count += count
+            accumulation_count = await accumulation_service.delete_agent_run_accumulations(
+                collection_id, agent_run_ids
+            )
 
             agent_run_result = await session.execute(
                 delete(SQLAAgentRun).where(
