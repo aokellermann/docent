@@ -1,5 +1,7 @@
 from typing import Any
+
 import pandas as pd
+
 
 def dql_to_df(cols: list[str], rows: list[list[Any]]):
     def _cast_value(v: Any) -> Any:
@@ -8,10 +10,10 @@ def dql_to_df(cols: list[str], rows: list[list[Any]]):
             return None
         if isinstance(v, (bool, int, float)):
             return v
-        
+
         # Try int
         try:
-            if '.' not in v:
+            if "." not in v:
                 return int(v)
         except (ValueError, TypeError):
             pass

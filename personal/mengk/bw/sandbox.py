@@ -1,4 +1,4 @@
-#%%
+# %%
 
 print("hello world")
 # %%
@@ -10,7 +10,6 @@ class Foo:
     @classmethod
     def set_docent_enabled(cls, enabled: bool) -> None:
         cls.DOCENT_ENABLED = enabled
-
 
     def get_docent_enabled(self) -> bool:
         return self.DOCENT_ENABLED
