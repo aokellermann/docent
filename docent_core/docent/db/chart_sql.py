@@ -35,9 +35,9 @@ def _convert_to_numeric(raw: Any) -> Any:
 
     return case(
         (
-            # If it was a number originally, cast it back to number
+            # Match numbers including negatives, decimals, scientific notation
             # Note: if measure were a numeric string originally, it wouldn't be available in the menu
-            raw_text.op("~")(r"^[0-9]+\.?[0-9]*$"),  # type: ignore[attr-defined]
+            raw_text.op("~")(r"^-?[0-9]+\.?[0-9]*([eE][+-]?[0-9]+)?$"),  # type: ignore[attr-defined]
             cast(raw, Numeric),
         ),
         (

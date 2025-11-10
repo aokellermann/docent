@@ -212,3 +212,66 @@ async def test_chart_stats_simple(
     bin2 = stats["ar.metadata_json->>agent_scaffold,bar"]
     assert bin2["mean"] == 3.5
     assert bin2["n"] == 2
+
+
+@pytest.mark.integration
+async def test_chart_stats_negative_numbers(
+    authed_client: httpx.AsyncClient,
+    test_collection_id: str,
+):
+    """Regression test: negative numbers should be included in count and mean calculations."""
+    metadata_1 = {
+        "agent_scaffold": "foo",
+        "scores": {"rating": -5},
+    }
+    metadata_2 = {
+        "agent_scaffold": "foo",
+        "scores": {"rating": -3},
+    }
+    metadata_3 = {
+        "agent_scaffold": "foo",
+        "scores": {"rating": 2},
+    }
+    metadata_4 = {
+        "agent_scaffold": "bar",
+        "scores": {"rating": -10},
+    }
+
+    agent_runs = runs_with_metadata([metadata_1, metadata_2, metadata_3, metadata_4])
+
+    payload = {"agent_runs": [ar.model_dump(mode="json") for ar in agent_runs]}
+    response = await authed_client.post(
+        f"/rest/{test_collection_id}/agent_runs",
+        json=payload,
+    )
+    assert response.status_code == 200
+
+    response = await authed_client.post(
+        f"/rest/chart/{test_collection_id}/create",
+        json={
+            "x_key": "ar.metadata_json->>agent_scaffold",
+            "y_key": "ar.metadata_json->scores->>rating",
+        },
+    )
+    assert response.status_code == 200
+
+    data = response.json()
+    chart_id = data["id"]
+
+    response = await authed_client.get(
+        f"/rest/chart/{test_collection_id}/{chart_id}/data",
+    )
+    assert response.status_code == 200
+    data = response.json()
+    stats = data["result"]["binStats"]
+
+    bin1 = stats["ar.metadata_json->>agent_scaffold,foo"]
+    # Mean of -5, -3, 2 = -6/3 = -2
+    assert bin1["mean"] == -2.0
+    # All 3 negative and positive values should be counted
+    assert bin1["n"] == 3
+
+    bin2 = stats["ar.metadata_json->>agent_scaffold,bar"]
+    assert bin2["mean"] == -10.0
+    # Negative value should be counted
+    assert bin2["n"] == 1
