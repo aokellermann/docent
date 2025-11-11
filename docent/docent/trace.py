@@ -1,3 +1,5 @@
+# pyright: reportUnnecessaryIsInstance=false
+
 import atexit
 import contextvars
 import itertools
@@ -22,6 +24,7 @@ from typing import (
     List,
     Mapping,
     Optional,
+    Sequence,
     Set,
     Union,
     cast,
@@ -117,26 +120,81 @@ class DocentTracer:
             logger.info("Docent tracing disabled.")
             return
 
-        self.collection_name: str = collection_name
-        self.collection_id: str = collection_id if collection_id else str(uuid.uuid4())
-        self.default_agent_run_id: str = agent_run_id if agent_run_id else str(uuid.uuid4())
-        self.endpoints: List[str]
-
-        # Handle endpoint parameter - convert to list if it's a string
-        if isinstance(endpoint, str):
-            self.endpoints = [endpoint]
+        if not isinstance(collection_name, str) or not collection_name:
+            logger.error(
+                "collection_name must be provided as a non-empty string (got %r); defaulting to %s.",
+                collection_name,
+                DEFAULT_COLLECTION_NAME,
+            )
+            self.collection_name = DEFAULT_COLLECTION_NAME
         else:
-            self.endpoints = endpoint
+            self.collection_name = collection_name
+
+        if collection_id is not None:
+            if isinstance(collection_id, str) and collection_id:
+                self.collection_id = collection_id
+            else:
+                logger.error(
+                    "collection_id must be provided as a non-empty string (got %r); generating a new ID.",
+                    collection_id,
+                )
+                self.collection_id = str(uuid.uuid4())
+        else:
+            self.collection_id = str(uuid.uuid4())
+
+        if agent_run_id is not None:
+            if isinstance(agent_run_id, str) and agent_run_id:
+                self.default_agent_run_id = agent_run_id
+            else:
+                logger.error(
+                    "default agent_run_id must be a non-empty string (got %r); generating a new ID.",
+                    agent_run_id,
+                )
+                self.default_agent_run_id = str(uuid.uuid4())
+        else:
+            self.default_agent_run_id = str(uuid.uuid4())
+        self.endpoints: List[str] = self._prepare_endpoints(endpoint)
 
         # Build headers with authentication if provided
-        self.headers = headers or {}
+        if headers is None:
+            self.headers: Dict[str, str] = {}
+        elif not isinstance(headers, dict):
+            logger.error(
+                "HTTP headers for Docent tracing must be provided as a dict (got %r).",
+                headers,
+            )
+            self.headers = {}
+        else:
+            sanitized_headers: Dict[str, str] = {}
+            for header_key, header_value in headers.items():
+                if not isinstance(header_key, str):
+                    logger.error(
+                        "HTTP header keys must be strings; skipping key %r of type %s.",
+                        header_key,
+                        type(header_key).__name__,
+                    )
+                    continue
+                if not isinstance(header_value, str):
+                    logger.error(
+                        "HTTP header values must be strings; skipping '%s' value of type %s.",
+                        header_key,
+                        type(header_value).__name__,
+                    )
+                    continue
+                sanitized_headers[header_key] = header_value
+            self.headers = sanitized_headers
 
         # Handle API key authentication (takes precedence over custom headers)
-        if api_key:
-            self.headers["Authorization"] = f"Bearer {api_key}"
+        if api_key is not None:
+            if isinstance(api_key, str) and api_key:
+                self.headers["Authorization"] = f"Bearer {api_key}"
+            else:
+                logger.error(
+                    "api_key must be a non-empty string (got %r); ignoring value.", api_key
+                )
+
+        if self.headers.get("Authorization"):
             logger.info(f"Using API key authentication for {self.collection_name}")
-        elif self.headers.get("Authorization"):
-            logger.info(f"Using custom Authorization header for {self.collection_name}")
         else:
             logger.info(f"No authentication configured for {self.collection_name}")
 
@@ -177,6 +235,50 @@ class DocentTracer:
         self._transcript_group_states: dict[str, dict[str, Optional[str]]] = {}
         self._transcript_group_state_lock = threading.Lock()
         self._flush_lock = threading.Lock()
+
+    def _prepare_endpoints(self, endpoint: Union[str, Sequence[str]]) -> List[str]:
+        """
+        Normalize endpoint input with simple type checks; fall back to DEFAULT_ENDPOINT as needed.
+        """
+        endpoints: List[str] = []
+
+        if isinstance(endpoint, str):
+            candidate = endpoint.strip()
+            if not candidate:
+                logger.error(
+                    "Docent telemetry endpoint cannot be empty; defaulting to %s.", DEFAULT_ENDPOINT
+                )
+            else:
+                endpoints.append(candidate)
+        elif isinstance(endpoint, (list, tuple)):
+            for index, value in enumerate(endpoint):
+                if not isinstance(value, str):
+                    logger.error(
+                        "Endpoint entries must be strings; entry at index %s is %s (%r). Skipping it.",
+                        index,
+                        type(value).__name__,
+                        value,
+                    )
+                    continue
+                candidate = value.strip()
+                if not candidate:
+                    logger.error(
+                        "Endpoint entries cannot be empty strings (index %s). Skipping it.",
+                        index,
+                    )
+                    continue
+                endpoints.append(candidate)
+        else:
+            logger.error(
+                "Endpoint must be a string or list/tuple of strings (got %r). Defaulting to %s.",
+                endpoint,
+                DEFAULT_ENDPOINT,
+            )
+
+        if not endpoints:
+            endpoints = [DEFAULT_ENDPOINT]
+
+        return endpoints
 
     def get_current_agent_run_id(self) -> Optional[str]:
         """
@@ -534,24 +636,6 @@ class DocentTracer:
         """Verify if the manager is properly initialized."""
         return self._initialized
 
-    def get_disabled_agent_run_id(self, agent_run_id: Optional[str]) -> str:
-        """Return sentinel value for agent run ID when tracing is disabled."""
-        if agent_run_id is None:
-            return DISABLED_AGENT_RUN_ID
-        return agent_run_id
-
-    def get_disabled_transcript_id(self, transcript_id: Optional[str]) -> str:
-        """Return sentinel value for transcript ID when tracing is disabled."""
-        if transcript_id is None:
-            return DISABLED_TRANSCRIPT_ID
-        return transcript_id
-
-    def get_disabled_transcript_group_id(self, transcript_group_id: Optional[str]) -> str:
-        """Return sentinel value for transcript group ID when tracing is disabled."""
-        if transcript_group_id is None:
-            return DISABLED_TRANSCRIPT_GROUP_ID
-        return transcript_group_id
-
     @contextmanager
     def agent_run_context(
         self,
@@ -573,17 +657,26 @@ class DocentTracer:
             Tuple of (agent_run_id, transcript_id)
         """
         if self.is_disabled():
-            agent_run_id = self.get_disabled_agent_run_id(agent_run_id)
-            transcript_id = self.get_disabled_transcript_id(transcript_id)
+            agent_run_id = _get_disabled_agent_run_id(agent_run_id)
+            transcript_id = _get_disabled_transcript_id(transcript_id)
             yield agent_run_id, transcript_id
             return
 
         if not self._initialized:
             self.initialize()
 
-        if agent_run_id is None:
+        if agent_run_id is not None and (not isinstance(agent_run_id, str) or not agent_run_id):
+            logger.error("Invalid agent_run_id for agent_run_context; generating a new ID.")
             agent_run_id = str(uuid.uuid4())
-        if transcript_id is None:
+        elif agent_run_id is None:
+            agent_run_id = str(uuid.uuid4())
+
+        if transcript_id is not None and (not isinstance(transcript_id, str) or not transcript_id):
+            logger.error(
+                "Invalid transcript_id for agent_run_context; generating a new transcript ID."
+            )
+            transcript_id = str(uuid.uuid4())
+        elif transcript_id is None:
             transcript_id = str(uuid.uuid4())
 
         # Set context variables for this execution context
@@ -627,17 +720,26 @@ class DocentTracer:
             Tuple of (agent_run_id, transcript_id)
         """
         if self.is_disabled():
-            agent_run_id = self.get_disabled_agent_run_id(agent_run_id)
-            transcript_id = self.get_disabled_transcript_id(transcript_id)
+            agent_run_id = _get_disabled_agent_run_id(agent_run_id)
+            transcript_id = _get_disabled_transcript_id(transcript_id)
             yield agent_run_id, transcript_id
             return
 
         if not self._initialized:
             self.initialize()
 
-        if agent_run_id is None:
+        if agent_run_id is not None and (not isinstance(agent_run_id, str) or not agent_run_id):
+            logger.error("Invalid agent_run_id for async_agent_run_context; generating a new ID.")
             agent_run_id = str(uuid.uuid4())
-        if transcript_id is None:
+        elif agent_run_id is None:
+            agent_run_id = str(uuid.uuid4())
+
+        if transcript_id is not None and (not isinstance(transcript_id, str) or not transcript_id):
+            logger.error(
+                "Invalid transcript_id for async_agent_run_context; generating a new transcript ID."
+            )
+            transcript_id = str(uuid.uuid4())
+        elif transcript_id is None:
             transcript_id = str(uuid.uuid4())
 
         # Set context variables for this execution context
@@ -664,37 +766,72 @@ class DocentTracer:
         Get the API headers for HTTP requests.
 
         Returns:
-            Dictionary of headers including Authorization if set
+            Headers including content type and any custom entries configured on the tracer
         """
-        headers = {"Content-Type": "application/json"}
-
-        authorization = self.headers.get("Authorization")
-        if authorization:
-            headers["Authorization"] = authorization
-
+        # Copy configured headers so we don't mutate the original dict
+        headers = dict(self.headers)
+        # Ensure JSON payloads always advertise the correct content type
+        headers.setdefault("Content-Type", "application/json")
         return headers
 
-    def _ensure_json_serializable_metadata(self, metadata: Dict[str, Any], context: str) -> None:
+    def _ensure_json_serializable_metadata(
+        self, metadata: Dict[str, Any], context: str
+    ) -> Optional[Dict[str, Any]]:
         """
         Validate that metadata can be serialized to JSON before sending it to the backend.
+        Returns a sanitized shallow copy so subsequent code never mutates the caller's object.
+        Any validation failure is logged and results in None so callers can skip sending metadata.
         """
-        try:
-            json.dumps(metadata)
-        except (TypeError, ValueError) as exc:
-            raise TypeError(f"{context} metadata must be JSON serializable") from exc
-        offending_path = self._find_null_character_path(metadata)
-        if offending_path is not None:
-            raise ValueError(
-                f"{context} metadata cannot contain null characters (found at {offending_path}). "
-                "Remove or replace '\\u0000' before calling Docent tracing APIs."
+        if not isinstance(metadata, dict):
+            logger.error(
+                "%s metadata must be provided as a dict (got %s: %r). Skipping metadata payload.",
+                context,
+                type(metadata).__name__,
+                metadata,
             )
+            return None
+
+        metadata_copy: Dict[str, Any] = {}
+        for key, value in metadata.items():
+            if not isinstance(key, str):
+                logger.error(
+                    "%s metadata keys must be strings; skipping key %r (type %s).",
+                    context,
+                    key,
+                    type(key).__name__,
+                )
+                continue
+            metadata_copy[key] = value
+
+        try:
+            json.dumps(metadata_copy)
+        except (TypeError, ValueError) as exc:
+            logger.error(
+                "%s metadata must be JSON serializable (%s). Skipping metadata payload: %r",
+                context,
+                exc,
+                metadata,
+            )
+            return None
+        offending_path = self._find_null_character_path(metadata_copy)
+        if offending_path is not None:
+            logger.error(
+                "%s metadata cannot contain null characters (found at %s). "
+                "Skipping metadata payload.",
+                context,
+                offending_path,
+            )
+            return None
+        return metadata_copy
 
     def _post_json(self, path: str, data: Dict[str, Any]) -> None:
         self._post_json_sync(path, data)
 
     def _post_json_sync(self, path: str, data: Dict[str, Any]) -> None:
         if not self._api_endpoint_base:
-            raise RuntimeError("API endpoint base is not configured")
+            message = "API endpoint base is not configured"
+            logger.error(message)
+            raise RuntimeError(message)
         url = f"{self._api_endpoint_base}{path}"
         try:
             resp = requests.post(url, json=data, headers=self._api_headers(), timeout=(10, 60))
@@ -829,22 +966,24 @@ class DocentTracer:
 
     def _find_null_character_path(self, value: Any, path: str = "") -> Optional[str]:
         """Backend rejects NUL bytes, so detect them before we send metadata to the backend."""
-        return None
         if isinstance(value, str):
             if "\x00" in value or "\\u0000" in value or "\\x00" in value:
                 return path or "<root>"
             return None
 
         if isinstance(value, dict):
-            for key, item in value.items():
-                next_path = f"{path}.{key}" if path else str(key)
+            typed_dict: Mapping[str, Any] = cast(Mapping[str, Any], value)
+            for key, item in typed_dict.items():
+                key_str = str(key)
+                next_path = f"{path}.{key_str}" if path else key_str
                 result = self._find_null_character_path(item, next_path)
                 if result:
                     return result
             return None
 
         if isinstance(value, (list, tuple)):
-            for index, item in enumerate(value):
+            typed_sequence: Sequence[Any] = cast(Sequence[Any], value)
+            for index, item in enumerate(typed_sequence):
                 next_path = f"{path}[{index}]" if path else f"[{index}]"
                 result = self._find_null_character_path(item, next_path)
                 if result:
@@ -873,6 +1012,14 @@ class DocentTracer:
             return
 
         collection_id = self.collection_id
+        if not isinstance(agent_run_id, str) or not agent_run_id:
+            logger.error("Cannot send agent run score without a valid agent_run_id.")
+            return
+
+        if not isinstance(name, str) or not name:
+            logger.error("Cannot send agent run score without a valid score name.")
+            return
+
         payload: Dict[str, Any] = {
             "collection_id": collection_id,
             "agent_run_id": agent_run_id,
@@ -880,21 +1027,48 @@ class DocentTracer:
             "score_value": score,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        if attributes:
-            payload.update(attributes)
+        if attributes is not None:
+            if not isinstance(attributes, dict):
+                logger.error(
+                    "Score attributes must be provided as a dict (got %s: %r). Skipping attributes.",
+                    type(attributes).__name__,
+                    attributes,
+                )
+            else:
+                sanitized_attributes: Dict[str, Any] = {}
+                for attr_key, attr_value in attributes.items():
+                    if not isinstance(attr_key, str):
+                        logger.error(
+                            "Score attribute keys must be strings; skipping key %r of type %s.",
+                            attr_key,
+                            type(attr_key).__name__,
+                        )
+                        continue
+                    sanitized_attributes[attr_key] = attr_value
+                payload.update(sanitized_attributes)
         self._post_json("/v1/scores", payload)
 
     def send_agent_run_metadata(self, agent_run_id: str, metadata: Dict[str, Any]) -> None:
         if self.is_disabled():
             return
 
-        self._ensure_json_serializable_metadata(metadata, "Agent run")
+        if not isinstance(agent_run_id, str) or not agent_run_id:
+            logger.error("Cannot send agent run metadata without a valid agent_run_id.")
+            return
+
+        metadata_payload = self._ensure_json_serializable_metadata(metadata, "Agent run")
+        if metadata_payload is None:
+            logger.error(
+                "Skipping agent run metadata send for %s due to invalid metadata payload.",
+                agent_run_id,
+            )
+            return
 
         collection_id = self.collection_id
         payload: Dict[str, Any] = {
             "collection_id": collection_id,
             "agent_run_id": agent_run_id,
-            "metadata": metadata,
+            "metadata": metadata_payload,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         self._post_json("/v1/agent-run-metadata", payload)
@@ -920,6 +1094,10 @@ class DocentTracer:
         if self.is_disabled():
             return
 
+        if not isinstance(transcript_id, str) or not transcript_id:
+            logger.error("Cannot send transcript metadata without a valid transcript_id.")
+            return
+
         collection_id = self.collection_id
         payload: Dict[str, Any] = {
             "collection_id": collection_id,
@@ -929,14 +1107,34 @@ class DocentTracer:
 
         # Only add fields that are provided
         if name is not None:
-            payload["name"] = name
+            if isinstance(name, str):
+                payload["name"] = name
+            else:
+                logger.error("Transcript name must be a string; ignoring value %r.", name)
         if description is not None:
-            payload["description"] = description
+            if isinstance(description, str):
+                payload["description"] = description
+            else:
+                logger.error(
+                    "Transcript description must be a string; ignoring value %r.", description
+                )
         if transcript_group_id is not None:
-            payload["transcript_group_id"] = transcript_group_id
+            if isinstance(transcript_group_id, str) and transcript_group_id:
+                payload["transcript_group_id"] = transcript_group_id
+            else:
+                logger.error(
+                    "transcript_group_id must be a non-empty string; ignoring value %r.",
+                    transcript_group_id,
+                )
         if metadata is not None:
-            self._ensure_json_serializable_metadata(metadata, "Transcript")
-            payload["metadata"] = metadata
+            metadata_payload = self._ensure_json_serializable_metadata(metadata, "Transcript")
+            if metadata_payload is None:
+                logger.error(
+                    "Transcript %s metadata payload invalid; sending transcript data without metadata.",
+                    transcript_id,
+                )
+            else:
+                payload["metadata"] = metadata_payload
 
         self._post_json("/v1/transcript-metadata", payload)
 
@@ -987,16 +1185,21 @@ class DocentTracer:
             The transcript ID
         """
         if self.is_disabled():
-            transcript_id = self.get_disabled_transcript_id(transcript_id)
+            transcript_id = _get_disabled_transcript_id(transcript_id)
             yield transcript_id
             return
 
         if not self._initialized:
-            raise RuntimeError(
-                "Tracer is not initialized. Call initialize_tracing() before using transcript context."
-            )
+            message = "Tracer is not initialized. Call initialize_tracing() before using transcript context."
+            logger.error(message)
+            raise RuntimeError(message)
 
-        if transcript_id is None:
+        if transcript_id is not None and (not isinstance(transcript_id, str) or not transcript_id):
+            logger.error(
+                "Invalid transcript_id for transcript_context; generating a new transcript ID."
+            )
+            transcript_id = str(uuid.uuid4())
+        elif transcript_id is None:
             transcript_id = str(uuid.uuid4())
 
         # Determine transcript group ID before setting new context
@@ -1005,6 +1208,15 @@ class DocentTracer:
                 transcript_group_id = self._transcript_group_id_var.get()
             except LookupError:
                 # No current transcript group context, this transcript has no group
+                transcript_group_id = None
+        else:
+            if isinstance(transcript_group_id, str) and transcript_group_id:
+                pass
+            else:
+                logger.error(
+                    "Invalid transcript_group_id for transcript_context; ignoring value %r.",
+                    transcript_group_id,
+                )
                 transcript_group_id = None
 
         # Set context variable for this execution context
@@ -1047,16 +1259,21 @@ class DocentTracer:
             The transcript ID
         """
         if self.is_disabled():
-            transcript_id = self.get_disabled_transcript_id(transcript_id)
+            transcript_id = _get_disabled_transcript_id(transcript_id)
             yield transcript_id
             return
 
         if not self._initialized:
-            raise RuntimeError(
-                "Tracer is not initialized. Call initialize_tracing() before using transcript context."
-            )
+            message = "Tracer is not initialized. Call initialize_tracing() before using transcript context."
+            logger.error(message)
+            raise RuntimeError(message)
 
-        if transcript_id is None:
+        if transcript_id is not None and (not isinstance(transcript_id, str) or not transcript_id):
+            logger.error(
+                "Invalid transcript_id for async_transcript_context; generating a new transcript ID."
+            )
+            transcript_id = str(uuid.uuid4())
+        elif transcript_id is None:
             transcript_id = str(uuid.uuid4())
 
         # Determine transcript group ID before setting new context
@@ -1065,6 +1282,15 @@ class DocentTracer:
                 transcript_group_id = self._transcript_group_id_var.get()
             except LookupError:
                 # No current transcript group context, this transcript has no group
+                transcript_group_id = None
+        else:
+            if isinstance(transcript_group_id, str) and transcript_group_id:
+                pass
+            else:
+                logger.error(
+                    "Invalid transcript_group_id for async_transcript_context; ignoring value %r.",
+                    transcript_group_id,
+                )
                 transcript_group_id = None
 
         # Set context variable for this execution context
@@ -1105,6 +1331,12 @@ class DocentTracer:
         if self.is_disabled():
             return
 
+        if not isinstance(transcript_group_id, str) or not transcript_group_id:
+            logger.error(
+                "Cannot send transcript group metadata without a valid transcript_group_id."
+            )
+            return
+
         collection_id = self.collection_id
 
         # Get agent_run_id from current context
@@ -1119,15 +1351,41 @@ class DocentTracer:
             state: dict[str, Optional[str]] = self._transcript_group_states.setdefault(
                 transcript_group_id, {}
             )
-            final_name: Optional[str] = name if name is not None else state.get("name")
-            final_description: Optional[str] = (
-                description if description is not None else state.get("description")
-            )
-            final_parent_transcript_group_id: Optional[str] = (
-                parent_transcript_group_id
-                if parent_transcript_group_id is not None
-                else state.get("parent_transcript_group_id")
-            )
+            if name is not None:
+                if isinstance(name, str):
+                    final_name = name
+                else:
+                    logger.error(
+                        "Transcript group name must be a string; ignoring value %r.",
+                        name,
+                    )
+                    final_name = state.get("name")
+            else:
+                final_name = state.get("name")
+
+            if description is not None:
+                if isinstance(description, str):
+                    final_description = description
+                else:
+                    logger.error(
+                        "Transcript group description must be a string; ignoring value %r.",
+                        description,
+                    )
+                    final_description = state.get("description")
+            else:
+                final_description = state.get("description")
+
+            if parent_transcript_group_id is not None:
+                if isinstance(parent_transcript_group_id, str) and parent_transcript_group_id:
+                    final_parent_transcript_group_id = parent_transcript_group_id
+                else:
+                    logger.error(
+                        "parent_transcript_group_id must be a non-empty string; ignoring value %r.",
+                        parent_transcript_group_id,
+                    )
+                    final_parent_transcript_group_id = state.get("parent_transcript_group_id")
+            else:
+                final_parent_transcript_group_id = state.get("parent_transcript_group_id")
 
             if final_name is not None:
                 state["name"] = final_name
@@ -1149,9 +1407,17 @@ class DocentTracer:
             payload["description"] = final_description
         if final_parent_transcript_group_id is not None:
             payload["parent_transcript_group_id"] = final_parent_transcript_group_id
-        if metadata is not None:
-            self._ensure_json_serializable_metadata(metadata, "Transcript group")
-            payload["metadata"] = metadata
+            if metadata is not None:
+                metadata_payload = self._ensure_json_serializable_metadata(
+                    metadata, "Transcript group"
+                )
+                if metadata_payload is None:
+                    logger.error(
+                        "Transcript group %s metadata payload invalid; sending group data without metadata.",
+                        transcript_group_id,
+                    )
+                else:
+                    payload["metadata"] = metadata_payload
 
         self._post_json("/v1/transcript-group-metadata", payload)
 
@@ -1178,16 +1444,23 @@ class DocentTracer:
             The transcript group ID
         """
         if self.is_disabled():
-            transcript_group_id = self.get_disabled_transcript_group_id(transcript_group_id)
+            transcript_group_id = _get_disabled_transcript_group_id(transcript_group_id)
             yield transcript_group_id
             return
 
         if not self._initialized:
-            raise RuntimeError(
-                "Tracer is not initialized. Call initialize_tracing() before using transcript group context."
-            )
+            message = "Tracer is not initialized. Call initialize_tracing() before using transcript group context."
+            logger.error(message)
+            raise RuntimeError(message)
 
-        if transcript_group_id is None:
+        if transcript_group_id is not None and (
+            not isinstance(transcript_group_id, str) or not transcript_group_id
+        ):
+            logger.error(
+                "Invalid transcript_group_id for transcript_group_context; generating a new ID."
+            )
+            transcript_group_id = str(uuid.uuid4())
+        elif transcript_group_id is None:
             transcript_group_id = str(uuid.uuid4())
 
         # Determine parent transcript group ID before setting new context
@@ -1196,6 +1469,15 @@ class DocentTracer:
                 parent_transcript_group_id = self._transcript_group_id_var.get()
             except LookupError:
                 # No current transcript group context, this becomes a root group
+                parent_transcript_group_id = None
+        else:
+            if isinstance(parent_transcript_group_id, str) and parent_transcript_group_id:
+                pass
+            else:
+                logger.error(
+                    "Invalid parent_transcript_group_id for transcript_group_context; ignoring value %r.",
+                    parent_transcript_group_id,
+                )
                 parent_transcript_group_id = None
 
         # Set context variable for this execution context
@@ -1240,16 +1522,23 @@ class DocentTracer:
             The transcript group ID
         """
         if self.is_disabled():
-            transcript_group_id = self.get_disabled_transcript_group_id(transcript_group_id)
+            transcript_group_id = _get_disabled_transcript_group_id(transcript_group_id)
             yield transcript_group_id
             return
 
         if not self._initialized:
-            raise RuntimeError(
-                "Tracer is not initialized. Call initialize_tracing() before using transcript group context."
-            )
+            message = "Tracer is not initialized. Call initialize_tracing() before using transcript group context."
+            logger.error(message)
+            raise RuntimeError(message)
 
-        if transcript_group_id is None:
+        if transcript_group_id is not None and (
+            not isinstance(transcript_group_id, str) or not transcript_group_id
+        ):
+            logger.error(
+                "Invalid transcript_group_id for async_transcript_group_context; generating a new ID."
+            )
+            transcript_group_id = str(uuid.uuid4())
+        elif transcript_group_id is None:
             transcript_group_id = str(uuid.uuid4())
 
         # Determine parent transcript group ID before setting new context
@@ -1258,6 +1547,15 @@ class DocentTracer:
                 parent_transcript_group_id = self._transcript_group_id_var.get()
             except LookupError:
                 # No current transcript group context, this becomes a root group
+                parent_transcript_group_id = None
+        else:
+            if isinstance(parent_transcript_group_id, str) and parent_transcript_group_id:
+                pass
+            else:
+                logger.error(
+                    "Invalid parent_transcript_group_id for async_transcript_group_context; ignoring value %r.",
+                    parent_transcript_group_id,
+                )
                 parent_transcript_group_id = None
 
         # Set context variable for this execution context
@@ -1289,7 +1587,10 @@ class DocentTracer:
             "status": "completed",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        self._post_json("/v1/trace-done", payload)
+        try:
+            self._post_json("/v1/trace-done", payload)
+        except Exception as exc:
+            logger.error(f"Failed to send trace completion signal: {exc}")
 
 
 _global_tracer: Optional[DocentTracer] = None
@@ -1375,11 +1676,34 @@ def is_package_installed(package_name: str) -> bool:
     return package_name.lower() in installed_packages
 
 
-def get_tracer() -> DocentTracer:
-    """Get the global Docent tracer."""
-    if _global_tracer is None:
-        raise RuntimeError("Docent tracer not initialized")
-    return _global_tracer
+def get_tracer(caller: str = "get_tracer()") -> Optional[DocentTracer]:
+    """
+    Get the global Docent tracer if it has been initialized.
+
+    Args:
+        caller: Human-readable name of the API being invoked. Used for log output.
+
+    Returns:
+        The global Docent tracer, or None if tracing has not been initialized.
+    """
+    tracer = _global_tracer
+    if tracer is None:
+        logger.error(
+            f"{caller} requires initialize_tracing() to be called before use. "
+            "You can also disable tracing by calling set_disabled(True) or by setting "
+            "the DOCENT_DISABLE_TRACING environment variable to 'true'."
+        )
+        return None
+
+    if not tracer.is_initialized():
+        logger.error(
+            f"{caller} cannot proceed because initialize_tracing() did not complete successfully. "
+            "You can also disable tracing by calling set_disabled(True) or by setting "
+            "the DOCENT_DISABLE_TRACING environment variable to 'true'."
+        )
+        return None
+
+    return tracer
 
 
 def close_tracing() -> None:
@@ -1406,13 +1730,23 @@ def is_initialized() -> bool:
     return _global_tracer.is_initialized()
 
 
-def is_disabled() -> bool:
-    """Check if global tracing is disabled."""
+def is_disabled(context_name: str = "Docent tracing") -> bool:
+    """
+    Check if global tracing is disabled for the given context.
+
+    Args:
+        context_name: Human-readable identifier for the caller used in error reporting.
+
+    Returns:
+        True when tracing is disabled globally, when no initialized tracer exists,
+        or when the active tracer reports being disabled.
+    """
     if _global_tracing_disabled:
         return True
-    if _global_tracer:
-        return _global_tracer.is_disabled()
-    return True
+    tracer = get_tracer(context_name)
+    if tracer is None:
+        return True
+    return tracer.is_disabled()
 
 
 def set_disabled(disabled: bool) -> None:
@@ -1432,16 +1766,20 @@ def agent_run_score(name: str, score: float, attributes: Optional[Dict[str, Any]
         score: Numeric score value
         attributes: Optional additional attributes for the score event
     """
-    if is_disabled():
+    if is_disabled("agent_run_score()"):
         return
+
+    tracer = get_tracer("agent_run_score()")
+    if tracer is None:
+        logger.error("Docent tracer unavailable; score will not be sent.")
+        return
+
+    agent_run_id = tracer.get_current_agent_run_id()
+    if not agent_run_id:
+        logger.warning("No active agent run context. Score will not be sent.")
+        return
+
     try:
-        tracer: DocentTracer = get_tracer()
-        agent_run_id = tracer.get_current_agent_run_id()
-
-        if not agent_run_id:
-            logger.warning("No active agent run context. Score will not be sent.")
-            return
-
         tracer.send_agent_run_score(agent_run_id, name, score, attributes)
     except Exception as e:
         logger.error(f"Failed to send score: {e}")
@@ -1470,15 +1808,20 @@ def agent_run_metadata(metadata: Dict[str, Any]) -> None:
         agent_run_metadata({"user": "John", "id": 123, "flagged": True})
         agent_run_metadata({"user": {"id": "123", "name": "John"}, "config": {"model": "gpt-4"}})
     """
-    if is_disabled():
+    if is_disabled("agent_run_metadata()"):
         return
-    try:
-        tracer = get_tracer()
-        agent_run_id = tracer.get_current_agent_run_id()
-        if not agent_run_id:
-            logger.warning("No active agent run context. Metadata will not be sent.")
-            return
 
+    tracer = get_tracer("agent_run_metadata()")
+    if tracer is None:
+        logger.error("Docent tracer unavailable; agent run metadata will not be sent.")
+        return
+
+    agent_run_id = tracer.get_current_agent_run_id()
+    if not agent_run_id:
+        logger.warning("No active agent run context. Metadata will not be sent.")
+        return
+
+    try:
         tracer.send_agent_run_metadata(agent_run_id, metadata)
     except Exception as e:
         logger.error(f"Failed to send agent run metadata: {e}")
@@ -1509,15 +1852,20 @@ def transcript_metadata(
             transcript_group_id="group-123",
         )
     """
-    if is_disabled():
+    if is_disabled("transcript_metadata()"):
         return
-    try:
-        tracer = get_tracer()
-        transcript_id = tracer.get_current_transcript_id()
-        if not transcript_id:
-            logger.warning("No active transcript context. Metadata will not be sent.")
-            return
 
+    tracer = get_tracer("transcript_metadata()")
+    if tracer is None:
+        logger.error("Docent tracer unavailable; transcript metadata will not be sent.")
+        return
+
+    transcript_id = tracer.get_current_transcript_id()
+    if not transcript_id:
+        logger.warning("No active transcript context. Metadata will not be sent.")
+        return
+
+    try:
         tracer.send_transcript_metadata(
             transcript_id, name, description, transcript_group_id, metadata
         )
@@ -1550,15 +1898,20 @@ def transcript_group_metadata(
             parent_transcript_group_id="root-group",
         )
     """
-    if is_disabled():
+    if is_disabled("transcript_group_metadata()"):
         return
-    try:
-        tracer = get_tracer()
-        transcript_group_id = tracer.get_current_transcript_group_id()
-        if not transcript_group_id:
-            logger.warning("No active transcript group context. Metadata will not be sent.")
-            return
 
+    tracer = get_tracer("transcript_group_metadata()")
+    if tracer is None:
+        logger.error("Docent tracer unavailable; transcript group metadata will not be sent.")
+        return
+
+    transcript_group_id = tracer.get_current_transcript_group_id()
+    if not transcript_group_id:
+        logger.warning("No active transcript group context. Metadata will not be sent.")
+        return
+
+    try:
         tracer.send_transcript_group_metadata(
             transcript_group_id, name, description, parent_transcript_group_id, metadata
         )
@@ -1585,11 +1938,18 @@ class AgentRunContext:
 
     def __enter__(self) -> tuple[str, str]:
         """Sync context manager entry."""
-        if is_disabled():
+        if is_disabled("agent_run_context"):
             self.agent_run_id = _get_disabled_agent_run_id(self.agent_run_id)
             self.transcript_id = _get_disabled_transcript_id(self.transcript_id)
             return self.agent_run_id, self.transcript_id
-        self._sync_context = get_tracer().agent_run_context(
+
+        tracer = get_tracer("agent_run_context")
+        if tracer is None:
+            logger.error("Cannot enter agent_run_context because tracing is not initialized.")
+            self.agent_run_id = _get_disabled_agent_run_id(self.agent_run_id)
+            self.transcript_id = _get_disabled_transcript_id(self.transcript_id)
+            return self.agent_run_id, self.transcript_id
+        self._sync_context = tracer.agent_run_context(
             self.agent_run_id, self.transcript_id, metadata=self.metadata, **self.attributes
         )
         return self._sync_context.__enter__()
@@ -1601,11 +1961,18 @@ class AgentRunContext:
 
     async def __aenter__(self) -> tuple[str, str]:
         """Async context manager entry."""
-        if is_disabled():
+        if is_disabled("agent_run_context"):
             self.agent_run_id = _get_disabled_agent_run_id(self.agent_run_id)
             self.transcript_id = _get_disabled_transcript_id(self.transcript_id)
             return self.agent_run_id, self.transcript_id
-        self._async_context = get_tracer().async_agent_run_context(
+
+        tracer = get_tracer("agent_run_context")
+        if tracer is None:
+            logger.error("Cannot enter agent_run_context because tracing is not initialized.")
+            self.agent_run_id = _get_disabled_agent_run_id(self.agent_run_id)
+            self.transcript_id = _get_disabled_transcript_id(self.transcript_id)
+            return self.agent_run_id, self.transcript_id
+        self._async_context = tracer.async_agent_run_context(
             self.agent_run_id, self.transcript_id, metadata=self.metadata, **self.attributes
         )
         return await self._async_context.__aenter__()
@@ -1745,10 +2112,16 @@ class TranscriptContext:
 
     def __enter__(self) -> str:
         """Sync context manager entry."""
-        if is_disabled():
+        if is_disabled("transcript_context"):
             self.transcript_id = _get_disabled_transcript_id(self.transcript_id)
             return self.transcript_id
-        self._sync_context = get_tracer().transcript_context(
+
+        tracer = get_tracer("transcript_context")
+        if tracer is None:
+            logger.error("Cannot enter transcript_context because tracing is not initialized.")
+            self.transcript_id = _get_disabled_transcript_id(self.transcript_id)
+            return self.transcript_id
+        self._sync_context = tracer.transcript_context(
             name=self.name,
             transcript_id=self.transcript_id,
             description=self.description,
@@ -1764,10 +2137,16 @@ class TranscriptContext:
 
     async def __aenter__(self) -> str:
         """Async context manager entry."""
-        if is_disabled():
+        if is_disabled("transcript_context"):
             self.transcript_id = _get_disabled_transcript_id(self.transcript_id)
             return self.transcript_id
-        self._async_context = get_tracer().async_transcript_context(
+
+        tracer = get_tracer("transcript_context")
+        if tracer is None:
+            logger.error("Cannot enter transcript_context because tracing is not initialized.")
+            self.transcript_id = _get_disabled_transcript_id(self.transcript_id)
+            return self.transcript_id
+        self._async_context = tracer.async_transcript_context(
             name=self.name,
             transcript_id=self.transcript_id,
             description=self.description,
@@ -1928,10 +2307,18 @@ class TranscriptGroupContext:
 
     def __enter__(self) -> str:
         """Sync context manager entry."""
-        if is_disabled():
+        if is_disabled("transcript_group_context"):
             self.transcript_group_id = _get_disabled_transcript_group_id(self.transcript_group_id)
             return self.transcript_group_id
-        self._sync_context = get_tracer().transcript_group_context(
+
+        tracer = get_tracer("transcript_group_context")
+        if tracer is None:
+            logger.error(
+                "Cannot enter transcript_group_context because tracing is not initialized."
+            )
+            self.transcript_group_id = _get_disabled_transcript_group_id(self.transcript_group_id)
+            return self.transcript_group_id
+        self._sync_context = tracer.transcript_group_context(
             name=self.name,
             transcript_group_id=self.transcript_group_id,
             description=self.description,
@@ -1947,10 +2334,18 @@ class TranscriptGroupContext:
 
     async def __aenter__(self) -> str:
         """Async context manager entry."""
-        if is_disabled():
+        if is_disabled("transcript_group_context"):
             self.transcript_group_id = _get_disabled_transcript_group_id(self.transcript_group_id)
             return self.transcript_group_id
-        self._async_context = get_tracer().async_transcript_group_context(
+
+        tracer = get_tracer("transcript_group_context")
+        if tracer is None:
+            logger.error(
+                "Cannot enter transcript_group_context because tracing is not initialized."
+            )
+            self.transcript_group_id = _get_disabled_transcript_group_id(self.transcript_group_id)
+            return self.transcript_group_id
+        self._async_context = tracer.async_transcript_group_context(
             name=self.name,
             transcript_group_id=self.transcript_group_id,
             description=self.description,
