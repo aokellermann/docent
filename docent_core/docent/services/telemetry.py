@@ -1,5 +1,6 @@
 import base64
 import json
+import traceback
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional, Sequence, cast
@@ -165,7 +166,7 @@ class TelemetryService:
                 )
 
                 # Process this agent run (handles both new and existing agent runs)
-                success = await self._process_single_agent_run(
+                success, failure_reason = await self._process_single_agent_run(
                     agent_run_id,
                     collection_id,
                     user,
@@ -179,12 +180,13 @@ class TelemetryService:
                         f"Successfully processed agent run {agent_run_id} (version {current_version})"
                     )
                 else:
-                    logger.error(f"Failed to process agent run {agent_run_id}")
+                    reason = failure_reason or "Processing failed"
+                    logger.error(f"Failed to process agent run {agent_run_id}: {reason}")
                     # Mark agent run as errored on failure
                     await self._mark_agent_runs_as_errored(
                         collection_id,
                         {agent_run_id: current_version},
-                        "Processing failed",
+                        error_message=reason,
                     )
 
             except Exception as e:
@@ -192,7 +194,8 @@ class TelemetryService:
                 await self._mark_agent_runs_as_errored(
                     collection_id,
                     {agent_run_id: current_version},
-                    str(e),
+                    error_message=str(e),
+                    error=e,
                 )
                 logger.error(f"Error processing agent run {agent_run_id}: {str(e)}")
                 continue
@@ -256,7 +259,7 @@ class TelemetryService:
         agent_run_id: str,
         collection_id: str,
         user: User,
-    ) -> bool:
+    ) -> tuple[bool, str | None]:
         """
         Process a single agent run by creating all necessary database objects.
 
@@ -266,86 +269,81 @@ class TelemetryService:
             user: The user creating the agent run
 
         Returns:
-            bool: True if processing was successful, False otherwise
+            tuple[bool, str | None]: Success flag and optional failure reason
         """
-        try:
-            from docent_core.docent.services.telemetry_accumulation import (
-                TelemetryAccumulationService,
-            )
+        from docent_core.docent.services.telemetry_accumulation import (
+            TelemetryAccumulationService,
+        )
 
-            accumulation_service = TelemetryAccumulationService(self.session)
+        accumulation_service = TelemetryAccumulationService(self.session)
 
-            agent_run_spans = await accumulation_service.get_agent_run_spans(
+        agent_run_spans = await accumulation_service.get_agent_run_spans(
+            collection_id, agent_run_id
+        )
+        if not agent_run_spans:
+            logger.info(f"No spans found for agent run {agent_run_id}")
+            return True, None  # Consider this a success even with no spans
+
+        agent_run_scores = await accumulation_service.get_agent_run_scores(
+            collection_id, agent_run_id
+        )
+        agent_run_metadata = await accumulation_service.get_agent_run_metadata(
+            collection_id, agent_run_id
+        )
+        agent_run_transcript_group_metadata = (
+            await accumulation_service.get_agent_run_transcript_group_metadata(
                 collection_id, agent_run_id
             )
-            if not agent_run_spans:
-                logger.info(f"No spans found for agent run {agent_run_id}")
-                return True  # Consider this a success even with no spans
+        )
 
-            agent_run_scores = await accumulation_service.get_agent_run_scores(
-                collection_id, agent_run_id
-            )
-            agent_run_metadata = await accumulation_service.get_agent_run_metadata(
-                collection_id, agent_run_id
-            )
-            agent_run_transcript_group_metadata = (
-                await accumulation_service.get_agent_run_transcript_group_metadata(
-                    collection_id, agent_run_id
-                )
-            )
+        # Organize spans by transcript_id -> spans[]
+        spans_by_transcript: Dict[str, List[Dict[str, Any]]] = {}
+        default_transcript_id = str(uuid4())
+        for span in agent_run_spans:
+            transcript_id = span.get("attributes", {}).get("transcript_id")
+            if not transcript_id:
+                span["attributes"]["transcript_id"] = default_transcript_id
+                transcript_id = default_transcript_id
+            if transcript_id:
+                if transcript_id not in spans_by_transcript:
+                    spans_by_transcript[transcript_id] = []
+                spans_by_transcript[transcript_id].append(span)
 
-            # Organize spans by transcript_id -> spans[]
-            spans_by_transcript: Dict[str, List[Dict[str, Any]]] = {}
-            default_transcript_id = str(uuid4())
-            for span in agent_run_spans:
-                transcript_id = span.get("attributes", {}).get("transcript_id")
-                if not transcript_id:
-                    span["attributes"]["transcript_id"] = default_transcript_id
-                    transcript_id = default_transcript_id
-                if transcript_id:
-                    if transcript_id not in spans_by_transcript:
-                        spans_by_transcript[transcript_id] = []
-                    spans_by_transcript[transcript_id].append(span)
-
-            # Create transcript groups for this agent run
-            transcript_groups = []
-            if agent_run_transcript_group_metadata:
-                transcript_groups = self._create_transcript_groups_from_accumulation_data(
-                    agent_run_transcript_group_metadata
-                )
-
-            # Create agent run from spans
-            agent_run_spans_dict = {agent_run_id: spans_by_transcript}
-            transcript_groups_by_agent_run = {agent_run_id: transcript_groups}
-            collection_scores = {agent_run_id: agent_run_scores}
-            collection_metadata = {agent_run_id: agent_run_metadata}
-
-            # Create agent run from spans
-            collection_agent_runs = await self._create_agent_runs_from_spans(
-                agent_run_spans_dict,
-                transcript_groups_by_agent_run,
-                collection_scores,
-                collection_metadata,
+        # Create transcript groups for this agent run
+        transcript_groups = []
+        if agent_run_transcript_group_metadata:
+            transcript_groups = self._create_transcript_groups_from_accumulation_data(
+                agent_run_transcript_group_metadata
             )
 
-            if not collection_agent_runs:
-                logger.warning(f"No agent run created from spans for {agent_run_id}")
-                return False
+        # Create agent run from spans
+        agent_run_spans_dict = {agent_run_id: spans_by_transcript}
+        transcript_groups_by_agent_run = {agent_run_id: transcript_groups}
+        collection_scores = {agent_run_id: agent_run_scores}
+        collection_metadata = {agent_run_id: agent_run_metadata}
 
-            # TODO(gregor): Use the original user who created the telemetry data instead of the processing user
-            # Get or create default view context for this collection
-            ctx = await self.mono_svc.get_default_view_ctx(collection_id, user)
-            # Store the agent run in the database
-            await self.update_agent_runs_for_telemetry(ctx, collection_agent_runs)
+        # Create agent run from spans
+        collection_agent_runs = await self._create_agent_runs_from_spans(
+            agent_run_spans_dict,
+            transcript_groups_by_agent_run,
+            collection_scores,
+            collection_metadata,
+        )
 
-            logger.info(
-                f"Successfully created agent run {agent_run_id} with {len(spans_by_transcript)} transcripts"
-            )
-            return True
+        if not collection_agent_runs:
+            logger.warning(f"No agent run created from spans for {agent_run_id}")
+            return False, f"No agent run created from spans for {agent_run_id}"
 
-        except Exception as e:
-            logger.error(f"Error processing single agent run {agent_run_id}: {str(e)}")
-            return False
+        # TODO(gregor): Use the original user who created the telemetry data instead of the processing user
+        # Get or create default view context for this collection
+        ctx = await self.mono_svc.get_default_view_ctx(collection_id, user)
+        # Store the agent run in the database
+        await self.update_agent_runs_for_telemetry(ctx, collection_agent_runs)
+
+        logger.info(
+            f"Successfully created agent run {agent_run_id} with {len(spans_by_transcript)} transcripts"
+        )
+        return True, None
 
     def extract_collection_info_from_spans(
         self,
@@ -927,6 +925,7 @@ class TelemetryService:
         collection_id: str,
         agent_run_versions: Mapping[str, int],
         error_message: str | None = None,
+        error: BaseException | None = None,
     ) -> None:
         """
         Mark agent runs as errored after failed processing.
@@ -936,6 +935,7 @@ class TelemetryService:
             collection_id: The collection ID
             agent_run_versions: Mapping of agent run IDs to the version that produced the error
             error_message: Optional error message to store
+            error: Optional exception for capturing stack trace and type information
         """
         if not agent_run_versions:
             return
@@ -954,15 +954,17 @@ class TelemetryService:
                     f"No telemetry status row found for agent run {agent_run_id} in collection {collection_id}"
                 )
                 continue
-            stored_metadata: dict[str, Any] = row.metadata_json
+            stored_metadata: dict[str, Any] = row.metadata_json or {}
 
             previous_error_version = stored_metadata.get("errored_version", 0)
 
             if previous_error_version == provided_version:
                 # Same version as last error, increment error count
                 error_count = int(stored_metadata.get("error_count", 0)) + 1
-                stored_history: list[dict[str, Any]] = stored_metadata.get("error_history", [])
-                error_history: list[dict[str, Any]] = list[dict[str, Any]](stored_history)
+                stored_history: list[dict[str, Any]] = (
+                    stored_metadata.get("error_history", []) or []
+                )
+                error_history: list[dict[str, Any]] = list(stored_history)
             elif previous_error_version < provided_version:
                 # Newer version than last error, reset error count and history
                 error_count = 1
@@ -974,8 +976,9 @@ class TelemetryService:
                 )
                 continue
 
-            if error_message:
-                error_history.append({"error": error_message})
+            error_entry = self._build_error_entry(error_message, error)
+            if error_entry:
+                error_history.append(error_entry)
                 if len(error_history) > 5:
                     error_history = error_history[-5:]
 
@@ -1007,6 +1010,41 @@ class TelemetryService:
         logger.info(
             f"Marked {len(agent_run_versions)} agent runs as needs_processing after error in collection {collection_id}"
         )
+
+    def _build_error_entry(
+        self,
+        error_message: str | None,
+        error: BaseException | None,
+    ) -> dict[str, Any] | None:
+        """
+        Build a structured error entry with optional stack trace information.
+        """
+        message_parts: list[str] = []
+        if error_message:
+            message_parts.append(error_message)
+
+        if error:
+            error_text = str(error)
+            if error_text and error_text not in message_parts:
+                message_parts.append(error_text)
+
+        if not message_parts and not error:
+            return None
+
+        combined_message = " | ".join(message_parts) if message_parts else None
+
+        entry: dict[str, Any] = {
+            "message": combined_message or (error.__class__.__name__ if error else "Unknown error"),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        if error:
+            entry["error_type"] = error.__class__.__name__
+            entry["stack_trace"] = "".join(
+                traceback.format_exception(type(error), error, error.__traceback__)
+            )
+
+        return entry
 
     async def update_agent_runs_for_telemetry(
         self, ctx: ViewContext, agent_runs: Sequence[AgentRun]
