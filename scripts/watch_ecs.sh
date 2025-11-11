@@ -8,4 +8,4 @@ fi
 
 DEPLOYMENT_ID=$1
 
-aws logs tail /ecs/docent-${DEPLOYMENT_ID} --follow --since=1h
+aws logs tail /ecs/docent-${DEPLOYMENT_ID} --follow --since=10m
