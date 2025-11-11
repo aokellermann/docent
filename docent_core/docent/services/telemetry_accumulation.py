@@ -5,7 +5,7 @@ This service replaces Redis storage for spans, scores, metadata, and other telem
 that needs to be accumulated before processing.
 """
 
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, cast
 from uuid import uuid4
 
 from sqlalchemy import and_, delete, or_, select
@@ -20,6 +20,22 @@ from docent_core.docent.db.schemas.tables import (
 )
 
 logger = get_logger(__name__)
+
+
+def deep_merge_dicts(destination: Dict[str, Any], source: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Recursively merge two dictionaries in-place.
+
+    Later/inner values override earlier ones while preserving unrelated keys,
+    which lets telemetry metadata accumulate without losing nested fields.
+    """
+    for key, value in source.items():
+        dest_value = destination.get(key)
+        if isinstance(dest_value, dict) and isinstance(value, dict):
+            deep_merge_dicts(cast(Dict[str, Any], dest_value), cast(Dict[str, Any], value))
+        else:
+            destination[key] = value
+    return destination
 
 
 class TelemetryAccumulationService:
@@ -458,8 +474,18 @@ class TelemetryAccumulationService:
                 if transcript_group_id not in metadata:
                     metadata[transcript_group_id] = {}
 
-                # Merge metadata, with newer entries taking precedence
-                metadata[transcript_group_id].update(entry.data)
+                existing_entry = metadata[transcript_group_id]
+                for key, value in entry.data.items():
+                    if key == "metadata" and isinstance(value, dict):
+                        existing_metadata = existing_entry.get("metadata")
+                        if isinstance(existing_metadata, dict):
+                            deep_merge_dicts(
+                                cast(Dict[str, Any], existing_metadata), cast(Dict[str, Any], value)
+                            )
+                        else:
+                            existing_entry["metadata"] = dict(cast(Dict[str, Any], value))
+                    else:
+                        existing_entry[key] = value
             except Exception as e:
                 logger.error(
                     f"Failed to process transcript group metadata for collection {collection_id}: {e}"
@@ -497,8 +523,18 @@ class TelemetryAccumulationService:
                 if transcript_group_id not in metadata:
                     metadata[transcript_group_id] = {}
 
-                # Merge metadata, with newer entries taking precedence
-                metadata[transcript_group_id].update(entry.data)
+                existing_entry = metadata[transcript_group_id]
+                for key, value in entry.data.items():
+                    if key == "metadata" and isinstance(value, dict):
+                        existing_metadata = existing_entry.get("metadata")
+                        if isinstance(existing_metadata, dict):
+                            deep_merge_dicts(
+                                cast(Dict[str, Any], existing_metadata), cast(Dict[str, Any], value)
+                            )
+                        else:
+                            existing_entry["metadata"] = dict(cast(Dict[str, Any], value))
+                    else:
+                        existing_entry[key] = value
             except Exception as e:
                 logger.error(
                     f"Failed to process transcript group metadata for collection {collection_id}: {e}"

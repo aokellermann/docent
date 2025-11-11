@@ -43,7 +43,10 @@ from docent_core.docent.services.monoservice import (
     MonoService,
     sort_transcript_groups_by_parent_order,
 )
-from docent_core.docent.services.telemetry_accumulation import TelemetryAccumulationService
+from docent_core.docent.services.telemetry_accumulation import (
+    TelemetryAccumulationService,
+    deep_merge_dicts,
+)
 
 logger = get_logger(__name__)
 
@@ -1381,7 +1384,7 @@ class TelemetryService:
 
                 # Add any additional metadata from span events
                 if agent_run_metadata_dict:
-                    metadata_dict.update(agent_run_metadata_dict)
+                    deep_merge_dicts(metadata_dict, agent_run_metadata_dict)
                     logger.info(f"  Added metadata to agent run: {agent_run_metadata_dict}")
 
                 # Add stored scores (these take precedence over span-based scores)
@@ -1402,7 +1405,7 @@ class TelemetryService:
                         stored_metadata = metadata_item.get("metadata", {})
                         if stored_metadata:
                             # Merge stored metadata with span-based metadata, stored metadata takes precedence
-                            metadata_dict.update(stored_metadata)
+                            deep_merge_dicts(metadata_dict, stored_metadata)
                             logger.info(f"  Added stored metadata to agent run: {stored_metadata}")
 
                 metadata = metadata_dict
