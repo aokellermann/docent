@@ -23,6 +23,8 @@ import {
 
 import CollectionRow from './CollectionRow';
 import { useDeleteCollectionMutation } from '../api/collectionApi';
+import { useGetCollectionsPermissionsQuery } from '@/lib/permissions/collabSlice';
+import { PERMISSION_LEVELS } from '@/lib/permissions/types';
 
 interface CollectionsTableProps {
   collections?: Collection[];
@@ -44,6 +46,11 @@ export function CollectionsTable({
   };
 
   const [deleteCollection] = useDeleteCollectionMutation();
+  const ids = (collections || []).map((c) => c.id);
+  const { data: batchPerms, isFetching: permissionsFetching } =
+    useGetCollectionsPermissionsQuery(ids, {
+      skip: ids.length === 0,
+    });
 
   const handleDeleteCollection = () => {
     if (!deletingCollection) return;
@@ -98,13 +105,26 @@ export function CollectionsTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {collections.map((collection) => (
-            <CollectionRow
-              key={collection.id}
-              collection={collection}
-              onDelete={openDeleteDialog}
-            />
-          ))}
+          {collections.map((collection) => {
+            const level =
+              (batchPerms?.collection_permissions?.[collection.id] as
+                | keyof typeof PERMISSION_LEVELS
+                | undefined) || 'none';
+            const hasWritePermission =
+              PERMISSION_LEVELS[level] >= PERMISSION_LEVELS.write;
+            const hasAdminPermission =
+              PERMISSION_LEVELS[level] >= PERMISSION_LEVELS.admin;
+            return (
+              <CollectionRow
+                key={collection.id}
+                collection={collection}
+                onDelete={openDeleteDialog}
+                hasWritePermission={hasWritePermission}
+                hasAdminPermission={hasAdminPermission}
+                permissionsLoading={Boolean(!batchPerms || permissionsFetching)}
+              />
+            );
+          })}
         </TableBody>
       </Table>
 

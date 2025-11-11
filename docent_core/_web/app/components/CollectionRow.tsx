@@ -5,6 +5,7 @@ import {
   CheckIcon,
   ClipboardCopyIcon,
   Layers,
+  Loader2,
   Pencil,
   Trash2,
   XIcon,
@@ -20,11 +21,13 @@ import { TableCell, TableRow } from '@/components/ui/table';
 import { toast } from '@/hooks/use-toast';
 import { cn, copyToClipboard } from '@/lib/utils';
 
-import { useHasCollectionPermission } from '@/lib/permissions/hooks';
 import { useUpdateCollectionMutation } from '../api/collectionApi';
 
-interface CollectionRowProps {
+export interface CollectionRowProps {
   collection: Collection;
+  hasWritePermission: boolean;
+  hasAdminPermission: boolean;
+  permissionsLoading: boolean;
   /**
    * Triggered when the delete button is pressed. The parent component is
    * responsible for showing the confirmation dialog and dispatching the actual
@@ -35,11 +38,12 @@ interface CollectionRowProps {
 
 export default function CollectionRow({
   collection,
+  hasWritePermission,
+  hasAdminPermission,
+  permissionsLoading,
   onDelete,
 }: CollectionRowProps) {
   const router = useRouter();
-  const hasAdminPermission = useHasCollectionPermission('admin', collection.id);
-  const hasWritePermission = useHasCollectionPermission('write', collection.id);
 
   // Local editing state
   const [isEditing, setIsEditing] = useState(false);
@@ -249,7 +253,14 @@ export default function CollectionRow({
             >
               <ExternalLinkIcon className="h-3.5 w-3.5" />
             </Button> */}
-            {hasWritePermission ? (
+            {permissionsLoading ? (
+              <div className="flex items-center justify-end">
+                <Loader2
+                  size={16}
+                  className="animate-spin text-muted-foreground"
+                />
+              </div>
+            ) : hasWritePermission ? (
               <div className="flex items-center gap-3">
                 <Button
                   variant="ghost"

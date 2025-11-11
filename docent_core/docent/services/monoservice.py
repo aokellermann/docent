@@ -28,6 +28,7 @@ from sqlalchemy import (
     func,
     literal,
     literal_column,
+    or_,
     select,
     update,
 )
@@ -2155,6 +2156,48 @@ class MonoService:
     ###########
     # Locking #
     ###########
+
+    async def get_permissions_for_collections(
+        self, user: User, collection_ids: list[str]
+    ) -> dict[str, Permission | None]:
+        """
+        Batch fetch highest permission level for a user across many collections.
+        """
+        if not collection_ids:
+            return {}
+
+        async with self.db.session() as session:
+            conditions = [
+                SQLAAccessControlEntry.is_public,
+                SQLAAccessControlEntry.user_id == user.id,
+            ]
+            if user.organization_ids:
+                conditions.append(SQLAAccessControlEntry.organization_id.in_(user.organization_ids))
+
+            result = await session.execute(
+                select(
+                    SQLAAccessControlEntry.collection_id,
+                    SQLAAccessControlEntry.permission,
+                ).where(
+                    SQLAAccessControlEntry.collection_id.in_(collection_ids),
+                    or_(*conditions),
+                )
+            )
+            rows = result.all()
+
+        perms_by_id: dict[str, list[str]] = {cid: [] for cid in collection_ids}
+        for cid, perm in rows:
+            if cid is not None and perm is not None:
+                perms_by_id[cid].append(perm)
+
+        out: dict[str, Permission | None] = {}
+        for cid, perms in perms_by_id.items():
+            if not perms:
+                out[cid] = None
+            else:
+                highest = max(perms, key=lambda p: PERMISSION_LEVELS[p])
+                out[cid] = Permission(highest)
+        return out
 
     @asynccontextmanager
     async def advisory_lock(self, collection_id: str, action_id: str) -> AsyncIterator[None]:

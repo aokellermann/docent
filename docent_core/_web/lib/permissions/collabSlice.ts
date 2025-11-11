@@ -20,6 +20,17 @@ export const collabApi = createApi({
       query: (collectionId) => `/${collectionId}/permissions`,
       providesTags: ['CollectionPermissions'],
     }),
+    getCollectionsPermissions: build.query<
+      { collection_permissions: Record<string, PermissionLevel | null> },
+      string[]
+    >({
+      query: (collectionIds) => ({
+        url: `/collections/permissions`,
+        method: 'POST',
+        body: { collection_ids: collectionIds },
+      }),
+      providesTags: ['CollectionPermissions'],
+    }),
     getOrgUsers: build.query<User[], string>({
       query: (orgId) => `/organizations/${orgId}/users`,
       providesTags: ['Users'],
@@ -73,6 +84,7 @@ export const collabApi = createApi({
 
 export const {
   useGetCollectionPermissionsQuery,
+  useGetCollectionsPermissionsQuery,
   useGetOrgUsersQuery,
   useGetUserByEmailQuery,
   useLazyGetUserByEmailQuery,

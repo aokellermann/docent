@@ -300,12 +300,6 @@ async def get_collections(
         # Get all columns from the SQLAlchemy object
         {c.key: getattr(obj, c.key) for c in sqla_inspect(obj).mapper.column_attrs}
         for obj in sqla_collections
-        if await mono_svc.has_permission(
-            user,
-            resource_type=ResourceType.COLLECTION,
-            resource_id=obj.id,
-            permission=Permission.READ,
-        )
     ]
 
 
@@ -915,6 +909,26 @@ class UserPermissionsResponse(BaseModel):
 class PermissionCheckResponse(BaseModel):
     permission: Permission
     has_permission: bool
+
+
+class CollectionsPermissionsRequest(BaseModel):
+    collection_ids: list[str]
+
+
+class CollectionsPermissionsResponse(BaseModel):
+    collection_permissions: dict[str, str | None]
+
+
+@user_router.post("/collections/permissions", response_model=CollectionsPermissionsResponse)
+async def get_collections_permissions(
+    request: CollectionsPermissionsRequest,
+    user: User = Depends(get_user_anonymous_ok),
+    mono_svc: MonoService = Depends(get_mono_svc),
+):
+    perms = await mono_svc.get_permissions_for_collections(user, request.collection_ids)
+    return CollectionsPermissionsResponse(
+        collection_permissions={k: (v.value if v else None) for k, v in perms.items()}
+    )
 
 
 @user_router.get("/{collection_id}/has_permission")
