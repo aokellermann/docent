@@ -117,6 +117,36 @@ class Docent:
         )
         return collection_id
 
+    def update_collection(
+        self,
+        collection_id: str,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> None:
+        """Updates a Collection's name and/or description.
+
+        Requires WRITE permission on the collection.
+
+        Args:
+            collection_id: ID of the Collection to update.
+            name: New name for the Collection. If None, the name will be cleared.
+            description: New description for the Collection. If None, the description will be cleared.
+
+        Raises:
+            requests.exceptions.HTTPError: If the API request fails.
+        """
+        url = f"{self._server_url}/{collection_id}/collection"
+        payload: dict[str, Any] = {}
+        if name is not None:
+            payload["name"] = name
+        if description is not None:
+            payload["description"] = description
+
+        response = self._session.put(url, json=payload)
+        self._handle_response_errors(response)
+
+        logger.info(f"Successfully updated Collection '{collection_id}'")
+
     def add_agent_runs(
         self, collection_id: str, agent_runs: list[AgentRun], batch_size: int = 1000
     ) -> dict[str, Any]:
