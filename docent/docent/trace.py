@@ -1677,23 +1677,29 @@ def is_package_installed(package_name: str) -> bool:
     return package_name.lower() in installed_packages
 
 
-def get_tracer(caller: str = "get_tracer()") -> Optional[DocentTracer]:
+def get_tracer(
+    caller: str = "get_tracer()", log_error_if_tracer_is_none: bool = True
+) -> Optional[DocentTracer]:
     """
     Get the global Docent tracer if it has been initialized.
 
     Args:
         caller: Human-readable name of the API being invoked. Used for log output.
+        log_error_if_tracer_is_none: Whether to log an error if the tracer is None.
+            NOTE(mengk): when get_tracer is called in is_disabled, I don't want an error logged,
+            since that's what I'm trying to check. In other contexts, it makes sense.
 
     Returns:
         The global Docent tracer, or None if tracing has not been initialized.
     """
     tracer = _global_tracer
     if tracer is None:
-        logger.error(
-            f"{caller} requires initialize_tracing() to be called before use. "
-            "You can also disable tracing by calling set_disabled(True) or by setting "
-            "the DOCENT_DISABLE_TRACING environment variable to 'true'."
-        )
+        if log_error_if_tracer_is_none:
+            logger.error(
+                f"{caller} requires initialize_tracing() to be called before use. "
+                "You can also disable tracing by calling set_disabled(True) or by setting "
+                "the DOCENT_DISABLE_TRACING environment variable to 'true'."
+            )
         return None
 
     if not tracer.is_initialized():
@@ -1744,7 +1750,7 @@ def is_disabled(context_name: str = "Docent tracing") -> bool:
     """
     if _global_tracing_disabled:
         return True
-    tracer = get_tracer(context_name)
+    tracer = get_tracer(context_name, log_error_if_tracer_is_none=False)
     if tracer is None:
         return True
     return tracer.is_disabled()
