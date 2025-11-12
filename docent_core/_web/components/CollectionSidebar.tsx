@@ -68,9 +68,14 @@ export function CollectionSidebar() {
   return (
     <TooltipProvider delayDuration={0}>
       <Sidebar variant="inset" collapsible="icon" className="pt-0">
-        <SidebarHeader className="flex flex-col pl-2 pt-0 justify-center items-start">
+        <SidebarHeader
+          className={cn(
+            'flex items-center',
+            isCollapsed ? 'justify-center' : 'justify-start'
+          )}
+        >
           {/* Home button */}
-          <div className="flex h-12 items-center">
+          <div className="flex m-2 h-7 items-center">
             {isCollapsed ? (
               <Tooltip>
                 <TooltipTrigger asChild>
