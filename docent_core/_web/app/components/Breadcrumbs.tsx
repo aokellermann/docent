@@ -20,6 +20,7 @@ import ShareViewPopover from '@/lib/permissions/ShareViewPopover';
 import { useGetCollectionNameQuery } from '@/app/api/collectionApi';
 import { skipToken } from '@reduxjs/toolkit/query';
 import { cn } from '@/lib/utils';
+import UuidPill from '@/components/UuidPill';
 
 interface Crumb {
   title: string;
@@ -150,6 +151,7 @@ const Breadcrumbs: React.FC = () => {
             >
               Collection: {collectionName}
             </Link>
+            <UuidPill uuid={collectionId} />
             <ChevronRight className="size-3.5" />
           </>
         )}

@@ -58,7 +58,7 @@ export default function UuidPill({ uuid }: { uuid?: string }) {
 
   return (
     <span
-      className="inline-flex h-6 min-w-0 max-w-full items-center gap-x-1 rounded-md border border-border bg-muted py-0.5 pl-1 pr-0.5 text-xs font-mono text-muted-foreground transition-colors hover:bg-accent cursor-pointer"
+      className="inline-flex h-6 min-w-0 max-w-full items-center gap-x-1 rounded-md border border-border bg-muted py-0.5 pl-1 pr-0.5 text-xs font-mono text-muted-foreground transition-colors hover:bg-primary/5 cursor-pointer"
       onClick={onClick}
       title={`Click to copy full ID (${uuid})`}
     >
