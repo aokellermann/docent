@@ -51,7 +51,7 @@ export function LabelSetsProvider({
 }) {
   const [labelSetsByKey, setLabelSetsByKey] = useLocalStorage<
     Record<string, LabelSet | null>
-  >('labelSets', {});
+  >(`labelSets-${collectionId}`, {});
 
   // Fetch the available label sets from the API
   const { data: availableLabelSets, isFetching } = useGetLabelSetsQuery({
@@ -118,7 +118,7 @@ export function LabelSetsProvider({
     if (hasUpdates) {
       setLabelSetsByKey((prev) => ({ ...prev, ...updates }));
     }
-  }, [labelIdToRemoteLabelSet, labelSetsByKey]);
+  }, [labelIdToRemoteLabelSet]);
 
   const contextValue: LabelSetsContextValue = {
     getLabelSet,
