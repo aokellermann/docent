@@ -4,7 +4,6 @@ import atexit
 import contextvars
 import itertools
 import json
-import logging
 import os
 import sys
 import threading
@@ -45,8 +44,9 @@ from opentelemetry.sdk.trace.export import (
 )
 from opentelemetry.trace import Span
 from requests import Response
+from docent._log_util import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Default configuration
 DEFAULT_ENDPOINT = "https://api.docent.transluce.org/rest/telemetry"
