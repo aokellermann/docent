@@ -76,9 +76,9 @@ export function CollectionSidebar() {
                 <TooltipTrigger asChild>
                   <Button
                     asChild
-                    variant="ghost"
+                    variant="outline"
                     size="icon"
-                    className="h-8 w-8"
+                    className="h-8 w-8 bg-white hover:bg-secondary"
                   >
                     <Link href="/dashboard">
                       <Home className="h-4 w-4" />
@@ -88,7 +88,12 @@ export function CollectionSidebar() {
                 <TooltipContent side="right">Home</TooltipContent>
               </Tooltip>
             ) : (
-              <Button asChild variant="ghost" size="icon" className="h-8 w-8">
+              <Button
+                asChild
+                variant="outline"
+                size="icon"
+                className="h-8 w-8 bg-white hover:bg-secondary"
+              >
                 <Link href="/dashboard">
                   <Home className="h-4 w-4" />
                 </Link>
