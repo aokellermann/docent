@@ -138,7 +138,7 @@ const Breadcrumbs: React.FC = () => {
       );
 
   return (
-    <div className="text-sm flex items-center justify-between w-full">
+    <div className="text-sm flex items-center justify-between w-full ml-1">
       <div className="flex items-center gap-x-1">
         {collectionId && collectionName && (
           <>
