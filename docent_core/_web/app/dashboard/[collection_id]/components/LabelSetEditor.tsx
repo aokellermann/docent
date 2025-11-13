@@ -8,10 +8,16 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import {
   useGetLabelSetQuery,
   useGetLabelsInLabelSetQuery,
   useUpdateLabelSetMutation,
   useCreateLabelSetMutation,
+  useDeleteLabelsByLabelSetMutation,
 } from '@/app/api/labelApi';
 import JsonEditor from './JsonEditor';
 import { useParams } from 'next/navigation';
@@ -57,12 +63,15 @@ export default function LabelSetEditor({
     useUpdateLabelSetMutation();
   const [createLabelSet, { isLoading: isCreating }] =
     useCreateLabelSetMutation();
+  const [deleteLabelsByLabelSet, { isLoading: isDeleting }] =
+    useDeleteLabelsByLabelSetMutation();
 
   // Local state for editing
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [schemaText, setSchemaText] = useState('');
   const [schemaError, setSchemaError] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   // Initialize form when labelSet data loads
   useEffect(() => {
@@ -85,6 +94,15 @@ export default function LabelSetEditor({
     }
   }, [labelSet, isCreateMode, prefillSchema]);
 
+  const schemaHasChanges = useMemo(() => {
+    const normalizedRemoteSchema = JSON.stringify(
+      labelSet?.label_schema ?? {},
+      null,
+      2
+    );
+    return schemaText !== normalizedRemoteSchema;
+  }, [schemaText, labelSet?.label_schema]);
+
   const hasChanges = useMemo(() => {
     if (isCreateMode) {
       return name.trim().length > 0;
@@ -93,9 +111,9 @@ export default function LabelSetEditor({
     return (
       name !== labelSet.name ||
       description !== (labelSet.description || '') ||
-      schemaText !== JSON.stringify(labelSet.label_schema, null, 2)
+      schemaHasChanges
     );
-  }, [name, description, schemaText, labelSet, isCreateMode]);
+  }, [name, description, schemaHasChanges, labelSet, isCreateMode]);
 
   const { setLabelSet: setActiveLabelSet } = useLabelSets(collectionId);
 
@@ -164,7 +182,18 @@ export default function LabelSetEditor({
   };
 
   // Handlers
-  const handleSave = async () => {
+  const handleSaveClick = async () => {
+    // If schema has changed and there are existing labels, show confirmation
+    if (!isCreateMode && schemaHasChanges && labels && labels.length > 0) {
+      setConfirmOpen(true);
+      return;
+    }
+
+    // Otherwise, save directly without clearing labels
+    await handleSave(false);
+  };
+
+  const handleSave = async (clearLabels: boolean = false) => {
     // 1) Raise an error if the JSON is invalid
     let parsedSchema;
     try {
@@ -177,6 +206,14 @@ export default function LabelSetEditor({
     }
 
     // 2) Raise an error if the JSON does not have any properties
+    if (
+      !parsedSchema.properties ||
+      typeof parsedSchema.properties !== 'object'
+    ) {
+      setSchemaError('Invalid schema: Must have a "properties" object');
+      return;
+    }
+
     if (Object.keys(parsedSchema.properties).length === 0) {
       setSchemaError('Invalid schema: Must have at least one property');
       return;
@@ -202,6 +239,21 @@ export default function LabelSetEditor({
         setSchemaError('Failed to create label set');
       }
     } else if (labelSetId && collectionId) {
+      // Delete existing labels if requested
+      if (clearLabels && labels && labels.length > 0) {
+        try {
+          // Delete all labels in the label set
+          await deleteLabelsByLabelSet({
+            collectionId,
+            labelSetId,
+          }).unwrap();
+        } catch (error) {
+          console.error('Failed to delete labels:', error);
+          setSchemaError('Failed to delete existing labels');
+          return;
+        }
+      }
+
       // Update existing label set
       try {
         await updateLabelSet({
@@ -338,7 +390,7 @@ export default function LabelSetEditor({
             schemaText={schemaText}
             setSchemaText={setSchemaText}
             schemaError={schemaError}
-            editable={isCreateMode}
+            editable={true}
             forceOpenSchema={isCreateMode}
             showPreview={true}
           />
@@ -404,22 +456,82 @@ export default function LabelSetEditor({
 
       {/* Footer Actions */}
       <div className="flex items-center justify-end gap-2 pt-2">
-        <Button
-          onClick={handleSave}
-          disabled={!hasChanges || isUpdating || isCreating}
-          className="gap-1.5"
-        >
-          {isUpdating || isCreating ? (
-            <>
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Saving...
-            </>
-          ) : isCreateMode ? (
-            'Create Label Set'
-          ) : (
-            'Save Changes'
-          )}
-        </Button>
+        {!isCreateMode && schemaHasChanges && labels && labels.length > 0 ? (
+          <Popover open={confirmOpen} onOpenChange={setConfirmOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                onClick={handleSaveClick}
+                disabled={!hasChanges || isUpdating || isCreating || isDeleting}
+                className="gap-1.5"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Deleting labels...
+                  </>
+                ) : isUpdating ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  'Save Changes'
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-80 p-3 space-y-2" align="end">
+              <div className="text-sm font-medium">
+                You have existing labels
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Updating the schema will delete all {labels.length} existing
+                label
+                {labels.length !== 1 ? 's' : ''}.
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setConfirmOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setConfirmOpen(false);
+                    handleSave(true);
+                  }}
+                >
+                  Save & Delete Labels
+                </Button>
+              </div>
+            </PopoverContent>
+          </Popover>
+        ) : (
+          <Button
+            onClick={handleSaveClick}
+            disabled={!hasChanges || isUpdating || isCreating || isDeleting}
+            className="gap-1.5"
+          >
+            {isDeleting ? (
+              <>
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Deleting labels...
+              </>
+            ) : isUpdating || isCreating ? (
+              <>
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Saving...
+              </>
+            ) : isCreateMode ? (
+              'Create Label Set'
+            ) : (
+              'Save Changes'
+            )}
+          </Button>
+        )}
       </div>
     </div>
   );

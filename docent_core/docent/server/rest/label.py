@@ -155,6 +155,28 @@ async def delete_label(
     return {"message": "Label deleted successfully"}
 
 
+@label_router.delete("/{collection_id}/label_set/{label_set_id}/labels")
+async def delete_labels_by_label_set(
+    collection_id: str,
+    label_set_id: str,
+    label_svc: LabelService = Depends(get_label_service),
+    _: None = Depends(require_collection_permission(Permission.WRITE)),
+) -> dict[str, str]:
+    """Delete all labels in a label set."""
+    # Verify the label set belongs to this collection
+    label_set = await label_svc.get_label_set(label_set_id)
+    if label_set is None:
+        raise HTTPException(status_code=404, detail=f"Label set {label_set_id} not found")
+    if label_set.collection_id != collection_id:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Label set {label_set_id} not found in collection {collection_id}",
+        )
+
+    await label_svc.delete_labels_by_label_set(label_set_id)
+    return {"message": "Labels deleted successfully"}
+
+
 ####################
 # Label Set CRUD
 ####################

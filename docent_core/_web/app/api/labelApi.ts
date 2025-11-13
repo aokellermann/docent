@@ -113,6 +113,19 @@ export const labelApi = createApi({
         { type: 'Label', id: labelId },
       ],
     }),
+    deleteLabelsByLabelSet: build.mutation<
+      { message: string },
+      { collectionId: string; labelSetId: string }
+    >({
+      query: ({ collectionId, labelSetId }) => ({
+        url: `/${collectionId}/label_set/${labelSetId}/labels`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: (result, error, { labelSetId }) => [
+        { type: 'Label', id: `LABEL_SET-${labelSetId}` },
+        'Label',
+      ],
+    }),
 
     // Label Set CRUD
     createLabelSet: build.mutation<
@@ -229,6 +242,7 @@ export const {
   useGetLabelQuery,
   useUpdateLabelMutation,
   useDeleteLabelMutation,
+  useDeleteLabelsByLabelSetMutation,
 
   // Label Set CRUD
   useCreateLabelSetMutation,

@@ -4,7 +4,7 @@ from uuid import uuid4
 import jsonschema
 from jsonschema import ValidationError
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from docent._log_util import get_logger
@@ -204,6 +204,14 @@ class LabelService:
         label_to_delete = result.scalar_one_or_none()
         if label_to_delete:
             await self.session.delete(label_to_delete)
+
+    async def delete_labels_by_label_set(self, label_set_id: str) -> None:
+        """Delete all labels in a label set.
+
+        Args:
+            label_set_id: The label set ID
+        """
+        await self.session.execute(delete(SQLALabel).where(SQLALabel.label_set_id == label_set_id))
 
     ##################
     # Label Set CRUD #
