@@ -1,6 +1,7 @@
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from jsonschema import ValidationError
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +16,7 @@ from docent_core.docent.server.dependencies.permissions import (
 )
 from docent_core.docent.server.dependencies.services import get_label_service
 from docent_core.docent.server.dependencies.user import get_user_anonymous_ok
-from docent_core.docent.services.label import LabelService, LabelSetWithCount
+from docent_core.docent.services.label import BulkValidationError, LabelService, LabelSetWithCount
 
 logger = get_logger(__name__)
 
@@ -65,7 +66,11 @@ async def create_label(
     _: None = Depends(require_collection_permission(Permission.WRITE)),
 ) -> dict[str, str]:
     """Create a label."""
-    await label_svc.create_label(request.label)
+
+    try:
+        await label_svc.create_label(request.label)
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=e.message)
 
     # Flush to surface constraint violations as proper HTTP errors
     try:
@@ -91,7 +96,10 @@ async def create_labels(
     _: None = Depends(require_collection_permission(Permission.WRITE)),
 ) -> dict[str, str]:
     """Create multiple labels."""
-    await label_svc.create_labels(request.labels)
+    try:
+        await label_svc.create_labels(request.labels)
+    except BulkValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     # Flush to surface constraint violations as proper HTTP errors
     try:

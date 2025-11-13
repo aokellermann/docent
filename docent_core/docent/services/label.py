@@ -2,6 +2,7 @@ from typing import Any, AsyncContextManager, Callable, Optional
 from uuid import uuid4
 
 import jsonschema
+from jsonschema import ValidationError
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +16,16 @@ from docent_core.docent.db.schemas.label import (
 from docent_core.docent.services.monoservice import MonoService
 
 logger = get_logger(__name__)
+
+
+class BulkValidationError(Exception):
+    """Raised when multiple labels fail validation."""
+
+    def __init__(self, failures: list[tuple[str, ValidationError]]):
+        self.failures = failures
+        summary = f"Failed to validate {len(failures)} labels"
+        details = "\n".join(f"Label {label_id}: {error.message}" for label_id, error in failures)
+        super().__init__(f"{summary}:\n{details}")
 
 
 class LabelSetWithCount(BaseModel):
@@ -87,8 +98,15 @@ class LabelService:
             raise ValueError(f"Label set {label_set_id} not found")
 
         # Validate labels against schema
+        failed: list[tuple[str, ValidationError]] = []
         for label in labels:
-            jsonschema.validate(label.label_value, label_set.label_schema_no_reqs)
+            try:
+                jsonschema.validate(label.label_value, label_set.label_schema_no_reqs)
+            except ValidationError as e:
+                failed.append((label.id, e))
+
+        if failed:
+            raise BulkValidationError(failed)
 
         # Create the label
         sqla_labels = [SQLALabel.from_pydantic(label) for label in labels]
