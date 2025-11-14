@@ -68,7 +68,7 @@ class RubricService:
         self.session_cm_factory = session_cm_factory
         self.service = service
         self.llm_svc = llm_svc
-        self.job_svc = JobService(session_cm_factory)
+        self.job_svc = JobService(session, session_cm_factory)
 
     ###############
     # Rubric CRUD #

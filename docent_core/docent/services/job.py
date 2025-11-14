@@ -13,17 +13,15 @@ logger = get_logger(__name__)
 class JobService:
     def __init__(
         self,
+        session: AsyncSession,
         session_cm_factory: Callable[[], AsyncContextManager[AsyncSession]],
     ):
-        """Have the JobService manage its own sessions, because we don't want `cancel_job` to consume QueuePool resources.
-        TODO(mengk): I think this is likely not a complete solution because it still consumes REST connections.
-        """
+        self.session = session
         self.session_cm_factory = session_cm_factory
 
     async def get_job(self, job_id: str) -> SQLAJob | None:
-        async with self.session_cm_factory() as session:
-            result = await session.execute(select(SQLAJob).where(SQLAJob.id == job_id))
-            return result.scalar_one_or_none()
+        result = await self.session.execute(select(SQLAJob).where(SQLAJob.id == job_id))
+        return result.scalar_one_or_none()
 
     async def cancel_job(self, job_id: str):
         job = await self.get_job(job_id)
