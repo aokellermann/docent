@@ -11,7 +11,7 @@ elasticache_node_type = "cache.m6g.large"
 
 app_runner_cpu = 4096
 app_runner_memory = 8192
-app_runner_max_concurrency = 20
+app_runner_max_concurrency = 10
 app_runner_min_size = 5
 app_runner_max_size = 20
 app_runner_num_workers = 4
