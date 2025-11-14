@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import requests
 from tqdm import tqdm
 
@@ -572,6 +573,49 @@ class Docent:
         response = self._session.post(url, json={"dql": dql})
         self._handle_response_errors(response)
         return response.json()
+
+    def dql_result_to_dicts(self, dql_result: dict[str, Any]) -> list[dict[str, Any]]:
+        """Convert a DQL result to a list of dictionaries."""
+        cols = dql_result["columns"]
+        rows = dql_result["rows"]
+        return [dict(zip(cols, row)) for row in rows]
+
+    def dql_result_to_df_experimental(self, dql_result: dict[str, Any]):
+        """The implementation is not stable by any means!"""
+
+        cols = dql_result["columns"]
+        rows = dql_result["rows"]
+
+        def _cast_value(v: Any) -> Any:
+            """Cast a value to int, float, bool, or str as appropriate."""
+            if v is None:
+                return None
+            if isinstance(v, (bool, int, float)):
+                return v
+
+            # If a string, try to cast into a number
+            if isinstance(v, str):
+                try:
+                    if "." not in v:
+                        return int(v)
+                except (ValueError, TypeError):
+                    pass
+
+                try:
+                    return float(v)
+                except (ValueError, TypeError):
+                    pass
+
+            # Keep as original
+            return v
+
+        dicts: list[dict[str, Any]] = []
+        for row in rows:
+            combo = list(zip(cols, row))
+            combo = {k: _cast_value(v) for k, v in combo}
+            dicts.append(combo)
+
+        return pd.DataFrame(dicts)
 
     def select_agent_run_ids(
         self,

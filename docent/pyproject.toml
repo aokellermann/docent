@@ -34,6 +34,8 @@ dependencies = [
     "opentelemetry-instrumentation-langchain>=0.40.14",
     "opentelemetry-instrumentation-openai>=0.40.14",
     "opentelemetry-instrumentation-google-generativeai>=0.40.14",
+    # Client data science
+    "pandas>=2.3.3",
 ]
 
 [build-system]

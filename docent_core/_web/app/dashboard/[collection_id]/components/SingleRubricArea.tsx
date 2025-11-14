@@ -170,7 +170,7 @@ export default function SingleRubricArea({
                     size="sm"
                     onClick={() => setIsLabelSetsDialogOpen(true)}
                   >
-                    <Tags className="h-3 w-3 mr-1" />
+                    <Tags />
                     {activeLabelSet ? (
                       <span className="hidden xl:inline">
                         {activeLabelSet.name}

@@ -32,6 +32,7 @@ from sqlglot.optimizer.scope import (
 
 from docent._log_util import get_logger
 from docent_core.docent.db.schemas.auth_models import Permission, ResourceType, User
+from docent_core.docent.db.schemas.label import SQLALabel
 from docent_core.docent.db.schemas.rubric import SQLAJudgeResult
 from docent_core.docent.db.schemas.tables import (
     SQLAAgentRun,
@@ -423,6 +424,28 @@ def _judge_result_collection_predicate(table_alias: str, collection_id: str) -> 
     return exp.Exists(this=subquery)
 
 
+def _label_collection_predicate(table_alias: str, collection_id: str) -> SqlGlotExpression:
+    """Filter labels by ensuring their linked agent run belongs to the collection."""
+
+    subquery = (
+        exp.select(exp.Literal.string("1"))  # type: ignore[reportUnknownMemberType]
+        .from_(SQLAAgentRun.__tablename__)  # type: ignore[reportUnknownMemberType]
+        .where(  # type: ignore[reportUnknownMemberType]
+            exp.and_(  # type: ignore[reportUnknownMemberType]
+                exp.EQ(
+                    this=exp.column("collection_id", table=SQLAAgentRun.__tablename__),
+                    expression=exp.Literal.string(collection_id),  # type: ignore[reportUnknownMemberType]
+                ),
+                exp.EQ(
+                    this=exp.column("id", table=SQLAAgentRun.__tablename__),
+                    expression=exp.column("agent_run_id", table=table_alias),
+                ),
+            )
+        )
+    )
+    return exp.Exists(this=subquery)
+
+
 class DQLRegistry:
     """Keeps track of which database tables and columns DQL callers may access."""
 
@@ -585,6 +608,12 @@ def build_default_registry(
         table=SQLAJudgeResult.__table__,
         allowed_columns=_columns_for(SQLAJudgeResult.__table__),
         collection_predicate_factory=_judge_result_collection_predicate,
+    )
+    registry.register_table(
+        name=SQLALabel.__tablename__,
+        table=SQLALabel.__table__,
+        allowed_columns=_columns_for(SQLALabel.__table__),
+        collection_predicate_factory=_label_collection_predicate,
     )
 
     if json_fields:

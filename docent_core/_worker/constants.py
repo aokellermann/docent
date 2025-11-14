@@ -1,7 +1,8 @@
 from enum import Enum
 
 WORKER_QUEUE_NAME = "docent_worker_queue"
-JOB_TIMEOUT_SECONDS = 10 * 60  # 10 minutes
+# TODO(mengk) we should really consider making our jobs not... this long.
+JOB_TIMEOUT_SECONDS = 20 * 60  # 20 minutes
 
 
 class WorkerFunction(str, Enum):
