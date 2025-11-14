@@ -7,7 +7,8 @@ from uuid import uuid4
 
 from google.protobuf.json_format import MessageToDict
 from opentelemetry.proto.collector.trace.v1 import trace_service_pb2
-from sqlalchemy import Integer, and_
+from redis.exceptions import LockError
+from sqlalchemy import Integer, and_, case
 from sqlalchemy import cast as sa_cast
 from sqlalchemy import delete, func, not_, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -29,6 +30,8 @@ from docent.data_models.chat import (
 )
 from docent.data_models.chat.tool import ToolCall
 from docent_core._server._analytics.posthog import AnalyticsClient
+from docent_core._server._broker.redis_client import get_redis_client
+from docent_core._worker.constants import JOB_TIMEOUT_SECONDS
 from docent_core.docent.db.contexts import ViewContext
 from docent_core.docent.db.schemas.auth_models import User
 from docent_core.docent.db.schemas.tables import (
@@ -50,11 +53,17 @@ from docent_core.docent.services.telemetry_accumulation import (
 
 logger = get_logger(__name__)
 
+AGENT_RUN_LOCK_PREFIX = "telemetry_agent_run_lock"
+AGENT_RUN_LOCK_TIMEOUT_SECONDS = JOB_TIMEOUT_SECONDS + 60
+
 
 class TelemetryService:
     def __init__(self, session: AsyncSession, mono_svc: MonoService):
         self.session = session
         self.mono_svc = mono_svc
+
+    def _agent_run_lock_key(self, collection_id: str, agent_run_id: str) -> str:
+        return f"{AGENT_RUN_LOCK_PREFIX}_{collection_id}_{agent_run_id}"
 
     ###################
     # Telemetry Logs  #
@@ -127,7 +136,13 @@ class TelemetryService:
     # Trace Processing   #
     ######################
 
-    async def process_agent_runs_for_collection(self, collection_id: str, user: User) -> List[str]:
+    async def process_agent_runs_for_collection(
+        self,
+        collection_id: str,
+        user: User,
+        *,
+        limit: int | None = None,
+    ) -> List[str]:
         """
         Process all agent runs that need processing for a collection.
 
@@ -138,20 +153,31 @@ class TelemetryService:
         Args:
             collection_id: The collection ID to process
             user: The user who initiated the processing
+            limit: Optional maximum number of agent runs to process in this invocation
 
         Returns:
             List[str]: List of agent run IDs that were successfully processed
         """
+        if limit is not None and limit <= 0:
+            raise ValueError("limit must be a positive integer when provided")
+
         # Atomically get agent runs that need processing and mark them as processing
-        agent_run_versions = await self.get_and_mark_agent_runs_for_processing(collection_id)
+        agent_run_versions = await self.get_and_mark_agent_runs_for_processing(
+            collection_id, limit=limit
+        )
 
         if not agent_run_versions:
-            logger.info(f"No agent runs need processing for collection {collection_id}")
+            logger.info(
+                "No agent runs need processing for collection %s after marking query completed",
+                collection_id,
+            )
             return []
 
         logger.info(
             f"Found and marked {len(agent_run_versions)} agent runs for processing in collection {collection_id}"
         )
+
+        redis_client = await get_redis_client()
 
         # Process each agent run individually
         processed_count = 0
@@ -159,42 +185,56 @@ class TelemetryService:
         successfully_processed_versions: dict[str, int] = {}
 
         for agent_run_id, current_version in agent_run_versions.items():
+            lock = redis_client.lock(
+                self._agent_run_lock_key(collection_id, agent_run_id),
+                timeout=AGENT_RUN_LOCK_TIMEOUT_SECONDS,
+                blocking=False,
+            )
             try:
-                logger.info(
-                    f"Processing agent run {agent_run_id} (version {current_version}) in collection {collection_id}"
-                )
+                async with lock:
+                    try:
+                        logger.info(
+                            f"Processing agent run {agent_run_id} (version {current_version}) in collection {collection_id}"
+                        )
 
-                # Process this agent run (handles both new and existing agent runs)
-                success = await self._process_single_agent_run(
+                        # Process this agent run (handles both new and existing agent runs)
+                        success = await self._process_single_agent_run(
+                            agent_run_id,
+                            collection_id,
+                            user,
+                        )
+
+                        if success:
+                            processed_count += 1
+                            successfully_processed_agent_run_ids.append(agent_run_id)
+                            successfully_processed_versions[agent_run_id] = current_version
+                            logger.info(
+                                f"Successfully processed agent run {agent_run_id} (version {current_version})"
+                            )
+                        else:
+                            logger.error(f"Failed to process agent run {agent_run_id}")
+                            # Mark agent run as errored on failure
+                            await self._mark_agent_runs_as_errored(
+                                collection_id,
+                                {agent_run_id: current_version},
+                                "Processing failed",
+                            )
+
+                    except Exception as e:
+                        # Mark agent run as needs_processing again if processing failed
+                        await self._mark_agent_runs_as_errored(
+                            collection_id,
+                            {agent_run_id: current_version},
+                            str(e),
+                        )
+                        logger.error(f"Error processing agent run {agent_run_id}: {str(e)}")
+                        continue
+            except LockError:
+                logger.info(
+                    "Agent run %s in collection %s is already being processed, skipping",
                     agent_run_id,
                     collection_id,
-                    user,
                 )
-
-                if success:
-                    processed_count += 1
-                    successfully_processed_agent_run_ids.append(agent_run_id)
-                    successfully_processed_versions[agent_run_id] = current_version
-                    logger.info(
-                        f"Successfully processed agent run {agent_run_id} (version {current_version})"
-                    )
-                else:
-                    logger.error(f"Failed to process agent run {agent_run_id}")
-                    # Mark agent run as errored on failure
-                    await self._mark_agent_runs_as_errored(
-                        collection_id,
-                        {agent_run_id: current_version},
-                        "Processing failed",
-                    )
-
-            except Exception as e:
-                # Mark agent run as needs_processing again if processing failed
-                await self._mark_agent_runs_as_errored(
-                    collection_id,
-                    {agent_run_id: current_version},
-                    str(e),
-                )
-                logger.error(f"Error processing agent run {agent_run_id}: {str(e)}")
                 continue
 
         # Mark all successfully processed agent runs as completed with their versions
@@ -754,17 +794,25 @@ class TelemetryService:
             else:
                 logger.error("Accumulation service not found, skipping accumulation")
 
-    async def get_and_mark_agent_runs_for_processing(self, collection_id: str) -> dict[str, int]:
+    async def get_and_mark_agent_runs_for_processing(
+        self,
+        collection_id: str,
+        *,
+        limit: int | None = None,
+    ) -> dict[str, int]:
         """
         Atomically get agent runs that need processing and mark them as processing.
         Returns both the agent run IDs and their current versions.
 
         Args:
             collection_id: The collection ID
+            limit: Optional maximum number of agent runs to mark in this pass
 
         Returns:
             Dictionary mapping agent_run_id to current_version for successfully marked agent runs
         """
+        if limit is not None and limit <= 0:
+            raise ValueError("limit must be a positive integer when provided")
 
         # Track the latest version that failed so new data can retry even if status is ERROR
         errored_version = func.coalesce(
@@ -774,26 +822,35 @@ class TelemetryService:
             ),
             0,
         )
+        needs_processing_condition = (
+            SQLATelemetryAgentRunStatus.status == TelemetryAgentRunStatus.NEEDS_PROCESSING.value
+        )
+        completed_with_new_data_condition = and_(
+            SQLATelemetryAgentRunStatus.status == TelemetryAgentRunStatus.COMPLETED.value,
+            SQLATelemetryAgentRunStatus.current_version
+            > SQLATelemetryAgentRunStatus.processed_version,
+        )
+        errored_with_new_data_condition = and_(
+            SQLATelemetryAgentRunStatus.status == TelemetryAgentRunStatus.ERROR.value,
+            SQLATelemetryAgentRunStatus.current_version > errored_version,
+        )
+        fallback_condition = and_(
+            SQLATelemetryAgentRunStatus.current_version
+            > SQLATelemetryAgentRunStatus.processed_version,
+            not_(
+                and_(
+                    SQLATelemetryAgentRunStatus.status == TelemetryAgentRunStatus.ERROR.value,
+                    SQLATelemetryAgentRunStatus.current_version <= errored_version,
+                ),
+            ),
+        )
+        processing_filter = or_(needs_processing_condition, fallback_condition)
 
         stmt = (
             update(SQLATelemetryAgentRunStatus)
             .where(
-                or_(
-                    SQLATelemetryAgentRunStatus.status
-                    == TelemetryAgentRunStatus.NEEDS_PROCESSING.value,
-                    and_(
-                        SQLATelemetryAgentRunStatus.current_version
-                        > SQLATelemetryAgentRunStatus.processed_version,
-                        not_(
-                            and_(
-                                SQLATelemetryAgentRunStatus.status
-                                == TelemetryAgentRunStatus.ERROR.value,
-                                SQLATelemetryAgentRunStatus.current_version <= errored_version,
-                            ),
-                        ),
-                    ),
-                ),
                 SQLATelemetryAgentRunStatus.collection_id == collection_id,
+                processing_filter,
             )
             .values(status=TelemetryAgentRunStatus.PROCESSING.value)
             .returning(
@@ -802,9 +859,59 @@ class TelemetryService:
             )
         )
 
+        if limit is not None:
+            # Prioritize cleanly queued runs before fallback dirty rows when enforcing a limit.
+            priority_case = case(
+                (needs_processing_condition, 1),
+                (completed_with_new_data_condition, 2),
+                (errored_with_new_data_condition, 3),
+                (fallback_condition, 4),
+                else_=5,
+            )
+            limited_ids_subquery = (
+                select(SQLATelemetryAgentRunStatus.id)
+                .where(
+                    SQLATelemetryAgentRunStatus.collection_id == collection_id,
+                    processing_filter,
+                )
+                .order_by(
+                    priority_case.asc(),
+                    SQLATelemetryAgentRunStatus.created_at.asc(),
+                    SQLATelemetryAgentRunStatus.id.asc(),
+                )
+                .limit(limit)
+            )
+            stmt = stmt.where(SQLATelemetryAgentRunStatus.id.in_(limited_ids_subquery))
+
+        log_sql: str | None = None
+        bind = self.session.get_bind()
+        if hasattr(bind, "dialect"):
+            try:
+                compiled_stmt = stmt.compile(
+                    dialect=bind.dialect,  # type: ignore[attr-defined]
+                    compile_kwargs={"literal_binds": True},
+                )
+                log_sql = str(compiled_stmt)
+            except Exception as compile_error:
+                logger.warning(
+                    "Failed to compile telemetry mark query for collection %s: %s",
+                    collection_id,
+                    compile_error,
+                )
+
+        logger.info(
+            "Executing telemetry agent-run mark query for collection %s (limit=%s): %s",
+            collection_id,
+            limit if limit is not None else "all",
+            log_sql or stmt,
+        )
         result = await self.session.execute(stmt)
         rows = result.fetchall()
-
+        logger.info(
+            "Telemetry mark query returned %s agent runs for collection %s",
+            len(rows),
+            collection_id,
+        )
         agent_run_versions = {row.agent_run_id: row.current_version for row in rows}
 
         return agent_run_versions
