@@ -327,6 +327,7 @@ export default function LabelSetsTable({
                     key={header.id}
                     className="text-xs"
                     style={{
+                      height: ROW_HEIGHT_PX,
                       width: header.column.columnDef.size,
                     }}
                   >

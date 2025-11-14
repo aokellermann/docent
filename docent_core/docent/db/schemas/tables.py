@@ -85,10 +85,7 @@ class SQLAAgentRun(SQLABase):
     __tablename__ = TABLE_AGENT_RUN
 
     collection_id = mapped_column(
-        String(36),
-        ForeignKey(f"{TABLE_COLLECTION}.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
+        String(36), ForeignKey(f"{TABLE_COLLECTION}.id"), nullable=False, index=True
     )
 
     id = mapped_column(String(36), primary_key=True)
@@ -162,10 +159,7 @@ class SQLATelemetryAgentRunStatus(SQLABase):
 
     # Collection ID for grouping agent runs
     collection_id = mapped_column(
-        String(36),
-        ForeignKey(f"{TABLE_COLLECTION}.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
+        String(36), ForeignKey(f"{TABLE_COLLECTION}.id"), nullable=False, index=True
     )
 
     # agent run id, intentionally not a foreign key because we use this table to track agent runs that don't exist yet (i.e. that are still being ingested)
@@ -206,10 +200,7 @@ class SQLATranscript(SQLABase):
     __tablename__ = TABLE_TRANSCRIPT
 
     collection_id = mapped_column(
-        String(36),
-        ForeignKey(f"{TABLE_COLLECTION}.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
+        String(36), ForeignKey(f"{TABLE_COLLECTION}.id"), nullable=False, index=True
     )
     agent_run_id = mapped_column(
         String(36),
@@ -285,10 +276,7 @@ class SQLATranscriptGroup(SQLABase):
     id = mapped_column(String(36), primary_key=True)
 
     collection_id = mapped_column(
-        String(36),
-        ForeignKey(f"{TABLE_COLLECTION}.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
+        String(36), ForeignKey(f"{TABLE_COLLECTION}.id"), nullable=False, index=True
     )
     agent_run_id = mapped_column(
         String(36),
@@ -352,10 +340,7 @@ class SQLATranscriptEmbedding(SQLABase):
 
     id = mapped_column(String(36), primary_key=True)
     collection_id = mapped_column(
-        String(36),
-        ForeignKey(f"{TABLE_COLLECTION}.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
+        String(36), ForeignKey(f"{TABLE_COLLECTION}.id"), nullable=False, index=True
     )
     agent_run_id = mapped_column(
         String(36), ForeignKey(f"{TABLE_AGENT_RUN}.id"), nullable=False, index=True
@@ -391,10 +376,7 @@ class SQLAView(SQLABase):
 
     id = mapped_column(String(36), primary_key=True)
     collection_id = mapped_column(
-        String(36),
-        ForeignKey(f"{TABLE_COLLECTION}.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
+        String(36), ForeignKey(f"{TABLE_COLLECTION}.id"), nullable=False, index=True
     )
     # Owner of this view. Combined with collection_id must be unique (for non-sharing rows).
     user_id = mapped_column(String(36), ForeignKey(f"{TABLE_USER}.id"), nullable=False, index=True)
@@ -446,10 +428,7 @@ class SQLASearchCluster(SQLABase):
 
     id = mapped_column(String(36), primary_key=True)
     collection_id = mapped_column(
-        String(36),
-        ForeignKey(f"{TABLE_COLLECTION}.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
+        String(36), ForeignKey(f"{TABLE_COLLECTION}.id"), nullable=False, index=True
     )
     centroid = mapped_column(Text, nullable=False)
     search_query_id = mapped_column(
@@ -472,16 +451,10 @@ class SQLASearchResultCluster(SQLABase):
 
     id = mapped_column(String(36), primary_key=True)
     search_result_id = mapped_column(
-        String(36),
-        ForeignKey(f"{TABLE_SEARCH_RESULTS}.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
+        String(36), ForeignKey(f"{TABLE_SEARCH_RESULTS}.id"), nullable=False, index=True
     )
     cluster_id = mapped_column(
-        String(36),
-        ForeignKey(f"{TABLE_SEARCH_CLUSTER}.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
+        String(36), ForeignKey(f"{TABLE_SEARCH_CLUSTER}.id"), nullable=False, index=True
     )
     decision = mapped_column(Boolean, nullable=False)
     reason = mapped_column(Text, nullable=False)
@@ -507,10 +480,7 @@ class SQLASearchResult(SQLABase):
 
     id = mapped_column(String(36), primary_key=True)
     collection_id = mapped_column(
-        String(36),
-        ForeignKey(f"{TABLE_COLLECTION}.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
+        String(36), ForeignKey(f"{TABLE_COLLECTION}.id"), nullable=False, index=True
     )
 
     # Location of the search result
@@ -546,10 +516,7 @@ class SQLASearchQuery(SQLABase):
 
     id = mapped_column(String(36), primary_key=True)
     collection_id = mapped_column(
-        String(36),
-        ForeignKey(f"{TABLE_COLLECTION}.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
+        String(36), ForeignKey(f"{TABLE_COLLECTION}.id"), nullable=False, index=True
     )
 
     search_query = mapped_column(Text, nullable=False, index=True)
@@ -768,10 +735,7 @@ class SQLAAnalyticsEvent(SQLABase):
 
     # The collection ID (can be None for endpoints that don't operate on a specific collection)
     collection_id = mapped_column(
-        String(36),
-        ForeignKey(f"{TABLE_COLLECTION}.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
+        String(36), ForeignKey(f"{TABLE_COLLECTION}.id"), nullable=True, index=True
     )
 
     # The user ID (can be None for anonymous users)
@@ -834,10 +798,7 @@ class SQLATelemetryLog(SQLABase):
     id = mapped_column(String(36), primary_key=True)
     user_id = mapped_column(String(36), ForeignKey(f"{TABLE_USER}.id"), nullable=False, index=True)
     collection_id = mapped_column(
-        String(36),
-        ForeignKey(f"{TABLE_COLLECTION}.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
+        String(36), ForeignKey(f"{TABLE_COLLECTION}.id"), nullable=True, index=True
     )
     # Explicit type/category for this telemetry entry (e.g., "traces", "scores", "metadata", "trace-done")
     type = mapped_column(Text, nullable=True)

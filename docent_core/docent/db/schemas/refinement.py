@@ -89,7 +89,6 @@ class SQLARefinementAgentSession(SQLABase):
         ForeignKeyConstraint(
             ["rubric_id", "rubric_version"],
             [f"{TABLE_RUBRIC}.id", f"{TABLE_RUBRIC}.version"],
-            ondelete="CASCADE",
         ),
     )
 

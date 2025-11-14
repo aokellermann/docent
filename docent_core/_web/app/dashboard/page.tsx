@@ -32,7 +32,10 @@ import { resetCollectionSlice } from '../store/collectionSlice';
 import { useAppDispatch } from '../store/hooks';
 import { resetTranscriptSlice } from '../store/transcriptSlice';
 import { useRequireUserContext } from '../contexts/UserContext';
-import { useCreateCollectionMutation } from '../api/collectionApi';
+import {
+  useCreateCollectionMutation,
+  useGetCollectionsQuery,
+} from '../api/collectionApi';
 
 export default function HomePage() {
   // User is guaranteed to be present in authenticated pages
@@ -47,6 +50,8 @@ export default function HomePage() {
   const [newCollectionDescription, setNewCollectionDescription] = useState('');
 
   // RTK Query hooks
+  const { data: collections, isLoading: isLoadingCollections } =
+    useGetCollectionsQuery();
   const [createCollection, { isLoading: isCreatingCollection }] =
     useCreateCollectionMutation();
 
@@ -166,7 +171,10 @@ export default function HomePage() {
         </div>
 
         {/* Table area */}
-        <CollectionsTable />
+        <CollectionsTable
+          collections={collections}
+          isLoading={isLoadingCollections}
+        />
       </div>
 
       {/* Create New Collection Dialog */}

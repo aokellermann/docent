@@ -1,6 +1,6 @@
 'use client';
 
-import { Loader2, Upload, RefreshCw } from 'lucide-react';
+import { Loader2, Upload } from 'lucide-react';
 import React, {
   useMemo,
   useState,
@@ -43,13 +43,6 @@ import { navToAgentRun } from '@/lib/nav';
 import { useRouter } from 'next/navigation';
 import posthog from 'posthog-js';
 import type { DqlExecuteResponse } from '@/app/types/dqlTypes';
-
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
 
 const processAgentRunMetadata = (
   structuredMetadata: Record<string, unknown> | null | undefined
@@ -553,12 +546,7 @@ export default function ExperimentViewer({
     setDraggedFile(null);
   }, []);
 
-  const [isRefreshCooldown, setIsRefreshCooldown] = useState(false);
-
-  const handleRefresh = useCallback(() => {
-    if (isRefreshCooldown) return;
-
-    setIsRefreshCooldown(true);
+  const handleUploadSuccess = useCallback(() => {
     setMetadataData({});
     setLoadingMetadataIds(new Set<string>());
     setRequestedMetadataIds(new Set<string>());
@@ -566,17 +554,9 @@ export default function ExperimentViewer({
       collectionApi.util.invalidateTags([
         'AgentRunIds',
         'AgentRunMetadataFields',
-        'AgentRunMetadataRange',
       ])
     );
-
-    // 1 second cooldown
-    setTimeout(() => setIsRefreshCooldown(false), 1000);
-  }, [dispatch, isRefreshCooldown]);
-
-  const handleUploadSuccess = useCallback(() => {
-    handleRefresh();
-  }, [handleRefresh]);
+  }, [dispatch]);
 
   useEffect(() => {
     if (!collectionId) {
@@ -805,27 +785,6 @@ export default function ExperimentViewer({
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={handleRefresh}
-                  disabled={isAgentRunQueryPending || isRefreshCooldown}
-                  title="Refresh collection data"
-                >
-                  <RefreshCw
-                    className={cn(
-                      'h-4 w-4',
-                      isAgentRunQueryPending && 'animate-spin'
-                    )}
-                  />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                <p>Refresh agent runs</p>
-              </TooltipContent>
-            </Tooltip>
             <div className="hidden 2xl:block">
               <UploadRunsButton
                 onImportSuccess={handleUploadSuccess}
