@@ -89,12 +89,11 @@ def get_chat_service(
 
 
 def get_job_service(
-    session: AsyncSession = Depends(get_session),
     session_cm_factory: Callable[[], AsyncContextManager[AsyncSession]] = Depends(
         get_session_cm_factory
     ),
 ) -> JobService:
-    return JobService(session, session_cm_factory)
+    return JobService(session_cm_factory)
 
 
 def get_chart_service(session: AsyncSession = Depends(get_session)) -> ChartsService:

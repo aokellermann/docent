@@ -1284,7 +1284,7 @@ async def cancel_experiment(
 
         # we cancel the job directly instead of trying to cancel it gracefully using the job service
         async with investigator_svc.db.session() as session:
-            job_svc = JobService(session, investigator_svc.db.session)
+            job_svc = JobService(investigator_svc.db.session)
             await job_svc.cancel_job(active_job.id)
 
         # Save minimal cancelled experiment result
@@ -1332,7 +1332,7 @@ async def cancel_experiment(
 
         # we cancel the job directly instead of trying to cancel it gracefully using the job service
         async with investigator_svc.db.session() as session:
-            job_svc = JobService(session, investigator_svc.db.session)
+            job_svc = JobService(investigator_svc.db.session)
             await job_svc.cancel_job(active_job.id)
 
         # Save minimal cancelled experiment result
