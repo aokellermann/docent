@@ -832,7 +832,12 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                         setMetadataIntent(open ? { type: 'run' } : null)
                       }
                     >
-                      <MetadataPopover.DefaultTrigger />
+                      <MetadataPopover.DefaultTrigger
+                        disabled={
+                          !agentRun.metadata ||
+                          Object.keys(agentRun.metadata).length === 0
+                        }
+                      />
                       <MetadataPopover.Content title="Agent Run Metadata">
                         <MetadataPopover.Body metadata={agentRun.metadata}>
                           {(md) => (
@@ -1004,6 +1009,11 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                             const citedTextRange = isTranscriptIntent
                               ? metadataIntent?.citedTextRange
                               : undefined;
+                            const transcriptMetadata =
+                              (selectedTranscriptId
+                                ? transcriptsById[selectedTranscriptId]
+                                : undefined
+                              )?.metadata || {};
                             return (
                               <MetadataPopover.Root
                                 open={Boolean(isTranscriptIntent)}
@@ -1018,17 +1028,16 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                                   )
                                 }
                               >
-                                <MetadataPopover.DefaultTrigger />
+                                <MetadataPopover.DefaultTrigger
+                                  disabled={
+                                    Object.keys(transcriptMetadata).length === 0
+                                  }
+                                />
                                 <MetadataPopover.Content
                                   title={`Transcript Metadata`}
                                 >
                                   <MetadataPopover.Body
-                                    metadata={
-                                      (selectedTranscriptId
-                                        ? transcriptsById[selectedTranscriptId]
-                                        : undefined
-                                      )?.metadata || {}
-                                    }
+                                    metadata={transcriptMetadata}
                                   >
                                     {(md) => (
                                       <MetadataBlock

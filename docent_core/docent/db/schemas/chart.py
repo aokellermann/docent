@@ -25,7 +25,10 @@ class SQLAChart(SQLABase):
 
     # Foreign keys
     collection_id = mapped_column(
-        String(36), ForeignKey(f"{TABLE_COLLECTION}.id"), nullable=False, index=True
+        String(36),
+        ForeignKey(f"{TABLE_COLLECTION}.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     created_by = mapped_column(
         String(36), ForeignKey(f"{TABLE_USER}.id"), nullable=False, index=True

@@ -46,7 +46,10 @@ class SQLARubric(SQLABase):
     id: Mapped[str] = mapped_column(String(36), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     collection_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey(f"{TABLE_COLLECTION}.id"), nullable=False, index=True
+        String(36),
+        ForeignKey(f"{TABLE_COLLECTION}.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
 
     rubric_text: Mapped[str] = mapped_column(Text, nullable=False)
@@ -188,7 +191,10 @@ class SQLAJudgeResult(SQLABase):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     agent_run_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey(f"{TABLE_AGENT_RUN}.id"), nullable=False, index=True
+        String(36),
+        ForeignKey(f"{TABLE_AGENT_RUN}.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     rubric_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     rubric_version: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
@@ -206,6 +212,7 @@ class SQLAJudgeResult(SQLABase):
         ForeignKeyConstraint(
             ["rubric_id", "rubric_version"],
             [f"{TABLE_RUBRIC}.id", f"{TABLE_RUBRIC}.version"],
+            ondelete="CASCADE",
         ),
     )
 
@@ -253,7 +260,10 @@ class SQLARubricCentroid(SQLABase):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     collection_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey(f"{TABLE_COLLECTION}.id"), nullable=False, index=True
+        String(36),
+        ForeignKey(f"{TABLE_COLLECTION}.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     rubric_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     rubric_version: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
@@ -265,6 +275,7 @@ class SQLARubricCentroid(SQLABase):
         ForeignKeyConstraint(
             ["rubric_id", "rubric_version"],
             [f"{TABLE_RUBRIC}.id", f"{TABLE_RUBRIC}.version"],
+            ondelete="CASCADE",
         ),
     )
 
@@ -295,7 +306,10 @@ class SQLAJudgeResultCentroid(SQLABase):
         index=True,
     )
     centroid_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey(f"{TABLE_RUBRIC_CENTROID}.id"), nullable=False, index=True
+        String(36),
+        ForeignKey(f"{TABLE_RUBRIC_CENTROID}.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     decision: Mapped[bool] = mapped_column(Boolean, nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)

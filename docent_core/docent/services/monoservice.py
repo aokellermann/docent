@@ -68,28 +68,20 @@ from docent_core.docent.db.schemas.auth_models import (
     SubjectType,
     User,
 )
-from docent_core.docent.db.schemas.chart import SQLAChart
-from docent_core.docent.db.schemas.chat import SQLAChatSession
-from docent_core.docent.db.schemas.refinement import SQLARefinementAgentSession
-from docent_core.docent.db.schemas.rubric import SQLAJudgeResult, SQLARubric
+from docent_core.docent.db.schemas.rubric import SQLAJudgeResult
 from docent_core.docent.db.schemas.tables import (
     EMBEDDING_DIM,
     TABLE_TRANSCRIPT_EMBEDDING,
     JobStatus,
     SQLAAccessControlEntry,
     SQLAAgentRun,
-    SQLAAnalyticsEvent,
     SQLAApiKey,
     SQLACollection,
     SQLAJob,
     SQLAModelApiKey,
-    SQLASearchCluster,
-    SQLASearchQuery,
     SQLASearchResult,
-    SQLASearchResultCluster,
     SQLASession,
     SQLATelemetryAgentRunStatus,
-    SQLATelemetryLog,
     SQLATranscript,
     SQLATranscriptEmbedding,
     SQLATranscriptGroup,
@@ -381,7 +373,10 @@ class MonoService:
         async with self.db.session() as session:
             session.add(
                 SQLACollection(
-                    id=collection_id, name=name, description=description, created_by=user.id
+                    id=collection_id,
+                    name=name,
+                    description=description,
+                    created_by=user.id,
                 )
             )
 
@@ -434,21 +429,7 @@ class MonoService:
             return result.scalar_one()
 
     async def delete_collection(self, collection_id: str) -> None:
-        # Remove all references from views to other dimensions and filters
-        async with self.db.session() as session:
-            await session.execute(
-                update(SQLAView)
-                .where(SQLAView.collection_id == collection_id)
-                .values(outer_bin_key=None, inner_bin_key=None, base_filter_dict=None)
-            )
-
-        # Delete telemetry logs
-        async with self.db.session() as session:
-            await session.execute(
-                delete(SQLATelemetryLog).where(SQLATelemetryLog.collection_id == collection_id)
-            )
-
-        # Delete telemetry accumulation data for the collection
+        # Delete telemetry accumulation data (custom cleanup logic)
         async with self.db.session() as session:
             from docent_core.docent.services.telemetry_accumulation import (
                 TelemetryAccumulationService,
@@ -457,147 +438,26 @@ class MonoService:
             accumulation_service = TelemetryAccumulationService(session)
             await accumulation_service.delete_accumulation_data(collection_id)
 
-        # delete all search result clusters joining on search result id to get collection_id
-        async with self.db.session() as session:
-            await session.execute(
-                delete(SQLASearchResultCluster).where(
-                    SQLASearchResultCluster.cluster_id.in_(
-                        select(SQLASearchCluster.id).where(
-                            SQLASearchCluster.collection_id == collection_id
-                        )
-                    )
-                )
-            )
-
-        # delete all search results
-        async with self.db.session() as session:
-            await session.execute(
-                delete(SQLASearchResult).where(SQLASearchResult.collection_id == collection_id)
-            )
-
-        # delete all search clusters
-        async with self.db.session() as session:
-            await session.execute(
-                delete(SQLASearchCluster).where(SQLASearchCluster.collection_id == collection_id)
-            )
-
-        # delete all search queries
-        async with self.db.session() as session:
-            await session.execute(
-                delete(SQLASearchQuery).where(SQLASearchQuery.collection_id == collection_id)
-            )
-
-        # Delete all attributes
-        async with self.db.session() as session:
-            await session.execute(
-                delete(SQLASearchResult).where(SQLASearchResult.collection_id == collection_id)
-            )
-
-        # Delete all embeddings
-        async with self.db.session() as session:
-            await session.execute(
-                delete(SQLATranscriptEmbedding).where(
-                    SQLATranscriptEmbedding.collection_id == collection_id
-                )
-            )
-
-        # Delete all analytics events
-        async with self.db.session() as session:
-            await session.execute(
-                delete(SQLAAnalyticsEvent).where(SQLAAnalyticsEvent.collection_id == collection_id)
-            )
-
-        # Delete all transcripts
-        async with self.db.session() as session:
-            await session.execute(
-                delete(SQLATranscript).where(SQLATranscript.collection_id == collection_id)
-            )
-
-        # Delete all transcript groups
-        async with self.db.session() as session:
-            await session.execute(
-                delete(SQLATranscriptGroup).where(
-                    SQLATranscriptGroup.collection_id == collection_id
-                )
-            )
-
-        # delete all chat_sessions for agent runs in this collection
-        async with self.db.session() as session:
-            await session.execute(
-                delete(SQLAChatSession).where(
-                    SQLAChatSession.agent_run_id.in_(
-                        select(SQLAAgentRun.id).where(SQLAAgentRun.collection_id == collection_id)
-                    )
-                )
-            )
-
-        # delete judge_results for agent runs in this collection
-        async with self.db.session() as session:
-            await session.execute(
-                delete(SQLAJudgeResult).where(
-                    SQLAJudgeResult.agent_run_id.in_(
-                        select(SQLAAgentRun.id).where(SQLAAgentRun.collection_id == collection_id)
-                    )
-                )
-            )
-
-        # Delete all agent runs
-        async with self.db.session() as session:
-            await session.execute(
-                delete(SQLAAgentRun).where(SQLAAgentRun.collection_id == collection_id)
-            )
-
-        # Delete all telemetry agent run status records
-        async with self.db.session() as session:
-            await session.execute(
-                delete(SQLATelemetryAgentRunStatus).where(
-                    SQLATelemetryAgentRunStatus.collection_id == collection_id
-                )
-            )
-
-        # Delete all Access Control Entries
-        async with self.db.session() as session:
-            view_ids = await session.execute(
-                select(SQLAView.id).where(SQLAView.collection_id == collection_id)
-            )
-            view_ids = view_ids.scalars().all()
-            await session.execute(
-                delete(SQLAAccessControlEntry).where(SQLAAccessControlEntry.view_id.in_(view_ids))
-            )
-            await session.execute(
-                delete(SQLAAccessControlEntry).where(
-                    SQLAAccessControlEntry.collection_id == collection_id
-                )
-            )
-
-        # Delete views
-        async with self.db.session() as session:
-            await session.execute(delete(SQLAView).where(SQLAView.collection_id == collection_id))
-
-        # Delete charts
-        async with self.db.session() as session:
-            await session.execute(delete(SQLAChart).where(SQLAChart.collection_id == collection_id))
-
-        # Delete all refinement agent sessions for rubrics in this collection
-        async with self.db.session() as session:
-            await session.execute(
-                delete(SQLARefinementAgentSession).where(
-                    SQLARefinementAgentSession.rubric_id.in_(
-                        select(SQLARubric.id).where(SQLARubric.collection_id == collection_id)
-                    )
-                )
-            )
-
-        # Delete all rubrics for this collection
-        async with self.db.session() as session:
-            await session.execute(
-                delete(SQLARubric).where(SQLARubric.collection_id == collection_id)
-            )
-
-        # Finally delete the collection
+        # Delete the collection - cascade handles everything else
         async with self.db.session() as session:
             await session.execute(delete(SQLACollection).where(SQLACollection.id == collection_id))
             logger.info(f"Deleted collection {collection_id}")
+
+    async def delete_collections(self, collection_ids: list[str]) -> bool:
+        # Delete all collections with the given IDs
+        async with self.db.session() as session:
+            q = delete(SQLACollection).where(SQLACollection.id.in_(collection_ids))
+            await session.execute(q)
+
+            from docent_core.docent.services.telemetry_accumulation import (
+                TelemetryAccumulationService,
+            )
+
+            accumulation_service = TelemetryAccumulationService(session)
+            for collection_id in collection_ids:
+                await accumulation_service.delete_accumulation_data(collection_id)
+
+        return True
 
     async def get_collections(self, user: User | None = None) -> Sequence[SQLACollection]:
         """
@@ -630,6 +490,76 @@ class MonoService:
 
             result = await session.execute(query)
             return result.scalars().all()
+
+    async def get_collections_page(
+        self, user: User | None = None, page: int = 1, page_size: int = 50
+    ) -> tuple[Sequence[SQLACollection], int]:
+        """
+        Get paginated collections that the user has access to.
+        Returns a tuple of (collections, total_count).
+        Ordered by created_at descending (newest first).
+        """
+        async with self.db.session() as session:
+            # Build base query with permissions filter, ordered by created_at desc
+            base_query = select(SQLACollection).order_by(SQLACollection.created_at.desc())
+
+            if user is not None:
+                base_query = (
+                    base_query.join(
+                        SQLAAccessControlEntry,
+                        SQLACollection.id == SQLAAccessControlEntry.collection_id,
+                    )
+                    .where(
+                        # User has direct permission
+                        (SQLAAccessControlEntry.user_id == user.id)
+                        |
+                        # User's organization has permission (if user has organizations)
+                        (
+                            SQLAAccessControlEntry.organization_id.in_(user.organization_ids)
+                            if user.organization_ids
+                            else False
+                        )
+                        # Notably, we don't make public collections discoverable.
+                    )
+                    .distinct()  # Avoid duplicates from multiple ACL entries
+                )
+
+            # Get total count - count distinct collection IDs
+            if user is not None:
+                # For authenticated users, count distinct collections from the joined query
+                distinct_collections_subq = (
+                    select(SQLACollection.id)
+                    .join(
+                        SQLAAccessControlEntry,
+                        SQLACollection.id == SQLAAccessControlEntry.collection_id,
+                    )
+                    .where(
+                        (SQLAAccessControlEntry.user_id == user.id)
+                        | (
+                            SQLAAccessControlEntry.organization_id.in_(user.organization_ids)
+                            if user.organization_ids
+                            else False
+                        )
+                    )
+                    .distinct()
+                    .subquery()
+                )
+                count_query = select(func.count()).select_from(distinct_collections_subq)
+            else:
+                # For anonymous users, count all collections
+                count_query = select(func.count(SQLACollection.id))
+            total_result = await session.execute(count_query)
+            total = total_result.scalar_one()
+
+            # Apply pagination
+            offset = (page - 1) * page_size
+            query = base_query.limit(page_size).offset(offset)
+
+            # Execute query
+            result = await session.execute(query)
+            collections = result.scalars().all()
+
+            return collections, total
 
     async def get_collection(self, collection_id: str) -> SQLACollection | None:
         """
@@ -701,7 +631,9 @@ class MonoService:
         async with self.db.session() as session:
             session.add_all(agent_run_data)
             session.add_all(transcript_group_data)
-            await session.flush()  # (mengk) seems necessary to avoid FK violations, for some strange reason
+            await (
+                session.flush()
+            )  # (mengk) seems necessary to avoid FK violations, for some strange reason
             session.add_all(transcript_data)
 
         logger.info(
@@ -747,7 +679,8 @@ class MonoService:
 
             agent_run_result = await session.execute(
                 delete(SQLAAgentRun).where(
-                    SQLAAgentRun.id.in_(agent_run_ids), SQLAAgentRun.collection_id == collection_id
+                    SQLAAgentRun.id.in_(agent_run_ids),
+                    SQLAAgentRun.collection_id == collection_id,
                 )
             )
             deleted_count = agent_run_result.rowcount or 0
@@ -848,7 +781,6 @@ class MonoService:
         collection_id: str,
         dql: str,
     ) -> DQLQueryResult:
-
         await ensure_dql_collection_access(
             mono_service=self,
             user=user,
@@ -1135,13 +1067,19 @@ class MonoService:
             The agent run.
         """
         agent_runs = await self.get_agent_runs(
-            ctx, agent_run_ids=[agent_run_id], apply_base_where_clause=apply_base_where_clause
+            ctx,
+            agent_run_ids=[agent_run_id],
+            apply_base_where_clause=apply_base_where_clause,
         )
         assert len(agent_runs) <= 1, f"Found {len(agent_runs)} AgentRuns with ID {agent_run_id}"
         return agent_runs[0] if agent_runs else None
 
     async def get_unique_field_values(
-        self, ctx: ViewContext, field_name: str, search: str | None = None, limit: int = 100
+        self,
+        ctx: ViewContext,
+        field_name: str,
+        search: str | None = None,
+        limit: int = 100,
     ) -> list[str]:
         """
         Get unique values for a specific metadata field from agent runs in the collection.
@@ -1187,7 +1125,6 @@ class MonoService:
                 return []
 
     async def count_base_agent_runs(self, ctx: ViewContext) -> int:
-
         async with self.db.session() as session:
             query = (
                 select(func.count())
@@ -1302,7 +1239,10 @@ class MonoService:
             ), f"Base filter must be a ComplexFilter, found {type(view.base_filter)}"
 
         return ViewContext(
-            collection_id=collection_id, view_id=view.id, base_filter=view.base_filter, user=user
+            collection_id=collection_id,
+            view_id=view.id,
+            base_filter=view.base_filter,
+            user=user,
         )
 
     async def set_view_base_filter(self, ctx: ViewContext, filter: ComplexFilter | None):
@@ -1319,7 +1259,10 @@ class MonoService:
                 )
 
         new_ctx = ViewContext(
-            collection_id=ctx.collection_id, view_id=ctx.view_id, base_filter=filter, user=ctx.user
+            collection_id=ctx.collection_id,
+            view_id=ctx.view_id,
+            base_filter=filter,
+            user=ctx.user,
         )
         return new_ctx
 
@@ -1332,7 +1275,10 @@ class MonoService:
                 )
 
         new_ctx = ViewContext(
-            collection_id=ctx.collection_id, view_id=ctx.view_id, base_filter=None, user=ctx.user
+            collection_id=ctx.collection_id,
+            view_id=ctx.view_id,
+            base_filter=None,
+            user=ctx.user,
         )
         return new_ctx
 
@@ -1365,7 +1311,10 @@ class MonoService:
         async with self.db.session() as session:
             count_query = (
                 select(func.count(SQLATranscriptEmbedding.id))
-                .join(SQLAAgentRun, SQLATranscriptEmbedding.agent_run_id == SQLAAgentRun.id)
+                .join(
+                    SQLAAgentRun,
+                    SQLATranscriptEmbedding.agent_run_id == SQLAAgentRun.id,
+                )
                 .where(
                     SQLATranscriptEmbedding.collection_id == ctx.collection_id,
                     ctx.get_base_where_clause(SQLAAgentRun),
@@ -1384,7 +1333,10 @@ class MonoService:
                 select(
                     SQLATranscriptEmbedding.agent_run_id,
                 )
-                .join(SQLAAgentRun, SQLATranscriptEmbedding.agent_run_id == SQLAAgentRun.id)
+                .join(
+                    SQLAAgentRun,
+                    SQLATranscriptEmbedding.agent_run_id == SQLAAgentRun.id,
+                )
                 .where(
                     SQLATranscriptEmbedding.collection_id == ctx.collection_id,
                     ctx.get_base_where_clause(SQLAAgentRun),
@@ -1520,7 +1472,10 @@ class MonoService:
         async with self.db.session() as session:
             count_query = (
                 select(func.count(SQLATranscriptEmbedding.id))
-                .join(SQLAAgentRun, SQLATranscriptEmbedding.agent_run_id == SQLAAgentRun.id)
+                .join(
+                    SQLAAgentRun,
+                    SQLATranscriptEmbedding.agent_run_id == SQLAAgentRun.id,
+                )
                 .where(SQLAAgentRun.collection_id == ctx.collection_id)
             )
             result = await session.execute(count_query)
@@ -1807,7 +1762,10 @@ class MonoService:
         # Persist anonymous user to database
         async with self.db.session() as session:
             sqla_user = SQLAUser(
-                id=user_id, email=email, password_hash="not necessary", is_anonymous=True
+                id=user_id,
+                email=email,
+                password_hash="not necessary",
+                is_anonymous=True,
             )
             session.add(sqla_user)
             # Call to_user() inside the session context
@@ -1970,6 +1928,54 @@ class MonoService:
             return False
         return user_permission_level.includes(permission)
 
+    async def get_direct_permissions(
+        self,
+        *,
+        user: User,
+        resource_type: ResourceType,
+        resource_ids: list[str],
+        permission: Permission,
+    ) -> bool:
+        """
+        Check if user has direct (user-level) permission on all specified resources.
+        Only checks direct user ACLs, not organization or public permissions.
+
+        Args:
+            user: The user to check permissions for
+            resource_type: Type of resource (COLLECTION or VIEW)
+            resource_ids: List of resource IDs to check
+            permission: Minimum permission level required
+
+        Returns:
+            True if user has at least the requested permission on all resources, False otherwise
+        """
+        if len(resource_ids) == 0:
+            return True
+
+        # Get minimum permission level required
+        min_level = PERMISSION_LEVELS[permission.value]
+        # Get all permission strings that meet or exceed the minimum level
+        allowed_permissions = [p for p, level in PERMISSION_LEVELS.items() if level >= min_level]
+
+        # Build resource filter based on ResourceType
+        if resource_type == ResourceType.COLLECTION:
+            resource_col = SQLAAccessControlEntry.collection_id
+        elif resource_type == ResourceType.VIEW:
+            resource_col = SQLAAccessControlEntry.view_id
+        else:
+            raise ValueError(f"Unsupported resource type: {resource_type}")
+
+        unique_resource_ids = set(resource_ids)
+        async with self.db.session() as session:
+            # Count distinct resources where user has direct permission at required level
+            query = select(func.count(distinct(resource_col))).where(
+                SQLAAccessControlEntry.user_id == user.id,
+                resource_col.in_(unique_resource_ids),
+                SQLAAccessControlEntry.permission.in_(allowed_permissions),
+            )
+            count = (await session.execute(query)).scalar_one()
+            return count == len(unique_resource_ids)
+
     async def get_acl_entries(
         self,
         resource_id: str,
@@ -2078,7 +2084,11 @@ class MonoService:
                 }
             elif subject_type == SubjectType.PUBLIC:
                 subject_filter = SQLAAccessControlEntry.is_public
-                subject_fields = {"user_id": None, "organization_id": None, "is_public": True}
+                subject_fields = {
+                    "user_id": None,
+                    "organization_id": None,
+                    "is_public": True,
+                }
 
             # Check if any permission already exists for this subject/resource combination
             result = await session.execute(
@@ -2418,7 +2428,8 @@ class MonoService:
             # Check if key already exists for this user and provider
             result = await session.execute(
                 select(SQLAModelApiKey).where(
-                    SQLAModelApiKey.user_id == user_id, SQLAModelApiKey.provider == provider
+                    SQLAModelApiKey.user_id == user_id,
+                    SQLAModelApiKey.provider == provider,
                 )
             )
             existing_key = result.scalar_one_or_none()
@@ -2441,7 +2452,8 @@ class MonoService:
         async with self.db.session() as session:
             result = await session.execute(
                 delete(SQLAModelApiKey).where(
-                    SQLAModelApiKey.user_id == user_id, SQLAModelApiKey.provider == provider
+                    SQLAModelApiKey.user_id == user_id,
+                    SQLAModelApiKey.provider == provider,
                 )
             )
             await session.commit()

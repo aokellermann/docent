@@ -354,7 +354,7 @@ export default function RubricList() {
       </div>
 
       {/* Rubrics List - Scrollable */}
-      <div className="flex-1 overflow-y-auto space-y-1.5 min-h-0">
+      <div className="flex-1 overflow-y-auto space-y-1.5 min-h-0 custom-scrollbar">
         {!effectiveCollectionId ? (
           <div className="flex justify-center py-4">
             <Loader2 size={16} className="animate-spin text-muted-foreground" />

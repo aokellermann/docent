@@ -32,6 +32,27 @@ interface UpdateCollectionRequest {
   description?: string;
 }
 
+interface PaginatedCollectionsRequest {
+  page: number;
+  page_size: number;
+}
+
+interface PaginatedCollectionsResponse {
+  items: Collection[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+interface BulkDeleteCollectionsRequest {
+  collection_ids: string[];
+}
+
+interface BulkDeleteCollectionsResponse {
+  success: boolean;
+  message: string;
+}
+
 interface AgentRunMetadataRequest {
   agent_run_ids: string[];
 }
@@ -76,6 +97,18 @@ export const collectionApi = createApi({
       query: () => '/collections',
       providesTags: ['Collection'],
     }),
+    getCollectionsPage: build.query<
+      PaginatedCollectionsResponse,
+      PaginatedCollectionsRequest
+    >({
+      query: ({ page, page_size }) => {
+        const params = new URLSearchParams();
+        params.append('page', page.toString());
+        params.append('page_size', page_size.toString());
+        return `/collections/page?${params.toString()}`;
+      },
+      providesTags: ['Collection'],
+    }),
     createCollection: build.mutation<
       CreateCollectionResponse,
       CreateCollectionRequest
@@ -99,6 +132,17 @@ export const collectionApi = createApi({
       query: (collection_id) => ({
         url: `/${collection_id}/collection`,
         method: 'DELETE',
+      }),
+      invalidatesTags: ['Collection'],
+    }),
+    bulkDeleteCollections: build.mutation<
+      BulkDeleteCollectionsResponse,
+      BulkDeleteCollectionsRequest
+    >({
+      query: (body) => ({
+        url: '/collections/delete',
+        method: 'DELETE',
+        body,
       }),
       invalidatesTags: ['Collection'],
     }),
@@ -300,9 +344,11 @@ export const collectionApi = createApi({
 export const {
   useGetCollectionNameQuery,
   useGetCollectionsQuery,
+  useGetCollectionsPageQuery,
   useCreateCollectionMutation,
   useUpdateCollectionMutation,
   useDeleteCollectionMutation,
+  useBulkDeleteCollectionsMutation,
   useGetBaseFilterQuery,
   usePostBaseFilterMutation,
   useGetAgentRunMetadataFieldsQuery,
