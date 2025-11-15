@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import threading
+import time
 import uuid
 from collections import defaultdict
 from contextlib import asynccontextmanager, contextmanager
@@ -236,6 +237,17 @@ class DocentTracer:
         self._transcript_group_states: dict[str, dict[str, Optional[str]]] = {}
         self._transcript_group_state_lock = threading.Lock()
         self._flush_lock = threading.Lock()
+        self._pending_agent_run_metadata_events: defaultdict[str, List[Dict[str, Any]]] = (
+            defaultdict(list)
+        )
+        self._pending_transcript_metadata_events: defaultdict[str, List[Dict[str, Any]]] = (
+            defaultdict(list)
+        )
+        # Transcript-group events are keyed by agent_run_id so they flush even if no span carries the group attribute.
+        self._pending_transcript_group_metadata_events: defaultdict[str, List[Dict[str, Any]]] = (
+            defaultdict(list)
+        )
+        self._pending_metadata_lock = threading.Lock()
 
     def _prepare_endpoints(self, endpoint: Union[str, Sequence[str]]) -> List[str]:
         """
@@ -314,6 +326,114 @@ class DocentTracer:
         """
         with self._transcript_counter_lock:
             return next(self._transcript_counters[transcript_id])
+
+    def _get_current_span(self) -> Optional[Span]:
+        """Return the active span, ignoring non-recording placeholders."""
+        try:
+            span = trace.get_current_span()
+        except Exception:
+            return None
+
+        try:
+            span_context = span.get_span_context()
+        except AttributeError:
+            return None
+
+        if span_context is None or not span_context.is_valid:
+            return None
+        return span
+
+    def _create_metadata_event(
+        self,
+        *,
+        name: str,
+        metadata: Optional[Dict[str, Any]],
+        attributes: Dict[str, Any],
+        timestamp_ns: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        return {
+            "name": name,
+            "metadata": metadata or {},
+            "attributes": attributes,
+            "timestamp_ns": timestamp_ns or time.time_ns(),
+        }
+
+    def _add_metadata_event_to_span(self, span: Span, event: Dict[str, Any]) -> None:
+        if not hasattr(span, "add_event"):
+            return
+
+        event_attributes: Dict[str, Any] = dict(event.get("attributes", {}))
+        metadata_payload = cast(Optional[Dict[str, Any]], event.get("metadata"))
+        if metadata_payload:
+            flattened_metadata = _flatten_dict(metadata_payload)
+            for key, value in flattened_metadata.items():
+                event_attributes[f"metadata.{key}"] = value
+
+        timestamp_ns = event.get("timestamp_ns")
+        span.add_event(
+            event.get("name", "metadata"), attributes=event_attributes, timestamp=timestamp_ns
+        )
+
+    def _pop_pending_events(
+        self, store: defaultdict[str, List[Dict[str, Any]]], key: Optional[str]
+    ) -> List[Dict[str, Any]]:
+        if key is None:
+            return []
+        with self._pending_metadata_lock:
+            if key not in store:
+                return []
+            events = list(store[key])
+            del store[key]
+            return events
+
+    def _emit_pending_metadata_events(
+        self,
+        span: Span,
+        *,
+        agent_run_id: Optional[str],
+        transcript_id: Optional[str],
+        transcript_group_id: Optional[str],
+    ) -> None:
+        for event in self._pop_pending_events(
+            self._pending_agent_run_metadata_events, agent_run_id
+        ):
+            self._add_metadata_event_to_span(span, event)
+        for event in self._pop_pending_events(
+            self._pending_transcript_metadata_events, transcript_id
+        ):
+            self._add_metadata_event_to_span(span, event)
+        for event in self._pop_pending_events(
+            self._pending_transcript_group_metadata_events, agent_run_id
+        ):
+            self._add_metadata_event_to_span(span, event)
+
+    def _queue_metadata_event(
+        self,
+        store: defaultdict[str, List[Dict[str, Any]]],
+        key: Optional[str],
+        event: Dict[str, Any],
+    ) -> None:
+        if not key:
+            logger.warning("Metadata event discarded because no identifier was provided: %s", event)
+            return
+        with self._pending_metadata_lock:
+            store[key].append(event)
+
+    def _emit_or_queue_metadata_event(
+        self,
+        *,
+        store: defaultdict[str, List[Dict[str, Any]]],
+        key: Optional[str],
+        event: Dict[str, Any],
+    ) -> None:
+        span = self._get_current_span()
+        if span is not None:
+            try:
+                self._add_metadata_event_to_span(span, event)
+                return
+            except Exception as exc:
+                logger.warning("Failed to attach metadata event to active span: %s", exc)
+        self._queue_metadata_event(store, key, event)
 
     def _init_spans_exporter(self, endpoint: str) -> Optional[Union[HTTPExporter, GRPCExporter]]:
         """Initialize the appropriate span exporter based on endpoint."""
@@ -446,6 +566,13 @@ class DocentTracer:
                     span_attrs = getattr(span, "attributes", {})
                     logger.debug(
                         f"Created span: name='{span_name}', collection_id={self.manager.collection_id}, agent_run_id={span_attrs.get('agent_run_id')}, transcript_id={span_attrs.get('transcript_id')}"
+                    )
+
+                    self.manager._emit_pending_metadata_events(
+                        span,
+                        agent_run_id=span_attrs.get("agent_run_id"),
+                        transcript_id=span_attrs.get("transcript_id"),
+                        transcript_group_id=span_attrs.get("transcript_group_id"),
                     )
 
                 def on_end(self, span: ReadableSpan) -> None:
@@ -1065,14 +1192,19 @@ class DocentTracer:
             )
             return
 
-        collection_id = self.collection_id
-        payload: Dict[str, Any] = {
-            "collection_id": collection_id,
-            "agent_run_id": agent_run_id,
-            "metadata": metadata_payload,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        self._post_json("/v1/agent-run-metadata", payload)
+        event = self._create_metadata_event(
+            name="agent_run_metadata",
+            metadata=metadata_payload,
+            attributes={
+                "collection_id": self.collection_id,
+                "agent_run_id": agent_run_id,
+            },
+        )
+        self._emit_or_queue_metadata_event(
+            store=self._pending_agent_run_metadata_events,
+            key=agent_run_id,
+            event=event,
+        )
 
     def send_transcript_metadata(
         self,
@@ -1099,34 +1231,34 @@ class DocentTracer:
             logger.error("Cannot send transcript metadata without a valid transcript_id.")
             return
 
-        collection_id = self.collection_id
-        payload: Dict[str, Any] = {
-            "collection_id": collection_id,
+        attributes: Dict[str, Any] = {
+            "collection_id": self.collection_id,
             "transcript_id": transcript_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "agent_run_id": self.get_current_agent_run_id(),
         }
 
-        # Only add fields that are provided
         if name is not None:
             if isinstance(name, str):
-                payload["name"] = name
+                attributes["name"] = name
             else:
                 logger.error("Transcript name must be a string; ignoring value %r.", name)
         if description is not None:
             if isinstance(description, str):
-                payload["description"] = description
+                attributes["description"] = description
             else:
                 logger.error(
                     "Transcript description must be a string; ignoring value %r.", description
                 )
         if transcript_group_id is not None:
             if isinstance(transcript_group_id, str) and transcript_group_id:
-                payload["transcript_group_id"] = transcript_group_id
+                attributes["transcript_group_id"] = transcript_group_id
             else:
                 logger.error(
                     "transcript_group_id must be a non-empty string; ignoring value %r.",
                     transcript_group_id,
                 )
+
+        metadata_payload: Optional[Dict[str, Any]] = None
         if metadata is not None:
             metadata_payload = self._ensure_json_serializable_metadata(metadata, "Transcript")
             if metadata_payload is None:
@@ -1134,10 +1266,17 @@ class DocentTracer:
                     "Transcript %s metadata payload invalid; sending transcript data without metadata.",
                     transcript_id,
                 )
-            else:
-                payload["metadata"] = metadata_payload
 
-        self._post_json("/v1/transcript-metadata", payload)
+        event = self._create_metadata_event(
+            name="transcript_metadata",
+            metadata=metadata_payload or {},
+            attributes=attributes,
+        )
+        self._emit_or_queue_metadata_event(
+            store=self._pending_transcript_metadata_events,
+            key=transcript_id,
+            event=event,
+        )
 
     def get_current_transcript_id(self) -> Optional[str]:
         """
@@ -1395,32 +1534,37 @@ class DocentTracer:
             if final_parent_transcript_group_id is not None:
                 state["parent_transcript_group_id"] = final_parent_transcript_group_id
 
-        payload: Dict[str, Any] = {
+        attributes: Dict[str, Any] = {
             "collection_id": collection_id,
             "transcript_group_id": transcript_group_id,
             "agent_run_id": agent_run_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-
         if final_name is not None:
-            payload["name"] = final_name
+            attributes["name"] = final_name
         if final_description is not None:
-            payload["description"] = final_description
+            attributes["description"] = final_description
         if final_parent_transcript_group_id is not None:
-            payload["parent_transcript_group_id"] = final_parent_transcript_group_id
-            if metadata is not None:
-                metadata_payload = self._ensure_json_serializable_metadata(
-                    metadata, "Transcript group"
-                )
-                if metadata_payload is None:
-                    logger.error(
-                        "Transcript group %s metadata payload invalid; sending group data without metadata.",
-                        transcript_group_id,
-                    )
-                else:
-                    payload["metadata"] = metadata_payload
+            attributes["parent_transcript_group_id"] = final_parent_transcript_group_id
 
-        self._post_json("/v1/transcript-group-metadata", payload)
+        metadata_payload: Optional[Dict[str, Any]] = None
+        if metadata is not None:
+            metadata_payload = self._ensure_json_serializable_metadata(metadata, "Transcript group")
+            if metadata_payload is None:
+                logger.error(
+                    "Transcript group %s metadata payload invalid; sending group data without metadata.",
+                    transcript_group_id,
+                )
+
+        event = self._create_metadata_event(
+            name="transcript_group_metadata",
+            metadata=metadata_payload or {},
+            attributes=attributes,
+        )
+        self._emit_or_queue_metadata_event(
+            store=self._pending_transcript_group_metadata_events,
+            key=agent_run_id,
+            event=event,
+        )
 
     @contextmanager
     def transcript_group_context(

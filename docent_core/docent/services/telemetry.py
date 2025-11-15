@@ -1,6 +1,7 @@
 import base64
 import json
 import uuid
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional, Sequence, cast
 from uuid import uuid4
@@ -1418,6 +1419,8 @@ class TelemetryService:
             agent_run_scores: Dict[str, int | float | bool | None] = {}
             agent_run_model: str | None = None
             agent_run_metadata_dict: Dict[str, Any] = {}
+            agent_run_metadata_events: List[Dict[str, Any]] = []
+            transcript_group_events: dict[str, List[Dict[str, Any]]] = defaultdict(list)
 
             # Process each transcript
             for transcript_id, transcript_spans in transcripts.items():
@@ -1442,12 +1445,16 @@ class TelemetryService:
                                 logger.info(f"    Found score: {score_name} = {score_value}")
 
                     # Extract metadata from span events
-                    span_metadata = self._extract_metadata_from_span_events(span)
-                    if span_metadata:
-                        # Unflatten the metadata to restore nested structure
-                        unflattened_metadata = self._unflatten_metadata(span_metadata)
-                        agent_run_metadata_dict.update(unflattened_metadata)
-                        logger.info(f"    Found metadata: {unflattened_metadata}")
+                    for metadata_event in self._extract_metadata_events_from_span(span):
+                        event_name = metadata_event.get("name")
+                        if event_name == "agent_run_metadata":
+                            agent_run_metadata_events.append(metadata_event)
+                        elif event_name == "transcript_group_metadata":
+                            group_id = metadata_event.get("attributes", {}).get(
+                                "transcript_group_id"
+                            )
+                            if group_id:
+                                transcript_group_events[group_id].append(metadata_event)
 
                     # Extract model from span attributes
                     span_attrs = span.get("attributes", {})
@@ -1489,6 +1496,11 @@ class TelemetryService:
                 if agent_run_model:
                     metadata_dict["model"] = agent_run_model
 
+                if agent_run_metadata_events:
+                    self._apply_agent_run_metadata_events(
+                        agent_run_metadata_events, agent_run_metadata_dict
+                    )
+
                 # Add any additional metadata from span events
                 if agent_run_metadata_dict:
                     deep_merge_dicts(metadata_dict, agent_run_metadata_dict)
@@ -1518,13 +1530,26 @@ class TelemetryService:
                 metadata = metadata_dict
 
                 # Get transcript groups for this agent run
-                agent_run_transcript_groups: list[TranscriptGroup] = []
+                agent_run_transcript_groups_map: Dict[str, TranscriptGroup] = {}
+                if transcript_group_events:
+                    metadata_map = self._transcript_group_events_to_metadata_map(
+                        transcript_group_events
+                    )
+                    event_transcript_groups = self._create_transcript_groups_from_accumulation_data(
+                        metadata_map
+                    )
+                    for tg in event_transcript_groups:
+                        if tg.agent_run_id == agent_run_id:
+                            agent_run_transcript_groups_map[tg.id] = tg
+
                 if (
                     transcript_groups_by_agent_run
                     and agent_run_id in transcript_groups_by_agent_run
                 ):
                     for tg in transcript_groups_by_agent_run[agent_run_id]:
-                        agent_run_transcript_groups.append(tg)
+                        agent_run_transcript_groups_map[tg.id] = tg
+
+                agent_run_transcript_groups = list(agent_run_transcript_groups_map.values())
 
                 agent_run = AgentRun(
                     id=agent_run_id,
@@ -2293,30 +2318,83 @@ class TelemetryService:
         logger.debug(f"Extracted {len(tool_calls)} tool calls from completion data")
         return tool_calls
 
-    def _extract_metadata_from_span_events(self, span: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Extract metadata from span events that were created by agent_run_metadata().
-
-        Args:
-            span: The span dictionary containing events
-
-        Returns:
-            Dictionary of metadata key-value pairs
-        """
-        metadata: Dict[str, Any] = {}
-
+    def _extract_metadata_events_from_span(self, span: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Extract metadata-related events from a span."""
+        metadata_events: List[Dict[str, Any]] = []
         for event in span.get("events", []):
-            if event.get("name") == "agent_run_metadata":
-                event_attrs = event.get("attributes", {})
+            name = event.get("name")
+            if name not in {
+                "agent_run_metadata",
+                "transcript_metadata",
+                "transcript_group_metadata",
+            }:
+                continue
 
-                # Extract metadata attributes that start with "metadata."
-                for key, value in event_attrs.items():
-                    if key.startswith("metadata."):
-                        # Remove the "metadata." prefix to get the actual key
-                        metadata_key = key[len("metadata.") :]
-                        metadata[metadata_key] = value
+            event_attrs = event.get("attributes", {})
+            metadata_attrs: Dict[str, Any] = {}
+            non_metadata_attrs: Dict[str, Any] = {}
 
-        return metadata
+            for key, value in event_attrs.items():
+                if key.startswith("metadata."):
+                    metadata_key = key[len("metadata.") :]
+                    metadata_attrs[metadata_key] = value
+                else:
+                    non_metadata_attrs[key] = value
+
+            metadata_events.append(
+                {
+                    "name": name,
+                    "timestamp": event.get("timestamp"),
+                    "attributes": non_metadata_attrs,
+                    "metadata": self._unflatten_metadata(metadata_attrs) if metadata_attrs else {},
+                }
+            )
+
+        return metadata_events
+
+    def _apply_agent_run_metadata_events(
+        self, metadata_events: List[Dict[str, Any]], target: Dict[str, Any]
+    ) -> None:
+        """Deep merge metadata events onto the target dictionary in timestamp order."""
+        sorted_events = sorted(metadata_events, key=lambda ev: ev.get("timestamp") or "")
+        for event in sorted_events:
+            event_metadata = cast(Dict[str, Any], event.get("metadata") or {})
+            if event_metadata:
+                deep_merge_dicts(target, event_metadata)
+
+    def _transcript_group_events_to_metadata_map(
+        self, transcript_group_events: dict[str, List[Dict[str, Any]]]
+    ) -> Dict[str, Dict[str, Any]]:
+        """Convert transcript group metadata events into the accumulation metadata format."""
+        metadata_map: Dict[str, Dict[str, Any]] = {}
+        for group_id, events in transcript_group_events.items():
+            merged_entry: Dict[str, Any] = {}
+            sorted_events = sorted(events, key=lambda ev: ev.get("timestamp") or "")
+            for event in sorted_events:
+                attrs = event.get("attributes", {})
+                for key in (
+                    "collection_id",
+                    "agent_run_id",
+                    "transcript_group_id",
+                    "name",
+                    "description",
+                    "parent_transcript_group_id",
+                ):
+                    value = attrs.get(key)
+                    if value is not None:
+                        merged_entry[key] = value
+
+                event_metadata = cast(Dict[str, Any], event.get("metadata") or {})
+                if event_metadata:
+                    merged_metadata = merged_entry.setdefault("metadata", {})
+                    deep_merge_dicts(merged_metadata, event_metadata)
+
+            if "transcript_group_id" not in merged_entry:
+                merged_entry["transcript_group_id"] = group_id
+
+            metadata_map[group_id] = merged_entry
+
+        return metadata_map
 
     def _unflatten_metadata(self, flattened_metadata: Dict[str, Any]) -> Dict[str, Any]:
         """
