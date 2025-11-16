@@ -435,6 +435,68 @@ class DocentTracer:
                 logger.warning("Failed to attach metadata event to active span: %s", exc)
         self._queue_metadata_event(store, key, event)
 
+    def _get_optional_context_value(self, var: ContextVar[str]) -> Optional[str]:
+        """Fetch a context var without creating a default when unset."""
+        try:
+            return var.get()
+        except LookupError:
+            return None
+
+    def _has_pending_metadata(
+        self,
+        *,
+        agent_run_id: Optional[str],
+        transcript_id: Optional[str],
+        transcript_group_id: Optional[str],
+    ) -> bool:
+        with self._pending_metadata_lock:
+            if agent_run_id and self._pending_agent_run_metadata_events.get(agent_run_id):
+                return True
+            if transcript_id and self._pending_transcript_metadata_events.get(transcript_id):
+                return True
+            if agent_run_id and self._pending_transcript_group_metadata_events.get(agent_run_id):
+                return True
+        return False
+
+    def _flush_pending_metadata_events(
+        self,
+        *,
+        agent_run_id: Optional[str],
+        transcript_id: Optional[str],
+        transcript_group_id: Optional[str],
+    ) -> None:
+        """
+        Attach any queued metadata events to a synthetic span so data is not dropped when no further spans start.
+        """
+        if self.is_disabled() or self._tracer is None:
+            return
+
+        if not self._has_pending_metadata(
+            agent_run_id=agent_run_id,
+            transcript_id=transcript_id,
+            transcript_group_id=transcript_group_id,
+        ):
+            return
+
+        span = self._tracer.start_span("docent.metadata.flush", context=self._root_context)
+        try:
+            span.set_attribute("collection_id", self.collection_id)
+            if agent_run_id:
+                span.set_attribute("agent_run_id", agent_run_id)
+            if transcript_id:
+                span.set_attribute("transcript_id", transcript_id)
+            if transcript_group_id:
+                span.set_attribute("transcript_group_id", transcript_group_id)
+
+            self._emit_pending_metadata_events(
+                span,
+                agent_run_id=agent_run_id,
+                transcript_id=transcript_id,
+                transcript_group_id=transcript_group_id,
+            )
+        finally:
+            span.end()
+
     def _init_spans_exporter(self, endpoint: str) -> Optional[Union[HTTPExporter, GRPCExporter]]:
         """Initialize the appropriate span exporter based on endpoint."""
         if not self.enable_otlp_export:
@@ -822,6 +884,12 @@ class DocentTracer:
 
             yield agent_run_id, transcript_id
         finally:
+            transcript_group_id = self._get_optional_context_value(self._transcript_group_id_var)
+            self._flush_pending_metadata_events(
+                agent_run_id=agent_run_id,
+                transcript_id=transcript_id,
+                transcript_group_id=transcript_group_id,
+            )
             self._agent_run_id_var.reset(agent_run_id_token)
             self._transcript_id_var.reset(transcript_id_token)
             self._attributes_var.reset(attributes_token)
@@ -885,6 +953,12 @@ class DocentTracer:
 
             yield agent_run_id, transcript_id
         finally:
+            transcript_group_id = self._get_optional_context_value(self._transcript_group_id_var)
+            self._flush_pending_metadata_events(
+                agent_run_id=agent_run_id,
+                transcript_id=transcript_id,
+                transcript_group_id=transcript_group_id,
+            )
             self._agent_run_id_var.reset(agent_run_id_token)
             self._transcript_id_var.reset(transcript_id_token)
             self._attributes_var.reset(attributes_token)
@@ -1373,6 +1447,15 @@ class DocentTracer:
 
             yield transcript_id
         finally:
+            agent_run_id_for_flush = self._get_optional_context_value(self._agent_run_id_var)
+            transcript_group_id_for_flush = self._get_optional_context_value(
+                self._transcript_group_id_var
+            )
+            self._flush_pending_metadata_events(
+                agent_run_id=agent_run_id_for_flush,
+                transcript_id=transcript_id,
+                transcript_group_id=transcript_group_id_for_flush,
+            )
             # Reset context variable to previous state
             self._transcript_id_var.reset(transcript_id_token)
 
@@ -1447,6 +1530,15 @@ class DocentTracer:
 
             yield transcript_id
         finally:
+            agent_run_id_for_flush = self._get_optional_context_value(self._agent_run_id_var)
+            transcript_group_id_for_flush = self._get_optional_context_value(
+                self._transcript_group_id_var
+            )
+            self._flush_pending_metadata_events(
+                agent_run_id=agent_run_id_for_flush,
+                transcript_id=transcript_id,
+                transcript_group_id=transcript_group_id_for_flush,
+            )
             # Reset context variable to previous state
             self._transcript_id_var.reset(transcript_id_token)
 
@@ -1641,6 +1733,13 @@ class DocentTracer:
 
             yield transcript_group_id
         finally:
+            agent_run_id_for_flush = self._get_optional_context_value(self._agent_run_id_var)
+            transcript_id_for_flush = self._get_optional_context_value(self._transcript_id_var)
+            self._flush_pending_metadata_events(
+                agent_run_id=agent_run_id_for_flush,
+                transcript_id=transcript_id_for_flush,
+                transcript_group_id=transcript_group_id,
+            )
             # Reset context variable to previous state
             self._transcript_group_id_var.reset(transcript_group_id_token)
 
@@ -1719,6 +1818,13 @@ class DocentTracer:
 
             yield transcript_group_id
         finally:
+            agent_run_id_for_flush = self._get_optional_context_value(self._agent_run_id_var)
+            transcript_id_for_flush = self._get_optional_context_value(self._transcript_id_var)
+            self._flush_pending_metadata_events(
+                agent_run_id=agent_run_id_for_flush,
+                transcript_id=transcript_id_for_flush,
+                transcript_group_id=transcript_group_id,
+            )
             # Reset context variable to previous state
             self._transcript_group_id_var.reset(transcript_group_id_token)
 
