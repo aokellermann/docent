@@ -19,7 +19,7 @@ if not DOCENT_SERVER_URL or not DOCENT_API_KEY:
     raise ValueError("DOCENT_API_KEY and DOCENT_SERVER_URL must be set")
 dc = Docent(api_key=DOCENT_API_KEY, server_url=DOCENT_SERVER_URL)
 
-cid = "2a40857c-8593-4818-aa2c-bbafa0f65f2c"
+cid = "f5f3c9d2-57de-4fa2-8bbd-24521d5e05ae"
 
 # %%
 
@@ -105,7 +105,7 @@ for row in rows:
 # Upload to labelset
 from docent.data_models import Label
 
-labelset_id = "5ed640ba-0816-4d02-8273-2f21c9d698f1"
+labelset_id = "4519e13a-762c-4347-8c71-647ce8e6ecc9"
 for coord, raw_label in labels.items():
     label = Label(
         label_set_id=labelset_id,
@@ -120,7 +120,7 @@ for coord, raw_label in labels.items():
 # Analyze the judge online #
 ############################
 
-rubric_id = "453bc979-fb69-44f5-9073-62241063f282"
+rubric_id = "f7faf721-8a15-4587-8e89-37ea6c46d6b7"
 result = dc.execute_dql(
     cid,
     f"""
@@ -132,9 +132,6 @@ where l.label_set_id = '{labelset_id}'
 )
 df = dc.dql_result_to_df_experimental(result)
 df["correct"] = df["gold_label"] == df["judge_output"]
-df
-
-# %%
 
 dfg = df.groupby("ar_id").agg(
     {
@@ -149,3 +146,5 @@ dfg
 # %%
 
 dfg["correct"].mean()
+
+# %%
