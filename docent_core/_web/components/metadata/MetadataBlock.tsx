@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useDebounce } from '@/hooks/use-debounce';
 
 export const formatMetadataValue = (value: any): string => {
   if (value === null || value === undefined) return 'N/A';
@@ -134,7 +135,9 @@ export function MetadataBlock({
   const [searchQuery, setSearchQuery] = useState('');
   const [searchType, setSearchType] = useState<SearchType>('fuzzy');
 
-  const trimmedQuery = searchQuery.trim();
+  // Debounce search query to avoid overwhelming CPU with expensive operations
+  const debouncedSearchQuery = useDebounce(searchQuery, 100);
+  const trimmedQuery = debouncedSearchQuery.trim();
 
   const { activeRegex, regexError } = useMemo(() => {
     if (searchType !== 'regex' || !trimmedQuery) {
@@ -283,7 +286,7 @@ export function MetadataBlock({
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search metadata..."
-          className="h-8 text-xs bg-background flex-1 min-w-[180px] max-w-sm hover:bg-secondary hover:text-primary focus-visible:ring-0 focus-visible:border-ring"
+          className="h-7 text-xs bg-background flex-1 min-w-[180px] max-w-sm hover:bg-secondary hover:text-primary focus-visible:ring-0 focus-visible:border-ring"
           aria-invalid={regexError ? true : undefined}
           ref={searchInputRef}
         />
@@ -291,7 +294,7 @@ export function MetadataBlock({
           value={searchType}
           onValueChange={(v) => setSearchType(v as SearchType)}
         >
-          <SelectTrigger className="h-8 w-[120px] text-xs bg-background flex-shrink-0 hover:bg-secondary hover:text-primary focus:ring-0 focus-visible:ring-0 focus-visible:border-ring focus-visible:shadow-[0_0_0_1px_hsl(var(--ring))]">
+          <SelectTrigger className="h-7 w-[120px] text-xs bg-background flex-shrink-0 hover:bg-secondary hover:text-primary focus:ring-0 focus-visible:ring-0 focus-visible:border-ring focus-visible:shadow-[0_0_0_1px_hsl(var(--ring))]">
             <SelectValue placeholder="Fuzzy" />
           </SelectTrigger>
           <SelectContent>

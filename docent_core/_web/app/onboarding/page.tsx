@@ -254,7 +254,7 @@ export default function OnboardingPage() {
                   }
                 }}
               >
-                <CardContent className="p-3">
+                <CardContent className="p-2">
                   {selectedItems.includes(option.label) ? (
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
@@ -311,7 +311,7 @@ export default function OnboardingPage() {
                 }
               }}
             >
-              <CardContent className="p-3">
+              <CardContent className="p-2">
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="font-medium text-gray-900 dark:text-white text-sm">
@@ -361,7 +361,7 @@ export default function OnboardingPage() {
               updateOnboardingData('institution', e.target.value)
             }
             placeholder="e.g., Stanford University, Google, Independent Researcher"
-            className="h-12 text-base border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
+            className="text-base border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
           />
         </div>
 
@@ -413,7 +413,7 @@ export default function OnboardingPage() {
               updateOnboardingData('discoverySource', e.target.value)
             }
             placeholder="e.g., Colleague recommendation, Search, Social media, Conference"
-            className="h-12 text-base border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
+            className="text-base border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
           />
         </div>
       </div>
