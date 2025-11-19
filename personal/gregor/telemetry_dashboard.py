@@ -27,10 +27,13 @@ from docent_core.docent.db.schemas.tables import (
 from docent_core.docent.services.monoservice import MonoService
 
 try:
+    from rich.text import Text
+    from textual import events
     from textual.app import App, ComposeResult
     from textual.containers import Horizontal, Vertical
     from textual.reactive import reactive
-    from textual.widgets import DataTable, Footer, Static
+    from textual.screen import ModalScreen
+    from textual.widgets import DataTable, Footer, Input, Static
 except ImportError as exc:  # pragma: no cover - Textual is optional
     raise SystemExit(
         "Telemetry dashboard requires the 'textual' package. Install it with 'pip install textual'."
@@ -614,6 +617,53 @@ class TelemetryDataProvider:
         return agent_rows
 
 
+class FilterPrompt(ModalScreen[str | None]):
+    """Simple modal prompt for collecting filter text."""
+
+    CSS = """
+    FilterPrompt {
+        align: center middle;
+    }
+
+    #filter-container {
+        width: 60%;
+        max-width: 80;
+        padding: 1 2;
+        border: wide $primary;
+        background: $panel;
+    }
+
+    #filter-help {
+        color: $text-muted;
+        padding-top: 1;
+    }
+    """
+
+    def __init__(self, table_label: str, initial_value: str = "") -> None:
+        super().__init__()
+        self.table_label = table_label
+        self.initial_value = initial_value
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="filter-container"):
+            yield Static(f"Filter {self.table_label or 'table'} rows", id="filter-title")
+            yield Input(placeholder="Type filter text and press Enter", id="filter-input")
+            yield Static("Enter to apply · Escape to clear filter", id="filter-help")
+
+    async def on_mount(self) -> None:
+        filter_input = self.query_one("#filter-input", Input)
+        filter_input.value = self.initial_value
+        filter_input.cursor_position = len(self.initial_value)
+        await filter_input.focus()
+
+    async def on_input_submitted(self, event: Input.Submitted) -> None:
+        await self.dismiss(event.value.strip())
+
+    async def on_key(self, event: events.Key) -> None:
+        if event.key == "escape":
+            await self.dismiss(None)
+
+
 class TelemetryDashboardApp(App[None]):
     """Textual dashboard showing telemetry processing progress."""
 
@@ -692,6 +742,7 @@ class TelemetryDashboardApp(App[None]):
         ("r", "refresh", "Refresh now"),
         ("a", "toggle_auto_refresh", "Auto refresh"),
         ("c", "copy_row", "Copy row"),
+        ("f", "filter_table", "Filter rows"),
     ]
 
     AUTO_REFRESH_SECONDS = 5
@@ -727,6 +778,7 @@ class TelemetryDashboardApp(App[None]):
         self._ingestion_sort_state: tuple[int, bool] | None = None
         self._collections_sort_state: tuple[int, bool] | None = None
         self._runs_sort_state: tuple[int, bool] | None = None
+        self._table_filters: dict[str, str] = {}
 
     def compose(self) -> ComposeResult:
         yield Static("Telemetry Control Room", id="dashboard-title")
@@ -838,6 +890,29 @@ class TelemetryDashboardApp(App[None]):
         state = "enabled" if self.auto_refresh_enabled else "paused"
         self.status_message = f"Auto-refresh {state}"
 
+    async def action_filter_table(self) -> None:
+        focused = self.focused
+        if not isinstance(focused, DataTable):
+            self.status_message = "Focus a table before filtering"
+            return
+        table_id = focused.id or ""
+        table_label = self._table_label(table_id)
+        initial = self._table_filters.get(table_id, "")
+        prompt = FilterPrompt(table_label, initial)
+        result = await self.push_screen_wait(prompt)
+        if result is None:
+            self._table_filters.pop(table_id, None)
+            self.status_message = f"Cleared filter on {table_label}"
+        else:
+            cleaned = result.strip()
+            if cleaned:
+                self._table_filters[table_id] = cleaned
+                self.status_message = f"Filter '{cleaned}' applied to {table_label}"
+            else:
+                self._table_filters.pop(table_id, None)
+                self.status_message = f"Cleared filter on {table_label}"
+        self._re_render_table(table_id)
+
     async def action_copy_row(self) -> None:
         focused = self.focused
         if not isinstance(focused, DataTable):
@@ -910,10 +985,11 @@ class TelemetryDashboardApp(App[None]):
         self.jobs_table.clear()
         sorted_jobs = self._sorted_jobs()
         now = utcnow_naive()
+        table_id = "jobs-table"
         for job in sorted_jobs:
             age = humanize_timedelta(now - job.created_at)
             job_type = job.type.replace("_", " ").title()
-            self.jobs_table.add_row(
+            row_values = [
                 job.status.upper(),
                 job_type,
                 job.collection_id or "—",
@@ -921,8 +997,11 @@ class TelemetryDashboardApp(App[None]):
                 job.user_email or "—",
                 age,
                 job.id,
-                key=job.id,
-            )
+            ]
+            prepared = self._prepare_filtered_values(table_id, row_values)
+            if prepared is None:
+                continue
+            self.jobs_table.add_row(*prepared, key=job.id)
         self.jobs_summary.update(self._build_job_summary())
         self._restore_table_state(self.jobs_table, cursor, scroll)
 
@@ -933,10 +1012,11 @@ class TelemetryDashboardApp(App[None]):
         self.completed_jobs_table.clear()
         sorted_jobs = self._sorted_completed_jobs()
         now = utcnow_naive()
+        table_id = "completed-jobs-table"
         for job in sorted_jobs:
             age = humanize_timedelta(now - job.created_at)
             job_type = job.type.replace("_", " ").title()
-            self.completed_jobs_table.add_row(
+            row_values = [
                 job.status.upper(),
                 job_type,
                 job.collection_id or "—",
@@ -944,8 +1024,11 @@ class TelemetryDashboardApp(App[None]):
                 job.user_email or "—",
                 age,
                 job.id,
-                key=job.id,
-            )
+            ]
+            prepared = self._prepare_filtered_values(table_id, row_values)
+            if prepared is None:
+                continue
+            self.completed_jobs_table.add_row(*prepared, key=job.id)
         self.completed_jobs_summary.update(self._build_completed_summary())
         self._restore_table_state(self.completed_jobs_table, cursor, scroll)
 
@@ -956,19 +1039,23 @@ class TelemetryDashboardApp(App[None]):
         self.ingestion_table.clear()
         ordered = self._sorted_ingestion()
         now = utcnow_naive()
+        table_id = "ingestion-table"
         for job in ordered:
             age = humanize_timedelta(now - job.created_at)
             log_id = job.telemetry_log_id or job.payload.get("telemetry_log_id") or "—"
             collection = job.collection_id or job.payload.get("collection_id") or "—"
-            self.ingestion_table.add_row(
+            row_values = [
                 job.status.upper(),
                 log_id,
                 collection,
                 job.user_email or "—",
                 age,
                 job.id,
-                key=job.id,
-            )
+            ]
+            prepared = self._prepare_filtered_values(table_id, row_values)
+            if prepared is None:
+                continue
+            self.ingestion_table.add_row(*prepared, key=job.id)
         self.ingestion_summary.update(self._build_ingestion_summary())
         self._restore_table_state(self.ingestion_table, cursor, scroll)
 
@@ -1168,9 +1255,10 @@ class TelemetryDashboardApp(App[None]):
 
         self.collections_table.clear()
         ordered_rows = self._sorted_collections()
+        table_id = "collections-table"
         for row in ordered_rows:
             rate_display = f"{row.completion_rate_per_min:.2f}/m" if row.recent_completed else "—"
-            self.collections_table.add_row(
+            row_values = [
                 row.collection_id,
                 str(row.awaiting),
                 str(row.processing),
@@ -1181,8 +1269,11 @@ class TelemetryDashboardApp(App[None]):
                 rate_display,
                 format_ago(row.last_updated_at),
                 format_ago(row.last_completed_at),
-                key=row.collection_id,
-            )
+            ]
+            prepared = self._prepare_filtered_values(table_id, row_values)
+            if prepared is None:
+                continue
+            self.collections_table.add_row(*prepared, key=row.collection_id)
 
         needs_work = sum(1 for row in self._collections_data if row.needs_work)
         self.collections_summary.update(
@@ -1255,6 +1346,7 @@ class TelemetryDashboardApp(App[None]):
         self.runs_table.clear()
         ordered_rows = self._sorted_runs()
         urgent = sum(1 for row in self._runs_data if row.requires_processing)
+        table_id = "runs-table"
         for row in ordered_rows:
             delta = row.current_version - row.processed_version
             delta_display = f"+{delta}" if delta >= 0 else str(delta)
@@ -1263,7 +1355,7 @@ class TelemetryDashboardApp(App[None]):
 
             error_text = truncate(row.error_message, 80) if row.error_message else ""
 
-            self.runs_table.add_row(
+            row_values = [
                 row.agent_run_id,
                 status_display,
                 delta_display,
@@ -1271,8 +1363,11 @@ class TelemetryDashboardApp(App[None]):
                 str(row.processed_version),
                 format_ago(row.updated_at),
                 error_text or "—",
-                key=row.agent_run_id,
-            )
+            ]
+            prepared = self._prepare_filtered_values(table_id, row_values)
+            if prepared is None:
+                continue
+            self.runs_table.add_row(*prepared, key=row.agent_run_id)
 
         self.runs_summary.update(
             f"{urgent} runs waiting · showing {len(self._runs_data)} most recent rows"
@@ -1319,6 +1414,28 @@ class TelemetryDashboardApp(App[None]):
             )
             self._render_agent_runs(self._runs_data)
 
+    def _re_render_table(self, table_id: str) -> None:
+        if table_id == "jobs-table":
+            self._render_jobs(self._jobs_data, self._job_stats_data)
+        elif table_id == "completed-jobs-table":
+            self._render_completed_jobs(self._completed_jobs_data)
+        elif table_id == "ingestion-table":
+            self._render_ingestion(self._ingestion_data)
+        elif table_id == "collections-table":
+            self._render_collections(self._collections_data)
+        elif table_id == "runs-table":
+            self._render_agent_runs(self._runs_data)
+
+    def _table_label(self, table_id: str) -> str:
+        label_map = {
+            "jobs-table": "Queued Jobs",
+            "completed-jobs-table": "Completed Jobs",
+            "ingestion-table": "Ingestion",
+            "collections-table": "Collections",
+            "runs-table": "Agent Runs",
+        }
+        return label_map.get(table_id, table_id or "table")
+
     def _next_sort_state(
         self,
         current: tuple[int, bool] | None,
@@ -1329,6 +1446,25 @@ class TelemetryDashboardApp(App[None]):
         if current and current[0] == column_index:
             return (column_index, not current[1])
         return (column_index, column_index in default_desc)
+
+    def _prepare_filtered_values(
+        self,
+        table_id: str,
+        values: Sequence[str],
+    ) -> list[str | Text] | None:
+        filter_text = self._table_filters.get(table_id)
+        if not filter_text:
+            return list(values)
+        normalized = filter_text.lower()
+        if not any(normalized in value.lower() for value in values):
+            return None
+        return [self._highlight_value(value, filter_text) for value in values]
+
+    @staticmethod
+    def _highlight_value(value: str, filter_text: str) -> Text:
+        text = Text(value)
+        text.highlight_words([filter_text], case_sensitive=False, style="bold yellow")
+        return text
 
     @staticmethod
     def _capture_table_state(
