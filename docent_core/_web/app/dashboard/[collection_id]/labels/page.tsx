@@ -17,6 +17,7 @@ import { SchemaDefinition } from '@/app/types/schema';
 import { Button } from '@/components/ui/button';
 import { Plus } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
+import { useHasCollectionWritePermission } from '@/lib/permissions/hooks';
 
 export default function LabelsPage() {
   const { collection_id: collectionId } = useParams<{
@@ -28,6 +29,7 @@ export default function LabelsPage() {
   );
   const [isCreateMode, setIsCreateMode] = useState(false);
   const { toast } = useToast();
+  const hasWritePermission = useHasCollectionWritePermission();
 
   // Fetch all label sets with counts
   const { data: allLabelSets, isLoading } = useGetLabelSetsWithCountsQuery({
@@ -54,6 +56,7 @@ export default function LabelsPage() {
   };
 
   const handleCreateNewLabelSet = () => {
+    if (!hasWritePermission) return;
     setSelectedLabelSetId(null);
     setIsCreateMode(true);
   };
@@ -96,6 +99,7 @@ export default function LabelsPage() {
             size="sm"
             onClick={handleCreateNewLabelSet}
             className="gap-1.5 h-7 text-xs"
+            disabled={!hasWritePermission}
           >
             <Plus className="h-3 w-3" />
             Create New

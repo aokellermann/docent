@@ -7,6 +7,7 @@ import { AgentRunJudgeResults, RubricCentroid } from '@/app/api/rubricApi';
 import VirtualResultsList from './VirtualResultsList';
 import { SchemaDefinition } from '@/app/types/schema';
 import { Label } from '@/app/api/labelApi';
+import { useHasCollectionWritePermission } from '@/lib/permissions/hooks';
 
 interface JudgeResultsListProps {
   centroids: RubricCentroid[];
@@ -31,6 +32,8 @@ export const JudgeResultsList = ({
   schema,
   activeLabelSet,
 }: JudgeResultsListProps) => {
+  const hasWritePermission = useHasCollectionWritePermission();
+
   if (centroids.length > 0) {
     return (
       <CentroidsList
@@ -43,6 +46,7 @@ export const JudgeResultsList = ({
         agentRunResults={agentRunResults}
         labels={labels}
         activeLabelSet={activeLabelSet}
+        canEditLabels={hasWritePermission}
       />
     );
   }
@@ -56,6 +60,7 @@ export const JudgeResultsList = ({
       schema={schema}
       labels={labels}
       activeLabelSet={activeLabelSet}
+      canEditLabels={hasWritePermission}
     />
   );
 };
@@ -70,6 +75,7 @@ interface CentroidsListProps {
   agentRunResults: AgentRunJudgeResults[];
   labels: Label[];
   activeLabelSet: any;
+  canEditLabels: boolean;
 }
 
 const CentroidsList = ({
@@ -82,6 +88,7 @@ const CentroidsList = ({
   agentRunResults,
   labels,
   activeLabelSet,
+  canEditLabels,
 }: CentroidsListProps) => {
   // Keep track of which IDs have been assigned (to later compute resids)
   const assignedResultIdsSet = useMemo(() => {

@@ -266,46 +266,48 @@ function RubricCard({
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              className={`p-1.5 rounded transition-colors
-                ${
+        {hasWritePermission && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className={`p-1.5 rounded transition-colors
+                  ${
+                    hasActiveJob
+                      ? 'bg-orange-bg text-orange-text'
+                      : 'hover:bg-green-bg/50 text-muted-foreground hover:text-green-text'
+                  }`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (hasActiveJob && jobDetails) {
+                    handleCancelJob(jobDetails.id);
+                  } else {
+                    startEvaluation({
+                      collectionId,
+                      rubricId: rubric.id,
+                    });
+                  }
+                }}
+                aria-label={
                   hasActiveJob
-                    ? 'bg-orange-bg text-orange-text'
-                    : 'hover:bg-green-bg/50 text-muted-foreground hover:text-green-text'
-                }`}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (hasActiveJob && jobDetails) {
-                  handleCancelJob(jobDetails.id);
-                } else {
-                  startEvaluation({
-                    collectionId,
-                    rubricId: rubric.id,
-                  });
+                    ? "Cancel this rubric's evaluation job"
+                    : 'Run an evaluation with this rubric'
                 }
-              }}
-              aria-label={
-                hasActiveJob
-                  ? "Cancel this rubric's evaluation job"
-                  : 'Run an evaluation with this rubric'
-              }
-              disabled={isCancellingJob}
-            >
-              {hasActiveJob ? (
-                <Pause className="h-3 w-3" />
-              ) : (
-                <Play className="h-3 w-3" />
-              )}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">
-            {hasActiveJob
-              ? "Cancel this rubric's evaluation job"
-              : 'Run an evaluation with this rubric'}
-          </TooltipContent>
-        </Tooltip>
+                disabled={isCancellingJob}
+              >
+                {hasActiveJob ? (
+                  <Pause className="h-3 w-3" />
+                ) : (
+                  <Play className="h-3 w-3" />
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {hasActiveJob
+                ? "Cancel this rubric's evaluation job"
+                : 'Run an evaluation with this rubric'}
+            </TooltipContent>
+          </Tooltip>
+        )}
         {hasWritePermission && (
           <Tooltip>
             <TooltipTrigger asChild>

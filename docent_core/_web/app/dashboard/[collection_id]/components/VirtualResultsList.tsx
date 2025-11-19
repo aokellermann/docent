@@ -26,6 +26,7 @@ interface VirtualResultsListProps {
   schema: SchemaDefinition;
   labels?: Label[];
   activeLabelSet: any;
+  canEditLabels: boolean;
 }
 
 const VirtualResultsList = ({
@@ -35,6 +36,7 @@ const VirtualResultsList = ({
   schema,
   labels,
   activeLabelSet,
+  canEditLabels,
 }: VirtualResultsListProps) => {
   const { filters, viewMode } = useResultFilterControls();
 
@@ -247,6 +249,7 @@ const VirtualResultsList = ({
                     schema={schema}
                     labels={labelsMap?.get(group.agent_run_id) || []}
                     activeLabelSetId={activeLabelSet?.id || null}
+                    canEditLabels={canEditLabels}
                   />
                 </div>
               </div>

@@ -33,9 +33,11 @@ import {
 import { ChartSpec } from '../types/collectionTypes';
 import { skipToken } from '@reduxjs/toolkit/query';
 import { cn } from '@/lib/utils';
+import { useHasCollectionWritePermission } from '@/lib/permissions/hooks';
 
 export function ChartsArea() {
   const collectionId = useAppSelector((state) => state.collection.collectionId);
+  const hasWritePermission = useHasCollectionWritePermission();
 
   const {
     data: charts = [],
@@ -97,7 +99,7 @@ export function ChartsArea() {
   };
 
   const addTab = async () => {
-    if (!collectionId) return;
+    if (!collectionId || !hasWritePermission) return;
 
     // Get the currently selected chart to copy its settings
     const currentChart = charts.find((chart) => chart.id === activeTabId);
@@ -269,8 +271,20 @@ export function ChartsArea() {
 
         {/* Add Tab Button */}
         <button
-          className="flex items-center justify-center p-1 ml-0 text-muted-foreground bg-muted rounded transition-colors self-center"
-          onClick={addTab}
+          className={cn(
+            'flex items-center justify-center p-1 ml-0 text-muted-foreground bg-muted rounded transition-colors self-center',
+            !hasWritePermission && 'opacity-50 cursor-not-allowed'
+          )}
+          onClick={() => {
+            if (!hasWritePermission) return;
+            addTab();
+          }}
+          disabled={!hasWritePermission}
+          title={
+            hasWritePermission
+              ? 'Add chart'
+              : 'You need edit access to add charts'
+          }
         >
           <Plus className="h-3 w-3" />
         </button>
