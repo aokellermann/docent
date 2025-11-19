@@ -38,6 +38,7 @@ import {
   useGetBaseFilterQuery,
 } from '../api/collectionApi';
 import { useHasCollectionWritePermission } from '@/lib/permissions/hooks';
+import { compareAgentRunColumnNames } from '@/lib/agentRunColumns';
 import { INTERNAL_BASE_URL } from '@/app/constants';
 
 import { navToAgentRun } from '@/lib/nav';
@@ -465,12 +466,9 @@ export default function ExperimentViewer({
     // Remove duplicates while preserving order
     const uniqueColumns = Array.from(new Set(allColumns));
 
-    // Sort all columns alphabetically, but keep created_at at the end
-    return uniqueColumns.sort((a, b) => {
-      if (a === 'created_at') return 1;
-      if (b === 'created_at') return -1;
-      return a.localeCompare(b);
-    });
+    // Sort in column display order:
+    // non-config metadata, metadata.config.*, then created_at.
+    return uniqueColumns.sort(compareAgentRunColumnNames);
   }, [derivedColumns, sortableFieldsData, discoveredColumns]);
 
   // Apply default columns exactly once per collection when no user preference exists.

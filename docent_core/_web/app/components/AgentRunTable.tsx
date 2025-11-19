@@ -57,6 +57,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { compareAgentRunColumnNames } from '@/lib/agentRunColumns';
 import { cn } from '@/lib/utils';
 import { useDebounce } from '@/hooks/use-debounce';
 import { useParams } from 'next/navigation';
@@ -422,12 +423,7 @@ export const AgentRunTable = memo(function AgentRunTable({
 
     const metadataColumns = selectedColumns
       .filter((columnKey) => columnKey !== 'agent_run_id') // Exclude agent_run_id since it has a hardcoded column
-      .sort((a, b) => {
-        // Sort selected columns to match the availableColumns order
-        if (a === 'created_at') return 1;
-        if (b === 'created_at') return -1;
-        return a.localeCompare(b);
-      })
+      .sort(compareAgentRunColumnNames)
       .map<ColumnDef<AgentRunTableRow>>((columnKey) => ({
         id: columnKey,
         header: () => (
