@@ -37,6 +37,7 @@ class Docent:
         self,
         *,
         domain: str = "docent.transluce.org",
+        use_https: bool = True,
         api_key: str | None = None,
         # Deprecated
         server_url: str | None = None,  # Use domain instead
@@ -73,13 +74,14 @@ class Docent:
         self._domain = domain
 
         # Set server URL; server_url takes precedence over domain
-        server_url = (server_url or f"https://api.{domain}").rstrip("/")
+        prefix = "https://" if use_https else "http://"
+        server_url = (server_url or f"{prefix}api.{domain}").rstrip("/")
         if not server_url.endswith("/rest"):
             server_url = f"{server_url}/rest"
         self._server_url = server_url
 
         # Set web URL; web_url takes precedence over domain
-        self._web_url = (web_url or f"https://{domain}").rstrip("/")
+        self._web_url = (web_url or f"{prefix}{domain}").rstrip("/")
 
         # Use requests.Session for connection pooling and persistent headers
         self._session = requests.Session()

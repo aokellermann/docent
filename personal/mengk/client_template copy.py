@@ -14,37 +14,60 @@ from docent import Docent
 from docent_core._env_util import ENV
 
 DOCENT_API_KEY = ENV.get("DOCENT_API_KEY")
-DOCENT_SERVER_URL = ENV.get("NEXT_PUBLIC_API_HOST")
-if not DOCENT_SERVER_URL or not DOCENT_API_KEY:
-    raise ValueError("DOCENT_API_KEY and DOCENT_SERVER_URL must be set")
-dc = Docent(api_key=DOCENT_API_KEY, server_url=DOCENT_SERVER_URL)
+DOCENT_DOMAIN = ENV.get("DOCENT_DOMAIN")
+if not DOCENT_DOMAIN or not DOCENT_API_KEY:
+    raise ValueError("DOCENT_API_KEY and DOCENT_DOMAIN must be set")
+client = Docent(api_key=DOCENT_API_KEY, server_url=f"http://{DOCENT_DOMAIN}")
 
 # %%
 
-ar = dc.get_agent_run(
-    "5eb33693-e934-4573-8041-6afb51e74f53", "1ab5d9b4-882a-4e1b-912e-8aa6d0254d8f"
-)
+from docent.data_models.formatted_objects import FormattedAgentRun, FormattedTranscript
+from docent.sdk.llm_context import LLMContext
+
+collection_id = "96fad7bd-eb81-4da6-95d9-d66e94ff1533"  # change as needed
 
 # %%
+# 1. chat about 2 specific agent runs
+run_ids = [
+    "c25827b1-333b-4555-87fb-e1450969f56b",
+    "ecada666-ce38-4b16-b098-a22590df09b4",
+]
+context = LLMContext()
+for run_id in run_ids:
+    run = client.get_agent_run(collection_id, run_id)
+    assert run is not None
+    context.add(run)
 
-_t = ar.transcript_dict["5f9074db-7463-49a4-bfd6-3cdbcc9a50a0"]
-tg = ar.transcript_group_dict[_t.transcript_group_id]
-par_tg = ar.transcript_group_dict[tg.parent_transcript_group_id]
-
-# get its children
-
-t_sibling = None
-for t in ar.transcript_dict.values():
-    if t.transcript_group_id == par_tg.id:
-        t_sibling = t
-        break
-
-# %%
-
-print(t_sibling.model_dump_json(exclude={"messages"}, indent=1))
-print(tg.model_dump_json(indent=1))
-
-
-print(t_sibling.created_at, tg.created_at, t_sibling.created_at < tg.created_at)
+client.start_chat(context, model_string="openai/gpt-5-mini", reasoning_effort="low")
 
 # %%
+# 2. chat about individual transcripts (LLM won't see other transcripts in the run)
+run_ids = ["da62ab48-ca38-4f29-8a47-fee15fb0ac4c", "8ed11e3b-1c67-4dcd-8078-96c9e0a994b6"]
+context = LLMContext()
+for run_id in run_ids:
+    run = client.get_agent_run(collection_id, run_id)
+    assert run is not None
+    for transcript in run.transcripts:
+        # suppose we only want to analyze the "verification" step and transcripts are named accordingly
+        if transcript.name is not None and "verification" in transcript.name.lower():
+            context.add(transcript)
+
+client.start_chat(context, model_string="openai/gpt-5-mini", reasoning_effort="low")
+
+# 3. select parts of a transcript to show/hide from the LLM
+run_ids = ["da62ab48-ca38-4f29-8a47-fee15fb0ac4c", "8ed11e3b-1c67-4dcd-8078-96c9e0a994b6"]
+context = LLMContext()
+for run_id in run_ids:
+    run = client.get_agent_run(collection_id, run_id)
+    assert run is not None
+    # FormattedAgentRun/FormattedTranscript let us control how we present runs/transcripts to the LLM
+    run = FormattedAgentRun.from_agent_run(run)
+    for i, transcript in enumerate(run.transcripts):
+        formatted_transcript = FormattedTranscript.from_transcript(transcript)
+        # hide the first message of each transcript from the LLM
+        # note: the UI will still show the original transcript
+        formatted_transcript.messages = formatted_transcript.messages[1:]
+        run.transcripts[i] = formatted_transcript
+    context.add(run)
+
+client.start_chat(context, model_string="openai/gpt-5-mini", reasoning_effort="low")
