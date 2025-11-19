@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -39,6 +39,7 @@ import {
   TooltipTrigger,
   TooltipProvider,
 } from '@/components/ui/tooltip';
+import { findModalResult } from '../utils/findModalResult';
 
 interface LabelSetMenuItemsProps {
   onLabelSetCreated: (labelSetId: string) => void;
@@ -724,7 +725,10 @@ const JudgeResultCard = ({
   activeLabelSetId,
 }: JudgeResultCardProps) => {
   const agentRunId = agentRunResult.agent_run_id;
-  const firstResult = agentRunResult.results[0];
+  const firstResult = useMemo(
+    () => findModalResult(agentRunResult, schema),
+    [agentRunResult, schema]
+  );
 
   const { collection_id: collectionId, rubric_id: rubricId } = useParams<{
     collection_id: string;

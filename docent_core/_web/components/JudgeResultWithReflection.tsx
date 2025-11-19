@@ -4,7 +4,6 @@ import { useMemo } from 'react';
 import { AgentRunJudgeResults } from '@/app/api/rubricApi';
 import Reflection from './JudgeResultReflection';
 import JudgeResultDetail from './JudgeResultDetail';
-import { JudgeResultWithCitations } from '@/app/store/rubricSlice';
 import { MetadataBlock } from './metadata/MetadataBlock';
 import { Badge } from './ui/badge';
 import { TextWithCitations } from './CitationRenderer';
@@ -56,23 +55,29 @@ export default function JudgeResultWithReflection({
   rubricId,
   collectionId,
 }: JudgeResultWithReflectionProps) {
-  const selectedResult: JudgeResultWithCitations | undefined = useMemo(() => {
-    return agentRunResults.results.find((r) => r.id === selectedResultId);
-  }, [agentRunResults.results, selectedResultId]);
-
   const rolloutIndexFromUrl = useMemo(() => {
     const index = agentRunResults.results.findIndex(
       (r) => r.id === selectedResultId
     );
-    return index >= 0 ? index : 0;
+    return index >= 0 ? index : null;
   }, [agentRunResults.results, selectedResultId]);
 
-  const isMultiRollout = agentRunResults.results.length > 1;
-
-  const showRolloutDetail =
+  let detailComponent: React.ReactNode = null;
+  if (agentRunResults.results.length === 1) {
+    detailComponent = (
+      <JudgeResultDetail judgeResult={agentRunResults.results[0]} />
+    );
+  } else if (
     rolloutIndexFromUrl !== null &&
-    isMultiRollout &&
-    agentRunResults.results[rolloutIndexFromUrl];
+    agentRunResults.results[rolloutIndexFromUrl]
+  ) {
+    detailComponent = (
+      <RolloutDetail
+        rollout={agentRunResults.results[rolloutIndexFromUrl].output}
+        rolloutIndex={rolloutIndexFromUrl}
+      />
+    );
+  }
 
   return (
     <>
@@ -83,16 +88,7 @@ export default function JudgeResultWithReflection({
         collectionId={collectionId}
         selectedRolloutIndex={rolloutIndexFromUrl}
       />
-      {showRolloutDetail ? (
-        <RolloutDetail
-          rollout={agentRunResults.results[rolloutIndexFromUrl].output}
-          rolloutIndex={rolloutIndexFromUrl}
-        />
-      ) : (
-        <JudgeResultDetail
-          judgeResult={selectedResult ?? agentRunResults.results[0]}
-        />
-      )}
+      {detailComponent}
     </>
   );
 }
