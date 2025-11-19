@@ -1,3 +1,5 @@
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -374,6 +376,7 @@ class StartFilteredEvalJobRequest(BaseModel):
     max_agent_runs: int | None = None
     n_rollouts_per_input: int = 1
     label_set_id: str | None = None
+    filter: dict[str, Any] | None = None
 
 
 @rubric_router.post("/{collection_id}/{rubric_id}/evaluate")
@@ -399,7 +402,12 @@ async def start_eval_rubric_job(
         f"and {request.n_rollouts_per_input} rollouts per input"
     )
     job_id = await rubric_svc.start_or_get_eval_rubric_job(
-        ctx, rubric_id, request.max_agent_runs, request.n_rollouts_per_input, request.label_set_id
+        ctx,
+        rubric_id,
+        request.max_agent_runs,
+        request.n_rollouts_per_input,
+        request.label_set_id,
+        request.filter,
     )
 
     # Check if user has a custom API key (just for analytics purposes)

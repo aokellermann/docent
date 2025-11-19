@@ -14,7 +14,7 @@ interface FilterChipsProps {
   onRemoveFilter: (filterId: string) => void;
   onEditFilter: (filter: PrimitiveFilter) => void;
   onClearAllFilters: () => void;
-  onToggleFilter: (filterId: string) => void;
+  onToggleFilter?: (filterId: string) => void;
   className?: string;
   disabled?: boolean;
 }
@@ -86,14 +86,16 @@ export const FilterChips = ({
                 return `${subFilter.type} filter`;
               }
             })()}
-            <button
-              onClick={() => onToggleFilter(subFilter.id)}
-              className="p-0.5 text-current hover:text-current/80 hover:bg-foreground/10 rounded-sm transition-colors"
-              title={isDisabled ? 'Enable filter' : 'Disable filter'}
-              disabled={disabled}
-            >
-              {isDisabled ? <Eye size={10} /> : <EyeOff size={10} />}
-            </button>
+            {onToggleFilter && (
+              <button
+                onClick={() => onToggleFilter(subFilter.id)}
+                className="p-0.5 text-current hover:text-current/80 hover:bg-foreground/10 rounded-sm transition-colors"
+                title={isDisabled ? 'Enable filter' : 'Disable filter'}
+                disabled={disabled}
+              >
+                {isDisabled ? <Eye size={10} /> : <EyeOff size={10} />}
+              </button>
+            )}
             {subFilter.type === 'primitive' && (
               <button
                 onClick={() => onEditFilter(subFilter as PrimitiveFilter)}

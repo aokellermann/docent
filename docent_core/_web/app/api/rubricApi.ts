@@ -5,6 +5,7 @@ import {
   JudgeResultWithCitations,
   ModelOption,
 } from '@/app/store/rubricSlice';
+import { ComplexFilter } from '@/app/types/collectionTypes';
 
 // Types based on the backend models
 export interface CreateRubricRequest {
@@ -307,6 +308,7 @@ export const rubricApi = createApi({
         max_agent_runs?: number | null;
         n_rollouts_per_input?: number;
         label_set_id?: string | null;
+        filter?: ComplexFilter | null;
       }
     >({
       query: ({
@@ -315,6 +317,7 @@ export const rubricApi = createApi({
         max_agent_runs,
         n_rollouts_per_input,
         label_set_id,
+        filter,
       }) => ({
         url: `/${collectionId}/${rubricId}/evaluate`,
         method: 'POST',
@@ -322,6 +325,7 @@ export const rubricApi = createApi({
           max_agent_runs: max_agent_runs ?? null,
           n_rollouts_per_input: n_rollouts_per_input ?? 1,
           label_set_id: label_set_id ?? null,
+          filter: filter ?? null,
         },
       }),
       invalidatesTags: (result, error, { rubricId }) => [

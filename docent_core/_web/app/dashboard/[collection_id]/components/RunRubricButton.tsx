@@ -85,7 +85,7 @@ const RunRubricButton = ({
         disabled={isButtonDisabled}
         onClick={handleStartRubricJob}
       >
-        Run rubric
+        Run rubric...
       </Button>
     );
 

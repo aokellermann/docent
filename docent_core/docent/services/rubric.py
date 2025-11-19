@@ -5,7 +5,7 @@ from typing import Any, AsyncContextManager, Callable, Sequence, cast
 from uuid import uuid4
 
 import anyio
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,6 +33,7 @@ from docent_core.docent.ai_tools.rubric.reflect import (
     run_reflection,
 )
 from docent_core.docent.db.contexts import ViewContext
+from docent_core.docent.db.filters import parse_filter_dict
 from docent_core.docent.db.schemas.label import SQLALabel
 from docent_core.docent.db.schemas.rubric import (
     SQLAJudgeReflection,
@@ -208,6 +209,7 @@ class RubricService:
         max_agent_runs: int | None = None,
         n_rollouts_per_input: int = 1,
         label_set_id: str | None = None,
+        filter: dict[str, Any] | None = None,
     ):
         """Start a job to evaluate the rubric."""
 
@@ -227,6 +229,7 @@ class RubricService:
                     "max_agent_runs": max_agent_runs,
                     "n_rollouts_per_input": n_rollouts_per_input,
                     "label_set_id": label_set_id,
+                    "filter": filter,
                 },
             )
         )
@@ -284,6 +287,7 @@ class RubricService:
         max_agent_runs = job.job_json.get("max_agent_runs", None)
         n_rollouts_per_input = job.job_json.get("n_rollouts_per_input", 1)
         label_set_id = job.job_json.get("label_set_id", None)
+        filter_dict = job.job_json.get("filter", None)
 
         # Subquery to count existing results per agent run for this rubric/version
         result_counts_subquery = (
@@ -300,10 +304,16 @@ class RubricService:
             .subquery()
         )
 
+        filter_clause = SQLAAgentRun.collection_id == ctx.collection_id
+        if filter_dict:
+            job_filter_clause = parse_filter_dict(filter_dict).to_sqla_where_clause(SQLAAgentRun)
+            if job_filter_clause is not None:
+                filter_clause = and_(filter_clause, job_filter_clause)
+
         # Select agent runs with their result counts, ordered by: labeled first, then UUID
         query = (
             select(SQLAAgentRun.id, result_counts_subquery.c.result_count)
-            .where(ctx.get_base_where_clause(SQLAAgentRun))
+            .where(filter_clause)
             .outerjoin(
                 result_counts_subquery,
                 SQLAAgentRun.id == result_counts_subquery.c.agent_run_id,
@@ -373,7 +383,9 @@ class RubricService:
                 """Resolves an agent run by grabbing it from the database.
                 The AgentRun may not be found, in which case this returns None.
                 """
-                return await self.service.get_agent_run(ctx, agent_run_id)
+                return await self.service.get_agent_run(
+                    ctx, agent_run_id, apply_base_where_clause=False
+                )
 
             return _resolver
 

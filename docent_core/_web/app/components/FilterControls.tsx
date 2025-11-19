@@ -63,6 +63,7 @@ interface FilterControlsProps {
   metadataData?: Record<string, Record<string, unknown>>;
   showFilterChips?: boolean;
   showStepFilter?: boolean;
+  allowToggleFilters?: boolean;
   initialFilter?: PrimitiveFilter | null;
 }
 
@@ -74,6 +75,7 @@ export const FilterControls = ({
   metadataData = {},
   showFilterChips = true,
   showStepFilter = true,
+  allowToggleFilters = true,
   initialFilter = null,
 }: FilterControlsProps) => {
   const [metadataKey, setMetadataKey] = useState('');
@@ -526,7 +528,7 @@ export const FilterControls = ({
           onRemoveFilter={removeFilter}
           onEditFilter={editFilter}
           onClearAllFilters={clearAllFilters}
-          onToggleFilter={handleToggleFilter}
+          onToggleFilter={allowToggleFilters ? handleToggleFilter : undefined}
           className="mb-1.5"
         />
       )}

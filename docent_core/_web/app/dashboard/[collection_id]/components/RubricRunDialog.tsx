@@ -11,6 +11,9 @@ import { Input } from '@/components/ui/input';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Loader2 } from 'lucide-react';
 import { useState } from 'react';
+import { useGetAgentRunMetadataFieldsQuery } from '@/app/api/collectionApi';
+import { FilterControls } from '@/app/components/FilterControls';
+import { ComplexFilter } from '@/app/types/collectionTypes';
 import { useStartEvaluationMutation } from '@/app/api/rubricApi';
 import { useGetUsageSummaryQuery } from '@/app/api/settingsApi';
 import { useLabelSets } from '@/providers/use-label-sets';
@@ -35,6 +38,18 @@ export default function RunRubricDialog({
     useStartEvaluationMutation();
   const { data: usageSummary } = useGetUsageSummaryQuery();
   const { activeLabelSet } = useLabelSets(rubricId);
+
+  // Filter state
+  const [filter, setFilter] = useState<ComplexFilter | null>(null);
+
+  const { data: metadataFieldsData } = useGetAgentRunMetadataFieldsQuery(
+    collectionId,
+    {
+      skip: !collectionId,
+    }
+  );
+  const agentRunMetadataFields = metadataFieldsData?.fields || [];
+
   const handleRun = async () => {
     const maxResultsNum =
       runMode === 'all'
@@ -51,6 +66,7 @@ export default function RunRubricDialog({
       max_agent_runs: maxResultsNum,
       n_rollouts_per_input: rolloutsNum,
       label_set_id: activeLabelSet?.id,
+      filter: filter,
     });
     onClose();
   };
@@ -63,6 +79,22 @@ export default function RunRubricDialog({
         </DialogHeader>
 
         <div className="space-y-4">
+          {/* Filter */}
+          <div className="space-y-2">
+            <Label>Filter runs</Label>
+            <div className="border rounded-md p-2">
+              <FilterControls
+                filters={filter}
+                onFiltersChange={setFilter}
+                metadataFields={agentRunMetadataFields}
+                collectionId={collectionId}
+                showFilterChips={true}
+                showStepFilter={true}
+                allowToggleFilters={false}
+              />
+            </div>
+          </div>
+
           {/* Number of runs */}
           <div className="space-y-2">
             <Label>Number of runs</Label>
