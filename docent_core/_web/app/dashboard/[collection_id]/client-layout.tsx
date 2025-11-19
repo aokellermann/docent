@@ -73,14 +73,12 @@ export function PermissionDeniedPage() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-secondary space-y-3">
       <div className="text-center">
-        <div className="text-base font-semibold text-primary">
-          Access Denied
-        </div>
-        <div className="text-muted-foreground text-sm">
+        <div className="text-xl font-semibold text-primary">Access Denied</div>
+        <div className="text-muted-foreground text-md">
           You don&apos;t have permission to view this resource
         </div>
       </div>
-      <Button size="sm" onClick={handleLoginRedirect}>
+      <Button size="default" onClick={handleLoginRedirect}>
         {user === null || user.is_anonymous
           ? 'Login to your account'
           : 'Back home'}
@@ -94,12 +92,12 @@ export function NotFoundPage() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-secondary space-y-3">
       <div className="text-center">
-        <div className="text-base font-semibold text-primary">Not Found</div>
-        <div className="text-muted-foreground text-sm">
+        <div className="text-xl font-semibold text-primary">Not Found</div>
+        <div className="text-muted-foreground text-md">
           The resource you are looking for does not exist.
         </div>
       </div>
-      <Button size="sm" onClick={() => router.push('/')}>
+      <Button size="default" onClick={() => router.push('/')}>
         Back home
       </Button>
     </div>
