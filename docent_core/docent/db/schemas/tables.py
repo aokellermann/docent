@@ -546,6 +546,20 @@ class SQLAJob(SQLABase):
     status: Mapped[JobStatus] = mapped_column(
         Enum(JobStatus), default=JobStatus.PENDING, nullable=False
     )
+    __table_args__ = (
+        Index(
+            "idx_jobs_type_status_created_at",
+            type,
+            status,
+            created_at,
+        ),
+        Index(
+            "idx_jobs_job_json_gin",
+            job_json,
+            postgresql_using="gin",
+            postgresql_ops={"job_json": "jsonb_path_ops"},
+        ),
+    )
 
 
 class SQLAUser(SQLABase):
