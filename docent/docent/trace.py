@@ -364,10 +364,11 @@ class DocentTracer:
 
         event_attributes: Dict[str, Any] = dict(event.get("attributes", {}))
         metadata_payload = cast(Optional[Dict[str, Any]], event.get("metadata"))
-        if metadata_payload:
-            flattened_metadata = _flatten_dict(metadata_payload)
-            for key, value in flattened_metadata.items():
-                event_attributes[f"metadata.{key}"] = value
+        if metadata_payload is not None:
+            try:
+                event_attributes["metadata_json"] = json.dumps(metadata_payload)
+            except (TypeError, ValueError) as exc:
+                logger.warning("Failed to serialize metadata payload for span event: %s", exc)
 
         timestamp_ns = event.get("timestamp_ns")
         span.add_event(
@@ -2040,18 +2041,6 @@ def agent_run_score(name: str, score: float, attributes: Optional[Dict[str, Any]
         tracer.send_agent_run_score(agent_run_id, name, score, attributes)
     except Exception as e:
         logger.error(f"Failed to send score: {e}")
-
-
-def _flatten_dict(d: Dict[str, Any], prefix: str = "") -> Dict[str, Any]:
-    """Flatten nested dictionary with dot notation."""
-    flattened: Dict[str, Any] = {}
-    for key, value in d.items():
-        new_key = f"{prefix}.{key}" if prefix else key
-        if isinstance(value, dict):
-            flattened.update(_flatten_dict(dict(value), new_key))  # type: ignore
-        else:
-            flattened[new_key] = value
-    return flattened
 
 
 def agent_run_metadata(metadata: Dict[str, Any]) -> None:

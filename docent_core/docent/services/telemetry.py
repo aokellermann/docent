@@ -2637,22 +2637,48 @@ class TelemetryService:
                 continue
 
             event_attrs = event.get("attributes", {})
+            metadata_from_json: Dict[str, Any] = {}
             metadata_attrs: Dict[str, Any] = {}
             non_metadata_attrs: Dict[str, Any] = {}
 
+            metadata_json_raw = event_attrs.get("metadata_json")
+            if isinstance(metadata_json_raw, str):
+                try:
+                    parsed_metadata = json.loads(metadata_json_raw)
+                    if isinstance(parsed_metadata, dict):
+                        metadata_from_json = cast(Dict[str, Any], parsed_metadata)
+                    else:
+                        logger.warning(
+                            "metadata_json payload on event %s is not a dict; ignoring.", name
+                        )
+                except json.JSONDecodeError:
+                    logger.warning("Failed to decode metadata_json on event %s.", name)
+
             for key, value in event_attrs.items():
+                if key == "metadata_json":
+                    continue
                 if key.startswith("metadata."):
                     metadata_key = key[len("metadata.") :]
                     metadata_attrs[metadata_key] = value
                 else:
                     non_metadata_attrs[key] = value
 
+            event_metadata: Dict[str, Any] = {}
+            if metadata_from_json:
+                event_metadata = dict(metadata_from_json)
+            if metadata_attrs:
+                unflattened_metadata = self._unflatten_metadata(metadata_attrs)
+                if event_metadata:
+                    deep_merge_dicts(event_metadata, unflattened_metadata)
+                else:
+                    event_metadata = unflattened_metadata
+
             metadata_events.append(
                 {
                     "name": name,
                     "timestamp": event.get("timestamp"),
                     "attributes": non_metadata_attrs,
-                    "metadata": self._unflatten_metadata(metadata_attrs) if metadata_attrs else {},
+                    "metadata": event_metadata,
                 }
             )
 
