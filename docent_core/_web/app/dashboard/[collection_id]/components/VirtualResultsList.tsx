@@ -26,7 +26,7 @@ interface VirtualResultsListProps {
   schema: SchemaDefinition;
   labels?: Label[];
   activeLabelSet: any;
-  canEditLabels: boolean;
+  canEditLabels?: boolean;
 }
 
 const VirtualResultsList = ({
@@ -36,7 +36,7 @@ const VirtualResultsList = ({
   schema,
   labels,
   activeLabelSet,
-  canEditLabels,
+  canEditLabels = false,
 }: VirtualResultsListProps) => {
   const { filters, viewMode } = useResultFilterControls();
 

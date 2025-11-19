@@ -179,6 +179,7 @@ const CentroidsList = ({
           schema={schema}
           labels={labels}
           activeLabelSet={activeLabelSet}
+          canEditLabels={canEditLabels}
         />
       </div>
     );

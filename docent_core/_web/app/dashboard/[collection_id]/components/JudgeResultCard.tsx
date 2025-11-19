@@ -135,11 +135,22 @@ const LabelSetMenuItems = ({
   );
 };
 
-const TagButton = React.forwardRef<HTMLButtonElement>(({ ...props }, ref) => {
+const TagButton = React.forwardRef<
+  HTMLButtonElement,
+  React.ButtonHTMLAttributes<HTMLButtonElement>
+>(({ className, disabled, ...props }, ref) => {
   return (
     <button
       ref={ref}
-      className="inline-flex items-center gap-1 border rounded-md border-dashed hover:bg-muted/70 text-muted-foreground px-1 py-[0.1rem] text-xs"
+      type="button"
+      disabled={disabled}
+      className={cn(
+        'inline-flex items-center gap-1 border rounded-md border-dashed px-1 py-[0.1rem] text-xs text-muted-foreground',
+        disabled
+          ? 'opacity-60 cursor-not-allowed'
+          : 'hover:bg-muted/70 text-muted-foreground cursor-pointer',
+        className
+      )}
       {...props}
     >
       <Pencil className="size-3" />
@@ -154,39 +165,63 @@ interface LabelBadgeProps {
   activeLabelSet: LabelSet | null;
   onEdit?: () => void; // used by text/number to open editor
   onClear?: () => void; // clear the label
+  disabled?: boolean;
 }
 
 const LabelBadge = React.forwardRef<
-  HTMLDivElement,
-  LabelBadgeProps & React.HTMLAttributes<HTMLDivElement>
->(({ labeledValue, activeLabelSet, onEdit, onClear, ...props }, ref) => {
-  const labelSetName = activeLabelSet?.name;
+  HTMLButtonElement,
+  LabelBadgeProps & React.ButtonHTMLAttributes<HTMLButtonElement>
+>(
+  (
+    {
+      labeledValue,
+      activeLabelSet,
+      onEdit,
+      onClear,
+      disabled,
+      className,
+      ...props
+    },
+    ref
+  ) => {
+    const labelSetName = activeLabelSet?.name;
 
-  return (
-    <div
-      ref={ref}
-      className="flex w-fit px-1 py-[0.1rem] cursor-pointer border relative bg-green-bg border-green-border rounded-md group/label"
-      {...props}
-    >
-      <div className="flex items-center gap-1">
-        <Tag className="size-3 flex-shrink-0 text-green-text" />
-        <span className="text-primary text-xs">{labeledValue}</span>
-        <X
-          className="size-3 flex-shrink-0 text-green-text cursor-pointer"
-          onPointerDown={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            onClear?.();
-          }}
-        />
-      </div>
-    </div>
-  );
-});
+    return (
+      <button
+        ref={ref}
+        type="button"
+        disabled={disabled}
+        className={cn(
+          'flex w-fit px-1 py-[0.1rem] border relative bg-green-bg border-green-border rounded-md group/label',
+          disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
+          className
+        )}
+        {...props}
+      >
+        <div className="flex items-center gap-1">
+          <Tag className="size-3 flex-shrink-0 text-green-text" />
+          <span className="text-primary text-xs">{labeledValue}</span>
+          <X
+            className={cn(
+              'size-3 flex-shrink-0 text-green-text',
+              disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
+            )}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (disabled) return;
+              onClear?.();
+            }}
+          />
+        </div>
+      </button>
+    );
+  }
+);
 LabelBadge.displayName = 'LabelBadge';
 interface AgreementDisplayProps {
   agreed: number;
@@ -225,6 +260,7 @@ interface EnumInputProps {
   schema: SchemaDefinition;
   isRequiredWarning?: boolean;
   agreement?: { agreed: number; total: number };
+  canEditLabels: boolean;
 }
 
 const EnumInput = ({
@@ -238,11 +274,13 @@ const EnumInput = ({
   schema,
   isRequiredWarning = false,
   agreement,
+  canEditLabels,
 }: EnumInputProps) => {
   const hasLabel = labelValue !== undefined;
   const activeLabelSetId = activeLabelSet?.id;
   const [tempLabelSetId, setTempLabelSetId] = useState<string | null>(null);
   const effectiveLabelSetId = activeLabelSetId || tempLabelSetId;
+  const disableEditing = !canEditLabels;
 
   return (
     <div className="gap-1 text-xs flex items-center flex-wrap">
@@ -256,7 +294,9 @@ const EnumInput = ({
         <AgreementDisplay agreed={agreement.agreed} total={agreement.total} />
       )}
       <DropdownMenu
+        open={disableEditing ? false : undefined}
         onOpenChange={(open) => {
+          if (disableEditing) return;
           if (!open) setTempLabelSetId(null);
         }}
       >
@@ -266,103 +306,23 @@ const EnumInput = ({
               labeledValue={labelValue}
               activeLabelSet={activeLabelSet}
               onClear={() => onClearLabel(activeLabelSetId)}
+              disabled={disableEditing}
             />
           ) : (
-            <TagButton />
+            <TagButton disabled={disableEditing} />
           )}
         </DropdownMenuTrigger>
-        <DropdownMenuContent className="w-56" align="start">
-          {effectiveLabelSetId ? (
-            <DropdownMenuRadioGroup
-              value={labelValue}
-              onValueChange={(value) => {
-                onSubmit(effectiveLabelSetId, value);
-                setTempLabelSetId(null);
-              }}
-            >
-              {options.map((value) => (
-                <DropdownMenuRadioItem
-                  className="text-xs"
-                  key={value}
-                  value={value}
-                >
-                  {value}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          ) : (
-            <LabelSetMenuItems
-              onLabelSetCreated={setTempLabelSetId}
-              schema={schema}
-            />
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
-  );
-};
-
-interface BooleanInputProps {
-  propertyKey: string;
-  resultValue: boolean;
-  labelValue?: boolean;
-  activeLabelSet: LabelSet | null;
-  onSubmit: (labelSetId: string, value: boolean) => void;
-  onClearLabel?: (labelSetId: string) => void;
-  schema: SchemaDefinition;
-  isRequiredWarning?: boolean;
-}
-
-const BooleanInput = ({
-  propertyKey,
-  resultValue,
-  labelValue,
-  activeLabelSet,
-  onSubmit,
-  onClearLabel,
-  schema,
-  isRequiredWarning = false,
-}: BooleanInputProps) => {
-  const hasLabel = labelValue !== undefined;
-  const activeLabelSetId = activeLabelSet?.id;
-  const [tempLabelSetId, setTempLabelSetId] = useState<string | null>(null);
-  const effectiveLabelSetId = activeLabelSetId || tempLabelSetId;
-
-  return (
-    <div className="gap-1 text-xs flex items-center">
-      <label
-        className={`font-semibold ${isRequiredWarning ? 'text-red-500' : ''}`}
-      >
-        {propertyKey}:
-      </label>
-      <div className="flex items-center gap-1">
-        <span>{String(resultValue)}</span>
-        <DropdownMenu
-          onOpenChange={(open) => {
-            if (!open) setTempLabelSetId(null);
-          }}
-        >
-          <DropdownMenuTrigger asChild>
-            {hasLabel && activeLabelSetId ? (
-              <LabelBadge
-                labeledValue={String(labelValue)}
-                activeLabelSet={activeLabelSet}
-                onClear={() => onClearLabel?.(activeLabelSetId)}
-              />
-            ) : (
-              <TagButton />
-            )}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent className="w-56">
+        {!disableEditing && (
+          <DropdownMenuContent className="w-56" align="start">
             {effectiveLabelSetId ? (
               <DropdownMenuRadioGroup
-                value={String(labelValue ?? resultValue)}
-                onValueChange={(val) => {
-                  onSubmit(effectiveLabelSetId, val === 'true');
+                value={labelValue}
+                onValueChange={(value) => {
+                  onSubmit(effectiveLabelSetId, value);
                   setTempLabelSetId(null);
                 }}
               >
-                {['true', 'false'].map((value) => (
+                {options.map((value) => (
                   <DropdownMenuRadioItem
                     className="text-xs"
                     key={value}
@@ -379,6 +339,97 @@ const BooleanInput = ({
               />
             )}
           </DropdownMenuContent>
+        )}
+      </DropdownMenu>
+    </div>
+  );
+};
+
+interface BooleanInputProps {
+  propertyKey: string;
+  resultValue: boolean;
+  labelValue?: boolean;
+  activeLabelSet: LabelSet | null;
+  onSubmit: (labelSetId: string, value: boolean) => void;
+  onClearLabel?: (labelSetId: string) => void;
+  schema: SchemaDefinition;
+  isRequiredWarning?: boolean;
+  canEditLabels: boolean;
+}
+
+const BooleanInput = ({
+  propertyKey,
+  resultValue,
+  labelValue,
+  activeLabelSet,
+  onSubmit,
+  onClearLabel,
+  schema,
+  isRequiredWarning = false,
+  canEditLabels,
+}: BooleanInputProps) => {
+  const hasLabel = labelValue !== undefined;
+  const activeLabelSetId = activeLabelSet?.id;
+  const [tempLabelSetId, setTempLabelSetId] = useState<string | null>(null);
+  const effectiveLabelSetId = activeLabelSetId || tempLabelSetId;
+  const disableEditing = !canEditLabels;
+
+  return (
+    <div className="gap-1 text-xs flex items-center">
+      <label
+        className={`font-semibold ${isRequiredWarning ? 'text-red-500' : ''}`}
+      >
+        {propertyKey}:
+      </label>
+      <div className="flex items-center gap-1">
+        <span>{String(resultValue)}</span>
+        <DropdownMenu
+          open={disableEditing ? false : undefined}
+          onOpenChange={(open) => {
+            if (disableEditing) return;
+            if (!open) setTempLabelSetId(null);
+          }}
+        >
+          <DropdownMenuTrigger asChild>
+            {hasLabel && activeLabelSetId ? (
+              <LabelBadge
+                labeledValue={String(labelValue)}
+                activeLabelSet={activeLabelSet}
+                onClear={() => onClearLabel?.(activeLabelSetId)}
+                disabled={disableEditing}
+              />
+            ) : (
+              <TagButton disabled={disableEditing} />
+            )}
+          </DropdownMenuTrigger>
+          {!disableEditing && (
+            <DropdownMenuContent className="w-56">
+              {effectiveLabelSetId ? (
+                <DropdownMenuRadioGroup
+                  value={String(labelValue ?? resultValue)}
+                  onValueChange={(val) => {
+                    onSubmit(effectiveLabelSetId, val === 'true');
+                    setTempLabelSetId(null);
+                  }}
+                >
+                  {['true', 'false'].map((value) => (
+                    <DropdownMenuRadioItem
+                      className="text-xs"
+                      key={value}
+                      value={value}
+                    >
+                      {value}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              ) : (
+                <LabelSetMenuItems
+                  onLabelSetCreated={setTempLabelSetId}
+                  schema={schema}
+                />
+              )}
+            </DropdownMenuContent>
+          )}
         </DropdownMenu>
       </div>
     </div>
@@ -396,6 +447,7 @@ interface NumberInputProps {
   onClearLabel?: (labelSetId: string) => void;
   schema: SchemaDefinition;
   isRequiredWarning?: boolean;
+  canEditLabels: boolean;
 }
 
 const NumberInput = ({
@@ -409,12 +461,14 @@ const NumberInput = ({
   onClearLabel,
   schema,
   isRequiredWarning = false,
+  canEditLabels,
 }: NumberInputProps) => {
   const activeLabelSetId = activeLabelSet?.id;
   const [openPopover, setOpenPopover] = useState(false);
   const [localValue, setLocalValue] = useState(String(labelValue ?? ''));
   const [tempLabelSetId, setTempLabelSetId] = useState<string | null>(null);
   const effectiveLabelSetId = activeLabelSetId || tempLabelSetId;
+  const disableEditing = !canEditLabels;
 
   // Sync local state when labelValue updates from server
   useEffect(() => {
@@ -423,7 +477,7 @@ const NumberInput = ({
 
   // Helper to check whether the entered value is a valid number
   const submit = () => {
-    if (!effectiveLabelSetId) return;
+    if (!effectiveLabelSetId || disableEditing) return;
     const parsed = parseInt(localValue, 10);
     if (!isNaN(parsed)) {
       const clamped = Math.min(maximum, Math.max(minimum, parsed));
@@ -446,8 +500,9 @@ const NumberInput = ({
       </div>
       <div className="flex items-center gap-1">
         <Popover
-          open={openPopover}
+          open={disableEditing ? false : openPopover}
           onOpenChange={(open) => {
+            if (disableEditing) return;
             setOpenPopover(open);
             if (!open) setTempLabelSetId(null);
           }}
@@ -459,42 +514,45 @@ const NumberInput = ({
                 activeLabelSet={activeLabelSet}
                 onClear={() => onClearLabel?.(activeLabelSetId)}
                 onEdit={() => setOpenPopover(true)}
+                disabled={disableEditing}
               />
             ) : (
-              <TagButton />
+              <TagButton disabled={disableEditing} />
             )}
           </PopoverTrigger>
-          <PopoverContent className="w-64 p-1" align="start">
-            {effectiveLabelSetId ? (
-              <form
-                className="flex flex-col gap-2 p-1"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  submit();
-                  setOpenPopover(false);
-                }}
-              >
-                <input
-                  type="number"
-                  value={localValue}
-                  onChange={(e) => setLocalValue(e.target.value)}
-                  className="border rounded px-2 py-1 text-xs"
-                  max={maximum}
-                  min={minimum}
+          {!disableEditing && (
+            <PopoverContent className="w-64 p-1" align="start">
+              {effectiveLabelSetId ? (
+                <form
+                  className="flex flex-col gap-2 p-1"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    submit();
+                    setOpenPopover(false);
+                  }}
+                >
+                  <input
+                    type="number"
+                    value={localValue}
+                    onChange={(e) => setLocalValue(e.target.value)}
+                    className="border rounded px-2 py-1 text-xs"
+                    max={maximum}
+                    min={minimum}
+                  />
+                  <Button size="sm" type="submit">
+                    Save
+                  </Button>
+                </form>
+              ) : (
+                <LabelSetMenuItems
+                  onLabelSetCreated={(id) => {
+                    setTempLabelSetId(id);
+                  }}
+                  schema={schema}
                 />
-                <Button size="sm" type="submit">
-                  Save
-                </Button>
-              </form>
-            ) : (
-              <LabelSetMenuItems
-                onLabelSetCreated={(id) => {
-                  setTempLabelSetId(id);
-                }}
-                schema={schema}
-              />
-            )}
-          </PopoverContent>
+              )}
+            </PopoverContent>
+          )}
         </Popover>
       </div>
     </div>
@@ -511,6 +569,7 @@ interface TextWithCitationsInputProps {
   onClearLabel?: (labelSetId: string) => void;
   schema: SchemaDefinition;
   isRequiredWarning?: boolean;
+  canEditLabels: boolean;
 }
 
 const TextWithCitationsInput = ({
@@ -523,6 +582,7 @@ const TextWithCitationsInput = ({
   onClearLabel,
   schema,
   isRequiredWarning = false,
+  canEditLabels,
 }: TextWithCitationsInputProps) => {
   const { collection_id: collectionId } = useParams<{
     collection_id: string;
@@ -573,6 +633,7 @@ const TextWithCitationsInput = ({
   const [openPopover, setOpenPopover] = useState(false);
   const [tempLabelSetId, setTempLabelSetId] = useState<string | null>(null);
   const effectiveLabelSetId = activeLabelSetId || tempLabelSetId;
+  const disableEditing = !canEditLabels;
 
   useEffect(() => {
     if (openPopover) {
@@ -607,8 +668,9 @@ const TextWithCitationsInput = ({
       </div>
       <div className="flex items-center gap-1 flex-wrap">
         <Popover
-          open={openPopover}
+          open={disableEditing ? false : openPopover}
           onOpenChange={(open) => {
+            if (disableEditing) return;
             setOpenPopover(open);
             if (!open) setTempLabelSetId(null);
           }}
@@ -620,55 +682,58 @@ const TextWithCitationsInput = ({
                 activeLabelSet={activeLabelSet}
                 onClear={() => onClearLabel?.(activeLabelSetId)}
                 onEdit={() => setOpenPopover(true)}
+                disabled={disableEditing}
               />
             ) : (
-              <TagButton />
+              <TagButton disabled={disableEditing} />
             )}
           </PopoverTrigger>
-          <PopoverContent className="w-96 p-1" align="start">
-            {effectiveLabelSetId ? (
-              <form
-                className="flex flex-col p-1 gap-2"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  onSubmit(effectiveLabelSetId, value);
-                  setOpenPopover(false);
-                  setTempLabelSetId(null);
-                }}
-              >
-                <Textarea
-                  ref={textareaRef}
-                  value={value}
-                  placeholder={placeholder}
-                  onChange={(e) => {
-                    setValue(e.target.value);
-                    adjustHeight();
+          {!disableEditing && (
+            <PopoverContent className="w-96 p-1" align="start">
+              {effectiveLabelSetId ? (
+                <form
+                  className="flex flex-col p-1 gap-2"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    onSubmit(effectiveLabelSetId, value);
+                    setOpenPopover(false);
+                    setTempLabelSetId(null);
                   }}
-                  className="min-h-[24px] max-h-[20vh] text-xs resize-vertical"
-                  autoFocus
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      onSubmit(effectiveLabelSetId, value);
-                      setOpenPopover(false);
-                      setTempLabelSetId(null);
-                    }
-                  }}
-                />
+                >
+                  <Textarea
+                    ref={textareaRef}
+                    value={value}
+                    placeholder={placeholder}
+                    onChange={(e) => {
+                      setValue(e.target.value);
+                      adjustHeight();
+                    }}
+                    className="min-h-[24px] max-h-[20vh] text-xs resize-vertical"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        onSubmit(effectiveLabelSetId, value);
+                        setOpenPopover(false);
+                        setTempLabelSetId(null);
+                      }
+                    }}
+                  />
 
-                <Button size="sm" type="submit">
-                  Save
-                </Button>
-              </form>
-            ) : (
-              <LabelSetMenuItems
-                onLabelSetCreated={(id) => {
-                  setTempLabelSetId(id);
-                }}
-                schema={schema}
-              />
-            )}
-          </PopoverContent>
+                  <Button size="sm" type="submit">
+                    Save
+                  </Button>
+                </form>
+              ) : (
+                <LabelSetMenuItems
+                  onLabelSetCreated={(id) => {
+                    setTempLabelSetId(id);
+                  }}
+                  schema={schema}
+                />
+              )}
+            </PopoverContent>
+          )}
         </Popover>
       </div>
     </div>
@@ -716,6 +781,7 @@ interface JudgeResultCardProps {
   schema: SchemaDefinition;
   labels: Label[];
   activeLabelSetId: string | null;
+  canEditLabels: boolean;
 }
 
 const JudgeResultCard = ({
@@ -723,6 +789,7 @@ const JudgeResultCard = ({
   schema,
   labels,
   activeLabelSetId,
+  canEditLabels,
 }: JudgeResultCardProps) => {
   const agentRunId = agentRunResult.agent_run_id;
   const firstResult = useMemo(
@@ -777,7 +844,7 @@ const JudgeResultCard = ({
   };
 
   const clearLabelField = async (key: string) => {
-    if (!activeLabelSetId) return;
+    if (!activeLabelSetId || !canEditLabels) return;
     const labelSetId = activeLabelSetId;
     // Find the label for this labelSetId
     const labelForSet = labels.find((l) => l.label_set_id === labelSetId);
@@ -833,7 +900,7 @@ const JudgeResultCard = ({
   };
 
   const save = async (key: string, value: any) => {
-    if (!collectionId || !activeLabelSetId) return;
+    if (!collectionId || !activeLabelSetId || !canEditLabels) return;
     const labelSetId = activeLabelSetId;
 
     // Update local state
@@ -907,6 +974,7 @@ const JudgeResultCard = ({
               onClearLabel={() => clearLabelField(key)}
               schema={schema}
               isRequiredWarning={isRequiredAndUnfilled(key)}
+              canEditLabels={canEditLabels}
             />
           );
         }
@@ -925,6 +993,7 @@ const JudgeResultCard = ({
               schema={schema}
               isRequiredWarning={isRequiredAndUnfilled(key)}
               agreement={calculateAgreement(key)}
+              canEditLabels={canEditLabels}
             />
           );
         }
@@ -941,6 +1010,7 @@ const JudgeResultCard = ({
               onClearLabel={() => clearLabelField(key)}
               schema={schema}
               isRequiredWarning={isRequiredAndUnfilled(key)}
+              canEditLabels={canEditLabels}
             />
           );
         }
@@ -963,6 +1033,7 @@ const JudgeResultCard = ({
               onClearLabel={() => clearLabelField(key)}
               schema={schema}
               isRequiredWarning={isRequiredAndUnfilled(key)}
+              canEditLabels={canEditLabels}
             />
           );
         }
