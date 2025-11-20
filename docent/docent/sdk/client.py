@@ -1,11 +1,14 @@
+import gzip
 import itertools
+import json
 import os
 import webbrowser
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Iterator, Literal
 
 import pandas as pd
 import requests
+from pydantic_core import to_jsonable_python
 from tqdm import tqdm
 
 from docent._log_util.logger import get_logger
@@ -15,6 +18,61 @@ from docent.data_models.judge import Label
 from docent.judges.util.meta_schema import validate_judge_result_schema
 from docent.loaders import load_inspect
 from docent.sdk.llm_context import LLMContext, LLMContextItem
+
+MAX_AGENT_RUN_PAYLOAD_BYTES = 100 * 1024 * 1024  # 100MB backend limit
+_AGENT_RUNS_PAYLOAD_PREFIX = b'{"agent_runs":['
+_AGENT_RUNS_PAYLOAD_SUFFIX = b"]}"
+
+
+def _serialize_agent_run(agent_run: AgentRun) -> bytes:
+    """Serialize an AgentRun to compact JSON bytes."""
+    return json.dumps(to_jsonable_python(agent_run), separators=(",", ":")).encode("utf-8")
+
+
+def _build_agent_runs_payload(serialized_runs: list[bytes]) -> bytes:
+    """Wrap serialized individual runs into the API payload envelope."""
+    body = b",".join(serialized_runs)
+    return _AGENT_RUNS_PAYLOAD_PREFIX + body + _AGENT_RUNS_PAYLOAD_SUFFIX
+
+
+def _yield_agent_run_batches_by_size(
+    agent_runs: list[AgentRun], max_payload_bytes: int
+) -> Iterator[tuple[int, bytes]]:
+    """Yield batches of agent runs whose serialized payloads stay within max_payload_bytes."""
+    envelope_len = len(_AGENT_RUNS_PAYLOAD_PREFIX) + len(_AGENT_RUNS_PAYLOAD_SUFFIX)
+    comma_len = 1
+
+    current_serialized: list[bytes] = []
+    current_size = envelope_len
+
+    for agent_run in agent_runs:
+        serialized = _serialize_agent_run(agent_run)
+        serialized_len = len(serialized)
+
+        if envelope_len + serialized_len > max_payload_bytes:
+            raise ValueError(
+                f"A single agent run (id={agent_run.id}) exceeds the maximum payload size of "
+                f"{max_payload_bytes} bytes. Reduce the size of that run before uploading."
+            )
+
+        delimiter = 0 if not current_serialized else comma_len
+        projected_size = current_size + delimiter + serialized_len
+
+        # If adding the next run would exceed the max payload size, yield the current batch
+        if current_serialized and projected_size > max_payload_bytes:
+            yield len(current_serialized), _build_agent_runs_payload(current_serialized)
+
+            # Add the "next run" as the first run in the next batch
+            current_serialized = [serialized]
+            current_size = envelope_len + serialized_len
+        # Otherwise, add to the current batch and continue
+        else:
+            current_serialized.append(serialized)
+            current_size = projected_size
+
+    if current_serialized:
+        yield len(current_serialized), _build_agent_runs_payload(current_serialized)
+
 
 logger = get_logger(__name__)
 
@@ -194,38 +252,65 @@ class Docent:
         logger.info(f"Successfully updated Collection '{collection_id}'")
 
     def add_agent_runs(
-        self, collection_id: str, agent_runs: list[AgentRun], batch_size: int = 1000
+        self,
+        collection_id: str,
+        agent_runs: list[AgentRun],
+        *,
+        compression: Literal["gzip", "none"] = "gzip",
+        # Deprecated
+        batch_size: int | None = None,
     ) -> dict[str, Any]:
         """Adds agent runs to a Collection.
 
         Agent runs represent execution traces that can be visualized and analyzed.
-        This method batches the insertion in groups of 1,000 for better performance.
+        Requests are automatically chunked to stay under the backend's payload limit.
 
         Args:
             collection_id: ID of the Collection.
             agent_runs: List of AgentRun objects to add.
+            compression: Compression algorithm for request bodies. Defaults to gzip.
+                Set to "none" to retain legacy behavior.
 
         Returns:
             dict: API response data.
 
         Raises:
+            ValueError: If any single agent run exceeds the maximum payload size.
             requests.exceptions.HTTPError: If the API request fails.
         """
-        from tqdm import tqdm
+
+        if batch_size is not None:
+            logger.warning(
+                "The 'batch_size' parameter is deprecated and will be removed in a future version. "
+                "We have transitioned to a new batching strategy based on the size of the payload."
+            )
 
         url = f"{self._server_url}/{collection_id}/agent_runs"
         total_runs = len(agent_runs)
 
         # Process agent runs in batches
-        with tqdm(total=total_runs, desc="Adding agent runs", unit="runs") as pbar:
-            for i in range(0, total_runs, batch_size):
-                batch = agent_runs[i : i + batch_size]
-                payload = {"agent_runs": [ar.model_dump(mode="json") for ar in batch]}
+        desc = f"Adding agent runs (compression={compression})"
+        with tqdm(total=total_runs, desc=desc, unit="runs") as pbar:
+            for batch_size, payload_bytes in _yield_agent_run_batches_by_size(
+                agent_runs, MAX_AGENT_RUN_PAYLOAD_BYTES
+            ):
+                request_kwargs: dict[str, Any] = {}
+                if compression == "none":
+                    request_kwargs["data"] = payload_bytes
+                    request_kwargs["headers"] = {"Content-Type": "application/json"}
+                elif compression == "gzip":
+                    request_kwargs["data"] = gzip.compress(payload_bytes)
+                    request_kwargs["headers"] = {
+                        "Content-Type": "application/json",
+                        "Content-Encoding": "gzip",
+                    }
+                else:
+                    raise ValueError(f"Unsupported compression '{compression}'")
 
-                response = self._session.post(url, json=payload)
+                response = self._session.post(url, **request_kwargs)
                 self._handle_response_errors(response)
 
-                pbar.update(len(batch))
+                pbar.update(batch_size)
 
         logger.info(f"Successfully added {total_runs} agent runs to Collection '{collection_id}'")
         return {"status": "success", "total_runs_added": total_runs}

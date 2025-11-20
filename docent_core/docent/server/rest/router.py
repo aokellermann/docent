@@ -1,3 +1,4 @@
+import gzip
 import itertools
 import os
 import tempfile
@@ -18,7 +19,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, ValidationError, model_validator
 from pydantic_core import to_jsonable_python
 from sqlalchemy import select
 from sqlalchemy.inspection import inspect as sqla_inspect
@@ -716,28 +717,72 @@ class DeleteAgentRunsRequest(BaseModel):
     agent_run_ids: list[str]
 
 
+def _decode_agent_runs_body(raw_body: bytes, content_encoding: str | None) -> tuple[bytes, str]:
+    """Decode request body for /agent_runs uploads, applying gzip when requested."""
+
+    normalized = (content_encoding or "").strip().lower()
+    if normalized in ("", "identity"):
+        return raw_body, normalized
+
+    if normalized == "gzip":
+        try:
+            return gzip.decompress(raw_body), normalized
+        except OSError as exc:
+            raise HTTPException(
+                status_code=400, detail="Unable to decompress gzip-compressed request body"
+            ) from exc
+
+    raise HTTPException(
+        status_code=415,
+        detail=f"Unsupported Content-Encoding '{content_encoding}'. Supported encodings: gzip.",
+    )
+
+
 @user_router.post("/{collection_id}/agent_runs")
 async def post_agent_runs(
     collection_id: str,
-    request: PostAgentRunsRequest,
+    request: Request,
     mono_svc: MonoService = Depends(get_mono_svc),
     ctx: ViewContext = Depends(get_default_view_ctx),
     analytics: AnalyticsClient = Depends(use_posthog_user_context),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
 ):
+    raw_body = await request.body()
+    if not raw_body:
+        raise HTTPException(status_code=400, detail="Request body is empty")
+
+    decoded_body, encoding_used = _decode_agent_runs_body(
+        raw_body, request.headers.get("content-encoding")
+    )
+    if encoding_used == "gzip":
+        original_size = len(raw_body)
+        decoded_size = len(decoded_body)
+        compression_ratio = decoded_size / max(original_size, 1)
+        logger.info(
+            "Received gzip-compressed agent runs upload size_bytes=%s decoded_bytes=%s ratio=%.2f",
+            original_size,
+            decoded_size,
+            compression_ratio,
+        )
+
+    try:
+        runs_request = PostAgentRunsRequest.model_validate_json(decoded_body)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=e.errors()) from e
+
     async with mono_svc.advisory_lock(collection_id, action_id="mutation"):
         try:
-            await mono_svc.check_space_for_runs(ctx, len(request.agent_runs))
+            await mono_svc.check_space_for_runs(ctx, len(runs_request.agent_runs))
         except ValueError as e:
             raise HTTPException(status_code=400, detail=f"Cannot add agent runs: {str(e)}")
-        await mono_svc.add_agent_runs(ctx, request.agent_runs)
+        await mono_svc.add_agent_runs(ctx, runs_request.agent_runs)
 
     # Track with PostHog
     analytics.track_event(
         "agent_runs_ingested",
         properties={
             "collection_id": collection_id,
-            "num_runs": len(request.agent_runs),
+            "num_runs": len(runs_request.agent_runs),
         },
     )
 
