@@ -409,6 +409,8 @@ export const SmartValueInput = React.forwardRef<
                 width: `${dropdownWidth}px`,
                 zIndex: DROPDOWN_STYLES.Z_INDEX,
                 maxHeight: DROPDOWN_STYLES.MAX_HEIGHT,
+                // Radix dialog sets pointer-events: none on body; portaled dropdown would inherit that
+                pointerEvents: 'auto',
               }}
             >
               <div className="p-1 relative">
