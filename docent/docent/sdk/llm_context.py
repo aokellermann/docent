@@ -365,7 +365,9 @@ def _get_text_for_citation_target(target: CitationTarget, context: LLMContext) -
             if transcript.id == item.transcript_id:
                 if 0 <= item.block_idx < len(transcript.messages):
                     message = transcript.messages[item.block_idx]
-                    metadata_value = message.metadata.get(item.metadata_key)
+                    metadata_value = (
+                        message.metadata.get(item.metadata_key) if message.metadata else None
+                    )
                     if metadata_value is not None:
                         return json.dumps(metadata_value)
         return None
