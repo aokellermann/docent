@@ -739,32 +739,6 @@ def _decode_agent_runs_body(raw_body: bytes, content_encoding: str | None) -> tu
 
 
 @user_router.post("/{collection_id}/agent_runs")
-async def post_agent_runs(
-    collection_id: str,
-    request: PostAgentRunsRequest,
-    mono_svc: MonoService = Depends(get_mono_svc),
-    ctx: ViewContext = Depends(get_default_view_ctx),
-    analytics: AnalyticsClient = Depends(use_posthog_user_context),
-    _: None = Depends(require_collection_permission(Permission.WRITE)),
-):
-    async with mono_svc.advisory_lock(collection_id, action_id="mutation"):
-        try:
-            await mono_svc.check_space_for_runs(ctx, len(request.agent_runs))
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=f"Cannot add agent runs: {str(e)}")
-        await mono_svc.add_agent_runs(ctx, request.agent_runs)
-
-    # Track with PostHog
-    analytics.track_event(
-        "agent_runs_ingested",
-        properties={
-            "collection_id": collection_id,
-            "num_runs": len(request.agent_runs),
-        },
-    )
-
-
-@user_router.post("/{collection_id}/agent_runs_compressed")
 async def post_agent_runs_compressed(
     collection_id: str,
     request: Request,
