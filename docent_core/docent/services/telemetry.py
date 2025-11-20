@@ -17,6 +17,7 @@ from sqlalchemy import delete, func, not_, or_, select, update
 from sqlalchemy.engine import Result
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import selectinload
 
 from docent._log_util import get_logger
 from docent.data_models import (
@@ -40,10 +41,12 @@ from docent_core.docent.db.contexts import ViewContext
 from docent_core.docent.db.schemas.auth_models import User
 from docent_core.docent.db.schemas.tables import (
     SQLAAgentRun,
+    SQLACollection,
     SQLATelemetryAgentRunStatus,
     SQLATelemetryLog,
     SQLATranscript,
     SQLATranscriptGroup,
+    SQLAUser,
     TelemetryAgentRunStatus,
 )
 from docent_core.docent.services.monoservice import (
@@ -1111,6 +1114,40 @@ class TelemetryService:
         )
         return await self.mono_svc.add_and_enqueue_telemetry_processing_job(
             collection_id, user, force=force
+        )
+
+    async def _get_collection_owner_user(self, collection_id: str) -> User | None:
+        stmt = (
+            select(SQLAUser)
+            .join(SQLACollection, SQLACollection.created_by == SQLAUser.id)
+            .where(SQLACollection.id == collection_id)
+            .options(selectinload(SQLAUser.organizations))
+        )
+        result = await self.session.execute(stmt)
+        owner = result.scalar_one_or_none()
+
+        if owner is None:
+            logger.warning(
+                "Unable to resolve owner for collection %s when ensuring telemetry processing",
+                collection_id,
+            )
+            return None
+
+        return owner.to_user()
+
+    async def ensure_telemetry_processing_for_collection_as_owner(
+        self, collection_id: str, *, force: bool = False
+    ) -> str | None:
+        """
+        Queue telemetry processing using the collection owner as the acting user.
+        Admin tools call this to reuse the owner's view context when they trigger work.
+        """
+        owner_user = await self._get_collection_owner_user(collection_id)
+        if owner_user is None:
+            return None
+
+        return await self.ensure_telemetry_processing_for_collection(
+            collection_id, owner_user, force=force
         )
 
     async def _mark_agent_runs_as_completed(

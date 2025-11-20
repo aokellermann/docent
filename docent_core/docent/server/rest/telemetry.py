@@ -7,9 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
 from docent._log_util import get_logger
-from docent_core.docent.db.schemas.auth_models import Permission, User
+from docent_core.docent.db.schemas.auth_models import User
 from docent_core.docent.server.dependencies.database import require_collection_exists
-from docent_core.docent.server.dependencies.permissions import require_collection_permission
 from docent_core.docent.server.dependencies.services import (
     get_mono_svc,
     get_telemetry_accumulation_service,
@@ -683,7 +682,6 @@ async def ensure_telemetry_processing(
     collection_id: str = Depends(require_collection_exists),
     user: User = Depends(get_user_anonymous_ok),
     mono_svc: MonoService = Depends(get_mono_svc),
-    _: None = Depends(require_collection_permission(Permission.READ)),
 ):
     """
     Ensure telemetry processing is queued for a collection if there's remaining work.
@@ -697,8 +695,8 @@ async def ensure_telemetry_processing(
 
         async with mono_svc.db.session() as session:
             telemetry_svc = TelemetryService(session, mono_svc)
-            job_id = await telemetry_svc.ensure_telemetry_processing_for_collection(
-                collection_id, user
+            job_id = await telemetry_svc.ensure_telemetry_processing_for_collection_as_owner(
+                collection_id
             )
 
             if job_id:
