@@ -30,7 +30,12 @@ class JobService:
             return
 
         # Only cancel the job if it's still active
-        if job.status in [JobStatus.PENDING, JobStatus.RUNNING]:
+        if job.status == JobStatus.PENDING:
+            # Directly cancel the job if pending; there's no worker yet
+            job.status = JobStatus.CANCELED
+            await self.session.commit()
+        elif job.status == JobStatus.RUNNING:
+            # If the job is already running, send a cancel signal
             job.status = JobStatus.CANCELLING
             await self.session.commit()
             await cancel_job(job_id)
