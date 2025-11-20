@@ -23,7 +23,7 @@ import posthog from 'posthog-js';
 import { toast } from '@/hooks/use-toast';
 import { SchemaProperty } from '../types/schema';
 
-interface FilterControlsProps {
+interface ResultFilterControlsProps {
   setIsPopoverOpen: (open: boolean) => void;
 }
 
@@ -60,7 +60,9 @@ function reducer(state: FilterState, action: Action): FilterState {
   }
 }
 
-export function FilterControls({ setIsPopoverOpen }: FilterControlsProps) {
+export function ResultFilterControls({
+  setIsPopoverOpen,
+}: ResultFilterControlsProps) {
   const { options, filters, setFilters, getValidOps, schema } =
     useResultFilterControls();
 
@@ -261,7 +263,7 @@ export function ResultFilterControlsTrigger() {
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[520px] p-3" align="start">
-        <FilterControls setIsPopoverOpen={setIsPopoverOpen} />
+        <ResultFilterControls setIsPopoverOpen={setIsPopoverOpen} />
       </PopoverContent>
     </Popover>
   );
@@ -294,7 +296,7 @@ export function ResultFilterControlsBadges() {
           </button>
         </PopoverTrigger>
         <PopoverContent align="start" sideOffset={4} className="w-[520px] p-3">
-          <FilterControls setIsPopoverOpen={setIsPopoverOpen} />
+          <ResultFilterControls setIsPopoverOpen={setIsPopoverOpen} />
         </PopoverContent>
       </Popover>
       {!showFilters && (
