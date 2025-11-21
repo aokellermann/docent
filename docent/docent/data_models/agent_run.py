@@ -1,7 +1,7 @@
 import sys
 import textwrap
+from collections import deque
 from datetime import datetime
-from queue import Queue
 from typing import Any, Literal, TypedDict, cast
 from uuid import uuid4
 
@@ -257,6 +257,13 @@ class AgentRun(BaseModel):
             self._transcript_group_dict = {tg.id: tg for tg in self.transcript_groups}
         return self._transcript_group_dict
 
+    def _invalidate_caches(self) -> None:
+        """Reset cached lookups after mutating transcripts or transcript groups."""
+        self._transcript_dict = None
+        self._transcript_group_dict = None
+        self._canonical_tree_cache.clear()
+        self._transcript_ids_ordered_cache.clear()
+
     def get_canonical_tree(
         self, full_tree: bool = False
     ) -> dict[str | None, list[tuple[Literal["t", "tg"], str]]]:
@@ -328,14 +335,11 @@ class AgentRun(BaseModel):
                 tg_tree.setdefault(t.transcript_group_id or "__global_root", set()).add(("t", t_id))
         else:
             # Initialize q with "important" tgs
-            q, seen = Queue[str](), set[str]()
-            for tg_id in tgs_to_transcripts.keys():
-                q.put(tg_id)
-                seen.add(tg_id)
+            q, seen = deque(tgs_to_transcripts.keys()), set(tgs_to_transcripts.keys())
 
             # Do an "upwards BFS" from leaves up to the root. Builds a tree of only relevant nodes.
-            while q.qsize() > 0:
-                u_id = q.get()
+            while q:
+                u_id = q.popleft()
                 u = tg_dict.get(u_id)  # None if __global_root
 
                 # Add the transcripts under this tg
@@ -349,7 +353,7 @@ class AgentRun(BaseModel):
                     tg_tree.setdefault(par_id, set()).add(("tg", u_id))
                     # If we haven't investigated the parent before, add to q
                     if par_id not in seen:
-                        q.put(par_id)
+                        q.append(par_id)
                         seen.add(par_id)
 
         # For each node, sort by created_at timestamp
@@ -383,6 +387,38 @@ class AgentRun(BaseModel):
         _assign_transcript_indices("__global_root", 0)
 
         return c_tree, transcript_idx_map
+
+    def delete_transcript_group_subtree(self, transcript_group_id: str) -> None:
+        """Delete a transcript group and all descendant groups/transcripts using the canonical tree."""
+        if transcript_group_id == "__global_root":
+            raise ValueError("Cannot delete the global root sentinel")
+        if transcript_group_id not in self.transcript_group_dict:
+            raise ValueError(
+                f"Transcript group '{transcript_group_id}' does not exist on this run."
+            )
+
+        canonical_tree = self.get_canonical_tree(full_tree=True)
+        groups_to_delete: set[str] = set()
+        transcripts_to_delete: set[str] = set()
+
+        queue: deque[str] = deque([transcript_group_id])
+        while queue:
+            current_group = queue.popleft()
+            groups_to_delete.add(current_group)
+            for child_type, child_id in canonical_tree.get(current_group, []):
+                if child_type == "tg":
+                    queue.append(child_id)
+                else:
+                    transcripts_to_delete.add(child_id)
+
+        if groups_to_delete:
+            self.transcript_groups = [
+                tg for tg in self.transcript_groups if tg.id not in groups_to_delete
+            ]
+        if transcripts_to_delete:
+            self.transcripts = [t for t in self.transcripts if t.id not in transcripts_to_delete]
+
+        self._invalidate_caches()
 
     def to_text_new(
         self,
