@@ -69,7 +69,7 @@ resource "aws_apprunner_service" "api" {
       image_identifier      = "${aws_ecr_repository.backend.repository_url}:latest"
       image_configuration {
         port = "8000"
-        start_command = "docent_core server --port 8000 --workers ${var.app_runner_num_workers}"
+        start_command = "docent_core server --port 8000 --workers ${var.app_runner_num_workers} --use-ddog"
         runtime_environment_variables = {
           ENV_RESOLUTION_STRATEGY = "os_environ"
           DEPLOYMENT_ID        = var.deployment
@@ -82,6 +82,10 @@ resource "aws_apprunner_service" "api" {
           DOCENT_REDIS_HOST    = aws_elasticache_replication_group.redis.primary_endpoint_address
           DOCENT_REDIS_PORT    = aws_elasticache_replication_group.redis.port
           DOCENT_REDIS_TLS     = "true"
+          DD_AGENT_HOST        = aws_lb.datadog_agent.dns_name
+          DD_AGENT_PORT        = "8126"
+          DD_ENV               = var.deployment
+          DD_SERVICE           = "docent-app"
         }
       }
       image_repository_type = "ECR"

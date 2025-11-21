@@ -5,6 +5,7 @@ from pathlib import Path
 import typer
 
 from docent._log_util import get_logger
+from docent_core._env_util import ENV
 
 logger = get_logger(__name__)
 app = typer.Typer(add_completion=False)
@@ -28,9 +29,7 @@ def server(
     port: int = typer.Option(8888, help="Port to bind to"),
     workers: int = typer.Option(1, help="Number of worker processes"),
     reload: bool = typer.Option(False, help="Enable auto-reload on code changes"),
-    timeout_graceful_shutdown: int | None = typer.Option(
-        None, help="Timeout in seconds for graceful shutdown when reloading"
-    ),
+    use_ddog: bool = typer.Option(False, help="Use Datadog APM"),
 ):
     # `cd` to the server directory; this is where we run uvicorn from (helps for autoreload)
     file_path = Path(__file__).parent.absolute()
@@ -46,10 +45,22 @@ def server(
         cmd.extend(["--workers", str(workers)])
     if reload:
         cmd.append("--reload")
-    if timeout_graceful_shutdown is not None:
-        cmd.extend(["--timeout-graceful-shutdown", str(timeout_graceful_shutdown)])
+    if use_ddog:
+        dd_agent_host = ENV.get("DD_AGENT_HOST")
+        dd_agent_port = ENV.get("DD_AGENT_PORT")
+        dd_env = ENV.get("DD_ENV")
+        dd_service = ENV.get("DD_SERVICE")
 
-    subprocess.run(cmd, check=True)
+        if not all([dd_agent_host, dd_agent_port, dd_env, dd_service]):
+            logger.error(
+                "--use-ddog was specified, but required env vars are missing. Disabling Datadog. "
+                "Required env vars: DD_AGENT_HOST, DD_AGENT_PORT, DD_ENV, DD_SERVICE"
+            )
+        else:
+            cmd = ["ddtrace-run"] + cmd
+            logger.info(f"Datadog enabled. Sending traces to {dd_agent_host}:{dd_agent_port}")
+
+    subprocess.run(cmd, check=True, env=ENV)
 
 
 @app.command(help="Run a background job runner worker")

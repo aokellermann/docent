@@ -11,6 +11,7 @@ The infrastructure includes:
 - **ElastiCache**: Redis cluster in private subnets
 - **App Runner**: API server (`docent_core/_server/api.py`) with VPC connectivity
 - **ECS Fargate**: Worker service (`docent_core/_worker/worker.py`) in private subnets
+- **Datadog Agent (ECS Fargate)**: Dedicated service that forwards logs, traces, and metrics to Datadog
 - **ECR**: Container registries for API and worker images
 
 ## Networking
@@ -27,6 +28,7 @@ The infrastructure includes:
 1. AWS CLI configured with appropriate credentials
 2. Terraform >= 1.0 installed
 3. Docker images built and pushed to ECR repositories
+4. Datadog account + API key (export as `TF_VAR_datadog_api_key` before planning/applying)
 
 ## Environment Switching
 
@@ -59,10 +61,13 @@ Each environment maintains its own state file in S3, preventing conflicts when s
    ./switch-to-staging.sh
    ```
 
-2. Set database password securely (if not already set in .tfvars):
+2. Set secrets securely (if not already set in .tfvars):
    ```bash
    # Option 1: Environment variable (recommended)
    export TF_VAR_db_password="your-secure-password"
+   export TF_VAR_datadog_api_key="your-datadog-api-key"
+   # Optional if you use a non-default Datadog site/region
+   export TF_VAR_datadog_site="datadoghq.eu"
    ```
 
 3. Plan the deployment:
@@ -124,8 +129,19 @@ The infrastructure automatically configures these environment variables:
 ## Monitoring
 
 - CloudWatch logs for ECS tasks
+- Dedicated ECS Datadog agent service pushes logs, traces, and metrics (set CPU/memory/desire via `datadog_agent_*` vars)
 - RDS Enhanced Monitoring enabled
 - App Runner has built-in monitoring and auto-scaling
+
+## Datadog Agent Configuration
+
+- The Terraform module provisions an `aws_ecs_service.datadog_agent` running the official `public.ecr.aws/datadog/agent:latest` image in the private subnets.
+- Required inputs:
+  - `datadog_api_key` (sensitive; currently provided as a Terraform variable via `TF_VAR_datadog_api_key`. Consider migrating to AWS Secrets Manager/SSM Parameter Store to avoid storing secrets in state.)
+  - Optional `datadog_site` (defaults to `datadoghq.com`).
+- Sizing knobs:
+  - `datadog_agent_cpu`, `datadog_agent_memory`, `datadog_agent_desired_count` per environment (set in `*.tfvars`).
+- After changing TF vars, run `terraform plan/apply -var-file=<env>.tfvars` in each workspace that needs the agent.
 
 ## Cleanup
 

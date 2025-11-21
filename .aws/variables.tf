@@ -181,6 +181,36 @@ variable "frontend_app_runner_max_size" {
   default     = 10
 }
 
+variable "datadog_api_key" {
+  description = "Datadog API key for the agent"
+  type        = string
+  sensitive   = true
+}
+
+variable "datadog_site" {
+  description = "Datadog site the agent should report to"
+  type        = string
+  default     = "us5.datadoghq.com"
+}
+
+variable "datadog_agent_cpu" {
+  description = "CPU units for the Datadog ECS agent task"
+  type        = number
+  default     = 256
+}
+
+variable "datadog_agent_memory" {
+  description = "Memory (MB) for the Datadog ECS agent task"
+  type        = number
+  default     = 512
+}
+
+variable "datadog_agent_desired_count" {
+  description = "Desired number of Datadog agent tasks"
+  type        = number
+  default     = 1
+}
+
 variable "vpc_cidr_block" {
   description = "CIDR block for the VPC."
   type        = string

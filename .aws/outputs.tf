@@ -13,6 +13,11 @@ output "private_subnet_ids" {
   value       = aws_subnet.private[*].id
 }
 
+output "datadog_apm_nlb_dns_name" {
+  description = "DNS name of the internal NLB fronting the Datadog agent APM endpoint"
+  value       = aws_lb.datadog_agent.dns_name
+}
+
 output "rds_endpoint" {
   description = "RDS instance endpoint"
   value       = aws_db_instance.postgres.endpoint

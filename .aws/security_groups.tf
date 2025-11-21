@@ -96,6 +96,36 @@ resource "aws_security_group" "ecs_tasks" {
   }
 }
 
+resource "aws_security_group" "datadog_agent" {
+  name_prefix = "${var.project_name}-${var.deployment}-datadog-agent-"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port   = 8126
+    to_port     = 8126
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr_block]
+    description = "Allow APM traffic from within the VPC"
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name        = "${var.project_name}-${var.deployment}-datadog-agent-sg"
+    Deployment = var.deployment
+    Role        = "datadog-agent"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 resource "aws_security_group" "vpc_endpoints" {
   name_prefix = "${var.project_name}-${var.deployment}-vpc-endpoints-"
   vpc_id      = aws_vpc.main.id

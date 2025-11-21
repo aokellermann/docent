@@ -136,6 +136,14 @@ resource "aws_ecs_task_definition" "worker" {
         {
           name  = "DOCENT_REDIS_TLS"
           value = "true"
+        },
+        {
+          name  = "DD_AGENT_HOST"
+          value = aws_lb.datadog_agent.dns_name
+        },
+        {
+          name  = "DD_AGENT_PORT"
+          value = "8126"
         }
       ]
 
@@ -174,6 +182,158 @@ resource "aws_ecs_service" "worker" {
   tags = {
     Name        = "${var.project_name}-${var.deployment}-worker-service"
     Deployment = var.deployment
+  }
+}
+
+resource "aws_lb" "datadog_agent" {
+  name               = "${var.project_name}-${var.deployment}-dd-apm"
+  internal           = true
+  load_balancer_type = "network"
+  subnets            = aws_subnet.private[*].id
+
+  enable_cross_zone_load_balancing = true
+
+  tags = {
+    Name        = "${var.project_name}-${var.deployment}-datadog-agent-nlb"
+    Deployment = var.deployment
+    Role        = "datadog-agent"
+  }
+}
+
+resource "aws_lb_target_group" "datadog_agent" {
+  name        = "${var.project_name}-${var.deployment}-dd-apm"
+  port        = 8126
+  protocol    = "TCP"
+  target_type = "ip"
+  vpc_id      = aws_vpc.main.id
+
+  health_check {
+    protocol = "TCP"
+    port     = "8126"
+  }
+
+  tags = {
+    Name        = "${var.project_name}-${var.deployment}-datadog-agent-tg"
+    Deployment = var.deployment
+    Role        = "datadog-agent"
+  }
+}
+
+resource "aws_lb_listener" "datadog_agent" {
+  load_balancer_arn = aws_lb.datadog_agent.arn
+  port              = 8126
+  protocol          = "TCP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.datadog_agent.arn
+  }
+}
+
+resource "aws_ecs_service" "datadog_agent" {
+  name            = "${var.project_name}-${var.deployment}-datadog-agent"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.datadog_agent.arn
+  desired_count   = var.datadog_agent_desired_count
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets          = aws_subnet.private[*].id
+    security_groups  = [aws_security_group.datadog_agent.id]
+    assign_public_ip = false
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.datadog_agent.arn
+    container_name   = "datadog-agent"
+    container_port   = 8126
+  }
+
+  depends_on = [
+    aws_lb_listener.datadog_agent
+  ]
+
+  tags = {
+    Name        = "${var.project_name}-${var.deployment}-datadog-agent-service"
+    Deployment = var.deployment
+    Role        = "datadog-agent"
+  }
+}
+
+resource "aws_ecs_task_definition" "datadog_agent" {
+  family                   = "${var.project_name}-${var.deployment}-datadog-agent"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = var.datadog_agent_cpu
+  memory                   = var.datadog_agent_memory
+  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
+  task_role_arn            = aws_iam_role.ecs_task.arn
+
+  container_definitions = jsonencode([
+    {
+      name  = "datadog-agent"
+      image = "public.ecr.aws/datadog/agent:latest"
+
+      environment = [
+        {
+          name  = "DD_API_KEY"
+          value = var.datadog_api_key
+        },
+        {
+          name  = "DD_SITE"
+          value = var.datadog_site
+        },
+        {
+          name  = "DD_ECS_FARGATE"
+          value = "true"
+        },
+        {
+          name  = "ECS_FARGATE"
+          value = "true"
+        },
+        {
+          name  = "DD_LOGS_ENABLED"
+          value = "true"
+        },
+        {
+          name  = "DD_APM_ENABLED"
+          value = "true"
+        },
+        {
+          name  = "DD_APM_NON_LOCAL_TRAFFIC"
+          value = "true"
+        },
+        {
+          name  = "DD_PROCESS_AGENT_ENABLED"
+          value = "true"
+        }
+      ]
+
+      portMappings = [
+        {
+          containerPort = 8126
+          hostPort      = 8126
+          protocol      = "tcp"
+        }
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.ecs.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "datadog-agent"
+        }
+      }
+
+      essential = true
+    }
+  ])
+
+  tags = {
+    Name        = "${var.project_name}-${var.deployment}-datadog-agent-task"
+    Deployment = var.deployment
+    Role        = "datadog-agent"
   }
 }
 
