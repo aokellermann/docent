@@ -45,14 +45,6 @@ fi
 # Force push the target branch #
 ################################
 
-# Confirmation prompt - this is a destructive operation
-read -p "⚠️ Type 'FORCE PUSH' to confirm that you want to overwrite '$TARGET_BRANCH' with the contents of '$SOURCE_BRANCH': " confirmation
-
-if [ "$confirmation" != "FORCE PUSH" ]; then
-  echo "Operation cancelled. Confirmation text did not match."
-  exit 1
-fi
-
 # Require exact branch name confirmation as an additional safeguard
 read -p "Now type the source branch name exactly to proceed: " source_confirmation
 if [ "$source_confirmation" != "$SOURCE_BRANCH" ]; then
