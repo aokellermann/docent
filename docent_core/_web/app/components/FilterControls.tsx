@@ -5,6 +5,7 @@ import {
   PrimitiveFilter,
   MetadataType,
   ComplexFilter,
+  CollectionFilter,
 } from '@/app/types/collectionTypes';
 import { TranscriptMetadataField } from '@/app/types/experimentViewerTypes';
 import { Button } from '@/components/ui/button';
@@ -53,6 +54,21 @@ export const toggleFilterDisabledState = (
     ...filterGroup,
     filters: updatedFilters,
   };
+};
+
+const isStepEqualityPrimitiveFilter = (
+  filterItem: CollectionFilter
+): filterItem is PrimitiveFilter => {
+  if (filterItem.type !== 'primitive') {
+    return false;
+  }
+
+  const isStepField = filterItem.key_path.join('.') === 'metadata.step';
+  const isEqualityOp = filterItem.op === '==';
+  const isIntegerValue =
+    typeof filterItem.value === 'number' && Number.isInteger(filterItem.value);
+
+  return isStepField && isEqualityOp && isIntegerValue;
 };
 
 interface FilterControlsProps {
@@ -109,20 +125,18 @@ export const FilterControls = ({
 
   // Sync step filter state with existing filters
   useEffect(() => {
-    if (filters?.filters) {
-      const stepFilter = filters.filters.find(
-        (f) =>
-          f.type === 'primitive' && f.key_path.join('.') === 'metadata.step'
-      );
-      if (stepFilter && stepFilter.type === 'primitive') {
-        const stepValue = stepFilter.value;
-        if (typeof stepValue === 'number' && Number.isInteger(stepValue)) {
-          setStepFilterValue(stepValue);
-        }
-      } else {
-        setStepFilterValue(null);
-      }
+    if (!filters?.filters) {
+      setStepFilterValue(null);
+      return;
     }
+
+    const equalityFilter = filters.filters.find(isStepEqualityPrimitiveFilter);
+    if (equalityFilter) {
+      setStepFilterValue(equalityFilter.value);
+      return;
+    }
+
+    setStepFilterValue(null);
   }, [filters]);
 
   const onUpdateMetadataFilter = (value: string) => {
@@ -195,9 +209,9 @@ export const FilterControls = ({
 
     // Check if the removed filter is a step filter
     const removedFilter = filters.filters.find((f) => f.id === filterId);
-    const isStepFilter =
-      removedFilter?.type === 'primitive' &&
-      removedFilter.key_path.join('.') === 'metadata.step';
+    const isStepFilter = removedFilter
+      ? isStepEqualityPrimitiveFilter(removedFilter)
+      : false;
 
     const updatedFilters = filters.filters.filter((f) => f.id !== filterId);
 
@@ -270,12 +284,7 @@ export const FilterControls = ({
 
       // Remove any existing step filter
       const currentFilters =
-        filters?.filters.filter(
-          (f) =>
-            !(
-              f.type === 'primitive' && f.key_path.join('.') === 'metadata.step'
-            )
-        ) || [];
+        filters?.filters.filter((f) => !isStepEqualityPrimitiveFilter(f)) || [];
 
       if (stepValue === null) {
         // No step filter
