@@ -125,11 +125,18 @@ variable "ecs_max_size" {
 variable "ecs_desired_count" {
   description = "Desired number of worker tasks"
   type        = number
+  default     = null
 }
 
-variable "ecs_num_workers" {
-  description = "Number of workers per instance for ECS"
+variable "ecs_default_workers" {
+  description = "Default number of workers per instance for ECS"
   type        = number
+}
+
+variable "ecs_workers_per_queue" {
+  description = "Override worker count per ECS queue (keys: default, telemetry_processing, telemetry_ingest)"
+  type        = map(number)
+  default     = {}
 }
 
 variable "telemetry_processing_ecs_min_size" {
@@ -147,7 +154,7 @@ variable "telemetry_processing_ecs_max_size" {
 variable "telemetry_processing_ecs_desired_count" {
   description = "Desired number of telemetry processing ECS tasks"
   type        = number
-  default     = 0
+  default     = null
 }
 
 variable "telemetry_ingest_ecs_min_size" {
@@ -165,13 +172,19 @@ variable "telemetry_ingest_ecs_max_size" {
 variable "telemetry_ingest_ecs_desired_count" {
   description = "Desired number of telemetry ingest ECS tasks"
   type        = number
-  default     = 0
+  default     = null
 }
 
 variable "worker_queue_target_depth" {
   description = "Target queue depth per worker when autoscaling"
   type        = number
   default     = 1
+}
+
+variable "worker_queue_target_depths" {
+  description = "Override queue depth targets per worker queue (keys: default, telemetry_processing, telemetry_ingest)"
+  type        = map(number)
+  default     = {}
 }
 
 variable "worker_queue_scale_in_cooldown" {

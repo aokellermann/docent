@@ -100,7 +100,7 @@ resource "aws_iam_role_policy" "ecs_task_metrics" {
 }
 
 locals {
-  worker_queue_configs = {
+  worker_queue_base_configs = {
     default = {
       service_suffix = "worker"
       container_name = "worker"
@@ -126,6 +126,14 @@ locals {
       max_size       = var.telemetry_ingest_ecs_max_size
     }
   }
+
+  worker_queue_configs = {
+    for queue_name, config in local.worker_queue_base_configs :
+    queue_name => merge(config, {
+      num_workers  = lookup(var.ecs_workers_per_queue, queue_name, var.ecs_default_workers)
+      target_depth = lookup(var.worker_queue_target_depths, queue_name, var.worker_queue_target_depth)
+    })
+  }
 }
 
 resource "aws_ecs_task_definition" "worker" {
@@ -143,7 +151,7 @@ resource "aws_ecs_task_definition" "worker" {
       name  = each.value.container_name
       image = "${aws_ecr_repository.backend.repository_url}:latest"
 
-      command = ["docent_core", "worker", "--workers", tostring(var.ecs_num_workers)]
+      command = ["docent_core", "worker", "--workers", tostring(each.value.num_workers)]
 
       environment = [
         {
@@ -229,8 +237,12 @@ resource "aws_ecs_service" "worker" {
   name            = "${var.project_name}-${var.deployment}-${each.value.service_suffix}"
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.worker[each.key].arn
-  desired_count   = each.value.desired_count
+  desired_count   = coalesce(each.value.desired_count, 1)
   launch_type     = "FARGATE"
+
+  lifecycle {
+    ignore_changes = [desired_count]
+  }
 
   network_configuration {
     subnets          = aws_subnet.private[*].id
@@ -437,7 +449,7 @@ resource "aws_appautoscaling_policy" "ecs_worker_queue_depth" {
         value = var.deployment
       }
     }
-    target_value       = var.worker_queue_target_depth
+    target_value       = each.value.target_depth
     scale_in_cooldown  = var.worker_queue_scale_in_cooldown
     scale_out_cooldown = var.worker_queue_scale_out_cooldown
   }

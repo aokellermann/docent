@@ -20,18 +20,25 @@ ecs_cpu = 4096
 ecs_memory = 8192
 ecs_min_size = 1
 ecs_max_size = 20
-ecs_desired_count = 1
-ecs_num_workers = 6
+ecs_default_workers = 4
+ecs_workers_per_queue = {
+  default              = 6
+  telemetry_processing = 4
+  telemetry_ingest     = 4
+}
+worker_queue_target_depths = {
+  default              = 3
+  telemetry_processing = 2
+  telemetry_ingest     = 4
+}
 
 # Telemetry processing worker service
 telemetry_processing_ecs_min_size     = 1
 telemetry_processing_ecs_max_size     = 20
-telemetry_processing_ecs_desired_count = 1
 
 # Telemetry ingest worker service
 telemetry_ingest_ecs_min_size     = 1
 telemetry_ingest_ecs_max_size     = 20
-telemetry_ingest_ecs_desired_count = 1
 
 # Queue-depth target tracking (shared by all worker services)
 worker_queue_target_depth       = 1
