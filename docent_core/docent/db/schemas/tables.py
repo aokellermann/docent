@@ -423,6 +423,27 @@ class SQLAView(SQLABase):
         return result
 
 
+class SQLAFilter(SQLABase):
+    __tablename__ = TABLE_FILTER
+
+    id = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    collection_id = mapped_column(
+        String(36),
+        ForeignKey(f"{TABLE_COLLECTION}.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name = mapped_column(Text, nullable=True)
+    description = mapped_column(Text, nullable=True)
+    filter_dict = mapped_column(JSONB, nullable=False)
+    created_by = mapped_column(
+        String(36), ForeignKey(f"{TABLE_USER}.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_at = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False
+    )
+
+
 class SQLASearchCluster(SQLABase):
     __tablename__ = TABLE_SEARCH_CLUSTER
 

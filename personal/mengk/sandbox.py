@@ -10,6 +10,27 @@ IPython.get_ipython().run_line_magic("autoreload", "2")
 
 # %%
 
+import json
+from typing import Any
+
+from docent import Docent
+from docent.data_models.agent_run import AgentRun
+from docent_core._env_util import ENV
+
+client = Docent(api_key=ENV.get("DOCENT_API_KEY"), server_url="http://localhost:8890")
+cid = client.create_collection(name="test", description="test")
+
+with open("file.json", "r") as f:
+    data: list[dict[str, Any]] = json.load(f)
+    data_parsed = [AgentRun.model_validate(item) for item in data]
+
+client.add_agent_runs(
+    cid,
+    data_parsed,
+)
+
+# %%
+
 from docent import Docent
 from docent_core._env_util import ENV
 

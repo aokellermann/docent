@@ -4,9 +4,10 @@ import os
 import tempfile
 import time
 import zipfile
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import anyio
 from fastapi import (
@@ -37,7 +38,9 @@ from docent_core._server._auth.session import (
 from docent_core._server.util import sse_stream
 from docent_core.docent.db.contexts import ViewContext
 from docent_core.docent.db.filters import (
+    CollectionFilter,
     ComplexFilter,
+    parse_filter_dict,
 )
 from docent_core.docent.db.schemas.auth_models import (
     Permission,
@@ -46,7 +49,7 @@ from docent_core.docent.db.schemas.auth_models import (
     User,
 )
 from docent_core.docent.db.schemas.collab_models import CollectionCollaborator
-from docent_core.docent.db.schemas.tables import SQLAAccessControlEntry
+from docent_core.docent.db.schemas.tables import SQLAAccessControlEntry, SQLAFilter
 from docent_core.docent.server.dependencies.analytics import use_posthog_user_context
 from docent_core.docent.server.dependencies.database import (
     get_mono_svc,
@@ -844,6 +847,44 @@ class PostBaseFilterRequest(BaseModel):
     filter: ComplexFilter | None
 
 
+class CreateFilterRequest(BaseModel):
+    filter: CollectionFilter
+    name: str | None = None
+    description: str | None = None
+
+
+class StoredFilterResponse(BaseModel):
+    id: str
+    collection_id: str
+    name: str | None
+    description: str | None
+    filter: CollectionFilter
+    created_at: datetime
+    created_by: str
+
+
+class FilterListItemResponse(BaseModel):
+    id: str
+    name: str | None
+    description: str | None
+    created_at: datetime
+    created_by: str
+
+
+def _serialize_stored_filter(filter_row: SQLAFilter) -> StoredFilterResponse:
+    filter_dict = cast(dict[str, Any], deepcopy(filter_row.filter_dict or {}))
+    filter_model = parse_filter_dict(filter_dict)
+    return StoredFilterResponse(
+        id=filter_row.id,
+        collection_id=filter_row.collection_id,
+        name=filter_row.name,
+        description=filter_row.description,
+        filter=filter_model,
+        created_at=filter_row.created_at,
+        created_by=filter_row.created_by,
+    )
+
+
 @user_router.post("/{collection_id}/base_filter")
 async def post_base_filter(
     collection_id: str,
@@ -878,6 +919,77 @@ async def get_base_filter(
     _: None = Depends(require_view_permission(Permission.WRITE)),
 ):
     return ctx.base_filter
+
+
+@user_router.get(
+    "/{collection_id}/filters",
+    response_model=list[FilterListItemResponse],
+)
+async def list_filters(
+    collection_id: str,
+    mono_svc: MonoService = Depends(get_mono_svc),
+    _: None = Depends(require_collection_permission(Permission.READ)),
+) -> list[FilterListItemResponse]:
+    filters = await mono_svc.list_filter_entries(collection_id=collection_id)
+    return [
+        FilterListItemResponse(
+            id=filter_row.id,
+            name=filter_row.name,
+            description=filter_row.description,
+            created_at=filter_row.created_at,
+            created_by=filter_row.created_by,
+        )
+        for filter_row in filters
+    ]
+
+
+@user_router.post("/{collection_id}/filters", response_model=StoredFilterResponse)
+async def create_filter(
+    collection_id: str,
+    request: CreateFilterRequest,
+    mono_svc: MonoService = Depends(get_mono_svc),
+    user: User = Depends(get_authenticated_user),
+    _: None = Depends(require_collection_permission(Permission.WRITE)),
+):
+    stored_filter = await mono_svc.create_filter_entry(
+        collection_id=collection_id,
+        filter_payload=request.filter,
+        user=user,
+        name=request.name,
+        description=request.description,
+    )
+    return _serialize_stored_filter(stored_filter)
+
+
+@user_router.get(
+    "/{collection_id}/filters/{filter_id}",
+    response_model=StoredFilterResponse,
+)
+async def get_filter(
+    collection_id: str,
+    filter_id: str,
+    mono_svc: MonoService = Depends(get_mono_svc),
+    _: None = Depends(require_collection_permission(Permission.READ)),
+):
+    stored_filter = await mono_svc.get_filter_entry(
+        collection_id=collection_id, filter_id=filter_id
+    )
+    if stored_filter is None:
+        raise HTTPException(status_code=404, detail=f"Filter {filter_id} not found")
+    return _serialize_stored_filter(stored_filter)
+
+
+@user_router.delete("/{collection_id}/filters/{filter_id}")
+async def delete_filter(
+    collection_id: str,
+    filter_id: str,
+    mono_svc: MonoService = Depends(get_mono_svc),
+    _: None = Depends(require_collection_permission(Permission.WRITE)),
+):
+    deleted = await mono_svc.delete_filter_entry(collection_id=collection_id, filter_id=filter_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Filter {filter_id} not found")
+    return {"status": "deleted", "filter_id": filter_id}
 
 
 # class GetRegexSnippetsRequest(BaseModel):

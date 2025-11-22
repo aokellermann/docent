@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from contextlib import asynccontextmanager
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from time import perf_counter
@@ -59,7 +60,7 @@ from docent_core.docent.db.dql import (
     parameterize_expression,
     parse_dql_query,
 )
-from docent_core.docent.db.filters import ComplexFilter
+from docent_core.docent.db.filters import CollectionFilter, ComplexFilter, parse_filter_dict
 from docent_core.docent.db.schemas.auth_models import (
     PERMISSION_LEVELS,
     Permission,
@@ -78,6 +79,7 @@ from docent_core.docent.db.schemas.tables import (
     SQLAAnalyticsEvent,
     SQLAApiKey,
     SQLACollection,
+    SQLAFilter,
     SQLAJob,
     SQLAModelApiKey,
     SQLASearchCluster,
@@ -1353,6 +1355,69 @@ class MonoService:
             collection_id=ctx.collection_id, view_id=ctx.view_id, base_filter=None, user=ctx.user
         )
         return new_ctx
+
+    ###########
+    # Filters #
+    ###########
+
+    async def create_filter_entry(
+        self,
+        *,
+        collection_id: str,
+        filter_payload: CollectionFilter,
+        user: User,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> SQLAFilter:
+        """Persist a filter definition for later reuse."""
+        filter_dict = filter_payload.model_dump()
+        # Validate payload before storing
+        parse_filter_dict(deepcopy(filter_dict))
+        filter_id = str(uuid4())
+
+        async with self.db.session() as session:
+            sqla_filter = SQLAFilter(
+                id=filter_id,
+                collection_id=collection_id,
+                name=name,
+                description=description,
+                filter_dict=filter_dict,
+                created_by=user.id,
+            )
+            session.add(sqla_filter)
+            await session.flush()
+            await session.refresh(sqla_filter)
+            return sqla_filter
+
+    async def get_filter_entry(self, *, collection_id: str, filter_id: str) -> SQLAFilter | None:
+        """Fetch a stored filter."""
+        async with self.db.session() as session:
+            result = await session.execute(
+                select(SQLAFilter).where(
+                    SQLAFilter.collection_id == collection_id, SQLAFilter.id == filter_id
+                )
+            )
+            return result.scalar_one_or_none()
+
+    async def list_filter_entries(self, *, collection_id: str) -> list[SQLAFilter]:
+        """Return all stored filters for a collection ordered by creation time."""
+        async with self.db.session() as session:
+            result = await session.execute(
+                select(SQLAFilter)
+                .where(SQLAFilter.collection_id == collection_id)
+                .order_by(SQLAFilter.created_at.desc())
+            )
+            return list(result.scalars().all())
+
+    async def delete_filter_entry(self, *, collection_id: str, filter_id: str) -> bool:
+        """Delete a stored filter."""
+        async with self.db.session() as session:
+            result = await session.execute(
+                delete(SQLAFilter).where(
+                    SQLAFilter.collection_id == collection_id, SQLAFilter.id == filter_id
+                )
+            )
+            return bool(result.rowcount)
 
     ########
     # Jobs #

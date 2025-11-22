@@ -247,56 +247,11 @@ class AgentRunIdFilter(BaseCollectionFilter):
         return table.id.in_(self.agent_run_ids)
 
 
-class SearchResultPredicateFilter(BaseCollectionFilter):
-    """Filter that applies a predicate to search results."""
-
-    type: Literal["search_result_predicate"] = "search_result_predicate"
-    predicate: str
-    search_query: str
-
-    def to_sqla_where_clause(
-        self,
-        table: Type["SQLAAgentRun"],
-        *,
-        context: FilterSQLContext | None = None,
-    ) -> ColumnElement[bool] | None:
-        """Convert to SQLAlchemy WHERE clause for search result filtering."""
-        if self.disabled:
-            return None
-        # This filter requires joining with search results table
-        # For now, we'll return None to indicate it needs special handling
-        # In practice, this would join with the search_results table
-        return None
-
-
-class SearchResultExistsFilter(BaseCollectionFilter):
-    """Filter that checks if search results exist."""
-
-    type: Literal["search_result_exists"] = "search_result_exists"
-    search_query: str
-
-    def to_sqla_where_clause(
-        self,
-        table: Type["SQLAAgentRun"],
-        *,
-        context: FilterSQLContext | None = None,
-    ) -> ColumnElement[bool] | None:
-        """Convert to SQLAlchemy WHERE clause for search result existence filtering."""
-        if self.disabled:
-            return None
-        # This filter requires joining with search results table
-        # For now, we'll return None to indicate it needs special handling
-        # In practice, this would join with the search_results table
-        return None
-
-
 CollectionFilter = Annotated[
     Union[
         PrimitiveFilter,
         ComplexFilter,
         AgentRunIdFilter,
-        SearchResultPredicateFilter,
-        SearchResultExistsFilter,
     ],
     Discriminator("type"),
 ]
@@ -315,9 +270,5 @@ def parse_filter_dict(filter_dict: dict[str, Any]) -> CollectionFilter:
         return ComplexFilter(**complex_filter_dict)
     elif filter_type == "agent_run_id":
         return AgentRunIdFilter(**filter_dict)
-    elif filter_type == "search_result_predicate":
-        return SearchResultPredicateFilter(**filter_dict)
-    elif filter_type == "search_result_exists":
-        return SearchResultExistsFilter(**filter_dict)
     else:
         raise ValueError(f"Unknown filter type: {filter_type}")

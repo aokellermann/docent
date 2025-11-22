@@ -471,3 +471,7 @@ plt.tight_layout()
 plt.show()
 
 # %%
+
+df[(df["mean_indep_brier_score"] < 0.25) & (df["consistency_brier_score"] > 0.25)]
+
+# %%
