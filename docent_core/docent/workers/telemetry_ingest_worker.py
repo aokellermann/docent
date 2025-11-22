@@ -7,6 +7,7 @@ Moves CPU-heavy OTLP parsing and span accumulation off the request path.
 import base64
 import gzip
 import time
+from collections import defaultdict
 from typing import Any, Dict, Optional
 
 from docent._log_util import get_logger
@@ -40,6 +41,7 @@ async def telemetry_ingest_job(ctx: TelemetryContext, job: SQLAJob) -> None:
     telemetry_log_id = job_params.get("telemetry_log_id")
     user_email = job_params.get("user_email")
     request_id = job_params.get("request_id")
+    agent_runs_by_collection: dict[str, set[str]] = defaultdict(set)
 
     if not telemetry_log_id:
         logger.error("Telemetry ingest job missing telemetry_log_id")
@@ -152,6 +154,12 @@ async def telemetry_ingest_job(ctx: TelemetryContext, job: SQLAJob) -> None:
             collection_ids, collection_names = telemetry_svc.extract_collection_info_from_spans(
                 spans
             )
+            for span in spans:
+                attrs = span.get("attributes", {})
+                collection_attr = attrs.get("collection_id")
+                agent_run_attr = attrs.get("agent_run_id")
+                if isinstance(collection_attr, str) and isinstance(agent_run_attr, str):
+                    agent_runs_by_collection[collection_attr].add(agent_run_attr)
             logger.info(
                 "telemetry_ingest phase=parse_spans telemetry_log_id=%s request_id=%s duration=%.3fs spans=%s collections=%s",
                 telemetry_log_id,
@@ -217,9 +225,16 @@ async def telemetry_ingest_job(ctx: TelemetryContext, job: SQLAJob) -> None:
 
             for collection_id in collection_ids:
                 try:
-                    await telemetry_svc.mono_svc.add_and_enqueue_telemetry_processing_job(
-                        collection_id, user
-                    )
+                    run_ids = agent_runs_by_collection.get(collection_id) or set()
+                    if run_ids:
+                        for agent_run_id in sorted(run_ids):
+                            await telemetry_svc.mono_svc.add_and_enqueue_telemetry_processing_job(
+                                collection_id, user, agent_run_id=agent_run_id
+                            )
+                    else:
+                        await telemetry_svc.mono_svc.add_and_enqueue_telemetry_processing_job(
+                            collection_id, user
+                        )
                 except Exception as exc:  # noqa: BLE001
                     logger.error(
                         "Failed to trigger telemetry processing job for collection %s: %s",

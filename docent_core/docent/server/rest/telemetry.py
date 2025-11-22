@@ -302,17 +302,6 @@ async def trace_done_endpoint(
             collection_id=collection_id,
         )
 
-        try:
-            await telemetry_svc.mono_svc.add_and_enqueue_telemetry_processing_job(
-                collection_id, user
-            )
-        except Exception as exc:
-            logger.error(
-                "Failed to trigger telemetry processing job for collection %s: %s",
-                collection_id,
-                exc,
-            )
-
         return _success_response({"status": "success", "collection_id": collection_id}, request_id)
 
     except HTTPException as exc:
@@ -390,7 +379,7 @@ async def add_score_endpoint(
 
         try:
             await telemetry_svc.mono_svc.add_and_enqueue_telemetry_processing_job(
-                collection_id, user
+                collection_id, user, agent_run_id=agent_run_id
             )
         except Exception as exc:
             logger.error(
@@ -473,7 +462,7 @@ async def add_metadata_endpoint(
 
         try:
             await telemetry_svc.mono_svc.add_and_enqueue_telemetry_processing_job(
-                collection_id, user
+                collection_id, user, agent_run_id=agent_run_id
             )
         except Exception as exc:
             logger.error(
@@ -660,7 +649,7 @@ async def add_transcript_group_metadata_endpoint(
 
         try:
             await telemetry_svc.mono_svc.add_and_enqueue_telemetry_processing_job(
-                collection_id, user
+                collection_id, user, agent_run_id=agent_run_id
             )
         except Exception as exc:
             logger.error(

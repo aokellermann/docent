@@ -1031,6 +1031,136 @@ class TelemetryService:
 
         return agent_run_versions
 
+    async def mark_single_agent_run_for_processing(
+        self, collection_id: str, agent_run_id: str
+    ) -> int | None:
+        """
+        Atomically mark a single agent run as processing when newer data exists.
+        Returns the current_version selected for processing, or None if no work.
+        """
+        errored_version = func.coalesce(
+            sa_cast(
+                SQLATelemetryAgentRunStatus.metadata_json["errored_version"].astext,
+                Integer,
+            ),
+            0,
+        )
+        version_greater_than_processed = (
+            SQLATelemetryAgentRunStatus.current_version
+            > SQLATelemetryAgentRunStatus.processed_version
+        )
+        processing_filter = and_(
+            version_greater_than_processed,
+            or_(
+                SQLATelemetryAgentRunStatus.status != TelemetryAgentRunStatus.ERROR.value,
+                SQLATelemetryAgentRunStatus.current_version > errored_version,
+            ),
+        )
+
+        update_stmt = (
+            update(SQLATelemetryAgentRunStatus)
+            .where(
+                SQLATelemetryAgentRunStatus.collection_id == collection_id,
+                SQLATelemetryAgentRunStatus.agent_run_id == agent_run_id,
+                processing_filter,
+            )
+            .values(status=TelemetryAgentRunStatus.PROCESSING.value)
+            .returning(SQLATelemetryAgentRunStatus.current_version)
+        )
+
+        result = await self.session.execute(update_stmt)
+        row = result.first()
+        if row is None:
+            logger.info(
+                "telemetry_processing mark_single_agent_run status=no_work collection_id=%s agent_run_id=%s",
+                collection_id,
+                agent_run_id,
+            )
+            return None
+
+        selected_version = int(row.current_version)
+        logger.info(
+            "telemetry_processing mark_single_agent_run status=marked collection_id=%s agent_run_id=%s version=%s",
+            collection_id,
+            agent_run_id,
+            selected_version,
+        )
+        return selected_version
+
+    async def process_single_agent_run_job(
+        self, collection_id: str, agent_run_id: str, user: User
+    ) -> bool:
+        """
+        Process a single agent run end-to-end with locking, status updates, and requeue checks.
+        """
+        selected_version = await self.mark_single_agent_run_for_processing(
+            collection_id, agent_run_id
+        )
+        if selected_version is None:
+            return False
+
+        redis_client = await get_redis_client()
+        lock = redis_client.lock(
+            self._agent_run_lock_key(collection_id, agent_run_id),
+            timeout=AGENT_RUN_LOCK_TIMEOUT_SECONDS,
+            blocking=False,
+        )
+
+        try:
+            async with lock:
+                await self.session.rollback()
+                processing_start = time.monotonic()
+                success = await self._process_single_agent_run(
+                    agent_run_id,
+                    collection_id,
+                    user,
+                )
+                processing_duration = time.monotonic() - processing_start
+
+                if success:
+                    await self._mark_agent_runs_as_completed(
+                        collection_id, {agent_run_id: selected_version}
+                    )
+                    logger.info(
+                        "telemetry_processing agent_run status=success collection_id=%s agent_run_id=%s version=%s duration=%.3fs",
+                        collection_id,
+                        agent_run_id,
+                        selected_version,
+                        processing_duration,
+                    )
+                else:
+                    await self._mark_agent_runs_as_errored(
+                        collection_id, {agent_run_id: selected_version}, "Processing failed"
+                    )
+                    logger.error(
+                        "telemetry_processing agent_run status=failed collection_id=%s agent_run_id=%s version=%s duration=%.3fs",
+                        collection_id,
+                        agent_run_id,
+                        selected_version,
+                        processing_duration,
+                    )
+        except LockError:
+            logger.warning(
+                "telemetry_processing agent_run status=skipped reason=lock_contention collection_id=%s agent_run_id=%s",
+                collection_id,
+                agent_run_id,
+            )
+            return False
+        finally:
+            try:
+                await self.ensure_telemetry_processing_for_agent_run(
+                    collection_id, agent_run_id, user
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "telemetry_processing agent_run status=enqueue_failed collection_id=%s agent_run_id=%s error=%s",
+                    collection_id,
+                    agent_run_id,
+                    exc,
+                )
+
+        return True
+
     async def has_remaining_work(self, collection_id: str) -> bool:
         """
         Check if there are agent runs that still need processing for a collection.
@@ -1083,6 +1213,49 @@ class TelemetryService:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none() is not None
 
+    async def has_agent_run_remaining_work(self, collection_id: str, agent_run_id: str) -> bool:
+        """
+        Check if a specific agent run still needs processing.
+        """
+        errored_version = func.coalesce(
+            sa_cast(
+                SQLATelemetryAgentRunStatus.metadata_json["errored_version"].astext,
+                Integer,
+            ),
+            0,
+        )
+        version_greater_than_processed = (
+            SQLATelemetryAgentRunStatus.current_version
+            > SQLATelemetryAgentRunStatus.processed_version
+        )
+
+        stmt = (
+            select(SQLATelemetryAgentRunStatus.agent_run_id)
+            .where(
+                SQLATelemetryAgentRunStatus.collection_id == collection_id,
+                SQLATelemetryAgentRunStatus.agent_run_id == agent_run_id,
+                or_(
+                    and_(
+                        SQLATelemetryAgentRunStatus.status
+                        == TelemetryAgentRunStatus.NEEDS_PROCESSING.value,
+                        version_greater_than_processed,
+                    ),
+                    and_(
+                        version_greater_than_processed,
+                        or_(
+                            SQLATelemetryAgentRunStatus.status
+                            != TelemetryAgentRunStatus.ERROR.value,
+                            SQLATelemetryAgentRunStatus.current_version > errored_version,
+                        ),
+                    ),
+                ),
+            )
+            .limit(1)
+        )
+
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none() is not None
+
     async def ensure_telemetry_processing_for_collection(
         self, collection_id: str, user: User, *, force: bool = False
     ) -> str | None:
@@ -1112,6 +1285,35 @@ class TelemetryService:
         )
         return await self.mono_svc.add_and_enqueue_telemetry_processing_job(
             collection_id, user, force=force
+        )
+
+    async def ensure_telemetry_processing_for_agent_run(
+        self,
+        collection_id: str,
+        agent_run_id: str,
+        user: User,
+        *,
+        force: bool = False,
+    ) -> str | None:
+        """
+        Queue telemetry processing for a specific agent run if work remains.
+        """
+        has_work = await self.has_agent_run_remaining_work(collection_id, agent_run_id)
+        if not has_work:
+            logger.debug(
+                "No remaining telemetry work for collection %s agent_run_id=%s",
+                collection_id,
+                agent_run_id,
+            )
+            return None
+
+        logger.info(
+            "Found telemetry work for collection %s agent_run_id=%s, queueing processing job",
+            collection_id,
+            agent_run_id,
+        )
+        return await self.mono_svc.add_and_enqueue_telemetry_processing_job(
+            collection_id, user, agent_run_id=agent_run_id, force=force
         )
 
     async def _get_collection_owner_user(self, collection_id: str) -> User | None:

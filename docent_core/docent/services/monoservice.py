@@ -1376,14 +1376,20 @@ class MonoService:
         return job_id
 
     async def add_telemetry_processing_job(
-        self, collection_id: str, user: User, *, force: bool = False
+        self,
+        collection_id: str,
+        user: User,
+        *,
+        agent_run_id: str | None = None,
+        force: bool = False,
     ) -> str | None:
         """
-        Adds a telemetry processing job for the given collection.
-        Only adds the job if there isn't already a pending job for this collection.
+        Adds a telemetry processing job for the given collection (or specific agent run).
+        Only adds the job if there isn't already a pending job for the same scope.
 
         Args:
             collection_id: The collection ID to process
+            agent_run_id: Optional agent run ID to scope the job
             user: The user who initiated the processing
             force: When True, permit creating a new job even if an existing one is running
 
@@ -1398,9 +1404,17 @@ class MonoService:
 
             existing_job_query = select(SQLAJob).where(
                 SQLAJob.type == "telemetry_processing_job",
-                SQLAJob.job_json.contains({"collection_id": collection_id}),
                 SQLAJob.status.in_(statuses_to_block),
+                SQLAJob.job_json["collection_id"].astext == collection_id,
             )
+            if agent_run_id is None:
+                existing_job_query = existing_job_query.where(
+                    SQLAJob.job_json["agent_run_id"].is_(None)
+                )
+            else:
+                existing_job_query = existing_job_query.where(
+                    SQLAJob.job_json["agent_run_id"].astext == agent_run_id
+                )
 
             existing_job_result = await session.execute(existing_job_query)
             existing_jobs = existing_job_result.scalars().all()
@@ -1409,7 +1423,11 @@ class MonoService:
                 # Log all existing jobs for debugging
                 job_ids = [job.id for job in existing_jobs]
                 logger.debug(
-                    f"Telemetry processing job(s) already exist for collection {collection_id}: {job_ids} (statuses: {[job.status for job in existing_jobs]})"
+                    "Telemetry processing job(s) already exist for collection %s%s: %s (statuses: %s)",
+                    collection_id,
+                    f" agent_run_id={agent_run_id}" if agent_run_id else "",
+                    job_ids,
+                    [job.status for job in existing_jobs],
                 )
                 return None
 
@@ -1421,13 +1439,19 @@ class MonoService:
                     type="telemetry_processing_job",
                     job_json={
                         "collection_id": collection_id,
+                        "agent_run_id": agent_run_id,
                         "user_id": user.id,
                         "user_email": user.email,
                         "user_organization_ids": user.organization_ids,
                     },
                 )
             )
-            logger.info(f"Added telemetry processing job {job_id} for collection {collection_id}")
+            logger.info(
+                "Added telemetry processing job %s for collection %s%s",
+                job_id,
+                collection_id,
+                f" agent_run_id={agent_run_id}" if agent_run_id else "",
+            )
 
             return job_id
 
@@ -1520,7 +1544,12 @@ class MonoService:
         return job_id
 
     async def add_and_enqueue_telemetry_processing_job(
-        self, collection_id: str, user: User, *, force: bool = False
+        self,
+        collection_id: str,
+        user: User,
+        *,
+        agent_run_id: str | None = None,
+        force: bool = False,
     ) -> str | None:
         """
         Adds a telemetry processing job for the given collection and enqueues it to Redis.
@@ -1528,6 +1557,7 @@ class MonoService:
 
         Args:
             collection_id: The collection ID to process
+            agent_run_id: Optional agent run ID to scope the job
             user: The user who initiated the processing
             force: When True, allow scheduling another job even if one is currently running
 
@@ -1535,7 +1565,9 @@ class MonoService:
             The job ID if created and enqueued, None if job already exists
         """
         # Create or reuse a job in the database
-        job_id = await self.add_telemetry_processing_job(collection_id, user, force=force)
+        job_id = await self.add_telemetry_processing_job(
+            collection_id, user, agent_run_id=agent_run_id, force=force
+        )
         if job_id is None:
             # Verify if an existing pending job is already enqueued; if not, enqueue it
             async with self.db.session() as session:
@@ -1543,7 +1575,12 @@ class MonoService:
                     select(SQLAJob)
                     .where(
                         SQLAJob.type == "telemetry_processing_job",
-                        SQLAJob.job_json.contains({"collection_id": collection_id}),
+                        SQLAJob.job_json["collection_id"].astext == collection_id,
+                        (
+                            SQLAJob.job_json["agent_run_id"].astext == agent_run_id
+                            if agent_run_id is not None
+                            else SQLAJob.job_json["agent_run_id"].is_(None)
+                        ),
                         SQLAJob.status == JobStatus.PENDING,
                     )
                     .order_by(SQLAJob.created_at.desc())
