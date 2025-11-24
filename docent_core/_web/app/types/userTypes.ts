@@ -10,3 +10,10 @@ export interface User {
   is_anonymous: boolean;
   name?: string;
 }
+
+export type ReplayPreference =
+  | 'loading'
+  | 'not-set'
+  | 'full-opt-in'
+  | 'masked-opt-in'
+  | 'opted-out';

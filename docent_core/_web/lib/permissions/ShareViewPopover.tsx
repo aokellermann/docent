@@ -1,5 +1,5 @@
 'use client';
-import { BASE_DOCENT_PATH } from '@/app/constants';
+import { COLLECTIONS_DASHBOARD_PATH } from '@/app/constants';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -189,7 +189,7 @@ const ShareViewPopover = ({ collectionId }: { collectionId: string }) => {
       if (typeof window === 'undefined') {
         throw new Error('Window is undefined');
       }
-      const shareUrl = `${window.location.origin}${BASE_DOCENT_PATH}/${collectionId}`;
+      const shareUrl = `${window.location.origin}${COLLECTIONS_DASHBOARD_PATH}/${collectionId}`;
       const didCopy = await copyToClipboard(shareUrl);
       if (!didCopy) {
         throw new Error('Copy command failed');

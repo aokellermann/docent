@@ -643,7 +643,7 @@ export const AgentRunTable = memo(function AgentRunTable({
   );
 
   return (
-    <div className="relative flex flex-col h-full min-h-0 w-full space-y-3">
+    <div className="relative flex flex-col h-full min-h-0 w-full space-y-3 agent-run-table">
       <div className="relative flex flex-wrap items-start gap-2">
         {showFetchOverlay && (
           <div className="flex flex-wrap items-center gap-1 text-xs h-full text-muted-foreground ml-1">

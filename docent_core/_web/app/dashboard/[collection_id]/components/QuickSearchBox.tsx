@@ -102,6 +102,7 @@ export default function QuickSearchBox({
       <fieldset>
         <InputGroup>
           <InputGroupTextarea
+            id="rubric-input"
             className="h-48 resize-none p-2 text-xs font-mono"
             placeholder={placeholderText}
             value={isPresetHovered ? '' : searchQueryTextboxValue}

@@ -3,41 +3,48 @@
 import { usePathname, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Key, Brain, Gauge, Lock } from 'lucide-react';
+import { Key, Brain, Gauge, Lock, Shield } from 'lucide-react';
+import { type LucideIcon } from 'lucide-react';
 
 interface SidebarItem {
   id: string;
-  label: string;
+  title: string;
   href: string;
-  icon: React.ComponentType<{ className?: string }>;
+  icon: LucideIcon;
 }
 
-const sidebarItems: SidebarItem[] = [
-  {
+export const SettingsSidebarItems: Record<string, SidebarItem> = {
+  'api-keys': {
     id: 'api-keys',
-    label: 'Docent API Keys',
+    title: 'Docent API Keys',
     href: '/settings/api-keys',
     icon: Key,
   },
-  {
+  'change-password': {
     id: 'change-password',
-    label: 'Change Password',
+    title: 'Change Password',
     href: '/settings/change-password',
     icon: Lock,
   },
-  {
+  'model-providers': {
     id: 'model-providers',
-    label: 'Model Providers',
+    title: 'Model Providers',
     href: '/settings/model-providers',
     icon: Brain,
   },
-  {
+  privacy: {
+    id: 'privacy',
+    title: 'Privacy',
+    href: '/settings/privacy',
+    icon: Shield,
+  },
+  usage: {
     id: 'usage',
-    label: 'Usage',
+    title: 'Usage',
     href: '/settings/usage',
     icon: Gauge,
   },
-];
+};
 
 export default function SettingsSidebar() {
   const router = useRouter();
@@ -50,7 +57,7 @@ export default function SettingsSidebar() {
           <h1 className="text-2xl font-bold mb-2">Settings</h1>
         </div>
         <nav className="space-y-2">
-          {sidebarItems.map((item) => {
+          {Object.values(SettingsSidebarItems).map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href;
 
@@ -62,7 +69,7 @@ export default function SettingsSidebar() {
                 onClick={() => router.push(item.href)}
               >
                 <Icon className="mr-2 h-4 w-4" />
-                {item.label}
+                {item.title}
               </Button>
             );
           })}

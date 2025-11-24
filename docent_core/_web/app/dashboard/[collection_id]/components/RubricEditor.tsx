@@ -389,6 +389,7 @@ export default function RubricEditor({
               />
             ) : (
               <Textarea
+                id="rubric-input"
                 className={cn(
                   'h-[30vh] max-h-[50vh] resize-y border-0 p-2 shadow-none focus-visible:ring-0 text-sm custom-scrollbar'
                 )}

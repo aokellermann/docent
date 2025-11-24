@@ -13,7 +13,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
-import { BASE_DOCENT_PATH } from '@/app/constants';
+import { COLLECTIONS_DASHBOARD_PATH } from '@/app/constants';
 import { Collection } from '@/app/types/collectionTypes';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -53,7 +53,7 @@ export default function CollectionRow({
   /* ----------------------------- Event handlers ---------------------------- */
   const openCollection = (e?: React.MouseEvent) => {
     if (isEditing) return;
-    const href = `${BASE_DOCENT_PATH}/${collection.id}`;
+    const href = `${COLLECTIONS_DASHBOARD_PATH}/${collection.id}`;
     if (e && (e.metaKey || e.ctrlKey)) {
       window.open(href, '_blank');
       return;
@@ -64,7 +64,7 @@ export default function CollectionRow({
   const handleAuxClick = (e: React.MouseEvent) => {
     if (isEditing) return;
     if (e.button === 1) {
-      const href = `${BASE_DOCENT_PATH}/${collection.id}`;
+      const href = `${COLLECTIONS_DASHBOARD_PATH}/${collection.id}`;
       window.open(href, '_blank');
     }
   };

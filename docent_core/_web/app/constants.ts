@@ -12,6 +12,8 @@ if (!BASE_URL) {
 export const INTERNAL_BASE_URL =
   process.env.NEXT_PUBLIC_INTERNAL_API_HOST || BASE_URL;
 
-export const BASE_DOCENT_PATH = '/dashboard';
+export const COLLECTIONS_DASHBOARD_PATH = '/dashboard';
 
 export const COOKIE_KEY = 'docent_session';
+export const SESSION_REPLAY_PREFERENCE_KEY =
+  'posthog_session_replay_preference';

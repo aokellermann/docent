@@ -437,7 +437,7 @@ export function MessageBox({
   };
 
   return (
-    <div className="mb-1">
+    <div className="mb-1 agent-run-viewer">
       <div
         id={id}
         className={cn(

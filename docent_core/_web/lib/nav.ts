@@ -1,4 +1,4 @@
-import { BASE_DOCENT_PATH } from '@/app/constants';
+import { COLLECTIONS_DASHBOARD_PATH } from '@/app/constants';
 import { AppRouterInstance } from 'next/dist/shared/lib/app-router-context.shared-runtime';
 
 export const getAgentRunUrl = (
@@ -11,7 +11,7 @@ export const getAgentRunUrl = (
   searchQuery?: string
 ) => {
   const prefix =
-    `${BASE_DOCENT_PATH}/${collectionId}/` +
+    `${COLLECTIONS_DASHBOARD_PATH}/${collectionId}/` +
     (paired ? 'paired_transcript' : 'agent_run') +
     `/${agentRunId}`;
   const params = new URLSearchParams();

@@ -280,7 +280,7 @@ export function MetadataBlock({
   }, [metadata, focusSearchInput]);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 metadata">
       <div className="flex flex-wrap items-center gap-2">
         <Input
           value={searchQuery}

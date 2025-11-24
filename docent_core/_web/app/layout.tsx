@@ -48,17 +48,17 @@ export default async function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <CSPostHogProvider>
-            <ReduxProvider>
-              <UserProvider user={user}>
+          <ReduxProvider>
+            <UserProvider user={user}>
+              <CSPostHogProvider>
                 <TooltipProvider delayDuration={0}>
                   {children}
                   <Toaster />
                   <ReduxToastHandler />
                 </TooltipProvider>
-              </UserProvider>
-            </ReduxProvider>
-          </CSPostHogProvider>
+              </CSPostHogProvider>
+            </UserProvider>
+          </ReduxProvider>
         </ThemeProvider>
       </body>
     </html>

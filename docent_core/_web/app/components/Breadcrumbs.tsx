@@ -12,7 +12,7 @@ import {
 import Link from 'next/link';
 import { useParams, usePathname, useSearchParams } from 'next/navigation';
 
-import { BASE_DOCENT_PATH } from '@/app/constants';
+import { COLLECTIONS_DASHBOARD_PATH } from '@/app/constants';
 import { Button } from '@/components/ui/button';
 
 import { UserProfile } from './auth/UserProfile';
@@ -21,6 +21,7 @@ import { useGetCollectionNameQuery } from '@/app/api/collectionApi';
 import { skipToken } from '@reduxjs/toolkit/query';
 import { cn } from '@/lib/utils';
 import UuidPill from '@/components/UuidPill';
+import { SettingsSidebarItems } from '@/app/settings/components/SettingsSidebar';
 
 interface Crumb {
   title: string;
@@ -32,10 +33,12 @@ const Breadcrumbs: React.FC = () => {
   const searchParams = useSearchParams();
   const disableNavigation = searchParams.get('nav') === 'false';
 
-  const { collection_id: collectionId, agent_run_id: agentRunId } = useParams<{
-    collection_id?: string;
-    agent_run_id?: string;
-  }>();
+  const allParams = useParams();
+  const {
+    collection_id: collectionId,
+    agent_run_id: agentRunId,
+  }: { collection_id?: string; agent_run_id?: string } = allParams;
+
   const pathname = usePathname();
   const { data } = useGetCollectionNameQuery(
     collectionId ? collectionId : skipToken
@@ -43,6 +46,9 @@ const Breadcrumbs: React.FC = () => {
   const collectionName = data?.name;
 
   const crumbs: Record<string, Crumb> = {
+    dashboard: {
+      title: 'Collection',
+    },
     agent_run: {
       title: `Run ${agentRunId?.split('-')[0]}`,
     },
@@ -57,12 +63,7 @@ const Breadcrumbs: React.FC = () => {
   const pageCrumbs: Record<string, Crumb> = {
     undefined: {
       title: 'Agent Runs',
-      url: `${BASE_DOCENT_PATH}/${collectionId}`,
-      icon: Layers,
-    },
-    agent_run: {
-      title: 'Agent Runs',
-      url: `${BASE_DOCENT_PATH}/${collectionId}`,
+      url: `${COLLECTIONS_DASHBOARD_PATH}/${collectionId}`,
       icon: Layers,
     },
     rubric: {
@@ -76,8 +77,19 @@ const Breadcrumbs: React.FC = () => {
     settings: {
       title: 'Settings',
       icon: Settings,
-      url: `${BASE_DOCENT_PATH}`,
+      url: `${COLLECTIONS_DASHBOARD_PATH}`,
     },
+    ...SettingsSidebarItems,
+  };
+
+  const getUUIDForSegment = (param: string): string | undefined => {
+    let resolvedParam: string = param;
+    if (param === 'dashboard') {
+      resolvedParam = 'Collection';
+    }
+
+    const slugLookup = resolvedParam.toLowerCase() + '_id';
+    return allParams[slugLookup] as string | undefined;
   };
 
   const isUUID = (segment: string) => {
@@ -86,93 +98,84 @@ const Breadcrumbs: React.FC = () => {
     );
   };
 
-  const getSegmentsWithRoot = (
-    segments: string[],
-    baseUrl: string
-  ): (Crumb & { url: string })[] => {
-    // Initial url and empty components array
-    let url = baseUrl;
-    const components: (Crumb & { url: string })[] = [];
+  let url = '';
+  const segments = pathname
+    .split('/')
+    .slice(1)
+    .map((segment) => {
+      // Only add a crumb for "identifying" segments
+      // E.g. a segment that is not a UUID
+      if (!isUUID(segment)) {
+        url = `${url}/${segment}`;
 
-    // Make the breadcrumb root
-    const pageKey = segments[0] as keyof typeof pageCrumbs;
-    components.push({
-      url: `${url}/${pageKey}`,
-      ...pageCrumbs[pageKey],
-    });
+        // Get the corresponding UUID for the segment if it exists
+        // E.g. segment, current_path => uuid
+        // (rubric, ".../rubric/[rubric_id]") => uuid
+        // (rubric, ".../rubric") => undefined
+        const uuid = getUUIDForSegment(segment);
+        let crumbToAdd;
 
-    let pending = null;
+        // If there's a UUID for this segment, append it to the URL and get a normal crumb
+        if (uuid) {
+          url = `${url}/${uuid}`;
+          crumbToAdd = crumbs[segment];
+        }
+        // If there is no UUID for this segment, get a crumb from the page crumbs
+        else {
+          crumbToAdd = pageCrumbs[segment];
+        }
 
-    // Iterate over the remaining segments
-    for (const segment of segments) {
-      url = `${url}/${segment}`;
-
-      if (isUUID(segment) || pending !== null) {
-        components.push({
-          url: url,
-          ...crumbs[pending as keyof typeof crumbs],
-        });
-
-        pending = null;
-      } else {
-        pending = segment;
+        // Add the crumb to the components
+        return {
+          url,
+          ...crumbToAdd,
+        };
       }
-    }
+    })
+    .filter((crumb) => crumb !== undefined);
 
-    if (pending !== null && segments.length > 1) {
-      components.push({
-        url: url,
-        ...crumbs[pending as keyof typeof crumbs],
-      });
-    }
+  const getBreadcrumb = (crumb: Crumb & { url: string }, index: number) => {
+    const { url, title, icon: Icon } = crumb;
 
-    return components;
-  };
-
-  const onDashboard = pathname.startsWith(BASE_DOCENT_PATH);
-  const segments = !onDashboard
-    ? getSegmentsWithRoot(pathname.split('/').slice(1), `${BASE_DOCENT_PATH}`)
-    : getSegmentsWithRoot(
-        pathname.split('/').slice(3),
-        `${BASE_DOCENT_PATH}/${collectionId}`
+    if (index === 0 && collectionId && collectionName) {
+      return (
+        <div className="flex items-center gap-2" key={0}>
+          <Link
+            className={cn(
+              'flex items-center gap-x-2',
+              disableNavigation && '!pointer-events-none'
+            )}
+            href={`${COLLECTIONS_DASHBOARD_PATH}/${collectionId}`}
+          >
+            Collection: {collectionName}
+          </Link>
+          <UuidPill uuid={collectionId} />
+          {segments.length > 1 && <ChevronRight className="size-3.5" />}
+        </div>
       );
+    }
+
+    return (
+      <div className="flex items-center gap-2" key={index}>
+        <Link
+          className={cn(
+            'flex items-center gap-x-2',
+            disableNavigation && '!pointer-events-none'
+          )}
+          href={url}
+        >
+          {Icon && <Icon className="size-3.5" />}
+          {title}
+        </Link>
+        {index < segments.length - 1 && <ChevronRight className="size-3.5" />}
+      </div>
+    );
+  };
 
   return (
     <div className="text-sm flex items-center justify-between w-full ml-1">
       <div className="flex items-center gap-x-1">
-        {collectionId && collectionName && (
-          <>
-            <Link
-              className={cn(
-                'flex items-center gap-x-2',
-                disableNavigation && '!pointer-events-none'
-              )}
-              href={`${BASE_DOCENT_PATH}/${collectionId}`}
-            >
-              Collection: {collectionName}
-            </Link>
-            <UuidPill uuid={collectionId} />
-            <ChevronRight className="size-3.5" />
-          </>
-        )}
-        {segments.map(({ url, title, icon: Icon }, index) => (
-          <>
-            <Link
-              className={cn(
-                'flex items-center gap-x-2',
-                disableNavigation && '!pointer-events-none'
-              )}
-              key={url}
-              href={url}
-            >
-              {Icon && <Icon className="size-3.5" />}
-              {title}
-            </Link>
-            {index < segments.length - 1 && (
-              <ChevronRight className="size-3.5" />
-            )}
-          </>
-        ))}
+        {segments.map((crumb, index) => getBreadcrumb(crumb, index))}
       </div>
 
       <div className="flex items-center gap-x-2">

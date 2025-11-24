@@ -891,7 +891,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
         {/* Header area Content */}
         {agentRun && (
           <>
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-1 agent-run-viewer">
               <div className="flex items-center justify-between space-x-1">
                 <div className="flex items-center space-x-1">
                   <Button
