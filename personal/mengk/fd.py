@@ -73,6 +73,8 @@ for batch in batched(inputs):
 
     # Convert to agent runs and judge with Docent
     agent_runs = [convert_to_agent_run(rollout) for rollout in rollouts]
+    # judge.__call__() automatically logs AgentRuns and JudgeResults back into Docent without blocking
+    # The only blocking part is actually computing the judge outputs; the rest is done in the background
     judge_outputs = judge(agent_runs)
 
     # Compute rewards and update the model
