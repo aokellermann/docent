@@ -128,7 +128,9 @@ trap cleanup EXIT INT TERM
 for prefix in "${PREFIXES[@]}"; do
     CMD=(aws logs tail "${LOG_GROUP}" --log-stream-name-prefix "${prefix}" --follow --since="$SINCE")
     if [[ -n "$USER_FILTER" ]]; then
-        CMD+=(--filter-pattern "${USER_FILTER}")
+        # Always use the `--filter-pattern=<val>` form so values starting with '-'
+        # are not parsed as flags by the AWS CLI.
+        CMD+=(--filter-pattern="${USER_FILTER}")
     fi
 
     echo "Running: ${CMD[*]}"

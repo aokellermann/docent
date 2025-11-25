@@ -69,7 +69,9 @@ fi
 
 CMD=(aws logs tail "$LOG_GROUP")
 if [[ -n "$USER_FILTER" ]]; then
-    CMD+=(--filter-pattern "$USER_FILTER")
+    # Always use the `--filter-pattern=<val>` form so values starting with '-'
+    # are not parsed as flags by the AWS CLI.
+    CMD+=(--filter-pattern="$USER_FILTER")
 fi
 CMD+=(--follow --since="$SINCE")
 
