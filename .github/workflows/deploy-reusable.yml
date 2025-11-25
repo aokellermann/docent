@@ -4,25 +4,25 @@ on:
   workflow_call:
     inputs:
       deployment_id:
-        description: 'Deployment identifier (e.g., prod, staging, metr, bwater)'
+        description: "Deployment identifier (e.g., prod, staging, metr, bwater)"
         required: true
         type: string
       github_environment:
-        description: 'GitHub environment name'
+        description: "GitHub environment name"
         required: true
         type: string
       deploy_frontend_vercel:
-        description: 'Deploy frontend to Vercel'
+        description: "Deploy frontend to Vercel"
         required: false
         type: boolean
         default: false
       deploy_frontend_apprunner:
-        description: 'Deploy frontend to App Runner'
+        description: "Deploy frontend to App Runner"
         required: false
         type: boolean
         default: false
       vercel_environment:
-        description: 'Vercel environment (production or preview)'
+        description: "Vercel environment (production or preview)"
         required: false
         type: string
 
@@ -101,12 +101,17 @@ jobs:
             exit 1
           fi
 
-      - name: Force ECS deployment
+      - name: Force ECS deployments
         run: |
-          aws ecs update-service \
-            --cluster ${{ env.PROJECT_NAME }}-${{ inputs.deployment_id }}-cluster \
-            --service ${{ env.PROJECT_NAME }}-${{ inputs.deployment_id }}-worker \
-            --force-new-deployment
+          set -euo pipefail
+          for suffix in worker telemetry-processing-worker telemetry-ingest-worker datadog-agent; do
+            service_name="${{ env.PROJECT_NAME }}-${{ inputs.deployment_id }}-$suffix"
+            echo "Forcing new deployment for $service_name"
+            aws ecs update-service \
+              --cluster ${{ env.PROJECT_NAME }}-${{ inputs.deployment_id }}-cluster \
+              --service "$service_name" \
+              --force-new-deployment
+          done
 
       - name: Deploy App Runner API
         env:

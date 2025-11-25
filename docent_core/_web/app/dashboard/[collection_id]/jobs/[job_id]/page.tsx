@@ -53,10 +53,7 @@ export default function JobDetailPage() {
     };
 
     return (
-      <Badge
-        variant={variants[status]}
-        className="capitalize text-sm px-3 py-1"
-      >
+      <Badge variant={variants[status]} className="capitalize">
         {status}
       </Badge>
     );
@@ -136,10 +133,10 @@ export default function JobDetailPage() {
       <div className="space-y-1 mb-4">
         <div className="flex justify-between items-center">
           <div>
-            <div className="text-lg font-semibold tracking-tight">
+            <div className="text-sm font-semibold tracking-tight">
               Job Details
             </div>
-            <div className="text-sm text-muted-foreground">
+            <div className="text-xs text-muted-foreground">
               Detailed information about this background job
             </div>
           </div>
@@ -151,20 +148,20 @@ export default function JobDetailPage() {
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Job Information</CardTitle>
+            <CardTitle className="text-sm">Job Information</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div>
               <div className="text-xs font-medium text-muted-foreground mb-1">
                 Job ID
               </div>
-              <div className="font-mono text-sm">{job.job_id}</div>
+              <div className="font-mono text-xs">{job.job_id}</div>
             </div>
             <div>
               <div className="text-xs font-medium text-muted-foreground mb-1">
                 Type
               </div>
-              <div className="text-sm">{formatJobType(job.type)}</div>
+              <div className="text-xs">{formatJobType(job.type)}</div>
             </div>
             <div>
               <div className="text-xs font-medium text-muted-foreground mb-1">
@@ -177,20 +174,20 @@ export default function JobDetailPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Timestamps</CardTitle>
+            <CardTitle className="text-sm">Timestamps</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div>
               <div className="text-xs font-medium text-muted-foreground mb-1">
                 Created At
               </div>
-              <div className="text-sm">{formatDate(job.created_at)}</div>
+              <div className="text-xs">{formatDate(job.created_at)}</div>
             </div>
             <div>
               <div className="text-xs font-medium text-muted-foreground mb-1">
                 Collection ID
               </div>
-              <div className="font-mono text-sm">{job.collection_id}</div>
+              <div className="font-mono text-xs">{job.collection_id}</div>
             </div>
           </CardContent>
         </Card>
@@ -198,7 +195,7 @@ export default function JobDetailPage() {
 
       {(job.status === 'pending' || job.status === 'running') && (
         <div className="mt-4 px-3 py-2 bg-blue-50 rounded-lg border border-blue-200">
-          <div className="text-sm text-blue-900">
+          <div className="text-xs text-blue-900">
             <span className="font-medium">
               {job.status === 'pending' ? 'Queued' : 'In Progress'}
             </span>
@@ -211,7 +208,7 @@ export default function JobDetailPage() {
 
       {job.status === 'completed' && (
         <div className="mt-4 px-3 py-2 bg-green-50 rounded-lg border border-green-200">
-          <div className="text-sm text-green-900">
+          <div className="text-xs text-green-900">
             <span className="font-medium">Completed</span>
             {' - '}
             This job has finished successfully.
@@ -221,7 +218,7 @@ export default function JobDetailPage() {
 
       {job.status === 'canceled' && (
         <div className="mt-4 px-3 py-2 bg-red-50 rounded-lg border border-red-200">
-          <div className="text-sm text-red-900">
+          <div className="text-xs text-red-900">
             <span className="font-medium">Failed</span>
             {' - '}
             This job encountered an error or was canceled.

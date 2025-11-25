@@ -86,10 +86,10 @@ export default function JobsPage() {
       <div className="space-y-1 mb-4">
         <div className="flex justify-between items-center">
           <div>
-            <div className="text-lg font-semibold tracking-tight">
+            <div className="text-sm font-semibold tracking-tight">
               Agent Run Ingestion Jobs
             </div>
-            <div className="text-sm text-muted-foreground">
+            <div className="text-xs text-muted-foreground">
               View agent run ingestion jobs for this collection
             </div>
           </div>
@@ -130,19 +130,23 @@ export default function JobsPage() {
             {jobs.map((job) => (
               <TableRow
                 key={job.job_id}
-                className="cursor-pointer hover:bg-muted/50"
+                className="cursor-pointer hover:bg-secondary/50"
                 onClick={() => handleRowClick(job.job_id)}
               >
-                <TableCell>
+                <TableCell className="py-2">
                   <span onClick={(e) => e.stopPropagation()}>
                     <UuidPill uuid={job.job_id} />
                   </span>
                 </TableCell>
-                <TableCell className="font-mono text-xs">
+                <TableCell className="py-2 text-xs text-muted-foreground">
                   {formatDate(job.created_at)}
                 </TableCell>
-                <TableCell>{formatJobType(job.type)}</TableCell>
-                <TableCell>{getStatusBadge(job.status)}</TableCell>
+                <TableCell className="py-2 text-xs text-primary">
+                  {formatJobType(job.type)}
+                </TableCell>
+                <TableCell className="py-2">
+                  {getStatusBadge(job.status)}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>

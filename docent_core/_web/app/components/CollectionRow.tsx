@@ -3,8 +3,6 @@
 import {
   CalendarIcon,
   CheckIcon,
-  ClipboardCopyIcon,
-  Layers,
   Loader2,
   Pencil,
   Trash2,
@@ -18,8 +16,9 @@ import { Collection } from '@/app/types/collectionTypes';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { TableCell, TableRow } from '@/components/ui/table';
+import UuidPill from '@/components/UuidPill';
 import { toast } from '@/hooks/use-toast';
-import { cn, copyToClipboard } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 
 import { useUpdateCollectionMutation } from '../api/collectionApi';
 
@@ -66,23 +65,6 @@ export default function CollectionRow({
     if (e.button === 1) {
       const href = `${COLLECTIONS_DASHBOARD_PATH}/${collection.id}`;
       window.open(href, '_blank');
-    }
-  };
-
-  const copyId = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const success = await copyToClipboard(collection.id);
-    if (success) {
-      toast({
-        title: 'Collection ID Copied',
-        description: `Copied ${collection.id} to clipboard`,
-      });
-    } else {
-      toast({
-        title: 'Failed to copy',
-        description: 'Could not copy to clipboard',
-        variant: 'destructive',
-      });
     }
   };
 
@@ -150,21 +132,9 @@ export default function CollectionRow({
       )}
     >
       {/* ID */}
-      <TableCell className="font-medium py-3">
-        <div className="flex items-center">
-          <Layers className="h-3.5 w-3.5 text-muted-foreground mr-1.5" />
-          <span className="font-mono text-primary text-xs">
-            {collection.id.split('-')[0]}
-          </span>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-5 w-5 ml-1"
-            onClick={copyId}
-            title="Copy full ID"
-          >
-            <ClipboardCopyIcon className="h-3 w-3 text-muted-foreground group-hover:text-blue-text" />
-          </Button>
+      <TableCell className="py-3">
+        <div onClick={(e) => e.stopPropagation()}>
+          <UuidPill uuid={collection.id} />
         </div>
       </TableCell>
 
