@@ -132,10 +132,8 @@ export default function CollectionRow({
       )}
     >
       {/* ID */}
-      <TableCell className="py-3">
-        <div onClick={(e) => e.stopPropagation()}>
-          <UuidPill uuid={collection.id} />
-        </div>
+      <TableCell className="py-2.5">
+        <UuidPill uuid={collection.id} stopPropagation />
       </TableCell>
 
       {/* Name */}

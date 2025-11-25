@@ -3,7 +3,13 @@ import { toast } from '@/hooks/use-toast';
 import { copyToClipboard } from '@/lib/utils';
 import { Copy } from 'lucide-react';
 
-export default function UuidPill({ uuid }: { uuid?: string }) {
+export default function UuidPill({
+  uuid,
+  stopPropagation = false,
+}: {
+  uuid?: string;
+  stopPropagation?: boolean;
+}) {
   const [isOverflowing, setIsOverflowing] = useState(false);
   const textRef = useRef<HTMLSpanElement>(null);
 
@@ -39,7 +45,10 @@ export default function UuidPill({ uuid }: { uuid?: string }) {
 
   if (!uuid) return null;
 
-  const onClick = async () => {
+  const onClick = async (e: React.MouseEvent) => {
+    if (stopPropagation) {
+      e.stopPropagation();
+    }
     const success = await copyToClipboard(uuid);
     if (success) {
       toast({

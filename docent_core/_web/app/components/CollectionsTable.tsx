@@ -87,19 +87,19 @@ export function CollectionsTable({
       <Table>
         <TableHeader className="bg-secondary sticky top-0">
           <TableRow>
-            <TableHead className="w-[15%] py-2.5 font-medium text-xs text-muted-foreground">
+            <TableHead className="w-[15%] py-1 font-medium text-xs text-muted-foreground">
               ID
             </TableHead>
-            <TableHead className="w-[25%] py-2.5 font-medium text-xs text-muted-foreground">
+            <TableHead className="w-[25%] py-1 font-medium text-xs text-muted-foreground">
               Name
             </TableHead>
-            <TableHead className="w-[35%] py-2.5 font-medium text-xs text-muted-foreground">
+            <TableHead className="w-[35%] py-1 font-medium text-xs text-muted-foreground">
               Description
             </TableHead>
-            <TableHead className="w-[15%] py-2.5 font-medium text-xs text-muted-foreground">
+            <TableHead className="w-[15%] py-1 font-medium text-xs text-muted-foreground">
               Created
             </TableHead>
-            <TableHead className="w-[10%] py-2.5 font-medium text-xs text-muted-foreground text-right">
+            <TableHead className="w-[10%] py-1 font-medium text-xs text-muted-foreground text-right">
               Actions
             </TableHead>
           </TableRow>
