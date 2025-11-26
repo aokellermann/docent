@@ -14,6 +14,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from '@/components/ui/tooltip';
 import { FunnelPlus, X } from 'lucide-react';
 import {
   useResultFilterControls,
@@ -22,6 +27,10 @@ import {
 import posthog from 'posthog-js';
 import { toast } from '@/hooks/use-toast';
 import { SchemaProperty } from '../types/schema';
+import { AgentRunJudgeResults } from '../api/rubricApi';
+import { Label } from '../api/labelApi';
+import ViewModeDropdown from '../dashboard/[collection_id]/components/ViewModeDropdown';
+import { cn } from '@/lib/utils';
 
 interface ResultFilterControlsProps {
   setIsPopoverOpen: (open: boolean) => void;
@@ -271,7 +280,17 @@ export function ResultFilterControlsTrigger() {
   );
 }
 
-export function ResultFilterControlsBadges() {
+interface ResultFilterControlsBadgesProps {
+  agentRunResults: AgentRunJudgeResults[];
+  labels: Label[];
+  className?: string;
+}
+
+export function ResultFilterControlsBadges({
+  agentRunResults,
+  labels,
+  className,
+}: ResultFilterControlsBadgesProps) {
   const { filters, setFilters } = useResultFilterControls();
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
 
@@ -286,26 +305,36 @@ export function ResultFilterControlsBadges() {
   const showFilters = filters && filters.length > 0;
 
   return (
-    <div className="flex flex-wrap gap-1.5 max-h-7 h-7 items-center">
-      <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
-        <PopoverTrigger asChild>
-          <button
-            className="inline-flex items-center h-6 gap-x-1 text-xs bg-background text-muted-foreground hover:text-primary border border-border px-1.5 rounded-md hover:bg-accent transition-all duration-200"
-            title="Filter"
+    <div className={cn('flex flex-wrap gap-1.5 items-center', className)}>
+      <div className="inline-flex items-center border border-border rounded-md overflow-hidden">
+        <ViewModeDropdown
+          agentRunResults={agentRunResults}
+          labels={labels ?? []}
+          className="!border-0 rounded-r-none rounded-l-md shadow-none"
+        />
+        <div className="h-7 w-px bg-border" />
+        <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <PopoverTrigger asChild>
+                <Button className="inline-flex items-center h-7 gap-x-1 text-xs bg-background text-muted-foreground hover:text-primary px-1.5 hover:bg-accent transition-all duration-200 rounded-l-none rounded-r-md">
+                  <FunnelPlus size={14} className="stroke-[1.5]" />
+                </Button>
+              </PopoverTrigger>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Add filter</p>
+            </TooltipContent>
+          </Tooltip>
+          <PopoverContent
+            align="start"
+            sideOffset={4}
+            className="w-[520px] p-3"
           >
-            <FunnelPlus size={14} className="stroke-[1.5]" />
-            <span>Filter</span>
-          </button>
-        </PopoverTrigger>
-        <PopoverContent align="start" sideOffset={4} className="w-[520px] p-3">
-          <ResultFilterControls setIsPopoverOpen={setIsPopoverOpen} />
-        </PopoverContent>
-      </Popover>
-      {!showFilters && (
-        <span className="text-xs text-muted-foreground font-mono">
-          No filters
-        </span>
-      )}
+            <ResultFilterControls setIsPopoverOpen={setIsPopoverOpen} />
+          </PopoverContent>
+        </Popover>
+      </div>
       {showFilters &&
         filters.map((f, idx) => (
           <div

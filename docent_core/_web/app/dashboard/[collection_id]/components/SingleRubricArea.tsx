@@ -6,10 +6,14 @@ import { useHasCollectionWritePermission } from '@/lib/permissions/hooks';
 
 import { Rubric } from '../../../store/rubricSlice';
 
-import { Loader2, Minimize2, Maximize2, Tags } from 'lucide-react';
-import RubricEditor from './RubricEditor';
+import { Loader2, Tags, ChevronRight } from 'lucide-react';
+import RubricEditor, { RubricVersionNavigator } from './RubricEditor';
 import { JudgeResultsList } from './JudgeResultsList';
-import { useGetRubricQuery } from '../../../api/rubricApi';
+import {
+  AgentRunJudgeResults,
+  useGetRubricQuery,
+  useGetLatestRubricVersionQuery,
+} from '../../../api/rubricApi';
 import { Button } from '@/components/ui/button';
 import {
   Tooltip,
@@ -19,21 +23,73 @@ import {
 } from '@/components/ui/tooltip';
 import LabelSetsDialog from './LabelSetsDialog';
 import { ResultFilterControlsBadges } from '@/app/components/ResultFilterControls';
-import RunRubricButton from './RunRubricButton';
 import { AgreementPopover } from './AgreementPopover';
 import ClusterButton from './ClusterButton';
 import useJobStatus from '@/app/hooks/use-job-status';
 import { ProgressBar } from '@/app/components/ProgressBar';
 import { useRubricVersion } from '@/providers/use-rubric-version';
-import ShareRubricButton from './ShareRubricButton';
 import { useRefinementTab } from '@/providers/use-refinement-tab';
 import { usePostRubricUpdateToRefinementSessionMutation } from '@/app/api/refinementApi';
 import { toast } from '@/hooks/use-toast';
-import RubricRunDialog from './RubricRunDialog';
-import ViewModeDropdown from './ViewModeDropdown';
-import { useGetLabelsInLabelSetQuery } from '@/app/api/labelApi';
+import { Label, useGetLabelsInLabelSetQuery } from '@/app/api/labelApi';
 import { useLabelSets } from '@/providers/use-label-sets';
 import { skipToken } from '@reduxjs/toolkit/query';
+import { SchemaDefinition } from '@/app/types/schema';
+import { cn } from '@/lib/utils';
+
+interface AgreementWidgetProps {
+  agentRunResults: AgentRunJudgeResults[];
+  activeLabelSet: any;
+  setIsLabelSetsDialogOpen: (open: boolean) => void;
+  labels: Label[];
+  schema?: SchemaDefinition;
+  className?: string;
+}
+
+function AgreementWidget({
+  agentRunResults,
+  activeLabelSet,
+  setIsLabelSetsDialogOpen,
+  labels,
+  schema,
+  className,
+}: AgreementWidgetProps) {
+  return (
+    <div className={cn('flex flex-row', className)}>
+      <TooltipProvider>
+        <div className="flex">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setIsLabelSetsDialogOpen(true)}
+              >
+                <Tags />
+                {activeLabelSet ? (
+                  <span className="hidden xl:inline">
+                    {activeLabelSet.name}
+                  </span>
+                ) : (
+                  <span className="hidden xl:inline">Select label set</span>
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Manage label sets</TooltipContent>
+          </Tooltip>
+        </div>
+      </TooltipProvider>
+      {activeLabelSet && (
+        <AgreementPopover
+          agentRunResults={agentRunResults}
+          labels={labels}
+          schema={schema}
+        />
+      )}
+    </div>
+  );
+}
 
 interface SingleRubricAreaProps {
   rubricId: string;
@@ -66,7 +122,6 @@ export default function SingleRubricArea({
 
   // Unsaved changes from the editor
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [isRunDialogOpen, setIsRunDialogOpen] = useState(false);
   const { version, setVersion } = useRubricVersion();
   const { setRefinementJobId } = useRefinementTab();
 
@@ -146,48 +201,31 @@ export default function SingleRubricArea({
     }
   };
 
-  const [showDiff, setShowDiff] = useState(false);
   const noJudgeResults = agentRunResults.length == 0;
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isEditorCollapsed, setIsEditorCollapsed] = useState(false);
+
+  // Get the latest version number for the version navigator
+  const minVersion = 1;
+  const { data: maxVersion } = useGetLatestRubricVersionQuery({
+    collectionId,
+    rubricId,
+  });
+
+  // Determine if the editor is editable
+  const isEditable =
+    !rubricJobId && hasWritePermission && !clusteringJobId && !isLabelsLoading;
+
+  const isClusteringActive = clusteringJobId !== null || centroids.length > 0;
 
   const ResultsSection = (
     <>
-      {/* Action Buttons */}
-      <div className="flex flex-wrap items-center justify-between">
-        <div className="flex flex-wrap items-center gap-1.5">
-          {/* View mode dropdown */}
-          <ViewModeDropdown
-            agentRunResults={agentRunResults}
-            labels={labels ?? []}
-          />
-
-          {/* Label set */}
-          <TooltipProvider>
-            <div className="flex">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setIsLabelSetsDialogOpen(true)}
-                  >
-                    <Tags />
-                    {activeLabelSet ? (
-                      <span className="hidden xl:inline">
-                        {activeLabelSet.name}
-                      </span>
-                    ) : (
-                      <span className="hidden xl:inline">Select label set</span>
-                    )}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Manage label sets</TooltipContent>
-              </Tooltip>
-            </div>
-          </TooltipProvider>
-
-          {/* Clustering controls */}
+      <div className="flex flex-wrap items-center gap-2 justify-between">
+        <ResultFilterControlsBadges
+          agentRunResults={agentRunResults}
+          labels={labels ?? []}
+          className="mr-auto"
+        />
+        <div className="flex items-center gap-1.5 ml-auto">
           {!rubricJobId && hasWritePermission && !noJudgeResults && (
             <ClusterButton
               collectionId={collectionId}
@@ -198,45 +236,16 @@ export default function SingleRubricArea({
               hasCentroids={centroids.length > 0}
             />
           )}
-
-          {/* Rubric controls */}
-          {!clusteringJobId && hasWritePermission && centroids.length === 0 && (
-            <RunRubricButton
-              collectionId={collectionId}
-              rubricId={rubricId}
-              rubricJobId={rubricJobId}
-              rubricJobStatus={rubricJobStatus}
-              hasUnsavedChanges={hasUnsavedChanges}
-              onClick={() => setIsRunDialogOpen(true)}
+          {!isClusteringActive && (
+            <AgreementWidget
+              agentRunResults={agentRunResults}
+              activeLabelSet={activeLabelSet}
+              setIsLabelSetsDialogOpen={setIsLabelSetsDialogOpen}
+              schema={schema}
+              labels={labels ?? []}
             />
           )}
-
-          {/* Expand / collapse and sharing */}
-          <div className="hidden lg:flex items-center gap-2">
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              className="size-7 text-xs text-muted-foreground"
-              onClick={() => setIsExpanded(!isExpanded)}
-            >
-              {isExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-            </Button>
-
-            <ShareRubricButton
-              rubricId={rubricId}
-              collectionId={collectionId}
-            />
-          </div>
         </div>
-      </div>
-      <div className="flex items-center gap-2 px-0.5 justify-between">
-        <ResultFilterControlsBadges />
-        <AgreementPopover
-          agentRunResults={agentRunResults}
-          schema={schema}
-          labels={labels ?? []}
-        />
       </div>
 
       {rubricJobId && (
@@ -277,37 +286,48 @@ export default function SingleRubricArea({
           activeLabelSet={activeLabelSet}
         />
       )}
-
-      <RubricRunDialog
-        isOpen={isRunDialogOpen}
-        onClose={() => setIsRunDialogOpen(false)}
-        collectionId={collectionId}
-        rubricId={rubricId}
-      />
     </>
   );
 
   return (
     <div className="space-y-2 flex flex-col flex-1 min-w-0">
-      {!isExpanded && (
+      {/* Clickable header with disclosure triangle */}
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          className="flex items-center gap-1 cursor-pointer hover:text-foreground/80"
+          onClick={() => setIsEditorCollapsed(!isEditorCollapsed)}
+          aria-expanded={!isEditorCollapsed}
+        >
+          <ChevronRight
+            className={cn(
+              'h-4 w-4 transition-transform',
+              !isEditorCollapsed && 'rotate-90'
+            )}
+          />
+          <span className="text-sm font-semibold">
+            {isEditable ? 'Rubric Editor' : 'Rubric Evaluation'}
+          </span>
+        </button>
+
+        <RubricVersionNavigator
+          rubric={rubric}
+          maxVersion={maxVersion}
+          minVersion={minVersion}
+          setRubricVersion={setVersion}
+        />
+      </div>
+
+      {!isEditorCollapsed && (
         <RubricEditor
           collectionId={collectionId}
           rubricId={rubricId}
           rubricVersion={version}
-          setRubricVersion={setVersion}
-          showDiff={showDiff}
-          setShowDiff={setShowDiff}
-          forceOpenSchema={false}
           onSave={handleRubricSave}
           onCloseWithoutSave={() => {}}
           shouldConfirmOnSave={hasLabels}
           onHasUnsavedChangesUpdated={setHasUnsavedChanges}
-          editable={
-            !rubricJobId &&
-            hasWritePermission &&
-            !clusteringJobId &&
-            !isLabelsLoading
-          }
+          editable={isEditable}
         />
       )}
 

@@ -51,6 +51,11 @@ export const AgreementPopover = ({
     });
   }, [schema]);
 
+  // Function to get the default property (first property for now)
+  const getDefaultProperty = (properties: string[]): string | null => {
+    return properties.length > 0 ? properties[0] : null;
+  };
+
   // Get first results per agent run for filtering
   const firstResults = useMemo(
     () => agentRunResults.map((arr) => arr.results[0]).filter(Boolean),
@@ -66,10 +71,16 @@ export const AgreementPopover = ({
   // Track the selected property for the visible selection
   const [selectedProperty, setSelectedProperty] = useState<string | null>(null);
 
-  // Default to the first property
+  // Update to default property when countableProperties or activeLabelSet changes
   useEffect(() => {
     if (countableProperties.length > 0 && activeLabelSet) {
-      setSelectedProperty(countableProperties[0]);
+      const defaultProp = getDefaultProperty(countableProperties);
+      setSelectedProperty((current) => {
+        // Keep current if it's still valid, otherwise use default
+        return current && countableProperties.includes(current)
+          ? current
+          : defaultProp;
+      });
     }
   }, [countableProperties, activeLabelSet]);
 
@@ -169,11 +180,11 @@ export const AgreementPopover = ({
       <PopoverTrigger asChild>
         <button className="text-xs h-7 gap-2 text-muted-foreground items-center flex justify-center px-2">
           <span className="font-mono truncate">
-            {selectedProperty && activeLabelSet
-              ? `${activeLabelSet.name}.${selectedProperty}`
+            {selectedProperty !== null && activeLabelSet
+              ? `${selectedProperty}`
               : ''}
           </span>
-          {selectedProperty && activeLabelSet ? (
+          {selectedProperty !== null && activeLabelSet ? (
             <span className="whitespace-nowrap">
               {propertyStats[selectedProperty]
                 ? propertyStats[selectedProperty].matches

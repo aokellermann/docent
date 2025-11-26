@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ChevronDown, Tags, Split, AlertCircle } from 'lucide-react';
+import { Tags, Split, AlertCircle } from 'lucide-react';
 import {
   ViewMode,
   useResultFilterControls,
@@ -53,11 +53,13 @@ const VIEW_MODE_OPTIONS: ViewModeOption[] = [
 interface ViewModeDropdownProps {
   agentRunResults: AgentRunJudgeResults[];
   labels: Label[];
+  className?: string;
 }
 
 export default function ViewModeDropdown({
   agentRunResults,
   labels,
+  className,
 }: ViewModeDropdownProps) {
   const { viewMode, setViewMode, filters } = useResultFilterControls();
 
@@ -96,14 +98,13 @@ export default function ViewModeDropdown({
         <Button
           variant="outline"
           size="sm"
-          className="h-7 gap-1.5 text-xs font-normal"
+          className={cn('h-7 gap-1.5 text-xs font-normal', className)}
         >
           {Icon && <Icon className="h-3 w-3" />}
           <span className="hidden sm:inline">{currentOption?.label}</span>
           <Badge variant="secondary" className="h-4 px-1 text-xs font-normal">
             {counts[viewMode]}
           </Badge>
-          <ChevronDown className="h-3 w-3 opacity-50" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-80">

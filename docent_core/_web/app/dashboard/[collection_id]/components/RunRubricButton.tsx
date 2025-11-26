@@ -77,8 +77,7 @@ const RunRubricButton = ({
   } else {
     // Otherwise, show the run button
     // But if the button is disabled, show a tooltip
-
-    const RunButton = () => (
+    const runButton = (
       <Button
         type="button"
         size="sm"
@@ -92,16 +91,14 @@ const RunRubricButton = ({
     if (isButtonDisabled) {
       return (
         <Tooltip>
-          <TooltipTrigger asChild>
-            <RunButton />
-          </TooltipTrigger>
+          <TooltipTrigger asChild>{runButton}</TooltipTrigger>
           <TooltipContent side="bottom">
             Switch to the latest version to run.
           </TooltipContent>
         </Tooltip>
       );
     } else {
-      return <RunButton />;
+      return runButton;
     }
   }
 };

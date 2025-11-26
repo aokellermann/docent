@@ -2,20 +2,17 @@
 
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
-import { skipToken } from '@reduxjs/toolkit/query';
 
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Label } from '@/components/ui/label';
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import { Badge } from '@/components/ui/badge';
 
 import { type Rubric } from '@/app/store/rubricSlice';
-import JsonEditor from './JsonEditor';
 import {
   useGetRubricQuery,
   useGetLatestRubricVersionQuery,
@@ -25,101 +22,82 @@ import {
 import { useAppDispatch } from '@/app/store/hooks';
 import { cn } from '@/lib/utils';
 import ModelPicker from '@/components/ModelPicker';
-import { Separator } from '@/components/ui/separator';
+import RunRubricButton from './RunRubricButton';
+import RubricRunDialog from './RubricRunDialog';
+import useJobStatus from '@/app/hooks/use-job-status';
+import { useLabelSets } from '@/providers/use-label-sets';
+import { useHasCollectionWritePermission } from '@/lib/permissions/hooks';
+import CodeMirror, { EditorView } from '@uiw/react-codemirror';
+import { json as jsonLanguage } from '@codemirror/lang-json';
+import { useTheme } from 'next-themes';
 
-function DescriptionInlineDiff({
-  previous,
-  current,
-}: {
-  previous: string;
-  current: string;
-}) {
-  if (previous === current) {
-    return (
-      <div className="rounded-sm border-0 bg-background p-2">
-        <div className="text-[11px] uppercase text-muted-foreground mb-1">
-          No changes from previous version
-        </div>
-        <div className="text-sm whitespace-pre-wrap break-words">{current}</div>
-      </div>
-    );
-  }
+export interface RubricVersionNavigatorProps {
+  rubric: Rubric | null | undefined;
+  maxVersion: number | undefined;
+  minVersion: number;
+  setRubricVersion?: (version: number) => void;
+}
 
-  const tokenize = (text: string) => text.match(/\S+\s*/g) || [];
-  const wordOf = (token: string) => token.trim();
-
-  const prevTokens = tokenize(previous);
-  const currTokens = tokenize(current);
-  const prevWords = prevTokens.map(wordOf);
-  const currWords = currTokens.map(wordOf);
-
-  const m = prevWords.length;
-  const n = currWords.length;
-  const dp: number[][] = Array.from({ length: m + 1 }, () =>
-    Array(n + 1).fill(0)
-  );
-  for (let i = m - 1; i >= 0; i--) {
-    for (let j = n - 1; j >= 0; j--) {
-      dp[i][j] =
-        prevWords[i] === currWords[j]
-          ? dp[i + 1][j + 1] + 1
-          : Math.max(dp[i + 1][j], dp[i][j + 1]);
+export function RubricVersionNavigator({
+  rubric,
+  maxVersion,
+  minVersion,
+  setRubricVersion,
+}: RubricVersionNavigatorProps) {
+  const handleVersionDecrement = () => {
+    if (setRubricVersion && rubric && rubric.version > minVersion) {
+      setRubricVersion(rubric.version - 1);
     }
-  }
+  };
 
-  const nodes: JSX.Element[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < m || j < n) {
-    if (i < m && j < n && prevWords[i] === currWords[j]) {
-      nodes.push(<span key={`eq-${i}-${j}`}>{currTokens[j]}</span>);
-      i++;
-      j++;
-    } else if (j < n && (i === m || dp[i][j + 1] >= (dp[i + 1]?.[j] ?? -1))) {
-      nodes.push(
-        <span
-          key={`add-${i}-${j}`}
-          className="bg-green-bg/40 text-green-text rounded px-0.5"
-        >
-          {currTokens[j]}
-        </span>
-      );
-      j++;
-    } else if (i < m) {
-      nodes.push(
-        <span
-          key={`del-${i}-${j}`}
-          className="bg-red-bg/40 text-red-text line-through rounded px-0.5"
-        >
-          {prevTokens[i]}
-        </span>
-      );
-      i++;
-    } else {
-      break;
+  const handleVersionIncrement = () => {
+    if (
+      setRubricVersion &&
+      rubric &&
+      maxVersion !== undefined &&
+      rubric.version < maxVersion
+    ) {
+      setRubricVersion(rubric.version + 1);
     }
-  }
+  };
 
   return (
-    <div className="h-[40vh] rounded-sm border-0 bg-background p-2 overflow-y-auto custom-scrollbar">
-      {/* <div className="text-[11px] uppercase text-muted-foreground mb-1">
-        Description changes
-      </div> */}
-      <div className="text-sm whitespace-pre-wrap break-words">{nodes}</div>
+    <div className="flex items-center gap-0.5 bg-secondary rounded border px-1 py-0.5">
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-4 w-4 p-0 hover:bg-background/50"
+        onClick={handleVersionDecrement}
+        disabled={!rubric || rubric.version <= minVersion}
+      >
+        <ChevronLeft className="h-2.5 w-2.5" />
+      </Button>
+      <div className="text-xs font-mono px-1.5 min-w-[2.5rem] text-center">
+        {rubric && maxVersion !== undefined
+          ? `v${rubric.version}/${maxVersion}`
+          : rubric
+            ? rubric.version
+            : '-'}
+      </div>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-4 w-4 p-0 hover:bg-background/50"
+        onClick={handleVersionIncrement}
+        disabled={
+          !rubric || maxVersion === undefined || rubric.version >= maxVersion
+        }
+      >
+        <ChevronRight className="h-2.5 w-2.5" />
+      </Button>
     </div>
   );
 }
-
-//
 
 interface RubricEditorProps {
   collectionId: string;
   rubricId: string;
   rubricVersion: number | null;
-  setRubricVersion?: (version: number) => void;
-  showDiff?: boolean;
-  setShowDiff?: (show: boolean) => void;
-  forceOpenSchema: boolean;
   onSave: (rubric: Rubric, clearLabels: boolean) => void;
   onCloseWithoutSave?: () => void;
   editable: boolean;
@@ -131,10 +109,6 @@ export default function RubricEditor({
   collectionId,
   rubricId,
   rubricVersion,
-  setRubricVersion,
-  showDiff,
-  setShowDiff,
-  forceOpenSchema,
   onSave,
   onCloseWithoutSave,
   editable,
@@ -157,6 +131,33 @@ export default function RubricEditor({
 
   const [schemaText, setSchemaText] = useState<string>('');
   const [schemaError, setSchemaError] = useState<string | null>(null);
+  const [schemaOpen, setSchemaOpen] = useState(false);
+
+  const [isRunDialogOpen, setIsRunDialogOpen] = useState(false);
+
+  const { resolvedTheme } = useTheme();
+  const codemirrorExtensions = useMemo(
+    () => [jsonLanguage(), EditorView.lineWrapping],
+    []
+  );
+
+  const hasWritePermission = useHasCollectionWritePermission();
+
+  const { activeLabelSet } = useLabelSets(rubricId);
+  const activeLabelSetId = activeLabelSet?.id;
+  const {
+    // Rubric job status
+    rubricJobId,
+    rubricJobStatus,
+
+    // Clustering job status
+    clusteringJobId,
+    centroids,
+  } = useJobStatus({
+    collectionId,
+    rubricId,
+    labelSetId: activeLabelSetId ?? null,
+  });
 
   useEffect(() => {
     if (remoteRubric) {
@@ -169,7 +170,6 @@ export default function RubricEditor({
   }, [remoteRubric, editable, setSchemaText, setSchemaError]);
 
   // Get the latest version number
-  const minVersion = 1;
   const { data: maxVersion } = useGetLatestRubricVersionQuery({
     collectionId,
     rubricId,
@@ -186,17 +186,6 @@ export default function RubricEditor({
   const rubric = useMemo(() => {
     return editable ? localRubric : remoteRubric;
   }, [localRubric, remoteRubric, editable]);
-
-  // Previous version state
-  const { data: prevRubricRemote } = useGetRubricQuery(
-    rubric && rubric.version >= 2 && showDiff
-      ? {
-          collectionId,
-          rubricId,
-          version: Math.max(1, rubric.version - 1),
-        }
-      : skipToken
-  );
 
   // Helper function to create a new rubric with updates
   const updateRubric = (updates: Partial<Rubric>) => {
@@ -215,24 +204,6 @@ export default function RubricEditor({
   ) => {
     if (!editable) return;
     updateRubric({ rubric_text: e.target.value });
-  };
-
-  // Version control handlers
-  const handleVersionDecrement = () => {
-    if (setRubricVersion && rubric && rubric.version > minVersion) {
-      setRubricVersion(rubric.version - 1);
-    }
-  };
-
-  const handleVersionIncrement = () => {
-    if (
-      setRubricVersion &&
-      rubric &&
-      maxVersion !== undefined &&
-      rubric.version < maxVersion
-    ) {
-      setRubricVersion(rubric.version + 1);
-    }
   };
 
   // Don't clear by default
@@ -285,8 +256,27 @@ export default function RubricEditor({
   }, [remoteRubric?.output_schema]);
 
   const schemaHasChanges = useMemo(() => {
+    if (!schemaText || !remoteRubric) return false;
     return schemaText !== normalizedRemoteSchema;
-  }, [schemaText, normalizedRemoteSchema]);
+  }, [schemaText, normalizedRemoteSchema, remoteRubric]);
+
+  const schemaPropertyCount = useMemo(() => {
+    try {
+      const parsed = JSON.parse(schemaText || '{}');
+      if (
+        !parsed ||
+        typeof parsed !== 'object' ||
+        Array.isArray(parsed) ||
+        typeof parsed.properties !== 'object' ||
+        parsed.properties === null
+      ) {
+        return 0;
+      }
+      return Object.keys(parsed.properties).length;
+    } catch (error) {
+      return 0;
+    }
+  }, [schemaText]);
 
   const hasChanges = useMemo(() => {
     if (!editable || !rubric || !remoteRubric) return false;
@@ -305,103 +295,20 @@ export default function RubricEditor({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold">
-          {editable ? 'Rubric Editor' : 'Rubric Evaluation'}
-        </span>
-
-        <div className="flex flex-wrap grow justify-end items-center gap-x-3">
-          {rubric && (
-            <ModelPicker
-              selectedModel={rubric.judge_model}
-              availableModels={availableJudgeModels}
-              onChange={(jm) => {
-                if (!editable) return;
-                updateRubric({ judge_model: jm });
-              }}
-              className="max-w-28"
-              shortenName
-            />
-          )}
-          <Separator orientation="vertical" className="h-5" />
-
-          {showDiff !== undefined && setShowDiff !== undefined && (
-            <div className="flex items-center gap-1.5">
-              <Checkbox
-                id="load-prev-rubric"
-                checked={showDiff}
-                className="h-3 flex items-center justify-center w-3"
-                onCheckedChange={(v) => setShowDiff(!!v)}
-                disabled={!rubric || rubric.version < 2}
-              />
-              <Label
-                htmlFor="load-prev-rubric"
-                className="text-xs text-muted-foreground whitespace-nowrap"
-              >
-                Show diff
-              </Label>
-            </div>
-          )}
-          <Separator orientation="vertical" className="h-5" />
-          <div>
-            <div className="flex items-center gap-0.5 bg-secondary rounded border px-1 py-0.5">
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-4 w-4 p-0 hover:bg-background/50"
-                onClick={handleVersionDecrement}
-                disabled={!rubric || rubric.version <= minVersion}
-              >
-                <ChevronLeft className="h-2.5 w-2.5" />
-              </Button>
-              <div className="text-xs font-mono px-1.5 min-w-[2.5rem] text-center">
-                {rubric && maxVersion !== undefined
-                  ? `v${rubric.version}/${maxVersion}`
-                  : rubric
-                    ? rubric.version
-                    : '-'}
-              </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-4 w-4 p-0 hover:bg-background/50"
-                onClick={handleVersionIncrement}
-                disabled={
-                  !rubric ||
-                  maxVersion === undefined ||
-                  rubric.version >= maxVersion
-                }
-              >
-                <ChevronRight className="h-2.5 w-2.5" />
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
       <div className="space-y-2 relative">
         {/* Rubric Text */}
         <div className="space-y-1">
           <div className="relative overflow-hidden rounded-md border bg-background focus-within:ring-1 focus-within:ring-ring">
-            {showDiff && prevRubricRemote && rubric ? (
-              <DescriptionInlineDiff
-                previous={prevRubricRemote.rubric_text || ''}
-                current={rubric.rubric_text || ''}
-              />
-            ) : (
-              <Textarea
-                id="rubric-input"
-                className={cn(
-                  'h-[30vh] max-h-[50vh] resize-y border-0 p-2 shadow-none focus-visible:ring-0 text-sm custom-scrollbar'
-                )}
-                placeholder="Enter a high-level description of what this rubric evaluates..."
-                value={rubric?.rubric_text || ''}
-                onChange={handleDescriptionChange}
-                disabled={isDisabled}
-                style={
-                  isDisabled ? { opacity: 1, color: 'inherit' } : undefined
-                }
-              />
-            )}
+            <Textarea
+              className={cn(
+                'h-[30vh] max-h-[50vh] resize-y border-0 p-2 shadow-none focus-visible:ring-0 text-sm custom-scrollbar'
+              )}
+              placeholder="Enter a high-level description of what this rubric evaluates..."
+              value={rubric?.rubric_text || ''}
+              onChange={handleDescriptionChange}
+              disabled={isDisabled}
+              style={isDisabled ? { opacity: 1, color: 'inherit' } : undefined}
+            />
 
             {/* Save Button */}
             {hasChanges && (
@@ -487,14 +394,101 @@ export default function RubricEditor({
           </div>
         </div>
       </div>
-      {/* Output Schema Dropdown */}
-      <JsonEditor
-        schemaText={schemaText}
-        setSchemaText={setSchemaText}
-        schemaError={schemaError}
-        editable={editable}
-        forceOpenSchema={forceOpenSchema || schemaHasChanges}
-      />
+      {/* Output Schema and Actions */}
+      <div className="flex flex-row gap-1">
+        <Popover open={schemaOpen} onOpenChange={setSchemaOpen}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className={cn(
+                'grow inline-flex items-center justify-start transition-colors rounded-md h-7 px-2 py-1.5 border bg-background shadow-sm whitespace-nowrap overflow-hidden basis-32',
+                editable ? 'hover:bg-accent' : 'cursor-default'
+              )}
+              onClick={() => setSchemaOpen(!schemaOpen)}
+              aria-expanded={schemaOpen}
+            >
+              <ChevronRight
+                className={cn(
+                  'h-3 w-3 transition-transform flex-shrink-0',
+                  schemaOpen ? 'rotate-90' : ''
+                )}
+              />
+              <div className="flex gap-2 items-center">
+                <span className="text-xs text-muted-foreground">
+                  Output Schema
+                </span>
+                {schemaPropertyCount > 0 && (
+                  <Badge variant="secondary" className="text-xs">
+                    {schemaPropertyCount}
+                  </Badge>
+                )}
+              </div>
+            </button>
+          </PopoverTrigger>
+
+          <PopoverContent
+            className="w-[600px] p-0"
+            align="start"
+            side="bottom"
+            sideOffset={4}
+          >
+            <div className="flex flex-col max-h-[400px]">
+              <div className="flex-1 overflow-y-auto custom-scrollbar">
+                <CodeMirror
+                  value={schemaText}
+                  height="auto"
+                  theme={resolvedTheme === 'dark' ? 'dark' : 'light'}
+                  extensions={codemirrorExtensions}
+                  onChange={(value) => setSchemaText(value)}
+                  basicSetup={{
+                    lineNumbers: false,
+                    highlightActiveLine: true,
+                    foldGutter: false,
+                  }}
+                  readOnly={!editable}
+                />
+              </div>
+
+              {schemaError && (
+                <div className="text-xs p-2 text-red-text border-t bg-red-bg/50">
+                  {schemaError}
+                </div>
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
+
+        {rubric && (
+          <ModelPicker
+            selectedModel={rubric.judge_model}
+            availableModels={availableJudgeModels}
+            onChange={(jm) => {
+              if (!editable) return;
+              updateRubric({ judge_model: jm });
+            }}
+            className="basis-32"
+            shortenName
+          />
+        )}
+
+        {!clusteringJobId && hasWritePermission && centroids.length === 0 && (
+          <RunRubricButton
+            collectionId={collectionId}
+            rubricId={rubricId}
+            rubricJobId={rubricJobId}
+            rubricJobStatus={rubricJobStatus}
+            hasUnsavedChanges={hasChanges}
+            onClick={() => setIsRunDialogOpen(true)}
+          />
+        )}
+
+        <RubricRunDialog
+          isOpen={isRunDialogOpen}
+          onClose={() => setIsRunDialogOpen(false)}
+          collectionId={collectionId}
+          rubricId={rubricId}
+        />
+      </div>
     </div>
   );
 }
