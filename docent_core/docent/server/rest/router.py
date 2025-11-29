@@ -26,7 +26,6 @@ from sqlalchemy.inspection import inspect as sqla_inspect
 
 from docent._log_util.logger import get_logger
 from docent.data_models.agent_run import AgentRun, FilterableField
-from docent.data_models.collection import Collection
 from docent.loaders import load_inspect
 from docent_core._server._analytics.posthog import AnalyticsClient
 from docent_core._server._auth.session import (
@@ -293,31 +292,76 @@ async def change_password(
 #############
 
 
-@user_router.get("/collections", response_model=list[Collection])
+class CollectionRpw(BaseModel):
+    """Represents a collection of agent runs.
+
+    A Collection is a container for organizing and managing related agent runs.
+
+    Attributes:
+        id: Unique identifier for the collection.
+        name: Human-readable name for the collection.
+        description: Optional description of the collection's purpose.
+        created_by: User ID of the collection creator (if available).
+        created_at: Timestamp when the collection was created.
+        agent_run_count: Number of agent runs in the collection (if available).
+        rubric_count: Number of rubrics in the collection (if available).
+        label_set_count: Number of label sets in the collection (if available).
+    """
+
+    id: str
+    name: str | None = None
+    description: str | None = None
+    created_by: str | None = None
+    created_at: datetime
+    agent_run_count: int | None = None
+    rubric_count: int | None = None
+    label_set_count: int | None = None
+
+
+@user_router.get("/collections", response_model=list[CollectionRpw])
 async def get_collections(
     user: User = Depends(get_user_anonymous_ok),
     mono_svc: MonoService = Depends(get_mono_svc),
 ):
     sqla_collections = await mono_svc.get_collections(user)  # Filter to only the user's collections
-    return [
-        # Get all columns from the SQLAlchemy object
-        {c.key: getattr(obj, c.key) for c in sqla_inspect(obj).mapper.column_attrs}
-        for obj in sqla_collections
-    ]
+
+    # Build response with counts for each collection
+    result: list[dict[str, Any]] = []
+    for obj in sqla_collections:
+        collection_data: dict[str, Any] = obj.dict()
+
+        # Add counts
+        collection_data["agent_run_count"] = await mono_svc.count_collection_agent_runs(obj.id)
+        collection_data["rubric_count"] = await mono_svc.count_collection_rubrics(obj.id)
+        collection_data["label_set_count"] = await mono_svc.count_collection_label_sets(obj.id)
+
+        result.append(collection_data)
+
+    return result
 
 
-@user_router.get("/{collection_id}/collection_details", response_model=Collection | None)
+@user_router.get("/{collection_id}/collection_details", response_model=CollectionRpw | None)
 async def get_collection_details(
     collection_id: str = Depends(require_collection_exists),
     mono_svc: MonoService = Depends(get_mono_svc),
     _: None = Depends(require_collection_permission(Permission.READ)),
 ):
-    """Get full details about a collection including id, name, description, created_at, and created_by."""
+    """Get full details about a collection including id, name, description, created_at, created_by, and counts."""
     collection = await mono_svc.get_collection(collection_id)
     if collection is None:
         return None
-    # Return all columns from the SQLAlchemy object
-    return {c.key: getattr(collection, c.key) for c in sqla_inspect(collection).mapper.column_attrs}
+
+    # Get all columns from the SQLAlchemy object
+    collection_data: dict[str, Any] = {
+        c.key: getattr(collection, c.key) for c in sqla_inspect(collection).mapper.column_attrs
+    }
+
+    # Add counts
+    collection_data["agent_run_count"] = await mono_svc.count_collection_agent_runs(collection.id)
+    collection_data["rubric_count"] = await mono_svc.count_collection_rubrics(collection.id)
+    collection_data["label_set_count"] = await mono_svc.count_collection_label_sets(collection.id)
+
+    return collection_data
 
 
 @user_router.get("/{collection_id}/exists")

@@ -1,13 +1,6 @@
 'use client';
 
-import {
-  CalendarIcon,
-  CheckIcon,
-  Loader2,
-  Pencil,
-  Trash2,
-  XIcon,
-} from 'lucide-react';
+import { CheckIcon, Loader2, Pencil, Trash2, XIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
@@ -113,10 +106,13 @@ export default function CollectionRow({
     // dateString is in UTC
     const date = new Date(dateString + 'Z');
     // display in local time
-    return date.toLocaleDateString('en-US', {
+    return date.toLocaleString('en-US', {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
     });
   };
 
@@ -176,10 +172,30 @@ export default function CollectionRow({
         )}
       </TableCell>
 
+      {/* Agent Run Count */}
+      <TableCell className="text-xs py-2 text-z">
+        <span className="text-muted-foreground">
+          {collection.agent_run_count?.toLocaleString() ?? '-'}
+        </span>
+      </TableCell>
+
+      {/* Rubric Count */}
+      <TableCell className="text-xs py-2">
+        <span className="text-muted-foreground">
+          {collection.rubric_count?.toLocaleString() ?? '-'}
+        </span>
+      </TableCell>
+
+      {/* Label Set Count */}
+      <TableCell className="text-xs py-2">
+        <span className="text-muted-foreground">
+          {collection.label_set_count?.toLocaleString() ?? '-'}
+        </span>
+      </TableCell>
+
       {/* Created At */}
       <TableCell className="text-xs py-2">
         <div className="flex items-center text-muted-foreground">
-          <CalendarIcon className="h-3 w-3 mr-1 text-muted-foreground" />
           {formatDate(collection.created_at)}
         </div>
       </TableCell>

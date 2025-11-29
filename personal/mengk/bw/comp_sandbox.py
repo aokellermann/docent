@@ -495,3 +495,40 @@ consistency_hurt[consistency_hurt["agent_run_id"] == "5783eb6d-da44-4827-888d-fa
 
 df[df["agent_run_id"] == "5783eb6d-da44-4827-888d-faae6e255fc6"]["indep_probs"].tolist()
 # %%
+
+import docent.trace as dt
+
+dt.initialize_tracing(collection_id=cid, endpoint=f"https://api.{DOCENT_DOMAIN}/rest/telemetry")
+
+with dt.agent_run_context(agent_run_id="820d7040-4c45-4096-9557-dc3f8b46dbb1"):
+    dt.agent_run_metadata(
+        metadata={
+            "mengk_comments": """
+Steve Bannon was already pardoned in 2021 for an unrelated reason. Presumably, this question was about more recent occurrences, but due to the nature of the phrasing of the question, it's not clear which event Steve Bannon will be pardoned for. So, I would consider this question underspecified.
+""".strip()
+        }
+    )
+
+# %%
+
+dc.open_agent_run(cid, "820d7040-4c45-4096-9557-dc3f8b46dbb1")
+# %%
+
+rows = dc.dql_result_to_dicts(
+    dc.execute_dql(
+        cid,
+        """
+SELECT
+    a.id AS agent_run_id,
+    a.metadata_json ->> 'mengk_comments' AS mengk_comments
+FROM agent_runs a
+WHERE a.metadata_json ->> 'mengk_comments' IS NOT NULL
+""",
+    )
+)
+
+# %%
+
+rows
+
+# %%

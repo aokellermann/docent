@@ -111,6 +111,9 @@ export interface Collection {
   description?: string | null;
   created_at: string;
   created_by?: string | null;
+  agent_run_count?: number;
+  rubric_count?: number;
+  label_set_count?: number;
 }
 
 export interface BaseAgentRunMetadata {

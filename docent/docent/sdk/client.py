@@ -14,7 +14,6 @@ from tqdm import tqdm
 
 from docent._log_util.logger import get_logger
 from docent.data_models.agent_run import AgentRun
-from docent.data_models.collection import Collection
 from docent.data_models.judge import Label
 from docent.judges.util.meta_schema import validate_judge_result_schema
 from docent.loaders import load_inspect
@@ -447,7 +446,7 @@ class Docent:
         self._handle_response_errors(response)
         return response.json()
 
-    def list_collections(self) -> list[Collection]:
+    def list_collections(self) -> list[dict[str, Any]]:
         """Lists all available Collections.
 
         Returns:
@@ -459,9 +458,9 @@ class Docent:
         url = f"{self._server_url}/collections"
         response = self._session.get(url)
         self._handle_response_errors(response)
-        return [Collection.model_validate(c) for c in response.json()]
+        return response.json()
 
-    def get_collection(self, collection_id: str) -> Collection | None:
+    def get_collection(self, collection_id: str) -> dict[str, Any] | None:
         """Get details about a specific Collection.
 
         Requires READ permission on the collection.
@@ -479,8 +478,7 @@ class Docent:
         url = f"{self._server_url}/{collection_id}/collection_details"
         response = self._session.get(url)
         self._handle_response_errors(response)
-        data = response.json()
-        return Collection.model_validate(data) if data is not None else None
+        return response.json()
 
     def list_rubrics(self, collection_id: str) -> list[dict[str, Any]]:
         """List all rubrics for a given collection.

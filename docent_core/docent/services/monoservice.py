@@ -70,7 +70,7 @@ from docent_core.docent.db.schemas.auth_models import (
 )
 from docent_core.docent.db.schemas.chart import SQLAChart
 from docent_core.docent.db.schemas.chat import SQLAChatSession
-from docent_core.docent.db.schemas.label import SQLATag
+from docent_core.docent.db.schemas.label import SQLALabelSet, SQLATag
 from docent_core.docent.db.schemas.refinement import SQLARefinementAgentSession
 from docent_core.docent.db.schemas.rubric import SQLAJudgeResult, SQLARubric
 from docent_core.docent.db.schemas.tables import (
@@ -655,6 +655,22 @@ class MonoService:
         """Count all agent runs for a collection (ignores base filters)."""
         async with self.db.session() as session:
             query = select(func.count()).where(SQLAAgentRun.collection_id == collection_id)
+            result = await session.execute(query)
+            return result.scalar_one()
+
+    async def count_collection_rubrics(self, collection_id: str) -> int:
+        """Count all unique rubrics (by id) for a collection."""
+        async with self.db.session() as session:
+            query = select(func.count(distinct(SQLARubric.id))).where(
+                SQLARubric.collection_id == collection_id
+            )
+            result = await session.execute(query)
+            return result.scalar_one()
+
+    async def count_collection_label_sets(self, collection_id: str) -> int:
+        """Count all label sets for a collection."""
+        async with self.db.session() as session:
+            query = select(func.count()).where(SQLALabelSet.collection_id == collection_id)
             result = await session.execute(query)
             return result.scalar_one()
 
