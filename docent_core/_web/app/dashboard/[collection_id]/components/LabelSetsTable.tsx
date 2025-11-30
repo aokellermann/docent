@@ -12,7 +12,7 @@ import {
   Trash2,
   ChevronDown,
   ChevronRight,
-  ClipboardCopyIcon,
+  Loader2,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -30,10 +30,10 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 
-import { cn, getSchemaPreview, copyToClipboard } from '@/lib/utils';
+import { cn, getSchemaPreview } from '@/lib/utils';
 import { LabelSet } from '@/app/api/labelApi';
 import { SchemaDefinition } from '@/app/types/schema';
-import { toast } from '@/hooks/use-toast';
+import UuidPill from '@/components/UuidPill';
 
 const ROW_HEIGHT_PX = 40;
 
@@ -102,64 +102,37 @@ export default function LabelSetsTable({
       label_schema: row.labelSchema,
     };
 
-    const copyId = async (e: React.MouseEvent) => {
-      e.stopPropagation();
-      const success = await copyToClipboard(row.id);
-      if (success) {
-        toast({
-          title: 'Label Set ID Copied',
-          description: `Copied ${row.id} to clipboard`,
-        });
-      } else {
-        toast({
-          title: 'Failed to copy',
-          description: 'Could not copy to clipboard',
-          variant: 'destructive',
-        });
-      }
-    };
-
     return (
       <div
-        className="flex items-center gap-1"
+        className="flex items-center gap-3"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Show activate button in SingleRubricArea context */}
-        <div className="flex justify-end w-16">
-          {onImportLabelSet && isValid ? (
-            <>
-              {isActive ? (
-                <div className="text-[10px] font-medium border text-green-text border-green-border bg-green-bg rounded-full px-2 py-0.5">
-                  Selected
-                </div>
-              ) : (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 w-7 p-0 !opacity-100"
-                  disabled={isActive}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (!isActive) {
-                      onImportLabelSet(labelSet);
-                    }
-                  }}
-                >
-                  <CirclePlus className="h-3.5 w-3.5" />
-                </Button>
-              )}
-            </>
-          ) : null}
-        </div>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100"
-          onClick={copyId}
-          title="Copy label set ID"
-        >
-          <ClipboardCopyIcon className="h-3.5 w-3.5" />
-        </Button>
+        {onImportLabelSet && isValid ? (
+          <>
+            {isActive ? (
+              <div className="text-[10px] font-medium border text-green-text border-green-border bg-green-bg rounded-full px-2 py-0.5">
+                Selected
+              </div>
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-auto w-auto p-0 text-muted-foreground group-hover:text-blue-text"
+                disabled={isActive}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!isActive) {
+                    onImportLabelSet(labelSet);
+                  }
+                }}
+                title="Import label set"
+              >
+                <CirclePlus className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </>
+        ) : null}
         {onDeleteLabelSet && (
           <Popover
             open={deletePopoverId === row.id}
@@ -167,10 +140,11 @@ export default function LabelSetsTable({
           >
             <PopoverTrigger asChild>
               <Button
-                size="sm"
                 variant="ghost"
-                className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100"
+                size="icon"
+                className="h-auto w-auto p-0 text-muted-foreground group-hover:text-red-text"
                 onClick={(e) => e.stopPropagation()}
+                title="Delete label set"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
@@ -221,6 +195,16 @@ export default function LabelSetsTable({
 
   const columns = useMemo<ColumnDef<LabelSetTableRow, unknown>[]>(() => {
     return [
+      {
+        id: 'id',
+        header: () => (
+          <span className="text-xs font-medium text-muted-foreground">ID</span>
+        ),
+        cell: ({ row }) => {
+          return <UuidPill uuid={row.original.id} stopPropagation />;
+        },
+        size: 80,
+      },
       {
         id: 'name',
         header: () => (
@@ -345,11 +329,13 @@ export default function LabelSetsTable({
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell
-                  colSpan={columns.length}
-                  className="text-center py-8 text-xs text-muted-foreground"
-                >
-                  Loading label sets...
+                <TableCell colSpan={columns.length} className="py-8">
+                  <div className="flex items-center justify-center">
+                    <Loader2
+                      size={16}
+                      className="animate-spin text-muted-foreground"
+                    />
+                  </div>
                 </TableCell>
               </TableRow>
             ) : compatibleLabelSets.length === 0 ? (
@@ -383,12 +369,7 @@ export default function LabelSetsTable({
                           : 'hover:bg-muted',
                         nextIsActive ? 'border-b-transparent' : 'border-b'
                       )}
-                      style={{
-                        height: ROW_HEIGHT_PX,
-                        boxShadow: isActive
-                          ? 'inset 0 0 0 1px hsl(var(--indigo-border))'
-                          : undefined,
-                      }}
+                      style={{ height: ROW_HEIGHT_PX }}
                     >
                       {row.getVisibleCells().map((cell) => (
                         <TableCell
@@ -454,12 +435,7 @@ export default function LabelSetsTable({
                             : 'hover:bg-muted',
                           nextIsActive ? 'border-b-transparent' : 'border-b'
                         )}
-                        style={{
-                          height: ROW_HEIGHT_PX,
-                          boxShadow: isActive
-                            ? 'inset 0 0 0 1px hsl(var(--indigo-border))'
-                            : undefined,
-                        }}
+                        style={{ height: ROW_HEIGHT_PX }}
                       >
                         {row.getVisibleCells().map((cell) => (
                           <TableCell

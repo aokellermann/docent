@@ -9,7 +9,6 @@ import {
 import LabelSetsTable, {
   type LabelSetTableRow,
 } from '../components/LabelSetsTable';
-import { cn } from '@/lib/utils';
 import LabelSetEditor from '../components/LabelSetEditor';
 import { useToast } from '@/hooks/use-toast';
 import { useParams } from 'next/navigation';
@@ -117,19 +116,12 @@ export default function LabelsPage() {
       <Separator orientation="vertical" />
 
       {/* Right Side - Detail Panel */}
-      <div className={'w-1/2 min-h-0 p-3 items-center justify-center flex'}>
-        <div
-          className={cn(
-            'w-full h-full flex items-center justify-center rounded-md p-3',
-            !selectedLabelSetId && !isCreateMode && 'border-dashed border'
-          )}
-        >
-          <LabelSetEditor
-            labelSetId={selectedLabelSetId}
-            isCreateMode={isCreateMode}
-            onCreateSuccess={handleCreateSuccess}
-          />
-        </div>
+      <div className="w-1/2 min-h-0 p-3 flex flex-col">
+        <LabelSetEditor
+          labelSetId={selectedLabelSetId}
+          isCreateMode={isCreateMode}
+          onCreateSuccess={handleCreateSuccess}
+        />
       </div>
     </div>
   );

@@ -14,7 +14,7 @@ import {
   type LabelSet,
 } from '@/app/api/labelApi';
 import LabelSetsTable, { type LabelSetTableRow } from './LabelSetsTable';
-import { cn, areSchemasCompatible } from '@/lib/utils';
+import { areSchemasCompatible } from '@/lib/utils';
 import LabelSetEditor from './LabelSetEditor';
 import { useToast } from '@/hooks/use-toast';
 import { useParams } from 'next/navigation';
@@ -164,12 +164,7 @@ export default function LabelSetsDialog({
           </div>
 
           {/* Right Side - Detail Panel */}
-          <div
-            className={cn(
-              'w-1/2 min-h-0 rounded-md p-3 items-center justify-center flex',
-              selectedLabelSetId ? 'border' : 'border-dashed border'
-            )}
-          >
+          <div className="w-1/2 min-h-0 flex flex-col">
             <LabelSetEditor
               labelSetId={selectedLabelSetId}
               isCreateMode={isCreateMode}

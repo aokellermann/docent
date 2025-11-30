@@ -285,10 +285,8 @@ export default function LabelSetEditor({
 
   if (!isCreateMode && !labelSetId) {
     return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="text-center text-sm text-muted-foreground">
-          Select a label set to view details
-        </div>
+      <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">
+        Select a label set to view details
       </div>
     );
   }
