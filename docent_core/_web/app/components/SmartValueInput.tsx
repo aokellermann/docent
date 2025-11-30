@@ -141,6 +141,11 @@ export const SmartValueInput = React.forwardRef<
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === 'Enter') {
+        // If dropdown is open, let cmdk handle selection first
+        if (showDropdown && displayValues.length > 0) {
+          // Don't prevent default - let cmdk select the highlighted item
+          return;
+        }
         e.preventDefault();
         setOpen(false);
         onEnter?.();
