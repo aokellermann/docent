@@ -5,13 +5,13 @@ set -e
 ROOT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." &> /dev/null && pwd )"
 
 # Parse arguments
-TARGET_BRANCH=""
+TARGET_BRANCHES=""
 SOURCE_BRANCH="main"
 
 while [[ "$#" -gt 0 ]]; do
   case $1 in
     -t|--target)
-      TARGET_BRANCH="$2"
+      TARGET_BRANCHES="$2"
       shift 2
       ;;
     -s|--source)
@@ -25,17 +25,29 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
-# Validate target branch
-if [ -z "$TARGET_BRANCH" ]; then
-  error "You must specify a target branch with -t or --target"
+# Validate target branches
+if [ -z "$TARGET_BRANCHES" ]; then
+  echo "You must specify target branch(es) with -t or --target (comma-separated for multiple)"
   exit 1
 fi
+
+# Convert comma-separated string to array
+IFS=',' read -ra TARGET_ARRAY <<< "$TARGET_BRANCHES"
 
 ###############################
 # Tag HEAD if pushing to prod #
 ###############################
 
-if [ "$TARGET_BRANCH" != "staging" ]; then
+# Check if any target branch is not staging (i.e., pushing to prod)
+NEEDS_TAG=false
+for TARGET_BRANCH in "${TARGET_ARRAY[@]}"; do
+  if [ "$TARGET_BRANCH" != "staging" ]; then
+    NEEDS_TAG=true
+    break
+  fi
+done
+
+if [ "$NEEDS_TAG" = true ]; then
   echo "Since you're pushing to a non-staging branch, let's tag HEAD with a version bump."
   . $ROOT_DIR/scripts/bump_version.sh
   # The script will not continue if tag creation fails
@@ -52,29 +64,38 @@ if [ "$source_confirmation" != "$SOURCE_BRANCH" ]; then
   exit 1
 fi
 
-# Require target branch confirmation as well
-read -p "Finally, type the target branch name exactly to proceed: " branch_confirmation
-if [ "$branch_confirmation" != "$TARGET_BRANCH" ]; then
-  echo "Operation cancelled. Target branch name did not match."
+# Require target branches confirmation as well
+read -p "Finally, type the target branch(es) exactly to proceed: " branch_confirmation
+if [ "$branch_confirmation" != "$TARGET_BRANCHES" ]; then
+  echo "Operation cancelled. Target branch(es) did not match."
   exit 1
 fi
 
 echo "Proceeding with force push operation..."
 
-# Sync branches
+# Sync source branch once
 git checkout $SOURCE_BRANCH
 git pull origin $SOURCE_BRANCH
-git checkout $TARGET_BRANCH
-git pull origin $TARGET_BRANCH
 
-# Create a backup branch with a timestamp
-BACKUP_BRANCH="${TARGET_BRANCH}-backup-$(date +%Y%m%d%H%M%S)"
-git checkout -b "$BACKUP_BRANCH"
-git push origin "$BACKUP_BRANCH"
+# Process each target branch
+for TARGET_BRANCH in "${TARGET_ARRAY[@]}"; do
+  echo ""
+  echo "=== Processing target branch: $TARGET_BRANCH ==="
 
-# Reset branch to match source
-git checkout $TARGET_BRANCH
-git reset --hard $SOURCE_BRANCH
+  git checkout $TARGET_BRANCH
+  git pull origin $TARGET_BRANCH
 
-# Force push branch to remote
-git push origin $TARGET_BRANCH --force
+  # Create a backup branch with a timestamp
+  BACKUP_BRANCH="${TARGET_BRANCH}-backup-$(date +%Y%m%d%H%M%S)"
+  git checkout -b "$BACKUP_BRANCH"
+  git push origin "$BACKUP_BRANCH"
+
+  # Reset branch to match source
+  git checkout $TARGET_BRANCH
+  git reset --hard $SOURCE_BRANCH
+
+  # Force push branch to remote
+  git push origin $TARGET_BRANCH --force
+
+  echo "=== Completed: $TARGET_BRANCH ==="
+done
