@@ -181,7 +181,7 @@ export default function CollectionRow({
 
       {/* Created At */}
       <TableCell className="text-xs py-2">
-        <div className="flex items-center text-muted-foreground">
+        <div className="flex items-center text-muted-foreground whitespace-nowrap">
           {formatDateValue(collection.created_at, true)}
         </div>
       </TableCell>
