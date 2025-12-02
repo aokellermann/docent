@@ -428,7 +428,15 @@ class DocentTracer:
         event: Dict[str, Any],
     ) -> None:
         span = self._get_current_span()
-        if span is not None:
+        span_attributes: Mapping[str, Any] = {}
+        try:
+            span_attributes = getattr(span, "attributes", {}) if span is not None else {}
+        except Exception:
+            span_attributes = {}
+        is_streaming_span = bool(span_attributes.get("llm.is_streaming"))
+
+        # Skip attaching to streaming spans because they already emit many chunk events.
+        if span is not None and not is_streaming_span:
             try:
                 self._add_metadata_event_to_span(span, event)
                 return
@@ -565,8 +573,15 @@ class DocentTracer:
             env_limit = int(env_value) if env_value.isdigit() else 0
             attribute_limit = max(env_limit, default_attribute_limit)
 
+            # Expand span event budget to avoid dropping events on streaming spans
+            default_event_limit = 4096
+            env_event_value = os.environ.get("OTEL_SPAN_EVENT_COUNT_LIMIT", "0")
+            env_event_limit = int(env_event_value) if env_event_value.isdigit() else 0
+            event_limit = max(env_event_limit, default_event_limit)
+
             span_limits = SpanLimits(
                 max_attributes=attribute_limit,
+                max_events=event_limit,
             )
 
             # Create our own isolated tracer provider
