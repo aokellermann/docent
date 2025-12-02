@@ -313,7 +313,6 @@ export default function SingleRubricArea({
               filters={runsFilter}
               onFiltersChange={handleRunsFilterChange}
               onRequestEdit={handleRequestEditFilter}
-              disabled={!hasWritePermission}
             />
           )}
         </div>
