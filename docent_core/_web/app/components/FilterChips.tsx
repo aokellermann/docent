@@ -47,7 +47,7 @@ interface FilterChipsProps {
   onRequestEdit?: (filter: PrimitiveFilter) => void;
   allowToggle?: boolean;
   className?: string;
-  disabled?: boolean;
+  readOnly?: boolean;
 }
 
 export const FilterChips = ({
@@ -56,7 +56,7 @@ export const FilterChips = ({
   onRequestEdit,
   allowToggle = true,
   className,
-  disabled = false,
+  readOnly = false,
 }: FilterChipsProps) => {
   const handleRemove = useCallback(
     (filterId: string) => {
@@ -148,42 +148,40 @@ export const FilterChips = ({
                 return `${subFilter.type} filter`;
               }
             })()}
-            {allowToggle && (
+            {allowToggle && !readOnly && (
               <button
                 onClick={() => handleToggle(subFilter.id)}
                 className="p-0.5 text-current hover:text-current/80 hover:bg-foreground/10 rounded-sm transition-colors"
                 title={isDisabled ? 'Enable filter' : 'Disable filter'}
-                disabled={disabled}
               >
                 {isDisabled ? <Eye size={10} /> : <EyeOff size={10} />}
               </button>
             )}
-            {subFilter.type === 'primitive' && onRequestEdit && (
+            {subFilter.type === 'primitive' && onRequestEdit && !readOnly && (
               <button
                 onClick={() => handleEdit(subFilter as PrimitiveFilter)}
                 className="p-0.5 text-current hover:text-current/80 hover:bg-foreground/10 rounded-sm transition-colors"
                 title="Edit filter"
-                disabled={disabled}
               >
                 <Pencil size={10} />
               </button>
             )}
-            <button
-              onClick={() => handleRemove(subFilter.id)}
-              className="p-0.5 text-current hover:text-current/80 hover:bg-foreground/10 rounded-sm transition-colors"
-              title="Remove filter"
-              disabled={disabled}
-            >
-              <CircleX size={10} />
-            </button>
+            {!readOnly && (
+              <button
+                onClick={() => handleRemove(subFilter.id)}
+                className="p-0.5 text-current hover:text-current/80 hover:bg-foreground/10 rounded-sm transition-colors"
+                title="Remove filter"
+              >
+                <CircleX size={10} />
+              </button>
+            )}
           </div>
         );
       })}
-      {currentFilters.length > 1 && (
+      {currentFilters.length > 1 && !readOnly && (
         <button
           onClick={handleClearAll}
           className="inline-flex items-center gap-x-1 text-[11px] bg-red-bg text-primary border border-red-border px-1.5 py-0.5 rounded-md hover:bg-red-bg/50 transition-colors"
-          disabled={disabled}
         >
           Clear All
           <Eraser size={10} />

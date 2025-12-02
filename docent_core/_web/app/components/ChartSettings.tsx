@@ -361,7 +361,7 @@ export default function ChartSettings({ chart, onChange }: ChartSettingsProps) {
               onFiltersChange={handleRunsFilterChange}
               onRequestEdit={handleRequestEdit}
               className="mr-1"
-              disabled={!hasWritePermission}
+              readOnly={!hasWritePermission}
             />
           )}
 
