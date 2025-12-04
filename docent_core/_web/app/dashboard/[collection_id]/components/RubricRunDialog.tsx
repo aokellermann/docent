@@ -137,7 +137,12 @@ export default function RunRubricDialog({
             <Label>Number of agent runs</Label>
             <RadioGroup
               value={runMode}
-              onValueChange={(value) => setRunMode(value as 'all' | 'first-n')}
+              onValueChange={(value) => {
+                setRunMode(value as 'all' | 'first-n');
+                if (value === 'first-n' && maxResults === '') {
+                  setMaxResults('10');
+                }
+              }}
             >
               <div className="flex items-center space-x-2">
                 <RadioGroupItem value="all" id="all" />
@@ -157,8 +162,11 @@ export default function RunRubricDialog({
                     min="1"
                     placeholder="10"
                     value={maxResults}
-                    onChange={(e) => setMaxResults(e.target.value)}
-                    disabled={runMode !== 'first-n'}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setMaxResults(value);
+                      setRunMode(value === '' ? 'all' : 'first-n');
+                    }}
                     className="h-8 w-24"
                   />
                 </div>
