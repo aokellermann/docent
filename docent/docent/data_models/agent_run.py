@@ -23,9 +23,12 @@ from docent.data_models.transcript import Transcript, TranscriptGroup
 logger = get_logger(__name__)
 
 
+FilterableFieldType = Literal["str", "bool", "int", "float"]
+
+
 class FilterableField(TypedDict):
     name: str
-    type: Literal["str", "bool", "int", "float"]
+    type: FilterableFieldType
 
 
 class AgentRun(BaseModel):
@@ -109,7 +112,7 @@ class AgentRun(BaseModel):
                     result.append(
                         {
                             "name": f"{prefix}.{k}",
-                            "type": cast(Literal["str", "bool", "int", "float"], type(v).__name__),
+                            "type": cast(FilterableFieldType, type(v).__name__),
                         }
                     )
                 elif isinstance(v, dict):

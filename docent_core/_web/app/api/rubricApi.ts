@@ -6,6 +6,8 @@ import {
   ModelOption,
 } from '@/app/store/rubricSlice';
 import { ComplexFilter, CollectionFilter } from '@/app/types/collectionTypes';
+import { collectionApi } from './collectionApi';
+import { TranscriptMetadataField } from '../types/experimentViewerTypes';
 
 // Types based on the backend models
 export interface CreateRubricRequest {
@@ -255,7 +257,7 @@ export const rubricApi = createApi({
       ],
     }),
     getJudgeResultFilterFields: build.query<
-      { fields: { name: string; type: 'str' | 'int' | 'float' | 'bool' }[] },
+      { fields: TranscriptMetadataField[] },
       { collectionId: string; rubricId: string; version?: number | null }
     >({
       query: ({ collectionId, rubricId, version }) => ({
@@ -301,6 +303,10 @@ export const rubricApi = createApi({
         { type: 'Assignments', id: rubricId },
         { type: 'RubricMetrics', id: rubricId },
       ],
+      async onQueryStarted(_, { dispatch, queryFulfilled }) {
+        await queryFulfilled;
+        dispatch(collectionApi.util.invalidateTags(['AgentRunMetadataFields']));
+      },
     }),
     deleteRubric: build.mutation<
       Rubric[],

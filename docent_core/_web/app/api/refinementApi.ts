@@ -3,6 +3,7 @@ import { BASE_URL } from '@/app/constants';
 import sseService from '../services/sseService';
 import { RefinementAgentSession } from '@/app/store/refinementSlice';
 import { Rubric } from '@/app/store/rubricSlice';
+import { collectionApi } from './collectionApi';
 
 export const refinementApi = createApi({
   reducerPath: 'refinementApi',
@@ -144,6 +145,10 @@ export const refinementApi = createApi({
       invalidatesTags: (result, error, arg) => [
         { type: 'RefinementSession' as const, id: arg.sessionId },
       ],
+      async onQueryStarted(_, { dispatch, queryFulfilled }) {
+        await queryFulfilled;
+        dispatch(collectionApi.util.invalidateTags(['AgentRunMetadataFields']));
+      },
     }),
 
     retryLastMessage: build.mutation<

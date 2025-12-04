@@ -6,7 +6,6 @@ import {
   useCreateRubricMutation,
   useStartEvaluationMutation,
   useGetJudgeModelsQuery,
-  useUpdateRubricMutation,
 } from '@/app/api/rubricApi';
 import { useCreateOrGetRefinementSessionMutation } from '@/app/api/refinementApi';
 import { toast } from '@/hooks/use-toast';
@@ -57,7 +56,6 @@ export default function RubricsPage() {
   // Mutations
   const [createRubric, { isLoading: isCreatingRubric }] =
     useCreateRubricMutation();
-  const [updateRubric] = useUpdateRubricMutation();
   const [startEvaluation, { isLoading: isStartingEvaluation }] =
     useStartEvaluationMutation();
   const [createOrGetSession, { isLoading: isCreatingOrGettingSession }] =

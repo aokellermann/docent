@@ -10,6 +10,7 @@ from typing import (
     Any,
     AsyncIterator,
     Final,
+    Iterator,
     Literal,
     ParamSpec,
     Sequence,
@@ -42,7 +43,7 @@ from sqlalchemy.sql import FromClause, lateral, text
 from sqlalchemy.types import Numeric
 
 from docent._log_util import get_logger
-from docent.data_models.agent_run import AgentRun, FilterableField
+from docent.data_models.agent_run import AgentRun, FilterableField, FilterableFieldType
 from docent.data_models.transcript import Transcript, TranscriptGroup
 from docent_core._db_service.db import DocentDB
 from docent_core._server._broker.redis_client import enqueue_job, get_redis_client
@@ -111,7 +112,7 @@ MAX_DQL_RESULT_LIMIT: Final[int] = 10_000
 
 def _infer_filter_type_from_types(
     value_types: str,
-) -> Literal["str", "bool", "int", "float"] | None:
+) -> FilterableFieldType | None:
     """Infer a filter type from a comma-separated list of detected JSON value types."""
 
     types = [t.strip() for t in value_types.split(",") if t.strip()]
@@ -124,6 +125,27 @@ def _infer_filter_type_from_types(
     if "boolean" in types:
         return "bool"
     return None
+
+
+_JSON_SCHEMA_TYPE_MAP: dict[str, FilterableFieldType] = {
+    "string": "str",
+    "integer": "int",
+    "number": "float",
+    "boolean": "bool",
+}
+
+
+def _extract_schema_fields(
+    schema: dict[str, Any],
+    prefix: str = "",
+) -> Iterator[tuple[str, FilterableFieldType]]:
+    """Extract field paths and types from a JSON Schema."""
+    if "properties" in schema:
+        for key, subschema in schema["properties"].items():
+            new_prefix = f"{prefix}.{key}" if prefix else key
+            yield from _extract_schema_fields(subschema, new_prefix)
+    elif (schema_type := schema.get("type")) in _JSON_SCHEMA_TYPE_MAP:
+        yield (prefix, _JSON_SCHEMA_TYPE_MAP[schema_type])
 
 
 class _NotGiven:
@@ -2631,27 +2653,48 @@ class MonoService:
             field_name = "metadata." + ".".join(info.path)
             all_fields[field_name] = {"name": field_name, "type": info.value_type}
 
+        async with self.db.session() as session:
+            if rubric_id is not None:
+                if rubric_version is not None:
+                    rubric_query = select(SQLARubric).where(
+                        SQLARubric.collection_id == ctx.collection_id,
+                        SQLARubric.id == rubric_id,
+                        SQLARubric.version == rubric_version,
+                    )
+                else:
+                    rubric_query = (
+                        select(SQLARubric)
+                        .where(
+                            SQLARubric.collection_id == ctx.collection_id,
+                            SQLARubric.id == rubric_id,
+                        )
+                        .order_by(SQLARubric.version.desc())
+                        .limit(1)
+                    )
+                result = await session.execute(rubric_query)
+                rubrics = list(result.scalars().all())
+            else:
+                result = await session.execute(
+                    select(SQLARubric).where(SQLARubric.collection_id == ctx.collection_id)
+                )
+                all_rubrics = list(result.scalars().all())
+                latest_by_id: dict[str, SQLARubric] = {}
+                for r in all_rubrics:
+                    existing = latest_by_id.get(r.id)
+                    if existing is None or r.version > existing.version:
+                        latest_by_id[r.id] = r
+                rubrics = list(latest_by_id.values())
+
+        for rubric in rubrics:
+            for path, field_type in _extract_schema_fields(rubric.output_schema):
+                field_name = f"rubric.{rubric.id}.{path}"
+                all_fields[field_name] = {"name": field_name, "type": field_type}
+
         judge_where: ColumnElement[bool] | None = None
         if rubric_id is not None:
             judge_where = SQLAJudgeResult.rubric_id == rubric_id
             if rubric_version is not None:
                 judge_where = and_(judge_where, SQLAJudgeResult.rubric_version == rubric_version)
-
-        judge_infos = await self.get_json_metadata_fields_for_column(
-            ctx.collection_id,
-            table=SQLAJudgeResult.__table__,
-            json_column=cast(ColumnElement[Any], SQLAJudgeResult.output),
-            column_name="output",
-            join_condition=SQLAJudgeResult.agent_run_id == SQLAAgentRun.id,
-            group_specs=(("rubric_id", cast(ColumnElement[Any], SQLAJudgeResult.rubric_id)),),
-            additional_where=judge_where,
-        )
-        for info in judge_infos:
-            info_rubric_id = info.labels.get("rubric_id")
-            if not info_rubric_id or info.value_type is None or not info.path:
-                continue
-            field_name = f"rubric.{info_rubric_id}." + ".".join(info.path)
-            all_fields[field_name] = {"name": field_name, "type": info.value_type}
 
         if include_judge_result_metadata:
             judge_metadata_infos = await self.get_json_metadata_fields_for_column(
