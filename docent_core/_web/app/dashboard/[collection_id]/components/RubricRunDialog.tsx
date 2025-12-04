@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Loader2 } from 'lucide-react';
 import { useState, useMemo } from 'react';
+import { useSelector } from 'react-redux';
 import { useGetAgentRunMetadataFieldsQuery } from '@/app/api/collectionApi';
 import { FilterControls } from '@/app/components/FilterControls';
 import { FilterChips } from '@/app/components/FilterChips';
@@ -18,6 +19,7 @@ import { ComplexFilter } from '@/app/types/collectionTypes';
 import {
   useStartEvaluationMutation,
   useEstimateCostQuery,
+  rubricApi,
 } from '@/app/api/rubricApi';
 import { useLabelSets } from '@/providers/use-label-sets';
 import { useDebounce } from '@/hooks/use-debounce';
@@ -42,7 +44,6 @@ export default function RunRubricDialog({
     useStartEvaluationMutation();
   const { activeLabelSet } = useLabelSets(rubricId);
 
-  // Filter state
   const [filter, setFilter] = useState<ComplexFilter | null>(null);
 
   const { data: metadataFieldsData } = useGetAgentRunMetadataFieldsQuery(
@@ -71,36 +72,29 @@ export default function RunRubricDialog({
 
   const debouncedParams = useDebounce(costEstimateParams, 1000);
 
-  const { data: costEstimate, isFetching: isCostLoading } =
-    useEstimateCostQuery(debouncedParams, {
-      skip: !isOpen,
-    });
+  const selectCachedEstimate = useMemo(
+    () => rubricApi.endpoints.estimateCost.select(costEstimateParams),
+    [costEstimateParams]
+  );
+  const cachedResult = useSelector(selectCachedEstimate);
+  const { isFetching } = useEstimateCostQuery(debouncedParams, {
+    skip: !isOpen,
+  });
 
   const isDebouncing =
     JSON.stringify(costEstimateParams) !== JSON.stringify(debouncedParams);
+  const costEstimate = cachedResult?.data;
+  const isCostLoading = !costEstimate && (isDebouncing || isFetching);
 
-  // Don't allow filtering a rubric run on outputs of other rubrics - backend doesn't support this
+  // Backend doesn't support filtering on rubric outputs
   const agentRunMetadataFields = (metadataFieldsData?.fields || []).filter(
     (field) => !field.name.startsWith('rubric.')
   );
 
   const handleRun = async () => {
-    const maxResultsNum =
-      runMode === 'all'
-        ? null
-        : maxResults !== ''
-          ? parseInt(maxResults, 10)
-          : null;
-    const rolloutsNum =
-      rolloutsPerInput !== '' ? parseInt(rolloutsPerInput, 10) : 1;
-
     await startEvaluation({
-      collectionId,
-      rubricId,
-      max_agent_runs: maxResultsNum,
-      n_rollouts_per_input: rolloutsNum,
+      ...costEstimateParams,
       label_set_id: activeLabelSet?.id,
-      filter: filter,
     });
     onClose();
   };
@@ -194,35 +188,24 @@ export default function RunRubricDialog({
           </div>
 
           {/* Cost estimate */}
-          {(() => {
-            const isLoading = isCostLoading || isDebouncing;
-
-            const costDisplay = isLoading
-              ? '—'
-              : costEstimate
-                ? costEstimate.fraction_of_daily_limit != null
-                  ? `${(costEstimate.fraction_of_daily_limit * 100).toFixed(1)}% of daily limit`
-                  : `$${(costEstimate.cost_cents / 100).toFixed(2)}`
-                : '—';
-
-            const rolloutsDisplay = isLoading
-              ? '—'
-              : costEstimate
-                ? String(costEstimate.rollouts_needed)
-                : '—';
-
-            return (
-              <div className="rounded-md bg-muted/50 p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">Estimated cost</span>
-                  <span className="text-sm font-semibold">{costDisplay}</span>
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  {rolloutsDisplay} total rollouts needed
-                </div>
-              </div>
-            );
-          })()}
+          <div className="rounded-md bg-muted/50 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">Estimated cost</span>
+              <span className="text-sm font-semibold">
+                {isCostLoading || !costEstimate
+                  ? '—'
+                  : costEstimate.fraction_of_daily_limit != null
+                    ? `${(costEstimate.fraction_of_daily_limit * 100).toFixed(1)}% of daily limit`
+                    : `$${(costEstimate.cost_cents / 100).toFixed(2)}`}
+              </span>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {isCostLoading || !costEstimate
+                ? '—'
+                : costEstimate.rollouts_needed}{' '}
+              total rollouts needed
+            </div>
+          </div>
         </div>
 
         <DialogFooter>
