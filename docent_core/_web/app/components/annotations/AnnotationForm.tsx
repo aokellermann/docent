@@ -25,6 +25,13 @@ export function AnnotationForm({
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      handleSave();
+    }
+  };
+
   return (
     <div className="border border-border rounded-lg p-3 space-y-3 bg-background">
       <div className="text-xs font-medium text-muted-foreground">
@@ -34,6 +41,7 @@ export function AnnotationForm({
       <Textarea
         value={content}
         onChange={(e) => setContent(e.target.value)}
+        onKeyDown={handleKeyDown}
         placeholder="Write your comment..."
         className="min-h-[80px] text-xs"
         autoFocus
