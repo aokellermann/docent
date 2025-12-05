@@ -1518,6 +1518,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                         onTabChange={setActiveAnnotationTab}
                         showAllTranscripts={showAllTranscripts}
                         onSetShowAllTranscripts={setShowAllTranscripts}
+                        annotationCount={filteredAnnotations.length}
                       />
                     </div>
                   </div>

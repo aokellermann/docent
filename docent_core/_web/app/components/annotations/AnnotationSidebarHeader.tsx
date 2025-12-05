@@ -20,6 +20,7 @@ interface AnnotationSidebarHeaderProps {
   onTabChange: (tab: AnnotationTab) => void;
   showAllTranscripts: boolean;
   onSetShowAllTranscripts: (value: boolean) => void;
+  annotationCount: number;
 }
 
 export const AnnotationSidebarHeader = ({
@@ -29,6 +30,7 @@ export const AnnotationSidebarHeader = ({
   onTabChange,
   showAllTranscripts,
   onSetShowAllTranscripts,
+  annotationCount,
 }: AnnotationSidebarHeaderProps) => {
   return (
     <div
@@ -114,6 +116,11 @@ export const AnnotationSidebarHeader = ({
             aria-label={isCollapsed ? 'Expand comments' : 'Collapse comments'}
           >
             <MessageSquare className="h-4 w-4" /> Comments
+            {annotationCount > 0 && (
+              <span className="bg-muted px-1.5 py-0.5 rounded-full text-xs font-medium">
+                {annotationCount}
+              </span>
+            )}
           </button>
         )}
       </div>
