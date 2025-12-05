@@ -1086,7 +1086,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
     ]);
 
     // Memoize what annotations are assigned to what message blocks
-    // Only for inline comment mode
+    // so we know where to render highlights
     const blockIdxToAnnotationsMap = useMemo(() => {
       // Build a map from blockIdxs --> annotations
       // An annotation can appear in multiple blocks if it has multiple citations
@@ -1094,6 +1094,9 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
       for (const annotation of filteredAnnotations) {
         for (const citation of annotation.citations) {
           if (citation.target.item.item_type !== 'block_content') continue;
+          // Only show highlights for annotations on the current transcript
+          if (citation.target.item.transcript_id !== selectedTranscriptId)
+            continue;
           const blockIdx = citation.target.item.block_idx;
           if (!map[blockIdx]) map[blockIdx] = [];
           // Avoid adding the same annotation twice to the same block
@@ -1103,7 +1106,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
         }
       }
       return map;
-    }, [filteredAnnotations]);
+    }, [filteredAnnotations, selectedTranscriptId]);
 
     const handleAddComment = useCallback(
       (

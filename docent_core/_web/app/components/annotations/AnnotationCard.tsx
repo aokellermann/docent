@@ -177,7 +177,13 @@ export function AnnotationCard({
           ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-950'
           : 'border-border bg-background hover:border-indigo-300 hover:bg-accent'
       )}
-      onClick={onFocus}
+      onClick={() => {
+        onFocus();
+        const firstCitation = effectiveCitations?.[0]?.target;
+        if (firstCitation && onNavigateToCitation) {
+          onNavigateToCitation(firstCitation);
+        }
+      }}
       onMouseEnter={() =>
         dispatch(setHoveredAnnotationId(annotation.id ?? null))
       }
