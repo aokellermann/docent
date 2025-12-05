@@ -5,7 +5,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { Copy, Check } from 'lucide-react';
+import { Copy, Check, MessageSquarePlus } from 'lucide-react';
 
 import { BaseMetadata } from '@/app/types/transcriptTypes';
 import { CitationTargetTextRange } from '@/app/types/citationTypes';
@@ -128,11 +128,13 @@ export function MetadataBlock({
   citedKey,
   textRange,
   showSearchControls = false,
+  onAddComment,
 }: {
   metadata: BaseMetadata;
   citedKey?: string;
   textRange?: CitationTargetTextRange;
   showSearchControls?: boolean;
+  onAddComment?: (key: string) => void;
 }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchType, setSearchType] = useState<SearchType>('exact');
@@ -333,22 +335,22 @@ export function MetadataBlock({
               ({ key, value, valueText, keyIntervals, valueIntervals }) => {
                 const isHighlightedRow = shouldHighlightRow(key);
                 const rowClass = isHighlightedRow
-                  ? 'flex items-center p-2 bg-yellow-100 dark:bg-yellow-900/30 transition-colors'
-                  : 'flex items-center p-2 hover:bg-muted transition-colors';
+                  ? 'group flex items-start p-2 bg-yellow-100 dark:bg-yellow-900/30 transition-colors'
+                  : 'group flex items-start p-2 hover:bg-muted transition-colors';
                 return (
                   <div
                     key={key}
                     className={rowClass}
                     data-highlighted={isHighlightedRow ? 'true' : undefined}
                   >
-                    <div className="w-1/3 font-medium text-sm text-primary break-words pr-4">
+                    <div className="w-1/3 font-medium text-sm text-primary break-words pr-4 flex items-center gap-2">
                       {keyIntervals.length > 0 ? (
                         <SegmentedText text={key} intervals={keyIntervals} />
                       ) : (
                         key
                       )}
                     </div>
-                    <div className="w-2/3 text-sm text-muted-foreground break-words whitespace-pre-wrap font-mono text-xs flex items-center justify-between">
+                    <div className="w-2/3 text-sm text-muted-foreground break-words whitespace-pre-wrap font-mono text-xs flex items-start justify-between">
                       <span className="flex-1">
                         {valueIntervals.length > 0 ? (
                           <SegmentedText
@@ -359,6 +361,18 @@ export function MetadataBlock({
                           valueText
                         )}
                       </span>
+                      {onAddComment && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onAddComment(key);
+                          }}
+                          className="p-1 rounded text-muted-foreground hover:text-primary transition-colors opacity-0 group-hover:opacity-100"
+                          title="Add comment to metadata field"
+                        >
+                          <MessageSquarePlus className="h-3 w-3" />
+                        </button>
+                      )}
                       <CopyButton value={value} />
                     </div>
                   </div>

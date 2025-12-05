@@ -4,6 +4,8 @@ from pydantic import BaseModel, Discriminator
 
 
 class CitationTargetTextRange(BaseModel):
+    target_start_idx: int | None = None
+    target_end_idx: int | None = None
     start_pattern: str | None = None
     end_pattern: str | None = None
 
@@ -60,6 +62,7 @@ class TranscriptBlockContentItem(ResolvedCitationItem):
     collection_id: str
     transcript_id: str
     block_idx: int
+    content_idx: int | None = None
 
 
 ResolvedCitationItemUnion = Annotated[

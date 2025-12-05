@@ -1,6 +1,9 @@
 // Citation types matching backend's InlineCitation and CitationTarget structure
 
 export interface CitationTargetTextRange {
+  // The start index of the target item within the text.
+  target_start_idx?: number;
+  target_end_idx?: number;
   start_pattern: string | null;
   end_pattern: string | null;
 }
@@ -41,6 +44,7 @@ export interface TranscriptBlockContentItem {
   collection_id: string;
   transcript_id: string;
   block_idx: number;
+  content_idx?: number;
 }
 
 export interface CitationTarget {

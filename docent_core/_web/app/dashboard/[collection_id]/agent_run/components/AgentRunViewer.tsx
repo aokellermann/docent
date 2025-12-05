@@ -6,17 +6,21 @@ import {
   ChevronRight,
   AlertCircle,
   PanelLeft,
-  PanelRight,
+  PanelRightClose,
+  PanelRightOpen,
+  MessageSquarePlus,
 } from 'lucide-react';
-import React, {
+import {
   forwardRef,
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
+  useImperativeHandle,
 } from 'react';
-
+import { TranscriptBlockContentItem } from '@/app/types/citationTypes';
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
 import {
   selectRunCitationsById,
@@ -24,6 +28,9 @@ import {
   toggleAgentRunRightSidebar,
   toggleJudgeLeftSidebar,
   toggleJudgeRightSidebar,
+  addCitationToDraft,
+  setSelectedAnnotationId,
+  setAnnotationSidebarCollapsed,
 } from '@/app/store/transcriptSlice';
 import {
   AgentRun,
@@ -53,7 +60,17 @@ import { MessageBox, hasJsonContent } from './MessageBox';
 import { Button } from '@/components/ui/button';
 import { useGetAgentRunWithCanonicalTreeQuery } from '@/app/api/collectionApi';
 import { skipToken } from '@reduxjs/toolkit/query';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
+import {
+  Annotation,
+  useGetAnnotationsForAgentRunQuery,
+} from '@/app/api/labelApi';
+import {
+  AnnotationSidebarHeader,
+  AnnotationTab,
+} from '@/app/components/annotations/AnnotationSidebarHeader';
+import { AnnotationSidebarContent } from '@/app/components/annotations/AnnotationSidebarContent';
+import { useTextSelection } from '@/providers/use-text-selection';
 
 // Export interface for use in other components
 interface ScrollToBlockParams {
@@ -79,13 +96,13 @@ type MetadataIntent =
   | { type: 'run'; citedKey?: string; textRange?: CitationTargetTextRange }
   | {
       type: 'transcript';
-      transcriptIdx: number;
+      transcriptId: string;
       citedKey?: string;
       textRange?: CitationTargetTextRange;
     }
   | {
       type: 'message';
-      transcriptIdx: number;
+      transcriptId: string;
       blockIdx: number;
       citedKey?: string;
       textRange?: CitationTargetTextRange;
@@ -226,7 +243,7 @@ const TranscriptPath: React.FC<{
     >
       <div className="flex items-center space-x-0.5 min-w-0 flex-1 overflow-x-auto custom-scrollbar">
         {path.map((item, index) => (
-          <React.Fragment key={item.id}>
+          <Fragment key={item.id}>
             {index > 0 && (
               <ChevronRight className="h-2.5 w-2.5 text-muted-foreground/40 flex-shrink-0" />
             )}
@@ -240,7 +257,7 @@ const TranscriptPath: React.FC<{
             >
               {item.name}
             </span>
-          </React.Fragment>
+          </Fragment>
         ))}
       </div>
     </div>
@@ -262,6 +279,8 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
     const collectionId = collectionIdProp ?? collectionIdFromRedux;
 
     const { rubric_id: rubricId } = useParams<{ rubric_id: string }>();
+    const searchParams = useSearchParams();
+    const initialAnnotationId = searchParams.get('annotation_id');
 
     // Full tree toggle (default off)
     const [fullTree, setFullTree] = useState(false);
@@ -281,6 +300,50 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
       const e = error as any;
       return e && typeof e === 'object' && 'status' in e && e.status === 404;
     }, [error]);
+
+    //*************************
+    // Annotation State & API *
+    //*************************
+
+    // Fetch annotations for this agent run
+    const { data: annotations = [] } = useGetAnnotationsForAgentRunQuery(
+      collectionId && agentRunId ? { collectionId, agentRunId } : skipToken
+    );
+
+    // State for the draft annotation
+    const draftAnnotation = useAppSelector(
+      (state) => state.transcript.draftAnnotation
+    );
+
+    // The currently selected / clicked annotation
+    const selectedAnnotationId = useAppSelector(
+      (state) => state.transcript.selectedAnnotationId
+    );
+
+    // Annotation sidebar state
+    const annotationSidebarCollapsed = useAppSelector(
+      (state) => state.transcript.annotationSidebarCollapsed
+    );
+
+    // Whether to display annotations inline or in a scrollable list
+    const [activeAnnotationTab, setActiveAnnotationTab] =
+      useState<AnnotationTab>('inline');
+
+    // Whether to show annotations for all transcripts in the sidebar
+    const [showAllTranscripts, setShowAllTranscripts] = useState(false);
+
+    // Whether the chat / label sidebar is open
+    const rightSidebarOpen = useAppSelector(
+      (state) => state.transcript?.agentRunRightSidebarOpen
+    );
+
+    // Ref for boundary container (scrollNode)
+    const boundaryRef = useRef<HTMLDivElement | null>(null);
+
+    //*********************************
+    // Transcript Data Transformation *
+    //*********************************
+
     const transcriptsById = useMemo(() => {
       const m: Record<string, Transcript> = {};
       if (agentRun?.transcripts)
@@ -340,7 +403,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
       } else {
         dispatch(toggleAgentRunLeftSidebar());
       }
-    }, [dispatch]);
+    }, [dispatch, rubricId]);
 
     const toggleRightSidebar = useCallback(() => {
       if (rubricId) {
@@ -348,7 +411,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
       } else {
         dispatch(toggleAgentRunRightSidebar());
       }
-    }, [dispatch]);
+    }, [dispatch, rubricId]);
 
     const [sidebarHovering, setSidebarHovering] = useState(false);
 
@@ -588,6 +651,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
     const scrollContainerRef = useCallback((node: HTMLDivElement | null) => {
       // Always reflect the latest node (including null on unmount)
       setScrollNode(node);
+      boundaryRef.current = node;
     }, []);
 
     // Attach/detach scroll listener when the scroll node changes
@@ -614,6 +678,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
           transcriptScrollPositions[selectedTranscriptId] || 0;
         scrollNode.scrollTop = savedPosition;
       }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedTranscriptId, scrollNode]);
 
     // Compute the current block index based on scroll position
@@ -667,7 +732,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
       ) {
         setCurrentBlockIndex(mostVisibleBlock.blockIndex);
       }
-    }, [debouncedScrollPosition, transcript, scrollNode]);
+    }, [debouncedScrollPosition, transcript, scrollNode, transcriptIdx]);
 
     // Fulfill pending scroll with simple retries instead of MutationObserver
     useEffect(() => {
@@ -801,6 +866,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
               citedKey: item.metadata_key,
               textRange,
             });
+            setActiveAnnotationTab('list');
             break;
 
           case 'transcript_metadata':
@@ -810,10 +876,11 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
             }
             setMetadataIntent({
               type: 'transcript',
-              transcriptIdx: 0,
+              transcriptId: item.transcript_id,
               citedKey: item.metadata_key,
               textRange,
             });
+            setActiveAnnotationTab('list');
             break;
 
           case 'block_metadata':
@@ -825,11 +892,12 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
             });
             setMetadataIntent({
               type: 'message',
-              transcriptIdx: 0,
+              transcriptId: item.transcript_id,
               blockIdx: item.block_idx,
               citedKey: item.metadata_key,
               textRange,
             });
+            setActiveAnnotationTab('list');
             break;
 
           case 'block_content':
@@ -853,7 +921,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
      * Block navigation
      */
 
-    React.useImperativeHandle(
+    useImperativeHandle(
       ref,
       () => ({
         scrollToBlock,
@@ -887,6 +955,271 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
       });
     }, [currentBlockIndex, transcript, scrollToBlock, selectedTranscriptId]);
 
+    //***********************
+    // Annotation Handlers *
+    //***********************
+
+    // Focus the annotation in the query parameter on load
+    const hasFocusedAnnotation = useRef(false);
+    useEffect(() => {
+      if (
+        initialAnnotationId &&
+        annotations.length > 0 &&
+        !hasFocusedAnnotation.current
+      ) {
+        // Select the annotation and open the sidebar
+        dispatch(setSelectedAnnotationId(initialAnnotationId));
+        dispatch(setAnnotationSidebarCollapsed(false));
+
+        // Find the annotation object
+        const initialFocusedAnnotation = annotations.find(
+          (a) => a.id === initialAnnotationId
+        );
+
+        // Scroll to the annotation citation within the transcript
+        if (
+          initialFocusedAnnotation &&
+          initialFocusedAnnotation.citations.length > 0
+        ) {
+          focusCitationTarget(initialFocusedAnnotation.citations[0].target);
+        }
+
+        hasFocusedAnnotation.current = true;
+      }
+    }, [initialAnnotationId, dispatch, annotations, focusCitationTarget]);
+
+    // Global click handler to deselect annotations when clicking outside
+    useEffect(() => {
+      if (!selectedAnnotationId) return;
+
+      const handleDocumentClick = (e: MouseEvent) => {
+        const target = e.target as HTMLElement;
+        // Check if click is inside an annotation card
+        const clickedInsideCard = target.closest('[data-annotation-card]');
+
+        // If click is outside any annotation card, deselect
+        if (!clickedInsideCard) {
+          dispatch(setSelectedAnnotationId(null));
+        }
+      };
+
+      // Use mousedown instead of click to avoid conflicts with card onClick handlers
+      document.addEventListener('mousedown', handleDocumentClick);
+      return () => {
+        document.removeEventListener('mousedown', handleDocumentClick);
+      };
+    }, [selectedAnnotationId, dispatch]);
+
+    // Text selection hook for citation creation and menu
+    const { menuElement } = useTextSelection({
+      containerRef: boundaryRef,
+      triggers: { mouseup: true, hotkey: true },
+      renderMenu: ({ citation, dismiss }) => {
+        return (
+          <button
+            onClick={() => {
+              dispatch(addCitationToDraft(citation));
+              dispatch(setAnnotationSidebarCollapsed(false));
+              dismiss();
+            }}
+            className="flex items-center gap-2 px-3 py-2 text-sm text-primary bg-background border border-border rounded-md shadow-lg hover:bg-accent transition-colors"
+          >
+            <MessageSquarePlus className="h-4 w-4" />
+            Comment
+          </button>
+        );
+      },
+    });
+
+    // List mode annotations: all annotation types for current transcript (or all transcripts if showAllTranscripts is true)
+    const filteredAnnotations = useMemo(() => {
+      const checkInTranscript = (transcriptId: string) => {
+        const annotationTranscriptIdx = transcriptIdToIdx[transcriptId];
+        return annotationTranscriptIdx === transcriptIdx;
+      };
+
+      const shouldIncludeAnnotation = (annotation: Annotation) => {
+        // Check if any citation matches the filter criteria
+        const citations = annotation.citations;
+        if (!citations || citations.length === 0) return false;
+
+        if (activeAnnotationTab === 'inline') {
+          return citations.some((citation) => {
+            if (citation.target.item.item_type === 'block_content') {
+              return checkInTranscript(citation.target.item.transcript_id);
+            }
+            return false;
+          });
+        } else if (activeAnnotationTab === 'list') {
+          // Include all annotations when showing all transcripts
+          if (showAllTranscripts) {
+            return true;
+          }
+          return citations.some((citation) => {
+            // Include annotations on the agent run metadata
+            if (citation.target.item.item_type === 'agent_run_metadata') {
+              return true;
+            }
+            // There are only four item_types, safe to assume that these three have a transcript_id
+            return checkInTranscript(citation.target.item.transcript_id);
+          });
+        }
+        return false;
+      };
+
+      const filtered: Annotation[] = annotations.filter(
+        shouldIncludeAnnotation
+      );
+
+      if (draftAnnotation && shouldIncludeAnnotation(draftAnnotation)) {
+        filtered.push(draftAnnotation);
+      }
+
+      return filtered;
+    }, [
+      annotations,
+      draftAnnotation,
+      showAllTranscripts,
+      transcriptIdToIdx,
+      transcriptIdx,
+      activeAnnotationTab,
+    ]);
+
+    // Memoize what annotations are assigned to what message blocks
+    // Only for inline comment mode
+    const blockIdxToAnnotationsMap = useMemo(() => {
+      // Build a map from blockIdxs --> annotations
+      // An annotation can appear in multiple blocks if it has multiple citations
+      const map: Record<number, Annotation[]> = {};
+      for (const annotation of filteredAnnotations) {
+        for (const citation of annotation.citations) {
+          if (citation.target.item.item_type !== 'block_content') continue;
+          const blockIdx = citation.target.item.block_idx;
+          if (!map[blockIdx]) map[blockIdx] = [];
+          // Avoid adding the same annotation twice to the same block
+          if (!map[blockIdx].includes(annotation)) {
+            map[blockIdx].push(annotation);
+          }
+        }
+      }
+      return map;
+    }, [filteredAnnotations]);
+
+    const handleAddComment = useCallback(
+      (
+        params:
+          | { type: 'agent_run'; metadataKey?: string }
+          | { type: 'transcript'; metadataKey?: string }
+          | { type: 'block_metadata'; blockIdx: number; metadataKey: string }
+          | { type: 'block_content'; blockIdx: number }
+      ) => {
+        if (!collectionId || !agentRunId) return;
+
+        let target: CitationTarget;
+        let tab: AnnotationTab = 'list';
+
+        switch (params.type) {
+          case 'agent_run':
+            target = {
+              item: {
+                item_type: 'agent_run_metadata',
+                agent_run_id: agentRunId,
+                collection_id: collectionId,
+                metadata_key: params.metadataKey || '',
+              },
+              text_range: null,
+            };
+            break;
+          case 'transcript':
+            if (!selectedTranscriptId) return;
+            target = {
+              item: {
+                item_type: 'transcript_metadata',
+                agent_run_id: agentRunId,
+                collection_id: collectionId,
+                transcript_id: selectedTranscriptId,
+                metadata_key: params.metadataKey || '',
+              },
+              text_range: null,
+            };
+            break;
+          case 'block_metadata':
+            if (!selectedTranscriptId) return;
+            target = {
+              item: {
+                item_type: 'block_metadata',
+                agent_run_id: agentRunId,
+                collection_id: collectionId,
+                transcript_id: selectedTranscriptId,
+                block_idx: params.blockIdx,
+                metadata_key: params.metadataKey,
+              },
+              text_range: null,
+            };
+            break;
+          case 'block_content':
+            if (!selectedTranscriptId) return;
+            target = {
+              item: {
+                item_type: 'block_content',
+                agent_run_id: agentRunId,
+                collection_id: collectionId,
+                transcript_id: selectedTranscriptId,
+                block_idx: params.blockIdx,
+              },
+              text_range: null,
+            };
+            tab = 'inline';
+            break;
+        }
+
+        dispatch(addCitationToDraft(target));
+        setActiveAnnotationTab(tab);
+        dispatch(setAnnotationSidebarCollapsed(false));
+      },
+      [collectionId, agentRunId, selectedTranscriptId, dispatch]
+    );
+
+    // Handle clicking on a block title for annotations created on transcript blocks
+    const handleBlockClick = useCallback(
+      (blockIdx: number) => {
+        // Find the first annotation for this block
+        const blockAnnotations = filteredAnnotations.filter((a) =>
+          a.citations.some(
+            (citation) =>
+              citation.target.item.item_type === 'block_content' &&
+              citation.target.item.block_idx === blockIdx
+          )
+        );
+
+        if (blockAnnotations.length > 0) {
+          // Sort by text position and select the first one
+          const sorted = [...blockAnnotations].sort((a, b) => {
+            const aCitation = a.citations.find(
+              (citation) =>
+                citation.target.item.item_type === 'block_content' &&
+                citation.target.item.block_idx === blockIdx
+            );
+            const bCitation = b.citations.find(
+              (citation) =>
+                citation.target.item.item_type === 'block_content' &&
+                citation.target.item.block_idx === blockIdx
+            );
+            const aStart = aCitation?.target.text_range?.target_start_idx ?? -1;
+            const bStart = bCitation?.target.text_range?.target_start_idx ?? -1;
+            return aStart - bStart;
+          });
+          dispatch(setSelectedAnnotationId(sorted[0].id));
+          setActiveAnnotationTab('inline');
+          dispatch(setAnnotationSidebarCollapsed(false));
+        }
+      },
+      [filteredAnnotations, dispatch]
+    );
+
+    // Determine if we should show annotations area
+    const hasAnnotations = annotations.length > 0 || draftAnnotation !== null;
+
     return (
       <>
         {/* Header area Content */}
@@ -903,16 +1236,16 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                   >
                     <PanelLeft className="h-4 w-4" />
                   </Button>
-                  <div className="font-semibold text-sm shrink-0">
+                  <span className="font-semibold text-sm shrink-0">
                     Agent Run
-                  </div>
+                  </span>
                   <UuidPill uuid={agentRun?.id} />
                   {agentRun && (
                     <MetadataPopover.Root
                       open={metadataIntent?.type === 'run'}
-                      onOpenChange={(open) =>
-                        setMetadataIntent(open ? { type: 'run' } : null)
-                      }
+                      onOpenChange={(open) => {
+                        setMetadataIntent(open ? { type: 'run' } : null);
+                      }}
                     >
                       <MetadataPopover.DefaultTrigger />
                       <MetadataPopover.Content title="Agent Run Metadata">
@@ -931,6 +1264,12 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                                   ? metadataIntent.textRange
                                   : undefined
                               }
+                              onAddComment={(key) =>
+                                handleAddComment({
+                                  type: 'agent_run',
+                                  metadataKey: key,
+                                })
+                              }
                             />
                           )}
                         </MetadataPopover.Body>
@@ -944,7 +1283,11 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                   className="h-6 w-6 cursor-default"
                   onClick={toggleRightSidebar}
                 >
-                  <PanelRight className="h-4 w-4" />
+                  {rightSidebarOpen ? (
+                    <PanelRightClose className="h-4 w-4" />
+                  ) : (
+                    <PanelRightOpen className="h-4 w-4" />
+                  )}
                 </Button>
               </div>
               <div className="text-xs text-muted-foreground flex items-center overflow-hidden truncate">
@@ -1046,175 +1389,303 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                   defaultSize={75}
                   className="flex flex-col min-h-0"
                 >
-                  {/* Transcript content */}
-                  <div className={getSidebarStyles('space-y-1 mb-2 pr-1')}>
-                    <div className="flex items-center justify-between">
-                      {selectedTranscriptId && (
-                        <div className="flex items-center space-x-1">
-                          {/* Only show toggle button if there are multiple transcripts and sidebar is hidden */}
-                          {shouldShowTranscriptNavigator && !sidebarVisible && (
-                            <div
-                              onMouseEnter={() => setSidebarHovering(true)}
-                              onMouseLeave={() => setSidebarHovering(false)}
-                              className="relative z-20"
-                            >
-                              <button
-                                onClick={() =>
-                                  setSidebarVisible(!sidebarVisible)
-                                }
-                                className="p-1 rounded text-muted-foreground hover:text-primary hover:bg-muted transition-colors"
-                                aria-label="Show transcript hierarchy"
-                              >
-                                <FolderTree className="h-4 w-4" />
-                              </button>
-                            </div>
-                          )}
-                          <div className="font-semibold text-sm">
-                            Transcript
+                  {/* Fixed Headers Row */}
+                  <div className="flex flex-row border-border flex-shrink-0">
+                    {/* Transcript header */}
+                    <div
+                      className={cn(
+                        'flex-1 min-w-0 space-y-1',
+                        hasAnnotations &&
+                          !annotationSidebarCollapsed &&
+                          'border-r border-border'
+                      )}
+                    >
+                      <div className="flex items-center justify-between min-w-0">
+                        {selectedTranscriptId && (
+                          <div className="flex items-center space-x-1 min-w-0 overflow-hidden">
+                            {/* Only show toggle button if there are multiple transcripts and sidebar is hidden */}
+                            {shouldShowTranscriptNavigator &&
+                              !sidebarVisible && (
+                                <div
+                                  onMouseEnter={() => setSidebarHovering(true)}
+                                  onMouseLeave={() => setSidebarHovering(false)}
+                                  className="relative z-20"
+                                >
+                                  <button
+                                    onClick={() =>
+                                      setSidebarVisible(!sidebarVisible)
+                                    }
+                                    className="p-1 rounded text-muted-foreground hover:text-primary hover:bg-muted transition-colors"
+                                    aria-label="Show transcript hierarchy"
+                                  >
+                                    <FolderTree className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              )}
+                            <span className="font-semibold text-sm">
+                              Transcript
+                            </span>
+                            <UuidPill uuid={selectedTranscriptId} />
+                            {(() => {
+                              const isTranscriptIntent =
+                                metadataIntent?.type === 'transcript' &&
+                                metadataIntent.transcriptId ===
+                                  selectedTranscriptId;
+                              const citedKey = isTranscriptIntent
+                                ? metadataIntent?.citedKey
+                                : undefined;
+                              const textRange = isTranscriptIntent
+                                ? metadataIntent?.textRange
+                                : undefined;
+                              return (
+                                <MetadataPopover.Root
+                                  open={Boolean(isTranscriptIntent)}
+                                  onOpenChange={(open) => {
+                                    setMetadataIntent(
+                                      open && selectedTranscriptId
+                                        ? {
+                                            type: 'transcript',
+                                            transcriptId: selectedTranscriptId,
+                                          }
+                                        : null
+                                    );
+                                  }}
+                                >
+                                  <MetadataPopover.DefaultTrigger />
+                                  <MetadataPopover.Content
+                                    title={`Transcript Metadata`}
+                                  >
+                                    <MetadataPopover.Body
+                                      metadata={
+                                        (selectedTranscriptId
+                                          ? transcriptsById[
+                                              selectedTranscriptId
+                                            ]
+                                          : undefined
+                                        )?.metadata || {}
+                                      }
+                                    >
+                                      {(md) => (
+                                        <MetadataBlock
+                                          metadata={md}
+                                          showSearchControls={true}
+                                          citedKey={citedKey}
+                                          textRange={textRange}
+                                          onAddComment={(key) =>
+                                            handleAddComment({
+                                              type: 'transcript',
+                                              metadataKey: key,
+                                            })
+                                          }
+                                        />
+                                      )}
+                                    </MetadataPopover.Body>
+                                  </MetadataPopover.Content>
+                                </MetadataPopover.Root>
+                              );
+                            })()}
                           </div>
-                          <UuidPill uuid={selectedTranscriptId} />
-                          {(() => {
-                            const isTranscriptIntent =
-                              metadataIntent?.type === 'transcript' &&
-                              metadataIntent.transcriptIdx === transcriptIdx;
-                            const citedKey = isTranscriptIntent
+                        )}
+                      </div>
+                      {selectedTranscriptId &&
+                        (selectedTranscriptId
+                          ? transcriptsById[selectedTranscriptId]
+                          : undefined
+                        )?.transcript_group_id && (
+                          <TranscriptPath
+                            className={getSidebarStyles('')}
+                            path={buildTranscriptPath(
+                              selectedTranscriptId,
+                              transcriptsById,
+                              transcriptGroupsById
+                            )}
+                          />
+                        )}
+                    </div>
+
+                    {/* Annotation header (conditionally rendered) */}
+                    <div className="w-80">
+                      <AnnotationSidebarHeader
+                        isCollapsed={annotationSidebarCollapsed}
+                        onToggleCollapsed={() =>
+                          dispatch(
+                            setAnnotationSidebarCollapsed(
+                              !annotationSidebarCollapsed
+                            )
+                          )
+                        }
+                        activeTab={activeAnnotationTab}
+                        onTabChange={setActiveAnnotationTab}
+                        showAllTranscripts={showAllTranscripts}
+                        onSetShowAllTranscripts={setShowAllTranscripts}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Relative wrapper for scroll container and fixed buttons */}
+                  <div className="relative flex-1 min-h-0">
+                    {/* Shared Scroll Container */}
+                    <div
+                      ref={scrollContainerRef}
+                      className="absolute inset-0 overflow-y-auto custom-scrollbar"
+                      // Disable browser scroll anchoring, which was causing the viewport to jump when creating a new draft annotation
+                      style={{ overflowAnchor: 'none' }}
+                    >
+                      <div className="flex flex-row items-stretch">
+                        {/* Messages column */}
+                        <div
+                          className={cn(
+                            'flex-1 space-y-2',
+                            hasAnnotations &&
+                              !annotationSidebarCollapsed &&
+                              'pr-1 border-r border-border'
+                          )}
+                        >
+                          {transcript.messages.map((message, index) => {
+                            const blockId = `t-${transcriptIdx}_b-${index}`;
+                            const isMsgIntent =
+                              metadataIntent?.type === 'message' &&
+                              metadataIntent.transcriptId ===
+                                selectedTranscriptId &&
+                              metadataIntent.blockIdx === index;
+                            const msgCitedKey = isMsgIntent
                               ? metadataIntent?.citedKey
                               : undefined;
-                            const textRange = isTranscriptIntent
+                            const msgCitedRange = isMsgIntent
                               ? metadataIntent?.textRange
                               : undefined;
-                            return (
-                              <MetadataPopover.Root
-                                open={Boolean(isTranscriptIntent)}
-                                onOpenChange={(open) =>
-                                  setMetadataIntent(
-                                    open
-                                      ? {
-                                          type: 'transcript',
-                                          transcriptIdx: transcriptIdx ?? 0,
-                                        }
-                                      : null
-                                  )
-                                }
-                              >
-                                <MetadataPopover.DefaultTrigger />
-                                <MetadataPopover.Content
-                                  title={`Transcript Metadata`}
-                                >
-                                  <MetadataPopover.Body
-                                    metadata={
-                                      (selectedTranscriptId
-                                        ? transcriptsById[selectedTranscriptId]
-                                        : undefined
-                                      )?.metadata || {}
-                                    }
-                                  >
-                                    {(md) => (
-                                      <MetadataBlock
-                                        metadata={md}
-                                        showSearchControls={true}
-                                        citedKey={citedKey}
-                                        textRange={textRange}
-                                      />
-                                    )}
-                                  </MetadataPopover.Body>
-                                </MetadataPopover.Content>
-                              </MetadataPopover.Root>
+
+                            const citedTargets = getCitationsForBlock(
+                              allCitations,
+                              selectedCitation,
+                              index,
+                              selectedTranscriptId!
                             );
-                          })()}
+
+                            if (
+                              !selectedTranscriptId ||
+                              !collectionId ||
+                              !agentRunId
+                            )
+                              return null;
+
+                            const blockAnnotations =
+                              blockIdxToAnnotationsMap[index] ?? [];
+
+                            const transcriptBlockContentItem: TranscriptBlockContentItem =
+                              {
+                                item_type: 'block_content',
+                                agent_run_id: agentRunId,
+                                collection_id: collectionId,
+                                transcript_id: selectedTranscriptId,
+                                block_idx: index,
+                              };
+
+                            return (
+                              <MessageBox
+                                key={index}
+                                message={message}
+                                index={index}
+                                blockId={blockId}
+                                isHighlighted={highlightedBlock === blockId}
+                                annotations={blockAnnotations}
+                                citedTargets={citedTargets}
+                                prettyPrintJsonMessages={
+                                  prettyPrintJsonMessages
+                                }
+                                setPrettyPrintJsonMessages={
+                                  setPrettyPrintJsonMessages
+                                }
+                                metadataDialogControl={{
+                                  open: Boolean(isMsgIntent),
+                                  onOpenChange: (open) => {
+                                    setMetadataIntent(
+                                      open && selectedTranscriptId
+                                        ? {
+                                            type: 'message',
+                                            transcriptId: selectedTranscriptId,
+                                            blockIdx: index,
+                                          }
+                                        : null
+                                    );
+                                  },
+                                  citedKey: msgCitedKey,
+                                  citedTextRange: msgCitedRange,
+                                }}
+                                dataContext={transcriptBlockContentItem}
+                                onAddMetadataComment={(key) =>
+                                  handleAddComment({
+                                    type: 'block_metadata',
+                                    blockIdx: index,
+                                    metadataKey: key,
+                                  })
+                                }
+                                onAddBlockComment={() =>
+                                  handleAddComment({
+                                    type: 'block_content',
+                                    blockIdx: index,
+                                  })
+                                }
+                                onBlockClick={() =>
+                                  hasAnnotations
+                                    ? handleBlockClick(index)
+                                    : undefined
+                                }
+                              />
+                            );
+                          })}
+                          {/* Text selection menu for creating annotations */}
+                          {menuElement}
                         </div>
-                      )}
+
+                        {/* Annotations column */}
+                        {!annotationSidebarCollapsed && (
+                          <div
+                            className={cn(
+                              'w-80 bg-muted/50',
+                              activeAnnotationTab === 'list'
+                                ? 'sticky top-0 self-start h-[calc(100vh-8rem)] overflow-y-auto  custom-scrollbar'
+                                : 'self-stretch'
+                            )}
+                          >
+                            <AnnotationSidebarContent
+                              annotationsForTranscript={filteredAnnotations}
+                              listModeAnnotations={filteredAnnotations}
+                              scrollContainerRef={{ current: scrollNode }}
+                              scrollToCitation={focusCitationTarget}
+                              activeTab={activeAnnotationTab}
+                            />
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    {selectedTranscriptId &&
-                      (selectedTranscriptId
-                        ? transcriptsById[selectedTranscriptId]
-                        : undefined
-                      )?.transcript_group_id && (
-                        <TranscriptPath
-                          className={getSidebarStyles('')}
-                          path={buildTranscriptPath(
-                            selectedTranscriptId,
-                            transcriptsById,
-                            transcriptGroupsById
-                          )}
-                        />
-                      )}
-                  </div>
-                  <div
-                    className="space-y-2 overflow-y-auto custom-scrollbar flex-1 min-h-0"
-                    ref={scrollContainerRef}
-                  >
-                    {transcript.messages.map((message, index) => {
-                      const blockId = `t-${transcriptIdx}_b-${index}`;
-                      const isMsgIntent =
-                        metadataIntent?.type === 'message' &&
-                        metadataIntent.transcriptIdx === (transcriptIdx ?? 0) &&
-                        metadataIntent.blockIdx === index;
-                      const msgCitedKey = isMsgIntent
-                        ? metadataIntent?.citedKey
-                        : undefined;
-                      const msgCitedRange = isMsgIntent
-                        ? metadataIntent?.textRange
-                        : undefined;
 
-                      const citedTargets = getCitationsForBlock(
-                        allCitations,
-                        selectedCitation,
-                        index,
-                        selectedTranscriptId!
-                      );
-
-                      return (
-                        <MessageBox
-                          key={index}
-                          message={message}
-                          index={index}
-                          blockId={blockId}
-                          isHighlighted={highlightedBlock === blockId}
-                          citedTargets={citedTargets}
-                          prettyPrintJsonMessages={prettyPrintJsonMessages}
-                          setPrettyPrintJsonMessages={
-                            setPrettyPrintJsonMessages
-                          }
-                          metadataDialogControl={{
-                            open: Boolean(isMsgIntent),
-                            onOpenChange: (open) =>
-                              setMetadataIntent(
-                                open
-                                  ? {
-                                      type: 'message',
-                                      transcriptIdx: transcriptIdx ?? 0,
-                                      blockIdx: index,
-                                    }
-                                  : null
-                              ),
-                            citedKey: msgCitedKey,
-                            citedTextRange: msgCitedRange,
-                          }}
-                          transcriptId={selectedTranscriptId ?? undefined}
-                        />
-                      );
-                    })}
-                  </div>
-
-                  {/* Navigation buttons inside the ScrollArea (relative to parent container) */}
-                  <div className="absolute bottom-3 right-3 flex flex-col gap-1">
-                    <div className="bg-muted border border-border rounded-md shadow-sm flex flex-col">
-                      <button
-                        onClick={goToPrevBlock}
-                        className="p-1.5 hover:bg-accent transition-colors rounded-t-md"
-                        title="Previous block"
-                      >
-                        <ChevronUp className="h-4 w-4 text-muted-foreground" />
-                      </button>
-                      <div className="h-px bg-accent" />
-                      <button
-                        onClick={goToNextBlock}
-                        className="p-1.5 hover:bg-accent transition-colors rounded-b-md"
-                        title="Next block"
-                      >
-                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                      </button>
+                    {/* Navigation buttons - fixed relative to wrapper */}
+                    <div
+                      className="absolute bottom-3 flex flex-col gap-1 pointer-events-none"
+                      style={{
+                        right: !annotationSidebarCollapsed
+                          ? 'calc(320px + 12px)'
+                          : '12px',
+                      }}
+                    >
+                      <div className="bg-muted border border-border rounded-md shadow-sm flex flex-col pointer-events-auto">
+                        <button
+                          onClick={goToPrevBlock}
+                          className="p-1.5 hover:bg-accent transition-colors rounded-t-md"
+                          title="Previous block"
+                        >
+                          <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                        <div className="h-px bg-accent" />
+                        <button
+                          onClick={goToNextBlock}
+                          className="p-1.5 hover:bg-accent transition-colors rounded-b-md"
+                          title="Next block"
+                        >
+                          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </ResizablePanel>

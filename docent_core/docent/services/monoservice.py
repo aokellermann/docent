@@ -1209,6 +1209,26 @@ class MonoService:
             "max": float(max_value) if max_value is not None else None,
         }
 
+    async def check_agent_run_in_collection(self, collection_id: str, agent_run_id: str) -> None:
+        """Verify that an agent run belongs to the specified collection.
+
+        Args:
+            collection_id: The collection ID to verify against
+            agent_run_id: The agent run ID to check
+
+        Raises:
+            ValueError: If the agent run doesn't exist or belongs to another collection
+        """
+        async with self.db.session() as session:
+            result = await session.execute(
+                select(SQLAAgentRun.collection_id).where(SQLAAgentRun.id == agent_run_id)
+            )
+            agent_run_collection_id = result.scalar_one_or_none()
+            if agent_run_collection_id is None or agent_run_collection_id != collection_id:
+                raise ValueError(
+                    f"Agent run {agent_run_id} not found in collection {collection_id}"
+                )
+
     async def get_agent_run(
         self, ctx: ViewContext, agent_run_id: str, apply_base_where_clause: bool = True
     ) -> AgentRun | None:

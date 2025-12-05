@@ -15,7 +15,6 @@ import { cn } from '@/lib/utils';
 import JudgeResultWithReflection from './JudgeResultWithReflection';
 import ModelPicker from './ModelPicker';
 import SelectionBadges from './SelectionBadges';
-import { InlineCitation } from '@/app/types/citationTypes';
 import { useTextSelection } from '@/providers/use-text-selection';
 import { useCitationNavigation } from '@/providers/CitationNavigationProvider';
 import Link from 'next/link';
@@ -299,31 +298,9 @@ export default function TranscriptChat({
                 selections={selections}
                 onRemove={handleRemoveSelectedText}
                 onNavigate={(item) => {
-                  const { transcriptId, blockIdx } = item;
-                  if (
-                    !transcriptId ||
-                    !collectionId ||
-                    !agentRunId ||
-                    blockIdx == null
-                  )
-                    return;
-
-                  const citation: InlineCitation = {
-                    start_idx: 0,
-                    end_idx: 0,
-                    target: {
-                      item: {
-                        item_type: 'block_content',
-                        agent_run_id: agentRunId,
-                        collection_id: collectionId,
-                        transcript_id: transcriptId,
-                        block_idx: blockIdx,
-                      },
-                      text_range: null,
-                    },
-                  };
+                  if (!item.citation) return;
                   citationNav?.navigateToCitation?.({
-                    target: citation.target,
+                    target: item.citation,
                   });
                 }}
               />

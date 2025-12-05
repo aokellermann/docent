@@ -37,6 +37,9 @@ export function citationTargetToId(target: CitationTarget): string {
     case 'block_content':
       minimalItem.ti = target.item.transcript_id;
       minimalItem.b = target.item.block_idx;
+      if (target.item.content_idx !== undefined) {
+        minimalItem.ci = target.item.content_idx;
+      }
       break;
   }
 
@@ -47,6 +50,8 @@ export function citationTargetToId(target: CitationTarget): string {
     minimal.r = {
       s: target.text_range.start_pattern,
       e: target.text_range.end_pattern,
+      si: target.text_range.target_start_idx, // Include position indices
+      ei: target.text_range.target_end_idx,
     };
   }
 
@@ -122,6 +127,9 @@ export function citationTargetFromId(id: string): CitationTarget {
       case 'block_content':
         item.transcript_id = minimal.i.ti;
         item.block_idx = minimal.i.b;
+        if (minimal.i.ci !== undefined) {
+          item.content_idx = minimal.i.ci;
+        }
         break;
       default:
         throw new Error(`Unknown item type: ${itemType}`);
@@ -130,8 +138,10 @@ export function citationTargetFromId(id: string): CitationTarget {
     // Reconstruct text range if present
     const text_range = minimal.r
       ? {
-          start_pattern: minimal.r.s,
-          end_pattern: minimal.r.e,
+          start_pattern: minimal.r.s ?? null,
+          end_pattern: minimal.r.e ?? null,
+          target_start_idx: minimal.r.si,
+          target_end_idx: minimal.r.ei,
         }
       : null;
 

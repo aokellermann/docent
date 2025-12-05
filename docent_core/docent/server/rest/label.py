@@ -9,15 +9,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from docent._log_util.logger import get_logger
 from docent.data_models.judge import Label
 from docent_core.docent.db.schemas.auth_models import User
-from docent_core.docent.db.schemas.label import LabelSet
+from docent_core.docent.db.schemas.label import Annotation, LabelSet
 from docent_core.docent.server.dependencies.database import get_session
 from docent_core.docent.server.dependencies.permissions import (
     Permission,
     require_collection_permission,
 )
-from docent_core.docent.server.dependencies.services import get_label_service
+from docent_core.docent.server.dependencies.services import get_label_service, get_mono_svc
 from docent_core.docent.server.dependencies.user import get_user_anonymous_ok
 from docent_core.docent.services.label import BulkValidationError, LabelService, LabelSetWithCount
+from docent_core.docent.services.monoservice import MonoService
 
 logger = get_logger(__name__)
 
@@ -51,6 +52,14 @@ class UpdateLabelSetRequest(BaseModel):
     name: str
     description: str | None = None
     label_schema: dict[str, Any]
+
+
+class CreateAnnotationRequest(BaseModel):
+    annotation: Annotation
+
+
+class UpdateAnnotationRequest(BaseModel):
+    content: str
 
 
 class CreateTagRequest(BaseModel):
@@ -353,3 +362,92 @@ async def get_labels_for_agent_run(
 ) -> list[Label]:
     """Get all labels for a specific agent run."""
     return await label_svc.get_labels_by_agent_run(agent_run_id)
+
+
+###################
+# Annotation CRUD #
+###################
+
+
+@label_router.post("/{collection_id}/annotation")
+async def create_annotation(
+    collection_id: str,
+    request: CreateAnnotationRequest,
+    label_svc: LabelService = Depends(get_label_service),
+    user: User = Depends(get_user_anonymous_ok),
+    _: None = Depends(require_collection_permission(Permission.WRITE)),
+) -> dict[str, str]:
+    """Create an annotation."""
+    # Validate that the annotation's collection_id matches the path parameter
+    if request.annotation.collection_id != collection_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Annotation collection_id ({request.annotation.collection_id}) does not match path collection_id ({collection_id})",
+        )
+
+    logger.info(f"Creating annotation for user {user.email}")
+    await label_svc.create_annotation(user.id, request.annotation)
+    return {"message": "Annotation created successfully"}
+
+
+@label_router.put("/{collection_id}/annotation/{annotation_id}")
+async def update_annotation(
+    collection_id: str,
+    annotation_id: str,
+    request: UpdateAnnotationRequest,
+    label_svc: LabelService = Depends(get_label_service),
+    _: None = Depends(require_collection_permission(Permission.WRITE)),
+) -> dict[str, str]:
+    """Update an annotation."""
+    # Verify that the annotation belongs to this collection
+    annotation = await label_svc.get_annotation(annotation_id)
+    if annotation is None:
+        raise HTTPException(status_code=404, detail=f"Annotation {annotation_id} not found")
+    if annotation.collection_id != collection_id:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Annotation {annotation_id} not found in collection {collection_id}",
+        )
+
+    await label_svc.update_annotation(annotation_id, request.content)
+    return {"message": "Annotation updated successfully"}
+
+
+@label_router.delete("/{collection_id}/annotation/{annotation_id}")
+async def delete_annotation(
+    collection_id: str,
+    annotation_id: str,
+    label_svc: LabelService = Depends(get_label_service),
+    _: None = Depends(require_collection_permission(Permission.WRITE)),
+) -> dict[str, str]:
+    """Delete an annotation."""
+    # Verify that the annotation belongs to this collection
+    annotation = await label_svc.get_annotation(annotation_id)
+    if annotation is None:
+        raise HTTPException(status_code=404, detail=f"Annotation {annotation_id} not found")
+    if annotation.collection_id != collection_id:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Annotation {annotation_id} not found in collection {collection_id}",
+        )
+
+    await label_svc.delete_annotation(annotation_id)
+    return {"message": "Annotation deleted successfully"}
+
+
+@label_router.get("/{collection_id}/agent_run/{agent_run_id}/annotations")
+async def get_annotations_by_agent_run(
+    collection_id: str,
+    agent_run_id: str,
+    label_svc: LabelService = Depends(get_label_service),
+    mono_svc: MonoService = Depends(get_mono_svc),
+    _: None = Depends(require_collection_permission(Permission.READ)),
+) -> list[Annotation]:
+    """Get all annotations for a specific agent run."""
+    # Verify that the agent run belongs to this collection
+    try:
+        await mono_svc.check_agent_run_in_collection(collection_id, agent_run_id)
+    except LabelService.AgentRunCollectionMismatchError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    return await label_svc.get_annotations_by_agent_run(agent_run_id)

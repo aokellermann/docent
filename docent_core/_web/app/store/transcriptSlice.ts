@@ -4,9 +4,10 @@
  */
 
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
-
+import { Annotation } from '../api/labelApi';
 import { AgentRun, SolutionSummary } from '../types/transcriptTypes';
-import { InlineCitation } from '../types/citationTypes';
+import { CitationTarget, InlineCitation } from '../types/citationTypes';
+import { TextSelectionItem } from '../../providers/use-text-selection';
 
 import { RootState } from './store';
 // Utility functions for TA session localStorage keys
@@ -26,6 +27,8 @@ export interface TranscriptState {
   solutionSummaryTaskId?: string;
   // All citations
   allCitations: Record<string, InlineCitation[]>;
+  hoveredAnnotationId: string | null;
+  selectedAnnotationId: string | null;
   // Agent run sidebar state
   agentRunSidebarTab?: string;
   // Sidebar visibility states for different routes
@@ -33,6 +36,12 @@ export interface TranscriptState {
   agentRunRightSidebarOpen: boolean;
   judgeLeftSidebarOpen: boolean;
   judgeRightSidebarOpen: boolean;
+
+  // Text selections
+  textSelections: TextSelectionItem[];
+  // Draft annotation (multi-citation creation flow)
+  draftAnnotation: Annotation | null;
+  annotationSidebarCollapsed: boolean;
 }
 
 const initialState: TranscriptState = {
@@ -41,6 +50,12 @@ const initialState: TranscriptState = {
   judgeLeftSidebarOpen: true,
   judgeRightSidebarOpen: true,
   allCitations: {},
+
+  hoveredAnnotationId: null,
+  selectedAnnotationId: null,
+  textSelections: [],
+  draftAnnotation: null,
+  annotationSidebarCollapsed: true,
 };
 
 export const transcriptSlice = createSlice({
@@ -97,10 +112,14 @@ export const transcriptSlice = createSlice({
         state.allCitations[key] = value;
       }
     },
+
+    // Mainly used for controlling the tab when switching between pages. E.g. if i want to ensure that the tab is on
+    // "chat" when I jump to a rubric page
     setAgentRunSidebarTab: (state, action: PayloadAction<string>) => {
       state.agentRunSidebarTab = action.payload;
     },
 
+    // Various sidebar states
     // Sidebar visibility states for different routes
     toggleAgentRunLeftSidebar: (state) => {
       state.agentRunLeftSidebarOpen = !(state.agentRunLeftSidebarOpen ?? false);
@@ -116,6 +135,49 @@ export const transcriptSlice = createSlice({
     toggleJudgeRightSidebar: (state) => {
       state.judgeRightSidebarOpen = !state.judgeRightSidebarOpen;
     },
+
+    // Annotation states
+    setHoveredAnnotationId: (state, action: PayloadAction<string | null>) => {
+      state.hoveredAnnotationId = action.payload;
+    },
+    setSelectedAnnotationId: (state, action: PayloadAction<string | null>) => {
+      state.selectedAnnotationId = action.payload;
+    },
+
+    // Text selections
+    setTextSelections: (state, action: PayloadAction<TextSelectionItem[]>) => {
+      state.textSelections = action.payload;
+    },
+    addCitationToDraft: (state, action: PayloadAction<CitationTarget>) => {
+      state.draftAnnotation = {
+        id: 'draft',
+        citations: [
+          {
+            start_idx: 0,
+            end_idx: 0,
+            target: action.payload,
+          },
+        ],
+        content: '',
+        user_email: '',
+        collection_id: '',
+        agent_run_id: '',
+        created_at: '',
+      };
+    },
+    updateDraftContent: (state, action: PayloadAction<string>) => {
+      if (state.draftAnnotation) {
+        state.draftAnnotation.content = action.payload;
+      }
+    },
+    clearDraftAnnotation: (state) => {
+      state.draftAnnotation = null;
+    },
+
+    setAnnotationSidebarCollapsed: (state, action: PayloadAction<boolean>) => {
+      state.annotationSidebarCollapsed = action.payload;
+    },
+
     resetTranscriptSlice: () => initialState,
   },
 });
@@ -137,6 +199,17 @@ export const {
   toggleJudgeLeftSidebar,
   toggleAgentRunRightSidebar,
   toggleJudgeRightSidebar,
+
+  // Annotation states
+  setHoveredAnnotationId,
+  setSelectedAnnotationId,
+
+  // Text selections
+  setTextSelections,
+  addCitationToDraft,
+  updateDraftContent,
+  clearDraftAnnotation,
+  setAnnotationSidebarCollapsed,
 } = transcriptSlice.actions;
 
 export const selectRunCitationsById = (
@@ -146,5 +219,8 @@ export const selectRunCitationsById = (
   if (!runId) return [];
   return state.transcript.allCitations[runId] || [];
 };
+
+export const selectTextSelections = (state: RootState) =>
+  state.transcript.textSelections;
 
 export default transcriptSlice.reducer;

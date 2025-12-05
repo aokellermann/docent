@@ -6,10 +6,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { AgentRun } from '@/app/types/transcriptTypes';
-import {
-  MessageBox,
-  hasJsonContent,
-} from '@/app/dashboard/[collection_id]/agent_run/components/MessageBox';
+import { hasJsonContent } from '@/app/dashboard/[collection_id]/agent_run/components/MessageBox';
 import { ChevronDown, ChevronRight, X, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScorePill } from '@/components/ScorePill';
@@ -279,22 +276,6 @@ export default function InvestigatorAgentRunViewer({
           )}
 
           {/* Messages */}
-          {transcript.messages.map((message, index) => {
-            const blockId = `r-0_t-0_b-${index}`;
-            return (
-              <MessageBox
-                key={index}
-                message={message}
-                index={index}
-                blockId={blockId}
-                isHighlighted={false}
-                citedTargets={[]}
-                prettyPrintJsonMessages={prettyPrintJsonMessages}
-                setPrettyPrintJsonMessages={setPrettyPrintJsonMessages}
-                transcriptId={transcript.id}
-              />
-            );
-          })}
         </div>
       </div>
     </div>

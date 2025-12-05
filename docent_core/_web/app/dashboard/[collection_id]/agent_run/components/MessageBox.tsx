@@ -2,39 +2,29 @@ import React, { useMemo, useRef } from 'react';
 import jsonStringFormatter from 'json-string-formatter';
 import { ChatMessage, Content, ToolCall } from '@/app/types/transcriptTypes';
 import { cn } from '@/lib/utils';
+import { Annotation } from '@/app/api/labelApi';
 import {
   CitationTarget,
   CitationTargetTextRange,
+  TranscriptBlockContentItem,
 } from '@/app/types/citationTypes';
 import {
   computeIntervalsForCitationTargets,
-  sliceIntervals,
   TextSpanWithCitations,
   transformCitationIntervalsForPrettyPrintJson,
 } from '@/lib/citationMatch';
+import { useAppSelector } from '@/app/store/hooks';
 import { citationTargetToId } from '@/lib/citationId';
 import { SegmentedText } from '@/lib/SegmentedText';
 import { MetadataPopover } from '@/components/metadata/MetadataPopover';
 import { MetadataBlock } from '@/components/metadata/MetadataBlock';
-import { useTextSelection } from '@/providers/use-text-selection';
 import { useCitationNavigation } from '@/providers/CitationNavigationProvider';
+import { MessageSquarePlus } from 'lucide-react';
 
 function stringify(x: any): string {
   if (typeof x === 'string') return x;
   return JSON.stringify(x);
 }
-
-export const shiftIntervals = (
-  intervals: TextSpanWithCitations[],
-  delta: number
-): TextSpanWithCitations[] =>
-  intervals
-    .map((interval) => ({
-      ...interval,
-      start: interval.start - delta,
-      end: interval.end - delta,
-    }))
-    .filter((interval) => interval.start < interval.end);
 
 export const formatToolCallData = (tool: ToolCall) => {
   if (tool.type === 'custom') {
@@ -68,6 +58,32 @@ export function getReasoningContent(
   return reasoningItem ? reasoningItem.reasoning : null;
 }
 
+type ContentIndices = {
+  reasoningIdx: number | null;
+  mainTextIdx: number;
+};
+
+export function getContentIndices(content: string | Content[]): ContentIndices {
+  if (typeof content === 'string') {
+    return { reasoningIdx: null, mainTextIdx: 0 };
+  }
+
+  let reasoningIdx: number | null = null;
+  let mainTextIdx = 0;
+
+  for (let i = 0; i < content.length; i++) {
+    const item = content[i];
+    if (item.type === 'reasoning' && reasoningIdx === null) {
+      reasoningIdx = i;
+    } else if (item.type === 'text') {
+      mainTextIdx = i;
+      break;
+    }
+  }
+
+  return { reasoningIdx, mainTextIdx };
+}
+
 // Helper function to detect if content contains JSON
 export const hasJsonContent = (text: string): boolean => {
   try {
@@ -85,6 +101,20 @@ export const hasJsonContent = (text: string): boolean => {
   }
   return false;
 };
+
+// Extract main text content from message
+export function getMainTextContent(message: ChatMessage): string {
+  if (typeof message.content === 'string') {
+    return message.content;
+  }
+  return message.content
+    .filter(
+      (item): item is Content & { text: string } =>
+        item.type === 'text' && typeof item.text === 'string'
+    )
+    .map((item) => item.text)
+    .join('\n');
+}
 
 const getRoleStyle = (role: string, isHighlighted: boolean) => {
   const transitionClasses = 'transition-colors duration-500 ease-out';
@@ -119,101 +149,25 @@ const getRoleStyle = (role: string, isHighlighted: boolean) => {
   return `${colorClasses} ${transitionClasses}`;
 };
 
-type MessageComponentRange = {
-  content: string;
-  start: number;
-  end: number;
-  source?: any;
-};
-type MessageContentRanges = {
-  main: MessageComponentRange;
-  reasoning: MessageComponentRange | null;
-  toolCalls: MessageComponentRange[];
-};
-
-// Take a ChatMessage and re-create the text that the judge model would have seen when writing citations
-// Returns tuple of text and ranges where message components appear in the text
-export function getMessageContentForCitations(
-  message: ChatMessage
-): [string, MessageContentRanges] {
-  // Main content
-  let mainContent = '';
-
-  if (typeof message.content === 'string') {
-    mainContent = message.content;
-  } else {
-    mainContent = message.content
-      .filter(
-        (item): item is Content & { text: string } =>
-          item.type === 'text' && typeof item.text === 'string'
-      )
-      .map((item) => item.text)
-      .join('\n');
-  }
-
-  const main: MessageComponentRange = {
-    content: mainContent,
-    start: 0,
-    end: mainContent.length,
-  };
-
-  let textContent = mainContent;
-
-  // Reasoning
-  const reasoningText = getReasoningContent(message.content);
-  let reasoning: MessageComponentRange | null = null;
-  if (reasoningText) {
-    const startIndex = textContent.length + 1; // account for leading newline
-    textContent += `\n${reasoningText}`;
-    reasoning = {
-      content: reasoningText,
-      start: startIndex,
-      end: startIndex + reasoningText.length,
-    };
-  }
-
-  // Tool calls
-  const toolCalls: MessageComponentRange[] = [];
-  if (
-    message?.role === 'assistant' &&
-    'tool_calls' in message &&
-    message.tool_calls
-  ) {
-    for (const toolCall of message.tool_calls) {
-      const innerContent = toolCall.view
-        ? toolCall.view.content
-        : `${toolCall.function}(${formatToolCallData(toolCall)})`;
-
-      textContent += '\n<tool call>\n';
-      toolCalls.push({
-        content: innerContent,
-        start: textContent.length,
-        end: textContent.length + innerContent.length,
-        source: toolCall,
-      });
-      textContent += innerContent;
-      textContent += '\n</tool call>';
-    }
-  }
-
-  return [textContent, { main, reasoning, toolCalls }];
-}
-
 interface MessageBoxProps {
   message: ChatMessage;
   index: number;
   blockId?: string;
   isHighlighted: boolean;
   citedTargets: CitationTarget[];
+  annotations: Annotation[];
   prettyPrintJsonMessages: Set<number>;
   setPrettyPrintJsonMessages: React.Dispatch<React.SetStateAction<Set<number>>>;
-  transcriptId?: string;
+  dataContext: TranscriptBlockContentItem;
   metadataDialogControl?: {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     citedKey?: string;
     citedTextRange?: CitationTargetTextRange;
   };
+  onAddMetadataComment?: (key: string) => void;
+  onAddBlockComment?: () => void;
+  onBlockClick?: () => void;
 }
 
 export function MessageBox({
@@ -222,21 +176,16 @@ export function MessageBox({
   blockId: id,
   isHighlighted,
   citedTargets,
+  annotations,
   prettyPrintJsonMessages,
+  dataContext,
   setPrettyPrintJsonMessages,
-  transcriptId,
   metadataDialogControl,
+  onAddMetadataComment,
+  onAddBlockComment,
+  onBlockClick,
 }: MessageBoxProps) {
   const containerRef = useRef<HTMLSpanElement | null>(null);
-  useTextSelection({
-    containerRef:
-      containerRef as unknown as React.RefObject<HTMLElement | null>,
-    selectionItem: {
-      transcriptId,
-      blockIdx: index,
-      text: '',
-    },
-  });
   const citationNav = useCitationNavigation();
   const selectedConversationCitation = citationNav?.selectedCitation ?? null;
 
@@ -269,53 +218,157 @@ export function MessageBox({
     return text;
   };
 
-  // Reconstruct the string that the judge saw when writing citations, and track how it maps to the chunks we'll render
-  const [textForCitations, componentRanges] = useMemo(
-    () => getMessageContentForCitations(message),
-    [message]
+  // Extract content texts
+  const mainTextContent = useMemo(() => getMainTextContent(message), [message]);
+  const reasoningContent = useMemo(
+    () => getReasoningContent(message.content),
+    [message.content]
   );
 
-  // Filter citation targets for block content citations with text ranges
-  const citationTargetsWithRanges: CitationTarget[] = useMemo(() => {
-    return citedTargets.filter(
-      (target) =>
-        target.item.item_type === 'block_content' &&
-        target.text_range !== null &&
-        target.text_range.start_pattern !== null
+  // Compute the content indices for citation context
+  const contentIndices = useMemo(
+    () => getContentIndices(message.content),
+    [message.content]
+  );
+
+  /**
+   * Compute citation intervals for a content section.
+   * Includes citations that either:
+   * - Have matching content_idx
+   * - Have no content_idx (legacy pattern-based citations)
+   */
+  const getIntervalsForContentIdx = (
+    contentIdx: number,
+    contentText: string
+  ): TextSpanWithCitations[] => {
+    // Filter citations: include those with matching content_idx OR no content_idx
+    const relevantTargets = citedTargets.filter((target) => {
+      if (target.item.item_type !== 'block_content') return false;
+      if (target.text_range === null) return false;
+      const item = target.item as TranscriptBlockContentItem;
+      // Include if content_idx matches OR if no content_idx (legacy)
+      return item.content_idx === contentIdx || item.content_idx == null;
+    });
+
+    const regularIntervals = computeIntervalsForCitationTargets(
+      contentText,
+      relevantTargets
     );
-  }, [citedTargets]);
 
-  const allCitationIntervals = computeIntervalsForCitationTargets(
-    textForCitations as string,
-    citationTargetsWithRanges
+    // Also handle annotations
+    const annotationIntervals = annotations.flatMap((ann) => {
+      if (!ann.citations || ann.citations.length === 0) return [];
+      const matchingTargets = ann.citations
+        .map((citation) => citation.target)
+        .filter((target) => {
+          if (target.item.item_type !== 'block_content') return false;
+          const item = target.item as TranscriptBlockContentItem;
+          return item.content_idx === contentIdx;
+        });
+      if (matchingTargets.length === 0) return [];
+      const intervals = computeIntervalsForCitationTargets(
+        contentText,
+        matchingTargets
+      );
+      return intervals.map((interval) => ({
+        ...interval,
+        isAnnotation: true,
+        annotationId: ann.id,
+      }));
+    });
+
+    return [...regularIntervals, ...annotationIntervals];
+  };
+
+  /**
+   * Compute citation intervals for tool calls (pattern-based only, no content_idx).
+   */
+  const getIntervalsForToolCall = (
+    toolCallText: string
+  ): TextSpanWithCitations[] => {
+    // Only include citations without content_idx (pattern-based)
+    const relevantTargets = citedTargets.filter((target) => {
+      if (target.item.item_type !== 'block_content') return false;
+      if (target.text_range === null) return false;
+      const item = target.item as TranscriptBlockContentItem;
+      return item.content_idx == null;
+    });
+
+    const regularIntervals = computeIntervalsForCitationTargets(
+      toolCallText,
+      relevantTargets
+    );
+
+    // Also handle annotations without content_idx
+    const annotationIntervals = annotations.flatMap((ann) => {
+      if (!ann.citations || ann.citations.length === 0) return [];
+      const matchingTargets = ann.citations
+        .map((citation) => citation.target)
+        .filter((target) => {
+          if (target.item.item_type !== 'block_content') return false;
+          const item = target.item as TranscriptBlockContentItem;
+          return item.content_idx == null;
+        });
+      if (matchingTargets.length === 0) return [];
+      const intervals = computeIntervalsForCitationTargets(
+        toolCallText,
+        matchingTargets
+      );
+      return intervals.map((interval) => ({
+        ...interval,
+        isAnnotation: true,
+        annotationId: ann.id,
+      }));
+    });
+
+    return [...regularIntervals, ...annotationIntervals];
+  };
+
+  const hoveredAnnotationId = useAppSelector(
+    (state) => state.transcript.hoveredAnnotationId
   );
+
+  const isHovered = annotations.some(
+    (ann) =>
+      ann.id === hoveredAnnotationId &&
+      ann.citations?.some((citation) => citation.target.text_range === null)
+  );
+
+  //********************
+  // Component Helpers *
+  //********************
 
   const renderMainMessageContent = () => {
-    const rawContentString = componentRanges.main.content;
+    const isPrettyPrinted = prettyPrintJsonMessages.has(index);
+    const contentString = isPrettyPrinted
+      ? prettyPrintJson(mainTextContent)
+      : mainTextContent;
+    const isTransformed = isPrettyPrinted && mainTextContent !== contentString;
 
-    const contentString = prettyPrintJsonMessages.has(index)
-      ? prettyPrintJson(rawContentString)
-      : rawContentString;
-
-    // Slice intervals to the main content range and align to that slice
-    const mainIntervals = sliceIntervals(
-      allCitationIntervals,
-      componentRanges.main.start,
-      componentRanges.main.end
+    const intervals = getIntervalsForContentIdx(
+      contentIndices.mainTextIdx,
+      mainTextContent
     );
 
     // If content was pretty-printed, transform the citation intervals to match the new positions
-    const citationIntervals =
-      prettyPrintJsonMessages.has(index) && rawContentString !== contentString
-        ? transformCitationIntervalsForPrettyPrintJson(
-            mainIntervals,
-            rawContentString,
-            contentString
-          )
-        : mainIntervals;
+    const citationIntervals = isTransformed
+      ? transformCitationIntervalsForPrettyPrintJson(
+          intervals,
+          mainTextContent,
+          contentString
+        )
+      : intervals;
+
+    const mainContext: TranscriptBlockContentItem = {
+      ...dataContext,
+      content_idx: contentIndices.mainTextIdx,
+    };
 
     return (
-      <div>
+      <div
+        data-citation-context={JSON.stringify(mainContext)}
+        data-original-text={isTransformed ? mainTextContent : undefined}
+      >
         <SegmentedText
           text={contentString}
           intervals={citationIntervals}
@@ -350,70 +403,54 @@ export function MessageBox({
 
   // Helper to render tool calls with citation highlighting for assistant messages
   const renderToolCalls = () => {
-    if (message.role === 'assistant' && message.tool_calls) {
-      return componentRanges.toolCalls.map((tool, i) => {
-        const toolCallIntervals = sliceIntervals(
-          allCitationIntervals,
-          tool.start,
-          tool.end
-        );
+    if (message.role !== 'assistant' || !message.tool_calls) return null;
 
-        return (
-          <div
-            key={i}
-            className="mt-1 p-1.5 bg-secondary/85 rounded text-xs break-all whitespace-pre-wrap"
-          >
-            <div className="text-[10px] text-muted-foreground mb-0.5">
-              Tool Call ID: {tool.source.id}
-            </div>
-            {tool.source.view ? (
-              <span className="font-mono">
-                <SegmentedText
-                  text={tool.content}
-                  intervals={toolCallIntervals}
-                  role={message.role}
-                  highlightedCitationId={highlightedCitationId ?? null}
-                />
-              </span>
-            ) : (
-              <div className="font-mono">
-                <span className="font-semibold">{tool.source.function}</span>
-                <span className="text-muted-foreground">
-                  (
-                  <SegmentedText
-                    text={formatToolCallData(tool.source)}
-                    intervals={shiftIntervals(
-                      toolCallIntervals,
-                      tool.source.function.length + 1
-                    )}
-                    role={message.role}
-                    highlightedCitationId={highlightedCitationId ?? null}
-                  />
-                  )
-                </span>
-              </div>
-            )}
+    return message.tool_calls.map((toolCall, i) => {
+      const toolCallContent = toolCall.view
+        ? toolCall.view.content
+        : `${toolCall.function}(${formatToolCallData(toolCall)})`;
+
+      const intervals = getIntervalsForToolCall(toolCallContent);
+
+      return (
+        <div
+          key={i}
+          className="mt-1 p-1.5 bg-secondary/85 rounded text-xs break-all whitespace-pre-wrap font-mono"
+        >
+          <div className="text-[10px] text-muted-foreground mb-0.5">
+            Tool Call ID: {toolCall.id}
           </div>
-        );
-      });
-    }
-    return null;
+          <SegmentedText
+            text={toolCallContent}
+            intervals={intervals}
+            role={message.role}
+            highlightedCitationId={highlightedCitationId ?? null}
+          />
+        </div>
+      );
+    });
   };
 
   const renderReasoningBlock = () => {
-    const reasoningText = componentRanges.reasoning?.content;
-    if (!reasoningText) return null;
+    if (!reasoningContent || contentIndices.reasoningIdx === null) return null;
 
-    const intervals = sliceIntervals(
-      allCitationIntervals,
-      componentRanges.reasoning!.start,
-      componentRanges.reasoning!.end
+    const intervals = getIntervalsForContentIdx(
+      contentIndices.reasoningIdx,
+      reasoningContent
     );
 
+    const reasoningContext: TranscriptBlockContentItem = {
+      ...dataContext,
+      content_idx: contentIndices.reasoningIdx,
+    };
+
     return (
-      <div className="mb-2 px-2 py-2 bg-muted border-l-2 border-border text-xs text-primary italic whitespace-pre-wrap [overflow-wrap:anywhere] max-w-full overflow-x-auto font-mono rounded custom-scrollbar">
+      <div
+        data-citation-context={JSON.stringify(reasoningContext)}
+        className="mb-2 px-2 py-2 bg-muted border-l-2 border-border text-xs text-primary italic whitespace-pre-wrap [overflow-wrap:anywhere] max-w-full overflow-x-auto font-mono rounded custom-scrollbar"
+      >
         <SegmentedText
-          text={reasoningText}
+          text={reasoningContent}
           intervals={intervals}
           role={message.role}
           highlightedCitationId={highlightedCitationId ?? null}
@@ -441,18 +478,39 @@ export function MessageBox({
       <div
         id={id}
         className={cn(
-          'p-2 rounded-md text-sm',
+          'group p-2 rounded-md text-sm',
           !isHighlighted && 'transition-all duration-1500',
           getRoleStyle(message.role, isHighlighted)
         )}
       >
         <div className="text-[10px] text-muted-foreground flex justify-between mb-1">
-          <span>
-            Block {index} |{' '}
-            {message.role.charAt(0).toUpperCase() + message.role.slice(1)}
+          <span className="flex items-center gap-1 select-none">
+            <span
+              onClick={onBlockClick}
+              className={cn(
+                onBlockClick &&
+                  'cursor-pointer hover:text-primary hover:underline',
+                isHovered && 'text-primary underline'
+              )}
+            >
+              Block {index} |{' '}
+              {message.role.charAt(0).toUpperCase() + message.role.slice(1)}
+            </span>
+            {onAddBlockComment && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAddBlockComment();
+                }}
+                className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-primary transition-colors opacity-0 group-hover:opacity-100"
+                title="Add comment to block"
+              >
+                <MessageSquarePlus className="h-3 w-3" />
+              </button>
+            )}
           </span>
           <div className="flex items-center gap-2">
-            {hasJsonContent(componentRanges.main.content) && (
+            {hasJsonContent(mainTextContent) && (
               <label className="flex items-center space-x-1 text-xs text-muted-foreground">
                 <input
                   type="checkbox"
@@ -479,6 +537,7 @@ export function MessageBox({
                         showSearchControls={true}
                         citedKey={metadataDialogControl?.citedKey}
                         textRange={metadataDialogControl?.citedTextRange}
+                        onAddComment={onAddMetadataComment}
                       />
                     )}
                   </MetadataPopover.Body>

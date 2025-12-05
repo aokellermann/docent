@@ -1,11 +1,13 @@
 from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+from docent.data_models.citation import InlineCitation
 from docent.data_models.judge import Label
 from docent_core._db_service.schemas.base import SQLABase
 from docent_core.docent.db.schemas.tables import TABLE_AGENT_RUN, TABLE_COLLECTION, TABLE_USER
@@ -13,6 +15,7 @@ from docent_core.docent.db.schemas.tables import TABLE_AGENT_RUN, TABLE_COLLECTI
 TABLE_LABEL = "labels"
 TABLE_LABEL_SET = "label_sets"
 TABLE_LABEL_SET_RUBRIC = "label_set_rubrics"
+TABLE_ANNOTATION = "annotations"
 TABLE_TAG = "tags"
 
 
@@ -105,6 +108,66 @@ class SQLALabelSet(SQLABase):
             name=self.name,
             description=self.description,
             label_schema=self.label_schema,
+        )
+
+
+class Annotation(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    user_email: str | None = None
+    collection_id: str
+    agent_run_id: str
+    citations: list[InlineCitation]
+    created_at: datetime | None = None
+    content: str
+
+
+class SQLAAnnotation(SQLABase):
+    """Annotations table - stores annotations for agent runs."""
+
+    __tablename__ = TABLE_ANNOTATION
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+
+    user_id = mapped_column(String(36), ForeignKey(f"{TABLE_USER}.id"), index=True)
+    collection_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey(f"{TABLE_COLLECTION}.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    agent_run_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey(f"{TABLE_AGENT_RUN}.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False
+    )
+
+    citations: Mapped[list[InlineCitation]] = mapped_column(JSONB, nullable=False)
+
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+
+    @classmethod
+    def from_pydantic(cls, user_id: str, annotation: Annotation) -> "SQLAAnnotation":
+        return cls(
+            id=annotation.id,
+            user_id=user_id,
+            collection_id=annotation.collection_id,
+            agent_run_id=annotation.agent_run_id,
+            citations=[citation.model_dump() for citation in annotation.citations],
+            content=annotation.content,
+        )
+
+    def to_pydantic(self) -> Annotation:
+        return Annotation(
+            id=self.id,
+            collection_id=self.collection_id,
+            agent_run_id=self.agent_run_id,
+            citations=[InlineCitation.model_validate(citation) for citation in self.citations],
+            created_at=self.created_at,
+            content=self.content,
         )
 
 

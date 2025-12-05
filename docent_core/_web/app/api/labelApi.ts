@@ -1,6 +1,7 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import { BASE_URL } from '@/app/constants';
 import { SchemaDefinition } from '@/app/types/schema';
+import { InlineCitation } from '@/app/types/citationTypes';
 
 // Types based on the backend models
 export interface Label {
@@ -50,13 +51,34 @@ export interface LabelSetName {
   name: string;
 }
 
+export interface Annotation {
+  id: string;
+  user_email: string;
+  collection_id: string;
+  agent_run_id: string;
+  citations: InlineCitation[];
+  created_at: string;
+  content: string;
+}
+
+export interface NewAnnotation {
+  collection_id: string;
+  agent_run_id: string;
+  citations: InlineCitation[];
+  content: string;
+}
+
+export interface UpdateAnnotationRequest {
+  content: string;
+}
+
 export const labelApi = createApi({
   reducerPath: 'labelApi',
   baseQuery: fetchBaseQuery({
     baseUrl: `${BASE_URL}/rest/label`,
     credentials: 'include',
   }),
-  tagTypes: ['Label', 'LabelSet', 'LabelSetAssociation'],
+  tagTypes: ['Label', 'LabelSet', 'LabelSetAssociation', 'Annotation'],
   endpoints: (build) => ({
     // Label CRUD
     createLabel: build.mutation<
@@ -233,6 +255,73 @@ export const labelApi = createApi({
             ]
           : [{ type: 'Label', id: `AGENT_RUN-${agentRunId}` }],
     }),
+
+    // Annotation CRUD
+    createAnnotation: build.mutation<
+      { message: string },
+      { collectionId: string; annotation: NewAnnotation }
+    >({
+      query: ({ collectionId, annotation }) => ({
+        url: `/${collectionId}/annotation`,
+        method: 'POST',
+        body: { annotation },
+      }),
+      invalidatesTags: (result, error, { annotation }) => [
+        'Annotation',
+        { type: 'Annotation', id: `AGENT_RUN-${annotation.agent_run_id}` },
+      ],
+    }),
+    updateAnnotation: build.mutation<
+      { message: string },
+      {
+        collectionId: string;
+        annotationId: string;
+        content: string;
+        agentRunId: string;
+      }
+    >({
+      query: ({ collectionId, annotationId, content }) => ({
+        url: `/${collectionId}/annotation/${annotationId}`,
+        method: 'PUT',
+        body: { content },
+      }),
+      invalidatesTags: (result, error, { agentRunId, annotationId }) => [
+        { type: 'Annotation', id: `AGENT_RUN-${agentRunId}` },
+        { type: 'Annotation', id: annotationId },
+      ],
+    }),
+    deleteAnnotation: build.mutation<
+      { message: string },
+      { collectionId: string; annotationId: string; agentRunId: string }
+    >({
+      query: ({ collectionId, annotationId }) => ({
+        url: `/${collectionId}/annotation/${annotationId}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: (result, error, { agentRunId, annotationId }) => [
+        { type: 'Annotation', id: `AGENT_RUN-${agentRunId}` },
+        { type: 'Annotation', id: annotationId },
+      ],
+    }),
+    getAnnotationsForAgentRun: build.query<
+      Annotation[],
+      { collectionId: string; agentRunId: string }
+    >({
+      query: ({ collectionId, agentRunId }) => ({
+        url: `/${collectionId}/agent_run/${agentRunId}/annotations`,
+        method: 'GET',
+      }),
+      providesTags: (result, error, { agentRunId }) =>
+        result
+          ? [
+              { type: 'Annotation', id: `AGENT_RUN-${agentRunId}` },
+              ...result.map((annotation) => ({
+                type: 'Annotation' as const,
+                id: annotation.id,
+              })),
+            ]
+          : [{ type: 'Annotation', id: `AGENT_RUN-${agentRunId}` }],
+    }),
   }),
 });
 
@@ -255,4 +344,10 @@ export const {
 
   // Other
   useGetLabelsForAgentRunQuery,
+
+  // Annotation CRUD
+  useCreateAnnotationMutation,
+  useUpdateAnnotationMutation,
+  useDeleteAnnotationMutation,
+  useGetAnnotationsForAgentRunQuery,
 } = labelApi;

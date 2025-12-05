@@ -6,6 +6,7 @@ export interface TextSpanWithCitations {
   start: number;
   end: number;
   citationId: string;
+  annotationId?: string;
 }
 
 // Position without citation ID (used for caching)
@@ -186,6 +187,10 @@ export const computeIntervalsForJsonPattern = (
 /**
  * Compute intervals for citation targets with text ranges
  * Uses the full CitationTarget to generate a proper, lossless citation ID
+ *
+ * If both target_start_idx and target_end_idx are present, uses them directly.
+ * Otherwise, if target_start_idx is present, only highlights the match closest to that position.
+ * Otherwise, highlights all matches.
  */
 export const computeIntervalsForCitationTargets = (
   text: string,
@@ -195,16 +200,49 @@ export const computeIntervalsForCitationTargets = (
 
   const intervals: TextSpanWithCitations[] = [];
   for (const target of targets) {
-    const { start_pattern } = target.text_range || {};
+    const { start_pattern, target_start_idx, target_end_idx } =
+      target.text_range || {};
+
+    // Generate proper citation ID from full CitationTarget
+    const citationId = citationTargetToId(target);
+
+    // If we have both start and end indices, use them directly without regex
+    if (target_start_idx != null && target_end_idx != null) {
+      intervals.push({
+        start: target_start_idx,
+        end: target_end_idx,
+        citationId,
+      });
+      continue;
+    }
+
+    // Fall back to pattern matching
     if (!start_pattern) continue;
 
     // Get positions from cache (pattern-based)
     const positions = findMatchesForPattern(text, start_pattern);
+    if (positions.length === 0) continue;
 
-    // Generate proper citation ID from full CitationTarget
-    const citationId = citationTargetToId(target);
-    const matches = positions.map((pos) => ({ ...pos, citationId }));
-    if (matches.length) intervals.push(...matches);
+    // If target_start_idx is present, only use the match closest to that position
+    if (target_start_idx !== undefined && target_start_idx !== null) {
+      // Find the match with start position closest to target_start_idx
+      let closestMatch = positions[0];
+      let closestDistance = Math.abs(positions[0].start - target_start_idx);
+
+      for (const pos of positions) {
+        const distance = Math.abs(pos.start - target_start_idx);
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestMatch = pos;
+        }
+      }
+
+      intervals.push({ ...closestMatch, citationId });
+    } else {
+      // No target_start_idx - highlight all matches
+      const matches = positions.map((pos) => ({ ...pos, citationId }));
+      intervals.push(...matches);
+    }
   }
 
   return intervals;
@@ -270,13 +308,17 @@ export const sliceIntervals = (
     .filter((interval) => interval.start < interval.end);
 };
 
-// Helper function to create character position mapping between original and pretty-printed JSON
-function createPrettyPrintJsonPositionMapping(
+type PrettyPrintMappings = {
+  originalToPretty: number[];
+  prettyToOriginal: number[];
+};
+
+function createPrettyPrintMappings(
   originalText: string,
   prettyText: string
-) {
-  // Create a mapping from original positions to pretty positions by finding matching content
+): PrettyPrintMappings {
   const originalToPretty: number[] = new Array(originalText.length);
+  const prettyToOriginal: number[] = new Array(prettyText.length);
 
   let originalPos = 0;
   let prettyPos = 0;
@@ -286,20 +328,19 @@ function createPrettyPrintJsonPositionMapping(
     const prettyChar = prettyText[prettyPos];
 
     if (originalChar === prettyChar) {
-      // Exact match - record the mapping
       originalToPretty[originalPos] = prettyPos;
+      prettyToOriginal[prettyPos] = originalPos;
       originalPos++;
       prettyPos++;
     } else if (/\s/.test(originalChar) && /\s/.test(prettyChar)) {
-      // Both are whitespace - advance both but prefer the pretty position mapping
       originalToPretty[originalPos] = prettyPos;
+      prettyToOriginal[prettyPos] = originalPos;
       originalPos++;
       prettyPos++;
     } else if (/\s/.test(prettyChar)) {
-      // Pretty has extra whitespace (common in formatted JSON)
+      prettyToOriginal[prettyPos] = originalPos;
       prettyPos++;
     } else if (/\s/.test(originalChar)) {
-      // Original has whitespace that was removed/changed
       originalToPretty[originalPos] = prettyPos;
       originalPos++;
     } else {
@@ -317,43 +358,60 @@ function createPrettyPrintJsonPositionMapping(
           },
         }
       );
+      originalToPretty[originalPos] = prettyPos;
+      prettyToOriginal[prettyPos] = originalPos;
+      originalPos++;
+      prettyPos++;
     }
   }
 
-  // Fill in any remaining positions
   while (originalPos < originalText.length) {
     originalToPretty[originalPos] = prettyText.length;
     originalPos++;
   }
   while (prettyPos < prettyText.length) {
+    prettyToOriginal[prettyPos] = originalText.length;
     prettyPos++;
   }
 
-  return originalToPretty;
+  return { originalToPretty, prettyToOriginal };
 }
 
-// Helper function to transform citation intervals from original to pretty-printed positions
 export function transformCitationIntervalsForPrettyPrintJson(
   intervals: TextSpanWithCitations[],
   originalText: string,
   prettyText: string
 ) {
-  const originalToPretty = createPrettyPrintJsonPositionMapping(
+  const { originalToPretty } = createPrettyPrintMappings(
     originalText,
     prettyText
   );
 
   return intervals
     .map((interval) => {
-      // Map the start and end positions
       const newStart = originalToPretty[interval.start] ?? interval.start;
       const newEnd = originalToPretty[interval.end - 1] ?? interval.end;
-
-      return {
-        ...interval,
-        start: newStart,
-        end: newEnd + 1, // Add 1 back since we mapped end-1
-      };
+      return { ...interval, start: newStart, end: newEnd + 1 };
     })
-    .filter((interval) => interval.start < interval.end); // Remove invalid intervals
+    .filter((interval) => interval.start < interval.end);
+}
+
+export function reverseTransformPrettyPrintIndices(
+  prettyStartIdx: number,
+  prettyEndIdx: number,
+  originalText: string,
+  prettyText: string
+): { startIdx: number; endIdx: number } {
+  const { prettyToOriginal } = createPrettyPrintMappings(
+    originalText,
+    prettyText
+  );
+
+  const startIdx = prettyToOriginal[prettyStartIdx] ?? 0;
+  const endIdx =
+    prettyEndIdx > 0
+      ? (prettyToOriginal[prettyEndIdx - 1] ?? originalText.length - 1) + 1
+      : 0;
+
+  return { startIdx, endIdx };
 }

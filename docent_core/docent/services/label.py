@@ -9,8 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from docent._log_util import get_logger
 from docent.data_models.judge import Label
-from docent_core.docent.db.schemas.label import SQLALabel, SQLALabelSet, SQLATag
-from docent_core.docent.db.schemas.tables import SQLAAgentRun
+from docent_core.docent.db.schemas.label import (
+    Annotation,
+    SQLAAnnotation,
+    SQLALabel,
+    SQLALabelSet,
+    SQLATag,
+)
+from docent_core.docent.db.schemas.tables import SQLAUser
 from docent_core.docent.services.monoservice import MonoService
 
 logger = get_logger(__name__)
@@ -375,6 +381,99 @@ class LabelService:
         sqla_labels = result.scalars().all()
         return [sqla_label.to_pydantic() for sqla_label in sqla_labels]
 
+    ###################
+    # Annotation CRUD #
+    ###################
+
+    async def create_annotation(self, user_id: str, annotation: Annotation) -> None:
+        """Create an annotation.
+
+        Args:
+            annotation: The annotation to create
+        """
+        sqla_annotation = SQLAAnnotation.from_pydantic(user_id, annotation)
+        self.session.add(sqla_annotation)
+
+    async def get_annotation(self, annotation_id: str) -> Annotation | None:
+        """Get a single annotation by ID.
+
+        Args:
+            annotation_id: The annotation ID
+
+        Returns:
+            The annotation or None if not found
+        """
+        result = await self.session.execute(
+            select(SQLAAnnotation, SQLAUser.email)
+            .join(SQLAUser, SQLAAnnotation.user_id == SQLAUser.id)
+            .where(SQLAAnnotation.id == annotation_id)
+        )
+        row = result.one_or_none()
+        if row is None:
+            return None
+        sqla_annotation, user_email = row
+        annotation = sqla_annotation.to_pydantic()
+        annotation.user_email = user_email
+        return annotation
+
+    async def get_annotations_by_agent_run(self, agent_run_id: str) -> list[Annotation]:
+        """Get all annotations for a specific agent run.
+
+        Args:
+            agent_run_id: The agent run ID
+
+        Returns:
+            List of annotations for the agent run
+        """
+        result = await self.session.execute(
+            select(SQLAAnnotation, SQLAUser.email)
+            .join(SQLAUser, SQLAAnnotation.user_id == SQLAUser.id)
+            .where(SQLAAnnotation.agent_run_id == agent_run_id)
+        )
+
+        annotations: list[Annotation] = []
+        for sqla_annotation, user_email in result.all():
+            annotation = sqla_annotation.to_pydantic()
+            annotation.user_email = user_email
+            annotations.append(annotation)
+        return annotations
+
+    async def update_annotation(self, annotation_id: str, content: str) -> bool:
+        """Update an annotation's content.
+
+        Args:
+            annotation_id: The annotation ID
+            content: The new annotation content
+
+        Returns:
+            True if updated successfully
+
+        Raises:
+            ValueError: If annotation doesn't exist
+        """
+        result = await self.session.execute(
+            select(SQLAAnnotation).where(SQLAAnnotation.id == annotation_id)
+        )
+        existing_annotation = result.scalar_one_or_none()
+        if existing_annotation is None:
+            raise ValueError(f"Annotation {annotation_id} not found")
+
+        existing_annotation.content = content
+        return True
+
+    async def delete_annotation(self, annotation_id: str) -> None:
+        """Delete an annotation.
+
+        Args:
+            annotation_id: The annotation ID
+        """
+        result = await self.session.execute(
+            select(SQLAAnnotation).where(SQLAAnnotation.id == annotation_id)
+        )
+        annotation_to_delete = result.scalar_one_or_none()
+        if annotation_to_delete:
+            await self.session.delete(annotation_to_delete)
+
     #############
     # Tag CRUD  #
     #############
@@ -386,15 +485,8 @@ class LabelService:
         """Create a tag for an agent run."""
         self._validate_tag_value(value)
 
-        # Ensure the agent run belongs to the collection before tagging
-        result = await self.session.execute(
-            select(SQLAAgentRun.collection_id).where(SQLAAgentRun.id == agent_run_id)
-        )
-        agent_run_collection_id = result.scalar_one_or_none()
-        if agent_run_collection_id is None or agent_run_collection_id != collection_id:
-            raise self.AgentRunCollectionMismatchError(
-                f"Agent run {agent_run_id} not found in collection {collection_id}"
-            )
+        # Verify that the agent run belongs to the collection, raising an error if it doesn't.
+        await self.service.check_agent_run_in_collection(collection_id, agent_run_id)
 
         sqla_tag = SQLATag(
             id=str(uuid4()),
