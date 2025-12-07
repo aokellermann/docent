@@ -691,11 +691,8 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
         // Calculate visibility as a percentage of the element's height
         const visibilityScore = visibleHeight / rect.height;
 
-        // Extract block index from the id
-        const blockIdx = parseInt(
-          element.id.replace('b-', '').split('_')[2],
-          10
-        );
+        // Extract block index from the id (format: t-{transcriptIdx}_b-{blockIdx})
+        const blockIdx = parseInt(element.id.split('_b-')[1], 10);
 
         return { blockIndex: blockIdx, visibilityScore };
       });
