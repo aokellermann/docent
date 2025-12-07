@@ -108,7 +108,6 @@ export function AnnotationCard({
       await createAnnotation({
         collectionId,
         annotation: {
-          collection_id: collectionId,
           agent_run_id: agentRunId,
           citations: draftAnnotation.citations,
           content,
