@@ -3,6 +3,7 @@
 import pytest
 
 from docent.data_models.agent_run import AgentRun
+from docent.data_models.chat import ChatMessage
 from docent.data_models.chat.message import AssistantMessage, UserMessage
 from docent.data_models.citation import (
     AgentRunMetadataItem,
@@ -275,7 +276,7 @@ def test_get_system_message():
 
 def create_test_agent_run() -> AgentRun:
     """Create a standardized mock AgentRun for all tests."""
-    messages = [
+    messages: list[ChatMessage] = [
         UserMessage(content="Hello, can you help?"),
         AssistantMessage(content="I understand the task and will help you."),
         UserMessage(content="Great, let's proceed."),

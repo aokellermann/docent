@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_serializer, field_validator
 
 from docent._llm_util.providers.preference_types import PUBLIC_PROVIDER_PREFERENCES, ModelOption
 from docent._log_util import get_logger
-from docent.data_models.agent_run import AgentRun
+from docent.data_models.agent_run import AgentRun, AgentRunView
 from docent.data_models.transcript import TEXT_RANGE_CITE_INSTRUCTION
 from docent.judges.util.meta_schema import validate_judge_result_schema
 from docent.sdk.llm_context import LLMContext, resolve_citations_with_context
@@ -147,7 +147,7 @@ class Rubric(BaseModel):
         # We've already validated that the system prompt template has these keys
         prompt = self.system_prompt_template.format(
             rubric=self.rubric_text,
-            agent_run=agent_run.to_text_new(),
+            agent_run=AgentRunView.from_agent_run(agent_run).to_text(),
             output_schema=output_schema_text,
             # Only include citation instructions if the schema requests citations
             citation_instructions=(

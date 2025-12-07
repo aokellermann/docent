@@ -6,7 +6,7 @@ import jsonschema
 
 from docent._llm_util.data_models.llm_output import LLMOutput
 from docent._llm_util.llm_svc import MessagesInput
-from docent.data_models.agent_run import AgentRun
+from docent.data_models.agent_run import AgentRun, AgentRunView
 from docent.data_models.chat.message import ChatMessage, SystemMessage, ToolMessage, UserMessage
 from docent.data_models.chat.tool import (
     ToolCall,
@@ -331,7 +331,7 @@ async def summarize_agent_runs(
     for ar in agent_runs:
         messages = [
             SystemMessage(content=SUMMARIZE_AGENT_RUNS_SYS_PROMPT.format(user_query=rubric_text)),
-            UserMessage(content=ar.text),
+            UserMessage(content=AgentRunView.from_agent_run(ar).to_text()),
         ]
         messages_batch.append(messages)
 

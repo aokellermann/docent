@@ -10,10 +10,20 @@ import { TranscriptMetadataField } from '@/app/types/experimentViewerTypes';
 import { AgentRun, BaseAgentRunMetadata } from '@/app/types/transcriptTypes';
 import sseService from '../services/sseService';
 
-type CanonicalChild = ['t' | 'tg', string] | string;
-interface CanonicalTree {
-  tree: Record<string, CanonicalChild[]>;
-  transcript_ids_ordered: string[];
+// Node types matching the backend NodeType enum
+type NodeType = 'ar' | 't' | 'tg';
+
+interface AgentRunTreeNode {
+  id: string;
+  node_type: NodeType;
+  children_ids: string[];
+  has_transcript_in_subtree: boolean;
+}
+
+interface AgentRunTree {
+  nodes: Record<string, AgentRunTreeNode>;
+  transcript_id_to_idx: Record<string, number>;
+  parent_map: Record<string, string>;
 }
 
 interface CreateCollectionRequest {
@@ -204,12 +214,12 @@ export const collectionApi = createApi({
         method: 'GET',
       }),
     }),
-    getAgentRunWithCanonicalTree: build.query<
-      [AgentRun, CanonicalTree],
+    getAgentRunWithTree: build.query<
+      [AgentRun, AgentRunTree],
       { collectionId: string; agentRunId: string; fullTree?: boolean }
     >({
       query: ({ collectionId, agentRunId, fullTree = false }) => ({
-        url: `/${collectionId}/agent_run_with_canonical_tree?agent_run_id=${agentRunId}&apply_base_where_clause=false&full_tree=${fullTree}`,
+        url: `/${collectionId}/agent_run_with_tree?agent_run_id=${agentRunId}&apply_base_where_clause=false&full_tree=${fullTree}`,
         method: 'GET',
       }),
     }),
@@ -347,5 +357,5 @@ export const {
   useImportRunsFromFileStreamQuery,
   useLazyImportRunsFromFileStreamQuery,
   useGetAgentRunQuery,
-  useGetAgentRunWithCanonicalTreeQuery,
+  useGetAgentRunWithTreeQuery,
 } = collectionApi;

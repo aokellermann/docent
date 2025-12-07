@@ -1,34 +1,23 @@
-import sys
+from __future__ import annotations
+
 import textwrap
-from collections import deque
 from datetime import datetime
+from enum import Enum
 from typing import Any, Literal, TypedDict, cast
 from uuid import uuid4
 
-import yaml
 from pydantic import (
     BaseModel,
     Field,
-    PrivateAttr,
     field_validator,
     model_validator,
 )
-from pydantic_core import to_jsonable_python
 
 from docent._log_util import get_logger
-from docent.data_models._tiktoken_util import get_token_count, group_messages_into_ranges
 from docent.data_models.metadata_util import dump_metadata
 from docent.data_models.transcript import Transcript, TranscriptGroup
 
 logger = get_logger(__name__)
-
-
-FilterableFieldType = Literal["str", "bool", "int", "float"]
-
-
-class FilterableField(TypedDict):
-    name: str
-    type: FilterableFieldType
 
 
 class AgentRun(BaseModel):
@@ -53,6 +42,10 @@ class AgentRun(BaseModel):
     transcripts: list[Transcript]
     transcript_groups: list[TranscriptGroup] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    ##############
+    # Validators #
+    ##############
 
     @field_validator("transcripts", mode="before")
     @classmethod
@@ -90,387 +83,406 @@ class AgentRun(BaseModel):
             raise ValueError("AgentRun must have at least one transcript")
         return self
 
-    def get_filterable_fields(self, max_depth: int = 1) -> list[FilterableField]:
-        """Returns a list of all fields that can be used to filter the agent run,
-        by recursively exploring the model_dump() for singleton types in dictionaries.
-
-        Returns:
-            list[FilterableField]: A list of filterable fields, where each field is a
-                                   dictionary containing its 'name' (path) and 'type'.
-        """
-
-        result: list[FilterableField] = []
-
-        def _explore_dict(d: dict[str, Any], prefix: str, depth: int):
-            nonlocal result
-
-            if depth > max_depth:
-                return
-
-            for k, v in d.items():
-                if isinstance(v, (str, int, float, bool)):
-                    result.append(
-                        {
-                            "name": f"{prefix}.{k}",
-                            "type": cast(FilterableFieldType, type(v).__name__),
-                        }
-                    )
-                elif isinstance(v, dict):
-                    _explore_dict(cast(dict[str, Any], v), f"{prefix}.{k}", depth + 1)
-
-        # Look at the agent run metadata
-        _explore_dict(to_jsonable_python(self.metadata), "metadata", 0)
-        # Look at the transcript metadata
-        # TODO(mengk): restore this later when we have the ability to integrate with SQL.
-        # for t_id, t in self.transcripts.items():
-        #     _explore_dict(
-        #         t.metadata.model_dump(strip_internal_fields=True), f"transcript.{t_id}.metadata", 0
-        #     )
-
-        # Append the text field
-        result.append({"name": "agent_run_id", "type": "str"})
-        result.append({"name": "text", "type": "str"})
-
-        return result
-
-    ######################
-    # Converting to text #
-    ######################
-
-    def _to_text_impl(self, token_limit: int = sys.maxsize) -> list[str]:
-        """
-        Core implementation for converting agent run to text representation.
-
-        Args:
-            token_limit: Maximum tokens per returned string under the GPT-4 tokenization scheme
-            use_blocks: If True, use individual message blocks. If False, use action units.
-
-        Returns:
-            List of strings, each at most token_limit tokens
-        """
-        # Generate transcript strings using appropriate method
-        transcript_strs: list[str] = []
-        for i, t in enumerate(self.transcripts):
-            transcript_content = t.to_str(
-                token_limit=sys.maxsize,
-                transcript_idx=i,
-            )[0]
-            transcript_strs.append(f"<transcript>\n{transcript_content}\n</transcript>")
-
-        transcripts_str = "\n\n".join(transcript_strs)
-
-        # Gather metadata
-        metadata_obj = to_jsonable_python(self.metadata)
-        if self.name is not None:
-            metadata_obj["name"] = self.name
-        if self.description is not None:
-            metadata_obj["description"] = self.description
-
-        yaml_width = float("inf")
-        transcripts_str = (
-            f"Here is a complete agent run for analysis purposes only:\n{transcripts_str}\n\n"
-        )
-        metadata_str = f"Metadata about the complete agent run:\n<agent run metadata>\n{yaml.dump(metadata_obj, width=yaml_width)}\n</agent run metadata>"
-
-        if token_limit == sys.maxsize:
-            return [f"{transcripts_str}" f"{metadata_str}"]
-
-        # Compute message length; if fits, return the full transcript and metadata
-        transcript_str_tokens = get_token_count(transcripts_str)
-        metadata_str_tokens = get_token_count(metadata_str)
-        if transcript_str_tokens + metadata_str_tokens <= token_limit:
-            return [f"{transcripts_str}" f"{metadata_str}"]
-
-        # Otherwise, split up the transcript and metadata into chunks
-        else:
-            results: list[str] = []
-            transcript_token_counts = [get_token_count(t) for t in transcript_strs]
-            ranges = group_messages_into_ranges(
-                transcript_token_counts, metadata_str_tokens, token_limit - 50
-            )
-            for msg_range in ranges:
-                if msg_range.include_metadata:
-                    cur_transcript_str = "\n\n".join(
-                        transcript_strs[msg_range.start : msg_range.end]
-                    )
-                    results.append(
-                        f"Here is a partial agent run for analysis purposes only:\n{cur_transcript_str}"
-                        f"{metadata_str}"
-                    )
-                else:
-                    assert (
-                        msg_range.end == msg_range.start + 1
-                    ), "Ranges without metadata should be a single message"
-                    t = self.transcripts[msg_range.start]
-                    if msg_range.num_tokens < token_limit - 50:
-                        transcript = (
-                            f"<transcript>\n{t.to_str(token_limit=sys.maxsize)[0]}\n</transcript>"
-                        )
-                        result = (
-                            f"Here is a partial agent run for analysis purposes only:\n{transcript}"
-                        )
-                        results.append(result)
-                    else:
-                        transcript_fragments: list[str] = t.to_str(
-                            token_limit=token_limit - 50,
-                        )
-                        for fragment in transcript_fragments:
-                            result = f"<transcript>\n{fragment}\n</transcript>"
-                            result = (
-                                f"Here is a partial agent run for analysis purposes only:\n{result}"
-                            )
-                            results.append(result)
-            return results
-
-    @property
-    def text(self) -> str:
-        """Concatenates all transcript texts with double newlines as separators.
-
-        Returns:
-            str: A string representation of all transcripts.
-        """
-        return self._to_text_impl(token_limit=sys.maxsize)[0]
-
-    ##############################
-    # New text rendering methods #
-    ##############################
-
-    # Transcript ID -> Transcript
-    _transcript_dict: dict[str, Transcript] | None = PrivateAttr(default=None)
-    # Transcript Group ID -> Transcript Group
-    _transcript_group_dict: dict[str, TranscriptGroup] | None = PrivateAttr(default=None)
-    # Canonical tree cache keyed by full_tree flag
-    _canonical_tree_cache: dict[bool, dict[str | None, list[tuple[Literal["t", "tg"], str]]]] = (
-        PrivateAttr(default_factory=dict)
-    )
-    # Transcript IDs (depth-first) cache keyed by full_tree flag
-    _transcript_ids_ordered_cache: dict[bool, list[str]] = PrivateAttr(default_factory=dict)
-
     @property
     def transcript_dict(self) -> dict[str, Transcript]:
-        """Lazily compute and cache a mapping from transcript ID to Transcript."""
-        if self._transcript_dict is None:
-            self._transcript_dict = {t.id: t for t in self.transcripts}
-        return self._transcript_dict
+        """Returns a dictionary mapping transcript IDs to Transcript objects."""
+        return {t.id: t for t in self.transcripts}
 
     @property
     def transcript_group_dict(self) -> dict[str, TranscriptGroup]:
-        """Lazily compute and cache a mapping from transcript group ID to TranscriptGroup."""
-        if self._transcript_group_dict is None:
-            self._transcript_group_dict = {tg.id: tg for tg in self.transcript_groups}
-        return self._transcript_group_dict
+        """Returns a dictionary mapping transcript group IDs to TranscriptGroup objects."""
+        return {tg.id: tg for tg in self.transcript_groups}
 
-    def _invalidate_caches(self) -> None:
-        """Reset cached lookups after mutating transcripts or transcript groups."""
-        self._transcript_dict = None
-        self._transcript_group_dict = None
-        self._canonical_tree_cache.clear()
-        self._transcript_ids_ordered_cache.clear()
+    def to_text(
+        self,
+        children_text: str,
+        agent_run_alias: int | str = 0,
+        indent: int = 0,
+        render_metadata: bool = True,
+    ) -> str:
+        if not isinstance(agent_run_alias, str):
+            agent_run_alias = f"R{agent_run_alias}"
 
-    def get_canonical_tree(
-        self, full_tree: bool = False
-    ) -> dict[str | None, list[tuple[Literal["t", "tg"], str]]]:
-        """Compute and cache the canonical, sorted transcript group tree.
+        if render_metadata:
+            metadata_text = dump_metadata(self.metadata)
+            if metadata_text is not None:
+                if indent > 0:
+                    metadata_text = textwrap.indent(metadata_text, " " * indent)
+                metadata_alias = f"{agent_run_alias}M"
+                children_text += f"\n<|agent run metadata {metadata_alias}|>\n{metadata_text}\n</|agent run metadata {metadata_alias}|>"
 
-        Args:
-            full_tree: If True, include all transcript groups regardless of whether
-                they contain transcripts. If False, include only the minimal tree
-                that connects relevant groups and transcripts.
+        if indent > 0:
+            children_text = textwrap.indent(children_text, " " * indent)
 
-        Returns:
-            Canonical tree mapping parent group id (or "__global_root") to a list of
-            children (type, id) tuples sorted by creation time.
-        """
-        if (
-            full_tree not in self._canonical_tree_cache
-            or full_tree not in self._transcript_ids_ordered_cache
-        ):
-            canonical_tree, transcript_idx_map = self._build_canonical_tree(full_tree=full_tree)
-            self._canonical_tree_cache[full_tree] = canonical_tree
-            self._transcript_ids_ordered_cache[full_tree] = list(transcript_idx_map.keys())
-        return self._canonical_tree_cache[full_tree]
+        return (
+            f"<|agent run {agent_run_alias}|>\n{children_text}\n</|agent run {agent_run_alias}|>\n"
+        )
 
-    def get_transcript_ids_ordered(self, full_tree: bool = False) -> list[str]:
-        """Compute and cache the depth-first transcript id ordering.
 
-        Args:
-            full_tree: Whether to compute based on the full tree or the minimal tree.
+# Sentinel value for the global root in the canonical tree (kept for backwards compatibility)
+# TODO(mengk): would like to migrate this to the ID of the agent run, if possible.
+GLOBAL_ROOT_ID: str = "__global_root"
 
-        Returns:
-            List of transcript ids in depth-first order.
-        """
-        if (
-            full_tree not in self._transcript_ids_ordered_cache
-            or full_tree not in self._canonical_tree_cache
-        ):
-            canonical_tree, transcript_idx_map = self._build_canonical_tree(full_tree=full_tree)
-            self._canonical_tree_cache[full_tree] = canonical_tree
-            self._transcript_ids_ordered_cache[full_tree] = list(transcript_idx_map.keys())
-        return self._transcript_ids_ordered_cache[full_tree]
 
-    def _build_canonical_tree(self, full_tree: bool = False):
-        t_dict = self.transcript_dict
-        tg_dict = self.transcript_group_dict
+class NodeType(str, Enum):
+    AGENT_RUN = "ar"
+    TRANSCRIPT = "t"
+    TRANSCRIPT_GROUP = "tg"
+    # MESSAGE = "m"  # TODO(mengk): support this later
 
-        # Find all transcript groups that have direct transcript children
-        # Also keep track of transcripts that are not in a group
-        tgs_to_transcripts: dict[str, set[str]] = {}
-        for transcript in t_dict.values():
-            if transcript.transcript_group_id is None:
-                tgs_to_transcripts.setdefault("__global_root", set()).add(transcript.id)
-            else:
-                tgs_to_transcripts.setdefault(transcript.transcript_group_id, set()).add(
-                    transcript.id
-                )
 
-        # tg_tree maps from parent -> children. A child can be a group or a transcript.
-        #   A parent must be a group (or None, for transcripts that are not in a group).
-        tg_tree: dict[str, set[tuple[Literal["t", "tg"], str]]] = {}
+class AgentRunTreeNode(BaseModel):
+    id: str  # Globally-unique UUID of the object itself
+    node_type: NodeType
+    children_ids: list[str]
+    # Whether this node or any of its descendants contains a transcript
+    has_transcript_in_subtree: bool = False
 
-        if full_tree:
-            for tg_id, tg in tg_dict.items():
-                tg_tree.setdefault(tg.parent_transcript_group_id or "__global_root", set()).add(
-                    ("tg", tg_id)
-                )
-                for t_id in tgs_to_transcripts.get(tg_id, []):
-                    tg_tree.setdefault(tg_id, set()).add(("t", t_id))
-            for t_id, t in t_dict.items():
-                tg_tree.setdefault(t.transcript_group_id or "__global_root", set()).add(("t", t_id))
-        else:
-            # Initialize q with "important" tgs
-            q, seen = deque(tgs_to_transcripts.keys()), set(tgs_to_transcripts.keys())
 
-            # Do an "upwards BFS" from leaves up to the root. Builds a tree of only relevant nodes.
-            while q:
-                u_id = q.popleft()
-                u = tg_dict.get(u_id)  # None if __global_root
+class AgentRunTree(BaseModel):
+    nodes: dict[str, AgentRunTreeNode]
+    transcript_id_to_idx: dict[str, int]
+    parent_map: dict[str, str]  # child_id -> parent_id
 
-                # Add the transcripts under this tg
-                for t_id in tgs_to_transcripts.get(u_id, []):
-                    tg_tree.setdefault(u_id, set()).add(("t", t_id))
+    @property
+    def nodes_pruned(self):
+        return self._prune_transcriptless_nodes(self.nodes)
 
-                # Add an edge from the parent
-                if u is not None:
-                    par_id = u.parent_transcript_group_id or "__global_root"
-                    # Mark u as a child of par
-                    tg_tree.setdefault(par_id, set()).add(("tg", u_id))
-                    # If we haven't investigated the parent before, add to q
-                    if par_id not in seen:
-                        q.append(par_id)
-                        seen.add(par_id)
+    @classmethod
+    def from_agent_run(cls, agent_run: AgentRun) -> AgentRunTree:
+        t_dict = agent_run.transcript_dict
+        tg_dict = agent_run.transcript_group_dict
 
-        # For each node, sort by created_at timestamp
-
-        def _cmp(element: tuple[Literal["t", "tg"], str]) -> datetime:
-            obj_type, obj_id = element
-            if obj_type == "tg":
-                return tg_dict[obj_id].created_at or datetime.max
-            else:
-                return t_dict[obj_id].created_at or datetime.max
-
-        c_tree: dict[str | None, list[tuple[Literal["t", "tg"], str]]] = {}
-        for tg_id in tg_tree:
-            children_ids = list(set(tg_tree[tg_id]))
-            sorted_children_ids = sorted(children_ids, key=_cmp)
-            c_tree[tg_id] = sorted_children_ids
-
-        # Compute transcript indices as the depth-first traversal index
-        transcript_idx_map: dict[str, int] = {}
-
-        def _assign_transcript_indices(cur_tg_id: str, next_idx: int) -> int:
-            children = c_tree.get(cur_tg_id, [])
-            for child_type, child_id in children:
-                if child_type == "tg":
-                    next_idx = _assign_transcript_indices(child_id, next_idx)
-                else:
-                    transcript_idx_map[child_id] = next_idx
-                    next_idx += 1
-            return next_idx
-
-        _assign_transcript_indices("__global_root", 0)
-
-        return c_tree, transcript_idx_map
-
-    def delete_transcript_group_subtree(self, transcript_group_id: str) -> None:
-        """Delete a transcript group and all descendant groups/transcripts using the canonical tree."""
-        if transcript_group_id == "__global_root":
-            raise ValueError("Cannot delete the global root sentinel")
-        if transcript_group_id not in self.transcript_group_dict:
-            raise ValueError(
-                f"Transcript group '{transcript_group_id}' does not exist on this run."
+        # Init tree and add the root AgentRun node
+        nodes: dict[str, AgentRunTreeNode] = {
+            GLOBAL_ROOT_ID: AgentRunTreeNode(
+                id=GLOBAL_ROOT_ID,
+                node_type=NodeType.AGENT_RUN,
+                children_ids=[],
             )
+        }
+        parent_map: dict[str, str] = {}
 
-        canonical_tree = self.get_canonical_tree(full_tree=True)
-        groups_to_delete: set[str] = set()
-        transcripts_to_delete: set[str] = set()
+        # Add all transcript groups to the tree
+        for tg_id, tg in tg_dict.items():
+            # Add this tg
+            if tg_id not in nodes:
+                nodes[tg_id] = AgentRunTreeNode(
+                    id=tg_id,
+                    node_type=NodeType.TRANSCRIPT_GROUP,
+                    children_ids=[],
+                )
+            # Add parent and mark the relationship
+            # If the stated ID is None, then it's the global root
+            par_id = tg.parent_transcript_group_id or GLOBAL_ROOT_ID
+            if par_id not in nodes:
+                nodes[par_id] = AgentRunTreeNode(
+                    id=par_id,
+                    node_type=(
+                        NodeType.AGENT_RUN
+                        if par_id == GLOBAL_ROOT_ID
+                        else NodeType.TRANSCRIPT_GROUP
+                    ),
+                    children_ids=[],
+                )
+            nodes[par_id].children_ids.append(tg_id)
+            parent_map[tg_id] = par_id
 
-        queue: deque[str] = deque([transcript_group_id])
-        while queue:
-            current_group = queue.popleft()
-            groups_to_delete.add(current_group)
-            for child_type, child_id in canonical_tree.get(current_group, []):
-                if child_type == "tg":
-                    queue.append(child_id)
-                else:
-                    transcripts_to_delete.add(child_id)
+        # Now add all the transcripts
+        for t_id, t in t_dict.items():
+            # Add this transcript
+            nodes[t_id] = AgentRunTreeNode(
+                id=t_id,
+                node_type=NodeType.TRANSCRIPT,
+                children_ids=[],
+            )
+            # Mark parent relationship
+            par_id = t.transcript_group_id or GLOBAL_ROOT_ID
+            # This should never happen, but check anyways for safety; fallback to global root
+            if par_id not in nodes:
+                logger.error(
+                    f"Parent {par_id} not found for transcript {t_id}. Assigning to global root as a fallback"
+                )
+                par_id = GLOBAL_ROOT_ID
+            nodes[par_id].children_ids.append(t_id)
+            parent_map[t_id] = par_id
 
-        if groups_to_delete:
-            self.transcript_groups = [
-                tg for tg in self.transcript_groups if tg.id not in groups_to_delete
-            ]
-        if transcripts_to_delete:
-            self.transcripts = [t for t in self.transcripts if t.id not in transcripts_to_delete]
+        # Go through each node and sort its children by created_at timestamp
+        def _cmp(obj_id: str) -> datetime:
+            obj_type = nodes[obj_id].node_type
+            if obj_type == NodeType.TRANSCRIPT_GROUP:
+                # This should never happen, but check anyways for safety
+                if obj_id not in tg_dict:
+                    logger.error(f"Transcript group {obj_id} not found")
+                    return datetime.max
+                return tg_dict[obj_id].created_at or datetime.max
+            elif obj_type == NodeType.TRANSCRIPT:
+                # This should never happen, but check anyways for safety
+                if obj_id not in t_dict:
+                    logger.error(f"Transcript {obj_id} not found")
+                    return datetime.max
+                return t_dict[obj_id].created_at or datetime.max
+            else:
+                raise ValueError(f"Unknown node type: {obj_type}")
 
-        self._invalidate_caches()
+        for node in nodes.values():
+            node.children_ids = sorted(node.children_ids, key=_cmp)
 
-    def to_text_new(
+        # Combined DFS: mark has_transcript_in_subtree and assign transcript indices
+        t_id_to_idx: dict[str, int] = {}
+
+        def _dfs(u_id: str, next_idx: int) -> tuple[bool, int]:
+            """Mark has_transcript_in_subtree and assign indices in a single traversal.
+
+            Returns (contains_transcript, next_idx_after).
+            """
+            node = nodes.get(u_id)
+            if node is None:
+                return False, next_idx
+
+            if node.node_type == NodeType.TRANSCRIPT:
+                # Leaf node: assign index immediately (pre-order)
+                t_id_to_idx[u_id] = next_idx
+                node.has_transcript_in_subtree = True
+                return True, next_idx + 1
+
+            # Non-transcript node: recurse into children
+            contains_transcript = False
+            for child_id in node.children_ids:
+                child_contains, next_idx = _dfs(child_id, next_idx)
+                contains_transcript = contains_transcript or child_contains
+
+            node.has_transcript_in_subtree = contains_transcript
+            return contains_transcript, next_idx
+
+        _dfs(GLOBAL_ROOT_ID, 0)
+
+        return cls(nodes=nodes, transcript_id_to_idx=t_id_to_idx, parent_map=parent_map)
+
+    def _prune_transcriptless_nodes(self, nodes: dict[str, AgentRunTreeNode]):
+        """Return a view of the canonical tree that only includes transcript-bearing branches."""
+        return {
+            node_id: node
+            for node_id, node in nodes.items()
+            if node.has_transcript_in_subtree or node_id == GLOBAL_ROOT_ID
+        }
+
+
+class SelectionSpecNode(BaseModel):
+    node_id: str
+
+    # Note that parent settings take precedence over child settings.
+    #   If a parent chooses not to render a child, the child's descendants
+    #   won't be rendered, even if render_children is True.
+    render_children_default: bool = True
+    # If render_default is True:  IDs of children to exclude
+    # If render_default is False: IDs of children to include
+    render_children_overrides: set[str] = Field(default_factory=set)
+    render_self_metadata: bool = True
+
+
+class SelectionSpec(BaseModel):
+    nodes: dict[str, SelectionSpecNode]
+
+    @classmethod
+    def from_agent_run_tree(cls, agent_run_tree: AgentRunTree) -> SelectionSpec:
+        return cls(
+            nodes={
+                node_id: SelectionSpecNode(node_id=node_id)
+                for node_id in agent_run_tree.nodes.keys()
+            }
+        )
+
+
+class AgentRunView:
+    def __init__(
+        self, agent_run: AgentRun, agent_run_tree: AgentRunTree, selection_spec: SelectionSpec
+    ):
+        self._ar = agent_run
+        self._ar_tree = agent_run_tree
+        self._spec = selection_spec
+
+    @classmethod
+    def from_agent_run(cls, agent_run: AgentRun) -> AgentRunView:
+        ar_tree = AgentRunTree.from_agent_run(agent_run)
+        spec = SelectionSpec.from_agent_run_tree(ar_tree)
+        return cls(agent_run=agent_run, agent_run_tree=ar_tree, selection_spec=spec)
+
+    #######################
+    # Core text rendering #
+    #######################
+
+    def to_text(
         self,
         agent_run_alias: int | str = 0,
         t_idx_map: dict[str, int] | None = None,
         indent: int = 0,
         full_tree: bool = False,
     ):
-        if isinstance(agent_run_alias, int):
-            agent_run_alias = f"R{agent_run_alias}"
-
-        c_tree = self.get_canonical_tree(full_tree=full_tree)
-        t_ids_ordered = self.get_transcript_ids_ordered(full_tree=full_tree)
+        ar_tree_nodes = self._ar_tree.nodes if full_tree else self._ar_tree.nodes_pruned
         if t_idx_map is None:
-            t_idx_map = {t_id: i for i, t_id in enumerate(t_ids_ordered)}
-        t_dict = self.transcript_dict
-        tg_dict = self.transcript_group_dict
+            t_idx_map = self._ar_tree.transcript_id_to_idx
+        t_dict = self._ar.transcript_dict
+        tg_dict = self._ar.transcript_group_dict
 
         # Traverse the tree and render the string
-        def _recurse(tg_id: str) -> str:
-            children_ids = c_tree.get(tg_id, [])
+        def _recurse(u_id: str) -> str:
+            if (u := ar_tree_nodes.get(u_id)) is None:
+                return ""
+
             children_texts: list[str] = []
-            for child_type, child_id in children_ids:
-                if child_type == "tg":
-                    children_texts.append(_recurse(child_id))
-                else:
-                    cur_text = t_dict[child_id].to_text_new(
-                        transcript_alias=t_idx_map[child_id],
+            for v_id in u.children_ids:
+                # Check if this child should be rendered
+                if not self.should_render_child(u_id, v_id):
+                    continue
+
+                # Get the node object
+                if (v := ar_tree_nodes.get(v_id)) is None:
+                    continue
+
+                # Casework on the node type
+                if v.node_type == NodeType.TRANSCRIPT_GROUP:
+                    children_texts.append(_recurse(v_id))
+                elif v.node_type == NodeType.TRANSCRIPT:
+                    cur_text = t_dict[v_id].to_text(
+                        transcript_alias=t_idx_map[v_id],
                         indent=indent,
+                        render_metadata=self.should_render_metadata(v_id),
                     )
                     children_texts.append(cur_text)
+                else:
+                    raise ValueError(f"Unknown node type: {v.node_type}")
             children_text = "\n".join(children_texts)
 
             # No wrapper for global root
-            if tg_id == "__global_root":
-                return children_text
+            if u_id == GLOBAL_ROOT_ID:
+                return self._ar.to_text(
+                    children_text,
+                    agent_run_alias=agent_run_alias,
+                    indent=indent,
+                    render_metadata=self.should_render_metadata(GLOBAL_ROOT_ID),
+                )
             # Delegate rendering to TranscriptGroup
             else:
-                tg = tg_dict[tg_id]
-                return tg.to_text_new(children_text=children_text, indent=indent)
+                tg = tg_dict[u_id]
+                return tg.to_text(
+                    children_text=children_text,
+                    indent=indent,
+                    render_metadata=self.should_render_metadata(u_id),
+                )
 
-        text = _recurse("__global_root")
+        return _recurse(GLOBAL_ROOT_ID)
 
-        # Append agent run metadata below the full content
-        metadata_text = dump_metadata(self.metadata)
-        if metadata_text is not None:
-            if indent > 0:
-                metadata_text = textwrap.indent(metadata_text, " " * indent)
-            metadata_alias = f"{agent_run_alias}M"
-            text += f"\n<|agent run metadata {metadata_alias}|>\n{metadata_text}\n</|agent run metadata {metadata_alias}|>"
+    #################
+    # Query methods #
+    #################
 
-        return f"<|agent run {agent_run_alias}|>\n{text}\n</|agent run {agent_run_alias}|>\n"
+    def should_render_child(self, parent_id: str, child_id: str) -> bool:
+        """Determine if a child should be rendered based on parent's render settings."""
+        # Default to rendering if no spec
+        if (parent_spec := self._spec.nodes.get(parent_id)) is None:
+            return True
+
+        # Default include: render all except those in overrides
+        if parent_spec.render_children_default:
+            return child_id not in parent_spec.render_children_overrides
+        # Default exclude: render only those in overrides
+        else:
+            return child_id in parent_spec.render_children_overrides
+
+    def should_render_metadata(self, node_id: str) -> bool:
+        """Determine if a node's metadata should be rendered."""
+        # Default to rendering if no spec
+        if (node_spec := self._spec.nodes.get(node_id)) is None:
+            return True
+        return node_spec.render_self_metadata
+
+    #########################################
+    # Show/hide parts of the canonical tree #
+    #########################################
+
+    def set_metadata_selection(self, node_id: str, selected: bool) -> None:
+        """Set whether a node's metadata is rendered.
+
+        When enabling (True), this also ensures the path from the root to this
+        node is visible by adjusting parent render settings.
+
+        Args:
+            node_id: The ID of the node to modify.
+            selected: Whether the node's metadata should be rendered.
+        """
+        if (spec := self._spec.nodes.get(node_id)) is not None:
+            spec.render_self_metadata = selected
+            if selected:
+                self._ensure_path_to_root_selected(node_id)
+
+    def set_node_selection(self, node_id: str, selected: bool) -> None:
+        """Set whether a node and its descendants are rendered.
+
+        This recursively sets children selection state for all descendants.
+        When enabling (True), this also ensures the path from the root to this
+        node is visible by adjusting parent render settings.
+        When disabling (False), this ensures the parent excludes this node.
+
+        Notably, this does _not_ affect the metadata rendering state of each node.
+
+        Args:
+            node_id: The ID of the node to modify.
+            selected: Whether the node and its descendants should be rendered.
+        """
+        self._set_children_selected_recursive(node_id, selected=selected)
+
+        if selected:
+            self._ensure_path_to_root_selected(node_id)
+        else:
+            self._ensure_node_excluded_from_parent(node_id)
+
+    def _set_children_selected_recursive(self, node_id: str, selected: bool) -> None:
+        """Recursively set children selection state for a node and all its descendants."""
+        if (node := self._ar_tree.nodes.get(node_id)) is None:
+            return
+        if (spec := self._spec.nodes.get(node_id)) is None:
+            return
+
+        spec.render_children_default = selected
+        spec.render_children_overrides.clear()
+
+        for child_id in node.children_ids:
+            self._set_children_selected_recursive(child_id, selected=selected)
+
+    def _get_parent_id(self, node_id: str) -> str | None:
+        """Get the parent ID for a node, or None if it's the root or not found."""
+        # The root node has no parent
+        if node_id == GLOBAL_ROOT_ID:
+            return None
+        return self._ar_tree.parent_map.get(node_id)
+
+    def _set_parent_renders_child(self, parent_id: str, child_id: str, renders: bool) -> None:
+        """Update parent's overrides so that it renders (or doesn't render) the child."""
+        if (parent_spec := self._spec.nodes.get(parent_id)) is None:
+            return
+        if renders == parent_spec.render_children_default:
+            parent_spec.render_children_overrides.discard(child_id)
+        else:
+            parent_spec.render_children_overrides.add(child_id)
+
+    def _ensure_path_to_root_selected(self, node_id: str) -> None:
+        """Traverse from node_id up to root, ensuring each parent renders its child."""
+        u_id = node_id
+        while (parent_id := self._get_parent_id(u_id)) is not None:
+            self._set_parent_renders_child(parent_id, u_id, renders=True)
+            u_id = parent_id
+
+    def _ensure_node_excluded_from_parent(self, node_id: str) -> None:
+        """Ensure the parent does not render this node."""
+        if (parent_id := self._get_parent_id(node_id)) is not None:
+            self._set_parent_renders_child(parent_id, node_id, renders=False)
+
+
+# Not sure why the filterable field type is defined here :shrug:
+FilterableFieldType = Literal["str", "bool", "int", "float"]
+
+
+class FilterableField(TypedDict):
+    name: str
+    type: FilterableFieldType

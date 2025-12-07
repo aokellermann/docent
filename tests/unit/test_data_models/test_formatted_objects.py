@@ -25,7 +25,7 @@ def test_formatted_transcript_preserves_indices_after_deletion():
     # Keep messages 0 and 2, delete message 1
     formatted.messages = [formatted.messages[0], formatted.messages[2]]
 
-    output = formatted.to_text_new("T0")
+    output = formatted.to_text("T0")
 
     assert "T0B0" in output
     assert "T0B2" in output

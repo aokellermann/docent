@@ -534,7 +534,7 @@ class CounterfactualExperiment:
 
                     # Create the transcript (initially empty)
                     # Add tools to transcript metadata if they exist
-                    transcript_metadata = {}
+                    transcript_metadata: dict[str, Any] = {}
                     if policy_config.tools:
                         # Store tools in transcript metadata for frontend display
                         transcript_metadata["tools"] = [

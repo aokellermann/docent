@@ -24,16 +24,18 @@ dc = Docent(api_key=DOCENT_API_KEY, domain=DOCENT_DOMAIN)
 # %%
 
 import pandas as pd
+from tqdm.auto import tqdm
 
 pd.set_option("display.float_format", "{:.3f}".format)
 
-cid = "0cdb3b85-0a4d-40de-992b-0c5edaa1ebbf"
+cid = "1f80cbbe-3b82-45db-9570-eb20346fe200"
 df = dc.dql_result_to_df_experimental(
     dc.execute_dql(
         cid,
         """
 SELECT
     a.id AS agent_run_id,
+    a.metadata_json ->> 'experiment_id' AS experiment_id,
     a.metadata_json ->> 'base_llm_name' AS llm,
     a.metadata_json ->> 'llm_reasoning_effort' AS reasoning_effort,
     a.metadata_json ->> 'llm_verbosity' AS verbosity,
@@ -46,10 +48,14 @@ FROM agent_runs a
 JOIN transcript_groups tg ON a.id = tg.agent_run_id
 WHERE
     tg.name = 'Generating Agentic Forecast' AND
-    a.metadata_json ->> 'base_llm_name' != 'sonnet_4_5_thinking' AND
-    a.metadata_json ->> 'llm_verbosity' != 'high'
+    (
+        a.metadata_json ->> 'experiment_id' = 'mengk_kalshi_liquid_113025_20_12_37' OR
+        a.metadata_json ->> 'experiment_id' = 'mengk_kalshi_liquid_112925_20_34_53' OR
+        a.metadata_json ->> 'experiment_id' = 'mengk_kalshi_liquid_112925_20_35_08'
+    )
 GROUP BY
     a.id,
+    a.metadata_json ->> 'experiment_id',
     a.metadata_json ->> 'base_llm_name',
     a.metadata_json ->> 'llm_reasoning_effort',
     a.metadata_json ->> 'llm_verbosity',
@@ -89,6 +95,7 @@ df["consistency_accuracy"] = ((df["consistency_prob"] >= 0.5) & (df["gold_prob"]
 df = df[
     [
         "agent_run_id",
+        "experiment_id",
         "llm",
         "reasoning_effort",
         "verbosity",
@@ -106,9 +113,72 @@ df = df[
         "indep_probs",
     ]
 ]
-# df = df.drop_duplicates(subset=["question", "llm", "reasoning_effort"], keep="first")
 df = df.sort_values(by="scaled_brier_score", ascending=False)
 df
+
+# %%
+
+# Join with the foreknowledge judge
+rubric_id = "048d4801-9397-4a9b-9c8c-14b0368659f3"
+df_foreknowledge = dc.dql_result_to_df_experimental(
+    dc.execute_dql(
+        cid,
+        f"""
+SELECT
+    a.id AS agent_run_id,
+    j.id AS judge_result_id,
+    j.output ->> 'label' AS foreknowledge_label
+FROM agent_runs a
+JOIN judge_results j ON a.id = j.agent_run_id
+WHERE
+    j.rubric_id = '{rubric_id}' AND
+    j.rubric_version = 5
+""",
+    )
+)
+df_foreknowledge["has_foreknowledge"] = (
+    df_foreknowledge["foreknowledge_label"] == "foreknowledge"
+) | (df_foreknowledge["foreknowledge_label"] == "wrong cutoff")
+df_foreknowledge = df_foreknowledge.drop(columns=["foreknowledge_label"])
+df = df.merge(df_foreknowledge, on="agent_run_id", how="inner")
+
+df = df[df["has_foreknowledge"] == False]
+
+df
+
+# %%
+
+for _, row in df[
+    (df["experiment_id"] == "mengk_kalshi_liquid_113025_20_12_37")
+    & (df["has_foreknowledge"] == False)
+].iterrows():
+    arid = row["agent_run_id"]
+    dc.tag_transcript(cid, arid, "new-exp_no-fk")
+
+# %%
+
+###########
+# Helpers #
+###########
+
+# Configurable grouping columns - change this list to group by different dimensions
+GROUP_BY_COLS = ["llm", "experiment_id", "has_foreknowledge"]
+# Get unique combinations of grouping columns
+unique_combos = df[GROUP_BY_COLS].drop_duplicates().sort_values(by=GROUP_BY_COLS)
+
+
+# Helper function to create mask for filtering by group values
+def make_group_mask(df: pd.DataFrame, group_values: dict) -> pd.Series:
+    mask = pd.Series(True, index=df.index)
+    for col, val in group_values.items():
+        mask &= df[col] == val
+    return mask
+
+
+# Helper function to create config label from group values
+def make_config_label(group_values: dict, sep: str = "\n") -> str:
+    return sep.join(str(v) for v in group_values.values())
+
 
 # %%
 
@@ -122,25 +192,11 @@ df
 import matplotlib.pyplot as plt
 import numpy as np
 
-# Get unique combinations of (llm, reasoning_effort, verbosity)
-unique_combos = (
-    df[["llm", "reasoning_effort", "verbosity"]]
-    .drop_duplicates()
-    .sort_values(by=["llm", "reasoning_effort", "verbosity"])
-)
-
 # Collect data for plotting
 plot_data = []
 for _, row in unique_combos.iterrows():
-    llm = row["llm"]
-    reasoning_effort = row["reasoning_effort"]
-    verbosity = row["verbosity"]
-
-    mask = (
-        (df["llm"] == llm)
-        & (df["reasoning_effort"] == reasoning_effort)
-        & (df["verbosity"] == verbosity)
-    )
+    group_values = {col: row[col] for col in GROUP_BY_COLS}
+    mask = make_group_mask(df, group_values)
     df_filtered = df[mask]
 
     mean_scaled_accuracy = df_filtered["scaled_accuracy"].mean()
@@ -152,7 +208,7 @@ for _, row in unique_combos.iterrows():
 
     plot_data.append(
         {
-            "config": f"{llm}\n{reasoning_effort}\n{verbosity}",
+            "config": make_config_label(group_values),
             "scaled_accuracy": mean_scaled_accuracy,
             "scaled_brier_score": mean_scaled_brier,
             "mean_indep_accuracy": mean_indep_accuracy,
@@ -173,15 +229,29 @@ width = 0.25  # Width of bars
 mean_indep_accuracies = [d["mean_indep_accuracy"] for d in plot_data]
 consistency_accuracies = [d["consistency_accuracy"] for d in plot_data]
 scaled_accuracies = [d["scaled_accuracy"] for d in plot_data]
-ax1.bar(x - width, mean_indep_accuracies, width, alpha=0.8, label="Mean Independent")
-ax1.bar(x, consistency_accuracies, width, alpha=0.8, label="Consistency")
-ax1.bar(x + width, scaled_accuracies, width, alpha=0.8, label="Scaled")
+bars1_1 = ax1.bar(x - width, mean_indep_accuracies, width, alpha=0.8, label="Mean Independent")
+bars1_2 = ax1.bar(x, consistency_accuracies, width, alpha=0.8, label="Consistency")
+bars1_3 = ax1.bar(x + width, scaled_accuracies, width, alpha=0.8, label="Scaled")
+
+# Add value labels on top of bars
+for bars in [bars1_1, bars1_2, bars1_3]:
+    for bar in bars:
+        height = bar.get_height()
+        ax1.annotate(
+            f"{height:.2f}",
+            xy=(bar.get_x() + bar.get_width() / 2, height),
+            xytext=(0, 3),  # 3 points vertical offset
+            textcoords="offset points",
+            ha="center",
+            va="bottom",
+            fontsize=8,
+        )
+
 ax1.set_xlabel("Model Configuration")
 ax1.set_ylabel("consistency_accuracy")
 ax1.set_title("Accuracy by Model Configuration")
 ax1.set_xticks(x)
 ax1.set_xticklabels(configs, rotation=45, ha="right")
-ax1.set_ylim(0.8, 0.9)
 ax1.grid(True, alpha=0.3, axis="y")
 ax1.legend()
 
@@ -189,11 +259,28 @@ ax1.legend()
 mean_indep_brier_scores = [d["mean_indep_brier_score"] for d in plot_data]
 consistency_brier_scores = [d["consistency_brier_score"] for d in plot_data]
 scaled_brier_scores = [d["scaled_brier_score"] for d in plot_data]
-ax2.bar(
+bars2_1 = ax2.bar(
     x - width, mean_indep_brier_scores, width, alpha=0.8, color="orange", label="Mean Independent"
 )
-ax2.bar(x, consistency_brier_scores, width, alpha=0.8, color="darkorange", label="Consistency")
-ax2.bar(x + width, scaled_brier_scores, width, alpha=0.8, color="red", label="Scaled")
+bars2_2 = ax2.bar(
+    x, consistency_brier_scores, width, alpha=0.8, color="darkorange", label="Consistency"
+)
+bars2_3 = ax2.bar(x + width, scaled_brier_scores, width, alpha=0.8, color="red", label="Scaled")
+
+# Add value labels on top of bars
+for bars in [bars2_1, bars2_2, bars2_3]:
+    for bar in bars:
+        height = bar.get_height()
+        ax2.annotate(
+            f"{height:.2f}",
+            xy=(bar.get_x() + bar.get_width() / 2, height),
+            xytext=(0, 3),  # 3 points vertical offset
+            textcoords="offset points",
+            ha="center",
+            va="bottom",
+            fontsize=8,
+        )
+
 ax2.set_xlabel("Model Configuration")
 ax2.set_ylabel("Brier Score")
 ax2.set_title("Brier Score by Model Configuration")
@@ -207,6 +294,43 @@ plt.show()
 
 # %%
 
+#################
+# Foreknowledge #
+#################
+
+# # Examine foreknowledge more carefully; when it happens, why are things incorrect?
+# df_foreknowledge_wrong = df[df["has_foreknowledge"] & (df["scaled_accuracy"] == False)]
+# row = df_foreknowledge_wrong.iloc[3]
+# dc.open_rubric(cid, rubric_id, row["agent_run_id"], row["judge_result_id"])
+
+# # Are some questions more prone to foreknowledge than others
+# foreknowledge_by_question = (
+#     df.groupby("question")
+#     .agg(
+#         total=("has_foreknowledge", "count"),
+#         foreknowledge_count=("has_foreknowledge", "sum"),
+#     )
+#     .reset_index()
+# )
+# foreknowledge_by_question["foreknowledge_fraction"] = (
+#     foreknowledge_by_question["foreknowledge_count"] / foreknowledge_by_question["total"]
+# )
+# foreknowledge_by_question = foreknowledge_by_question.sort_values(
+#     by="foreknowledge_fraction", ascending=False
+# )
+
+# # Histogram of foreknowledge fraction by question
+# plt.figure(figsize=(10, 6))
+# plt.hist(foreknowledge_by_question["foreknowledge_fraction"], bins=20, edgecolor="black", alpha=0.7)
+# plt.xlabel("Foreknowledge Fraction")
+# plt.ylabel("Number of Questions")
+# plt.title("Distribution of Foreknowledge Fraction Across Questions")
+# plt.grid(True, alpha=0.3, axis="y")
+# plt.tight_layout()
+# plt.show()
+
+# %%
+
 #########################################################################################
 # Explain diffs between models                                                          #
 # Find questions where models (on average) do substantively differently from each other #
@@ -214,18 +338,20 @@ plt.show()
 
 # %%
 
-# Group by (llm, reasoning_effort, question) and aggregate brier scores and accuracies
+# Group by (grouping cols + question) and aggregate brier scores and accuracies
 grouped_df = (
-    df.groupby(["llm", "reasoning_effort", "verbosity", "question"])
-    .agg({"scaled_brier_score": list})
+    df.groupby(GROUP_BY_COLS + ["question"])
+    .agg({"scaled_brier_score": list, "agent_run_id": list})
     .reset_index()
 )
 
-# Create pivot tables for average scaled brier score and accuracy by question and (llm, reasoning_effort)
+# Create pivot tables for average scaled brier score and accuracy by question and grouping columns
 import numpy as np
 
-# Create a combined column for (llm, reasoning_effort)
-df["model_config"] = df["llm"] + "_" + df["reasoning_effort"] + "_" + df["verbosity"]
+# Create a combined column for grouping columns
+df["model_config"] = (
+    df[GROUP_BY_COLS].astype(str).agg("_".join, axis=1)
+)  # Note: uses "_" for column names
 
 # Pivot table for average scaled brier score with count
 brier_pivot_mean = df.pivot_table(
@@ -233,6 +359,10 @@ brier_pivot_mean = df.pivot_table(
 )
 brier_pivot_count = df.pivot_table(
     values="scaled_brier_score", index="question", columns="model_config", aggfunc="count"
+)
+# Pivot table for agent_run_ids (aggregated as list)
+brier_pivot_ids = df.pivot_table(
+    values="agent_run_id", index="question", columns="model_config", aggfunc=list
 )
 
 # Combine mean and count into a single display
@@ -247,57 +377,11 @@ for col in brier_pivot.columns:
 
 # Sort by variance across model configurations (using the mean values)
 brier_pivot_mean["variance"] = brier_pivot_mean.var(axis=1)
-brier_pivot = brier_pivot.loc[brier_pivot_mean.sort_values(by="variance", ascending=False).index]
-brier_pivot
+sorted_index = brier_pivot_mean.sort_values(by="variance", ascending=False).index
+brier_pivot = brier_pivot.loc[sorted_index]
+brier_pivot_ids = brier_pivot_ids.loc[sorted_index]
 
-# %%
-
-# For each (llm, reasoning_effort) combination, show where it performs best and worst relative to others
-for _, row in unique_combos.iterrows():
-    llm = row["llm"]
-    effort = row["reasoning_effort"]
-    verbosity = row["verbosity"]
-    model_config = f"{llm}_{effort}_{verbosity}"
-
-    print(f"\n{'='*80}")
-    print(f"Model: {llm}, Reasoning Effort: {effort}, Verbosity: {verbosity}")
-    print(f"{'='*80}")
-
-    # Calculate relative performance (this model's scaled brier score minus average of all others)
-    other_cols = [
-        col for col in brier_pivot_mean.columns if col != model_config and col != "variance"
-    ]
-
-    if model_config in brier_pivot_mean.columns:
-        # Calculate average scaled brier score of other models for each question
-        brier_pivot_mean["others_avg"] = brier_pivot_mean[other_cols].mean(axis=1)
-
-        # Calculate relative performance (negative means this model is better)
-        brier_pivot_mean["relative_performance"] = (
-            brier_pivot_mean[model_config] - brier_pivot_mean["others_avg"]
-        )
-
-        # Questions where this model performs BEST (most negative relative performance)
-        print(f"\nTop 10 questions where {model_config} performs BEST relative to others:")
-        print("(Negative values = better performance, i.e., lower scaled Brier score)")
-        best_questions = brier_pivot_mean.nsmallest(10, "relative_performance")[
-            [model_config, "others_avg", "relative_performance"]
-        ]
-        print(best_questions.to_string())
-
-        # Questions where this model performs WORST (most positive relative performance)
-        print(f"\nTop 10 questions where {model_config} performs WORST relative to others:")
-        print("(Positive values = worse performance, i.e., higher scaled Brier score)")
-        worst_questions = brier_pivot_mean.nlargest(10, "relative_performance")[
-            [model_config, "others_avg", "relative_performance"]
-        ]
-        print(worst_questions.to_string())
-
-        # Clean up temporary columns
-        brier_pivot_mean.drop(columns=["others_avg", "relative_performance"], inplace=True)
-    else:
-        print(f"Model configuration {model_config} not found in data")
-
+brier_pivot.head(10)
 
 # %%
 
@@ -307,15 +391,8 @@ for _, row in unique_combos.iterrows():
 
 # %%
 
-# Create separate scatterplots of pre_brier vs post_brier for each (llm, reasoning, verbosity) combination
+# Create separate scatterplots of pre_brier vs post_brier for each grouping column combination
 import matplotlib.pyplot as plt
-
-# Get unique combinations
-unique_combos = (
-    df[["llm", "reasoning_effort", "verbosity"]]
-    .drop_duplicates()
-    .sort_values(by=["llm", "reasoning_effort", "verbosity"])
-)
 
 num_combos = len(unique_combos)
 cols = 3
@@ -325,15 +402,8 @@ fig, axes = plt.subplots(rows, cols, figsize=(15, 5 * rows))
 axes = axes.flatten() if num_combos > 1 else [axes]
 
 for idx, (_, row) in enumerate(unique_combos.iterrows()):
-    llm = row["llm"]
-    reasoning_effort = row["reasoning_effort"]
-    verbosity = row["verbosity"]
-
-    mask = (
-        (df["llm"] == llm)
-        & (df["reasoning_effort"] == reasoning_effort)
-        & (df["verbosity"] == verbosity)
-    )
+    group_values = {col: row[col] for col in GROUP_BY_COLS}
+    mask = make_group_mask(df, group_values)
     df_filtered = df[mask]
 
     # Calculate average brier scores
@@ -371,9 +441,8 @@ for idx, (_, row) in enumerate(unique_combos.iterrows()):
 
     ax.set_xlabel("Pre-Brier Score")
     ax.set_ylabel("Post-Brier Score")
-    ax.set_title(
-        f"{llm}\n{reasoning_effort}, {verbosity}\n(n={len(df_filtered)})\nΔ={avg_diff:.4f}"
-    )
+    config_title = ", ".join(str(v) for v in group_values.values())
+    ax.set_title(f"{config_title}\n(n={len(df_filtered)})\nΔ={avg_diff:.4f}")
     ax.grid(True, alpha=0.3)
     ax.legend()
 
@@ -394,15 +463,8 @@ fig, axes = plt.subplots(rows, cols, figsize=(15, 5 * rows))
 axes = axes.flatten() if num_combos > 1 else [axes]
 
 for idx, (_, row) in enumerate(unique_combos.iterrows()):
-    llm = row["llm"]
-    reasoning_effort = row["reasoning_effort"]
-    verbosity = row["verbosity"]
-
-    mask = (
-        (df["llm"] == llm)
-        & (df["reasoning_effort"] == reasoning_effort)
-        & (df["verbosity"] == verbosity)
-    )
+    group_values = {col: row[col] for col in GROUP_BY_COLS}
+    mask = make_group_mask(df, group_values)
     df_filtered = df[mask]
 
     # Create confusion matrix: rows = post_accuracy, cols = pre_accuracy
@@ -462,7 +524,8 @@ for idx, (_, row) in enumerate(unique_combos.iterrows()):
     # Add colorbar
     plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
-    ax.set_title(f"{llm}\n{reasoning_effort}, {verbosity}\n(n={total})\nΔAcc={acc_diff:.4f}")
+    config_title = ", ".join(str(v) for v in group_values.values())
+    ax.set_title(f"{config_title}\n(n={total})\nΔAcc={acc_diff:.4f}")
 
 # Hide any unused subplots
 for idx in range(num_combos, len(axes)):
@@ -473,45 +536,57 @@ plt.show()
 
 # %%
 
+# Tag runs with consistency_hurt or consistency_helped
 consistency_hurt = df[
     (df["mean_indep_brier_score"] < 0.25) & (df["consistency_brier_score"] > 0.25)
 ]
-
-# %%
-
-dc.open_agent_run(cid, consistency_hurt.iloc[0]["agent_run_id"])
-
-# %%
-
-from tqdm.auto import tqdm
-
 for ar_id in tqdm(consistency_hurt["agent_run_id"].tolist()):
-    dc.tag_transcript(cid, ar_id, "consistency_hurt")
+    try:
+        dc.tag_transcript(cid, ar_id, "consistency_hurt")
+    except Exception as e:
+        if (
+            hasattr(e, "response")
+            and hasattr(e.response, "status_code")
+            and e.response.status_code == 409
+        ):
+            print(f"Tag already exists for {ar_id}")
+            continue
+        raise
+consistency_helped = df[
+    (df["mean_indep_brier_score"] > 0.25) & (df["consistency_brier_score"] < 0.25)
+]
+for ar_id in tqdm(consistency_helped["agent_run_id"].tolist()):
+    try:
+        dc.tag_transcript(cid, ar_id, "consistency_helped")
+    except Exception as e:
+        if (
+            hasattr(e, "response")
+            and hasattr(e.response, "status_code")
+            and e.response.status_code == 409
+        ):
+            print(f"Tag already exists for {ar_id}")
+            continue
+        raise
 
 # %%
 
-consistency_hurt[consistency_hurt["agent_run_id"] == "5783eb6d-da44-4827-888d-faae6e255fc6"]
-# %%
-
-df[df["agent_run_id"] == "5783eb6d-da44-4827-888d-faae6e255fc6"]["indep_probs"].tolist()
-# %%
+#####################
+# Manual commenting #
+#####################
 
 import docent.trace as dt
 
 dt.initialize_tracing(collection_id=cid, endpoint=f"https://api.{DOCENT_DOMAIN}/rest/telemetry")
 
-with dt.agent_run_context(agent_run_id="820d7040-4c45-4096-9557-dc3f8b46dbb1"):
+with dt.agent_run_context(agent_run_id="6fdfe619-7368-4cf3-80d7-a97bf54a4a28"):
     dt.agent_run_metadata(
         metadata={
             "mengk_comments": """
-Steve Bannon was already pardoned in 2021 for an unrelated reason. Presumably, this question was about more recent occurrences, but due to the nature of the phrasing of the question, it's not clear which event Steve Bannon will be pardoned for. So, I would consider this question underspecified.
+Yet another example of the correct answer being in the context window but the agent completely ignoring it. It seems like o3 actually tries not to cheat?!
 """.strip()
         }
     )
 
-# %%
-
-dc.open_agent_run(cid, "820d7040-4c45-4096-9557-dc3f8b46dbb1")
 # %%
 
 rows = dc.dql_result_to_dicts(
@@ -526,9 +601,6 @@ WHERE a.metadata_json ->> 'mengk_comments' IS NOT NULL
 """,
     )
 )
-
-# %%
-
 rows
 
 # %%

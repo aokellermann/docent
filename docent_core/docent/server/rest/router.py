@@ -25,7 +25,11 @@ from sqlalchemy import select
 from sqlalchemy.inspection import inspect as sqla_inspect
 
 from docent._log_util.logger import get_logger
-from docent.data_models.agent_run import AgentRun, FilterableField
+from docent.data_models.agent_run import (
+    AgentRun,
+    AgentRunTree,
+    FilterableField,
+)
 from docent.loaders import load_inspect
 from docent_core._server._analytics.posthog import AnalyticsClient
 from docent_core._server._auth.session import (
@@ -723,8 +727,8 @@ async def get_agent_run(
     return await mono_svc.get_agent_run(ctx, agent_run_id, apply_base_where_clause)
 
 
-@user_router.get("/{collection_id}/agent_run_with_canonical_tree")
-async def get_agent_run_with_canonical_tree(
+@user_router.get("/{collection_id}/agent_run_with_tree")
+async def get_agent_run_with_tree(
     agent_run_id: str,
     apply_base_where_clause: bool = True,
     full_tree: bool = False,
@@ -735,11 +739,15 @@ async def get_agent_run_with_canonical_tree(
     agent_run = await mono_svc.get_agent_run(ctx, agent_run_id, apply_base_where_clause)
     if not agent_run:
         raise HTTPException(status_code=404, detail=f"Agent run {agent_run_id} not found")
-    else:
-        return agent_run, {
-            "tree": agent_run.get_canonical_tree(full_tree=full_tree),
-            "transcript_ids_ordered": agent_run.get_transcript_ids_ordered(full_tree=full_tree),
-        }
+
+    tree = AgentRunTree.from_agent_run(agent_run)
+    nodes = tree.nodes if full_tree else tree.nodes_pruned
+
+    return agent_run, {
+        "nodes": {k: v.model_dump() for k, v in nodes.items()},
+        "transcript_id_to_idx": tree.transcript_id_to_idx,
+        "parent_map": tree.parent_map,
+    }
 
 
 @user_router.get("/{collection_id}/agent_run_ids")

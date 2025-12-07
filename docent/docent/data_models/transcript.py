@@ -1,18 +1,10 @@
-import sys
 import textwrap
 from datetime import datetime
 from typing import Any, Iterable
 from uuid import uuid4
 
-import yaml
-from pydantic import BaseModel, Field, field_validator
-from pydantic_core import to_jsonable_python
+from pydantic import BaseModel, Field
 
-from docent.data_models._tiktoken_util import (
-    get_token_count,
-    group_messages_into_ranges,
-    truncate_to_token_limit,
-)
 from docent.data_models.chat import AssistantMessage, ChatMessage, ContentReasoning
 from docent.data_models.citation import RANGE_BEGIN, RANGE_END
 from docent.data_models.metadata_util import dump_metadata
@@ -108,14 +100,7 @@ class TranscriptGroup(BaseModel):
     created_at: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("metadata", mode="before")
-    @classmethod
-    def _validate_metadata_type(cls, v: Any) -> Any:
-        if v is not None and not isinstance(v, dict):
-            raise ValueError(f"metadata must be a dictionary, got {type(v).__name__}")
-        return v  # type: ignore
-
-    def to_text_new(self, children_text: str, indent: int = 0) -> str:
+    def to_text(self, children_text: str, indent: int = 0, render_metadata: bool = True) -> str:
         """Render this transcript group with its children and metadata.
 
         Metadata appears below the rendered children content.
@@ -123,16 +108,20 @@ class TranscriptGroup(BaseModel):
         Args:
             children_text: Pre-rendered text of this group's children (groups/transcripts).
             indent: Number of spaces to indent the rendered output.
+            render_metadata: Whether to include metadata in the output.
 
         Returns:
             str: XML-like wrapped text including the group's metadata.
         """
         # Prepare YAML metadata
-        metadata_text = dump_metadata(self.metadata)
-        if metadata_text is not None:
-            if indent > 0:
-                metadata_text = textwrap.indent(metadata_text, " " * indent)
-            inner = f"{children_text}\n<|{self.name} metadata|>\n{metadata_text}\n</|{self.name} metadata|>"
+        if render_metadata:
+            metadata_text = dump_metadata(self.metadata)
+            if metadata_text is not None:
+                if indent > 0:
+                    metadata_text = textwrap.indent(metadata_text, " " * indent)
+                inner = f"{children_text}\n<|{self.name} metadata|>\n{metadata_text}\n</|{self.name} metadata|>"
+            else:
+                inner = children_text
         else:
             inner = children_text
 
@@ -167,106 +156,6 @@ class Transcript(BaseModel):
     messages: list[ChatMessage]
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("metadata", mode="before")
-    @classmethod
-    def _validate_metadata_type(cls, v: Any) -> Any:
-        if v is not None and not isinstance(v, dict):
-            raise ValueError(f"metadata must be a dict, got {type(v).__name__}")
-        return v  # type: ignore
-
-    def __init__(self, *args: Any, **kwargs: Any):
-        super().__init__(*args, **kwargs)
-
-    def set_messages(self, messages: list[ChatMessage]):
-        """Set the messages in the transcript and recompute units of action.
-
-        Args:
-            messages: The new list of chat messages to set.
-        """
-        self.messages = messages
-
-    def _generate_formatted_blocks(
-        self,
-        transcript_idx: int = 0,
-    ) -> list[str]:
-        """Generate formatted blocks for transcript representation.
-
-        Args:
-            transcript_idx: Index of the transcript
-            agent_run_idx: Optional agent run index
-            use_action_units: If True, group messages into action units. If False, use individual blocks.
-
-        Returns:
-            list[str]: List of formatted blocks
-        """
-        # Individual message blocks
-        blocks: list[str] = []
-        for msg_idx, message in enumerate(self.messages):
-            blocks.append(
-                format_chat_message(
-                    message,
-                    index_label=f"T{transcript_idx}B{msg_idx}",
-                )
-            )
-
-        return blocks
-
-    def to_str(
-        self,
-        token_limit: int = sys.maxsize,
-        transcript_idx: int = 0,
-    ) -> list[str]:
-        """Core implementation for string representation with token limits.
-
-        Args:
-            token_limit: Maximum tokens per returned string
-            transcript_idx: Index of the transcript
-
-        Returns:
-            list[str]: List of strings, each within token limit
-        """
-        blocks: list[str] = self._generate_formatted_blocks(transcript_idx)
-        blocks_str = "\n".join(blocks)
-
-        # Gather metadata
-        metadata_obj = to_jsonable_python(self.metadata)
-        yaml_width = float("inf")
-        block_str = f"<blocks>\n{blocks_str}\n</blocks>\n"
-        metadata_str = f"<|transcript metadata|>\n{yaml.dump(metadata_obj, width=yaml_width)}\n</|transcript metadata|>"
-
-        if token_limit == sys.maxsize:
-            return [f"{block_str}" f"{metadata_str}"]
-
-        metadata_token_count = get_token_count(metadata_str)
-        block_token_count = get_token_count(block_str)
-
-        if metadata_token_count + block_token_count <= token_limit:
-            return [f"{block_str}" f"{metadata_str}"]
-        else:
-            results: list[str] = []
-            block_token_counts = [get_token_count(block) for block in blocks]
-            ranges = group_messages_into_ranges(
-                block_token_counts, metadata_token_count, token_limit
-            )
-            for msg_range in ranges:
-                if msg_range.include_metadata:
-                    cur_blocks = "\n".join(blocks[msg_range.start : msg_range.end])
-                    results.append(f"<blocks>\n{cur_blocks}\n</blocks>\n" f"{metadata_str}")
-                else:
-                    assert (
-                        msg_range.end == msg_range.start + 1
-                    ), "Ranges without metadata should be a single message"
-                    result = str(blocks[msg_range.start])
-                    if msg_range.num_tokens > token_limit - 10:
-                        result = truncate_to_token_limit(result, token_limit - 10)
-                    results.append(f"<blocks>\n{result}\n</blocks>\n")
-
-            return results
-
-    ##############################
-    # New text rendering methods #
-    ##############################
-
     def _enumerate_messages(self) -> Iterable[tuple[int, ChatMessage]]:
         """Yield (index, message) tuples for rendering.
 
@@ -274,7 +163,12 @@ class Transcript(BaseModel):
         """
         return enumerate(self.messages)
 
-    def to_text_new(self, transcript_alias: int | str = 0, indent: int = 0) -> str:
+    def to_text(
+        self,
+        transcript_alias: int | str = 0,
+        indent: int = 0,
+        render_metadata: bool = True,
+    ) -> str:
 
         if isinstance(transcript_alias, int):
             transcript_alias = f"T{transcript_alias}"
@@ -292,12 +186,13 @@ class Transcript(BaseModel):
         content_str = f"<|{transcript_alias} blocks|>\n{blocks_str}\n</|{transcript_alias} blocks|>"
 
         # Gather metadata and add to content
-        metadata_text = dump_metadata(self.metadata)
-        if metadata_text is not None:
-            if indent > 0:
-                metadata_text = textwrap.indent(metadata_text, " " * indent)
-            metadata_label = f"{transcript_alias}M"
-            content_str += f"\n<|transcript metadata {metadata_label}|>\n{metadata_text}\n</|transcript metadata {metadata_label}|>"
+        if render_metadata:
+            metadata_text = dump_metadata(self.metadata)
+            if metadata_text is not None:
+                if indent > 0:
+                    metadata_text = textwrap.indent(metadata_text, " " * indent)
+                metadata_label = f"{transcript_alias}M"
+                content_str += f"\n<|transcript metadata {metadata_label}|>\n{metadata_text}\n</|transcript metadata {metadata_label}|>"
 
         # Format content and return
         if indent > 0:

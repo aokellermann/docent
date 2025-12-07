@@ -58,7 +58,7 @@ import {
 } from '@/components/ui/resizable';
 import { MessageBox, hasJsonContent } from './MessageBox';
 import { Button } from '@/components/ui/button';
-import { useGetAgentRunWithCanonicalTreeQuery } from '@/app/api/collectionApi';
+import { useGetAgentRunWithTreeQuery } from '@/app/api/collectionApi';
 import { skipToken } from '@reduxjs/toolkit/query';
 import { useParams, useSearchParams } from 'next/navigation';
 import {
@@ -285,8 +285,8 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
     // Full tree toggle (default off)
     const [fullTree, setFullTree] = useState(false);
 
-    // Fetch canonical tree (respect fullTree)
-    const queryResult = useGetAgentRunWithCanonicalTreeQuery(
+    // Fetch agent run with tree (respect fullTree)
+    const queryResult = useGetAgentRunWithTreeQuery(
       collectionId ? { collectionId, agentRunId, fullTree } : skipToken
     );
     const { error, isError } = queryResult;
@@ -294,7 +294,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
       ? (queryResult.data as [any, any])
       : undefined;
     const agentRun: AgentRun = dataArray?.[0];
-    const canonicalTree = dataArray?.[1];
+    const agentRunTree = dataArray?.[1];
 
     const isNotFound = useMemo(() => {
       const e = error as any;
@@ -356,20 +356,19 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
         for (const tg of agentRun.transcript_groups) m[tg.id] = tg;
       return m;
     }, [agentRun]);
-    const transcriptIdxToId = useMemo(() => {
-      return canonicalTree?.transcript_ids_ordered || [];
-    }, [canonicalTree]);
-
+    // transcript_id_to_idx maps transcript IDs to their index in the canonical order
     const transcriptIdToIdx = useMemo(() => {
-      const map: Record<string, number> = {};
-      const ordered = canonicalTree?.transcript_ids_ordered || [];
-      ordered.forEach((id: string, idx: number) => {
-        map[id] = idx;
-      });
-      return map;
-    }, [canonicalTree]);
+      return agentRunTree?.transcript_id_to_idx || {};
+    }, [agentRunTree]);
 
-    const transcriptCount = canonicalTree?.transcript_ids_ordered?.length ?? 0;
+    // Derive the ordered list of transcript IDs from transcript_id_to_idx
+    const transcriptIdxToId = useMemo(() => {
+      const entries = Object.entries(transcriptIdToIdx) as [string, number][];
+      const sorted = entries.sort((a, b) => a[1] - b[1]);
+      return sorted.map(([id]) => id);
+    }, [transcriptIdToIdx]);
+
+    const transcriptCount = transcriptIdxToId.length;
     const hasTranscriptGroups = Boolean(agentRun?.transcript_groups?.length);
     const shouldShowTranscriptNavigator =
       transcriptCount >= 2 || hasTranscriptGroups;
@@ -430,10 +429,10 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
       }
     }, [agentRun?.transcript_groups]);
 
-    // Build unified node tree from backend canonical tree
+    // Build unified node tree from backend tree
     const { nodes: nodeTree } = useMemo(() => {
       // Fallback if missing data
-      if (!agentRun || !agentRun.transcripts || !canonicalTree) {
+      if (!agentRun || !agentRun.transcripts || !agentRunTree) {
         return {
           nodes: [] as TreeNode[],
         };
@@ -441,77 +440,60 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
 
       const transcripts = transcriptsById;
       const transcriptGroups = transcriptGroupsById;
-      const tree = (canonicalTree?.tree || {}) as Record<string, any[]>;
-
-      // Helper to parse a canonical child which might be encoded as
-      // [type, id] or as a string like 't:<id>' / 'tg:<id>'
-      const parseChild = (
-        child: any
-      ): { type: 't' | 'tg'; id: string } | null => {
-        if (!child) return null;
-        if (Array.isArray(child) && child.length === 2) {
-          const [t, id] = child as ['t' | 'tg', string];
-          if ((t === 't' || t === 'tg') && typeof id === 'string') {
-            return { type: t, id };
-          }
-          return null;
+      const tree = (agentRunTree?.nodes || {}) as Record<
+        string,
+        {
+          id: string;
+          node_type: 'ar' | 't' | 'tg';
+          children_ids: string[];
+          has_transcript_in_subtree: boolean;
         }
-        if (typeof child === 'string') {
-          if (child.startsWith('t:')) return { type: 't', id: child.slice(2) };
-          if (child.startsWith('tg:'))
-            return { type: 'tg', id: child.slice(3) };
-        }
-        return null;
-      };
+      >;
 
       const buildGroupNode = (groupId: string, level: number): TreeNode => {
         const childrenNodes: TreeNode[] = [];
-        const children = tree[groupId] || [];
-        for (const ch of children) {
-          const parsed = parseChild(ch);
-          if (!parsed) continue;
-          if (parsed.type === 't') {
-            if (transcripts[parsed.id])
+        const node = tree[groupId];
+        if (!node) return { type: 'group', id: groupId, level, children: [] };
+
+        for (const childId of node.children_ids) {
+          const childNode = tree[childId];
+          if (!childNode) continue;
+
+          if (childNode.node_type === 't') {
+            if (transcripts[childId]) {
               childrenNodes.push({
                 type: 'transcript',
-                id: parsed.id,
+                id: childId,
                 level: level + 1,
               });
-          } else if (parsed.type === 'tg') {
-            if (transcriptGroups[parsed.id]) {
-              childrenNodes.push(buildGroupNode(parsed.id, level + 1));
+            }
+          } else if (childNode.node_type === 'tg') {
+            if (transcriptGroups[childId]) {
+              childrenNodes.push(buildGroupNode(childId, level + 1));
             }
           }
         }
         return { type: 'group', id: groupId, level, children: childrenNodes };
       };
 
-      // Roots
-      const rootChildren = tree['__global_root'] || [];
-      const rootNodes: TreeNode[] = [];
-      const collectFromGroup = (groupId: string) => {
-        for (const ch of tree[groupId] || []) {
-          const parsed = parseChild(ch);
-          if (!parsed) continue;
-          if (parsed.type === 't') {
-            // ordering is defined by backend via transcript_idx_map
-          } else if (parsed.type === 'tg') {
-            if (transcriptGroups[parsed.id]) collectFromGroup(parsed.id);
-          }
-        }
-      };
+      // Get root node
+      const rootNode = tree['__global_root'];
+      if (!rootNode) {
+        return { nodes: [] as TreeNode[] };
+      }
 
-      for (const ch of rootChildren) {
-        const parsed = parseChild(ch);
-        if (!parsed) continue;
-        if (parsed.type === 'tg') {
-          if (transcriptGroups[parsed.id]) {
-            rootNodes.push(buildGroupNode(parsed.id, 0));
-            collectFromGroup(parsed.id);
+      const rootNodes: TreeNode[] = [];
+      for (const childId of rootNode.children_ids) {
+        const childNode = tree[childId];
+        if (!childNode) continue;
+
+        if (childNode.node_type === 'tg') {
+          if (transcriptGroups[childId]) {
+            rootNodes.push(buildGroupNode(childId, 0));
           }
-        } else if (parsed.type === 't') {
-          if (transcripts[parsed.id]) {
-            rootNodes.push({ type: 'transcript', id: parsed.id, level: 0 });
+        } else if (childNode.node_type === 't') {
+          if (transcripts[childId]) {
+            rootNodes.push({ type: 'transcript', id: childId, level: 0 });
           }
         }
       }
@@ -519,7 +501,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
       return {
         nodes: rootNodes,
       };
-    }, [agentRun, canonicalTree, transcriptsById, transcriptGroupsById]);
+    }, [agentRun, agentRunTree, transcriptsById, transcriptGroupsById]);
 
     // Upon initial load, if no transcript has been selected, select the first one
     const initTranscriptSelected = useRef(false);

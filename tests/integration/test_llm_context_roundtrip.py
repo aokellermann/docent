@@ -3,6 +3,7 @@
 import pytest
 
 from docent.data_models.agent_run import AgentRun
+from docent.data_models.chat import ChatMessage
 from docent.data_models.chat.message import AssistantMessage, UserMessage
 from docent.data_models.citation import TranscriptBlockContentItem
 from docent.data_models.formatted_objects import FormattedAgentRun, FormattedTranscript
@@ -123,7 +124,7 @@ async def test_mixed_context_roundtrip(
         metadata={},
     )
 
-    formatted_messages = [
+    formatted_messages: list[ChatMessage] = [
         UserMessage(content="Formatted 1"),
         AssistantMessage(content="Formatted 2"),
     ]

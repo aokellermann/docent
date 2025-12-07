@@ -4,7 +4,7 @@ from typing import Any
 import jsonschema
 import tiktoken
 
-from docent.data_models.agent_run import AgentRun
+from docent.data_models.agent_run import AgentRun, AgentRunView
 from docent.data_models.chat.message import ToolMessage
 from docent.data_models.chat.tool import (
     ToolCall,
@@ -123,7 +123,7 @@ Label text should defend the USER and ANALYST's positions in the context of the 
 def make_system_prompt(
     agent_run: AgentRun, judge_result: JudgeResult | None, rubric: Rubric | None
 ) -> str:
-    truncated_transcript = sanitize_pg_text(agent_run.to_text_new(indent=2))
+    truncated_transcript = sanitize_pg_text(AgentRunView.from_agent_run(agent_run).to_text())
     if judge_result is not None and rubric is not None:
         return JUDGE_RESULT_CHAT_SYSTEM_PROMPT_TEMPLATE.format(
             transcript=truncated_transcript,

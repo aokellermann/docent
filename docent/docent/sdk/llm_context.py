@@ -4,7 +4,7 @@ import sys
 import textwrap
 from typing import Any
 
-from docent.data_models.agent_run import AgentRun
+from docent.data_models.agent_run import AgentRun, AgentRunTree, AgentRunView
 from docent.data_models.citation import (
     AgentRunMetadataItem,
     CitationTarget,
@@ -76,7 +76,11 @@ class LLMContext:
 
         if isinstance(item, AgentRun):
             # Assign aliases in canonical tree order
-            t_ids_ordered = item.get_transcript_ids_ordered(full_tree=False)
+            ar_tree = AgentRunTree.from_agent_run(item)
+            t_ids_ordered = sorted(
+                ar_tree.transcript_id_to_idx.keys(),
+                key=lambda t_id: ar_tree.transcript_id_to_idx[t_id],
+            )
             for t_id in t_ids_ordered:
                 transcript = item.transcript_dict[t_id]
                 self._create_alias(transcript)
@@ -134,11 +138,13 @@ class LLMContext:
             item = self.get_item_by_alias(alias)
             # Render each transcript with its global index
             if isinstance(item, Transcript):
-                transcript_text = item.to_text_new(alias)
+                transcript_text = item.to_text(transcript_alias=alias)
                 sections.append(transcript_text)
             elif isinstance(item, AgentRun):  # type: ignore
                 id_to_idx_map = {t.id: i for i, t in self.transcript_aliases.items()}
-                agent_run_text = item.to_text_new(alias, t_idx_map=id_to_idx_map)
+                agent_run_text = AgentRunView.from_agent_run(item).to_text(
+                    agent_run_alias=alias, t_idx_map=id_to_idx_map
+                )
                 sections.append(agent_run_text)
             else:
                 raise ValueError(f"Unknown item type: {type(item)}")
@@ -152,7 +158,7 @@ class LLMContext:
             System message string with instructions on how to cite objects
         """
 
-        context_description = f"You are a helpful assistant that specializes in analyzing transcripts of AI agent behavior."
+        context_description = "You are a helpful assistant that specializes in analyzing transcripts of AI agent behavior."
 
         citation_instructions = textwrap.dedent(
             f"""

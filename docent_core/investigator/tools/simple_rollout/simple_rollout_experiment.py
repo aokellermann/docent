@@ -264,7 +264,7 @@ class SimpleRolloutExperiment:
                     self.result.agent_run_metadata[agent_run_id] = metadata
 
                     # Create the transcript (initially empty)
-                    transcript_metadata = {}
+                    transcript_metadata: dict[str, Any] = {}
                     if self.result.base_policy_config and self.result.base_policy_config.tools:
                         # Store tools in transcript metadata for frontend display
                         transcript_metadata["tools"] = [
