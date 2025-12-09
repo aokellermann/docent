@@ -14,7 +14,7 @@ app_runner_memory = 8192
 app_runner_max_concurrency = 15
 app_runner_min_size = 4
 app_runner_max_size = 20
-app_runner_num_workers = 4
+app_runner_num_workers = 2
 
 ecs_cpu = 4096
 ecs_memory = 8192
