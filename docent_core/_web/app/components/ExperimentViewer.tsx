@@ -89,8 +89,6 @@ const METADATA_FETCH_BATCH_SIZE = 200;
 
 type CachedExperimentViewerState = {
   metadataData: Record<string, Record<string, unknown>>;
-  requestedMetadataIds: string[];
-  loadingMetadataIds: string[];
   discoveredColumns: string[];
   scrollPosition?: number;
   dqlQuery?: string;
@@ -232,10 +230,10 @@ export default function ExperimentViewer({
     Record<string, Record<string, unknown>>
   >(() => cachedState?.metadataData ?? {});
   const [loadingMetadataIds, setLoadingMetadataIds] = useState<Set<string>>(
-    () => new Set(cachedState?.loadingMetadataIds ?? [])
+    () => new Set()
   );
   const [requestedMetadataIds, setRequestedMetadataIds] = useState<Set<string>>(
-    () => new Set(cachedState?.requestedMetadataIds ?? [])
+    () => new Set()
   );
 
   // Helper function to get localStorage key for selected columns
@@ -522,6 +520,7 @@ export default function ExperimentViewer({
       setMetadataData({});
       setLoadingMetadataIds(new Set<string>());
       setRequestedMetadataIds(new Set<string>());
+      setDiscoveredColumns(new Set());
       setExperimentViewerScrollPosition(undefined);
       setScrollPosition(undefined);
       setDqlQuery(DEFAULT_DQL_QUERY);
@@ -533,8 +532,10 @@ export default function ExperimentViewer({
 
     const cached = experimentViewerCache.get(collectionId);
     setMetadataData(cached?.metadataData ?? {});
-    setLoadingMetadataIds(new Set(cached?.loadingMetadataIds ?? []));
-    setRequestedMetadataIds(new Set(cached?.requestedMetadataIds ?? []));
+    // Always reset request tracking on navigation so missing metadata can be refetched.
+    setLoadingMetadataIds(new Set());
+    setRequestedMetadataIds(new Set());
+    setDiscoveredColumns(new Set(cached?.discoveredColumns ?? []));
     setExperimentViewerScrollPosition(cached?.scrollPosition);
     setScrollPosition(cached?.scrollPosition);
     setDqlQuery(cached?.dqlQuery ?? DEFAULT_DQL_QUERY);
@@ -580,8 +581,6 @@ export default function ExperimentViewer({
 
     experimentViewerCache.set(collectionId, {
       metadataData,
-      requestedMetadataIds: Array.from(requestedMetadataIds),
-      loadingMetadataIds: Array.from(loadingMetadataIds),
       discoveredColumns: Array.from(discoveredColumns),
       scrollPosition: experimentViewerScrollPosition,
       dqlQuery,
@@ -591,8 +590,6 @@ export default function ExperimentViewer({
   }, [
     collectionId,
     metadataData,
-    requestedMetadataIds,
-    loadingMetadataIds,
     discoveredColumns,
     experimentViewerScrollPosition,
     dqlQuery,
