@@ -1,7 +1,8 @@
 'use client';
 
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
@@ -118,6 +119,10 @@ export default function RubricEditor({
   const isDisabled = !editable;
 
   const dispatch = useAppDispatch();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const hasOpenedRunDialogRef = useRef(false);
 
   // Get the remote rubric
   const { data: remoteRubric } = useGetRubricQuery({
@@ -179,6 +184,16 @@ export default function RubricEditor({
   useEffect(() => {
     dispatch(rubricApi.util.invalidateTags([{ type: 'Rubric', id: rubricId }]));
   }, [rubricVersion, rubricId, dispatch]);
+
+  useEffect(() => {
+    if (hasOpenedRunDialogRef.current) return;
+    const shouldOpenDialog = searchParams.get('openRunDialog') === '1';
+    if (shouldOpenDialog) {
+      hasOpenedRunDialogRef.current = true;
+      setIsRunDialogOpen(true);
+      router.replace(pathname);
+    }
+  }, [searchParams, router, pathname]);
 
   const { data: availableJudgeModels } = useGetJudgeModelsQuery();
 

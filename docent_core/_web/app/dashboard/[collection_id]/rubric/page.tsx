@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   useCreateRubricMutation,
-  useStartEvaluationMutation,
   useGetJudgeModelsQuery,
 } from '@/app/api/rubricApi';
 import { useCreateOrGetRefinementSessionMutation } from '@/app/api/refinementApi';
@@ -56,8 +55,6 @@ export default function RubricsPage() {
   // Mutations
   const [createRubric, { isLoading: isCreatingRubric }] =
     useCreateRubricMutation();
-  const [startEvaluation, { isLoading: isStartingEvaluation }] =
-    useStartEvaluationMutation();
   const [createOrGetSession, { isLoading: isCreatingOrGettingSession }] =
     useCreateOrGetRefinementSessionMutation();
 
@@ -187,25 +184,15 @@ export default function RubricsPage() {
     const rubricId = await handleAddNewRubric(highLevelDescription);
     if (!rubricId) return;
 
-    await startEvaluation({
-      collectionId,
-      rubricId,
-    }).catch((error) => {
-      console.error('Failed to start full search:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to start full search',
-        variant: 'destructive',
-      });
-    });
-
     await createOrGetSession({
       collectionId,
       rubricId,
       sessionType: 'direct',
     })
       .then(() => {
-        router.push(`/dashboard/${collectionId}/rubric/${rubricId}`);
+        router.push(
+          `/dashboard/${collectionId}/rubric/${rubricId}?openRunDialog=1`
+        );
       })
       .catch((error) => {
         console.error('Failed to create or get session:', error);
@@ -217,8 +204,7 @@ export default function RubricsPage() {
       });
   };
 
-  const isLoading =
-    isCreatingRubric || isCreatingOrGettingSession || isStartingEvaluation;
+  const isLoading = isCreatingRubric || isCreatingOrGettingSession;
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-background rounded-lg border space-y-3">
