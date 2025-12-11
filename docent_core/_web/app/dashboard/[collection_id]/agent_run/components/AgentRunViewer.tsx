@@ -29,8 +29,8 @@ import {
   toggleJudgeLeftSidebar,
   toggleJudgeRightSidebar,
   addCitationToDraft,
-  setSelectedAnnotationId,
-  setAnnotationSidebarCollapsed,
+  setSelectedCommentId,
+  setCommentSidebarCollapsed,
 } from '@/app/store/transcriptSlice';
 import {
   AgentRun,
@@ -61,15 +61,12 @@ import { Button } from '@/components/ui/button';
 import { useGetAgentRunWithTreeQuery } from '@/app/api/collectionApi';
 import { skipToken } from '@reduxjs/toolkit/query';
 import { useParams, useSearchParams } from 'next/navigation';
+import { Comment, useGetCommentsForAgentRunQuery } from '@/app/api/labelApi';
 import {
-  Annotation,
-  useGetAnnotationsForAgentRunQuery,
-} from '@/app/api/labelApi';
-import {
-  AnnotationSidebarHeader,
-  AnnotationTab,
-} from '@/app/components/annotations/AnnotationSidebarHeader';
-import { AnnotationSidebarContent } from '@/app/components/annotations/AnnotationSidebarContent';
+  CommentSidebarHeader,
+  CommentTab,
+} from '@/app/components/annotations/CommentSidebarHeader';
+import { CommentSidebarContent } from '@/app/components/annotations/CommentSidebarContent';
 import { useTextSelection } from '@/providers/use-text-selection';
 import { useHasCollectionWritePermission } from '@/lib/permissions/hooks';
 
@@ -281,7 +278,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
 
     const { rubric_id: rubricId } = useParams<{ rubric_id: string }>();
     const searchParams = useSearchParams();
-    const initialAnnotationId = searchParams.get('annotation_id');
+    const initialCommentId = searchParams.get('comment_id');
 
     const hasWritePermission = useHasCollectionWritePermission();
 
@@ -304,35 +301,35 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
       return e && typeof e === 'object' && 'status' in e && e.status === 404;
     }, [error]);
 
-    //*************************
-    // Annotation State & API *
-    //*************************
+    //**********************
+    // Comment State & API *
+    //**********************
 
-    // Fetch annotations for this agent run
-    const { data: annotations = [] } = useGetAnnotationsForAgentRunQuery(
+    // Fetch comments for this agent run
+    const { data: comments = [] } = useGetCommentsForAgentRunQuery(
       collectionId && agentRunId ? { collectionId, agentRunId } : skipToken
     );
 
-    // State for the draft annotation
-    const draftAnnotation = useAppSelector(
-      (state) => state.transcript.draftAnnotation
+    // State for the draft comment
+    const draftComment = useAppSelector(
+      (state) => state.transcript.draftComment
     );
 
-    // The currently selected / clicked annotation
-    const selectedAnnotationId = useAppSelector(
-      (state) => state.transcript.selectedAnnotationId
+    // The currently selected / clicked comment
+    const selectedCommentId = useAppSelector(
+      (state) => state.transcript.selectedCommentId
     );
 
-    // Annotation sidebar state
-    const annotationSidebarCollapsed = useAppSelector(
-      (state) => state.transcript.annotationSidebarCollapsed
+    // Comment sidebar state
+    const commentSidebarCollapsed = useAppSelector(
+      (state) => state.transcript.commentSidebarCollapsed
     );
 
-    // Whether to display annotations inline or in a scrollable list
-    const [activeAnnotationTab, setActiveAnnotationTab] =
-      useState<AnnotationTab>('inline');
+    // Whether to display comments inline or in a scrollable list
+    const [activeCommentTab, setActiveCommentTab] =
+      useState<CommentTab>('inline');
 
-    // Whether to show annotations for all transcripts in the sidebar
+    // Whether to show comments for all transcripts in the sidebar
     const [showAllTranscripts, setShowAllTranscripts] = useState(false);
 
     // Whether the chat / label sidebar is open
@@ -848,7 +845,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
               citedKey: item.metadata_key,
               textRange,
             });
-            setActiveAnnotationTab('list');
+            setActiveCommentTab('list');
             break;
 
           case 'transcript_metadata':
@@ -862,7 +859,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
               citedKey: item.metadata_key,
               textRange,
             });
-            setActiveAnnotationTab('list');
+            setActiveCommentTab('list');
             break;
 
           case 'block_metadata':
@@ -879,7 +876,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
               citedKey: item.metadata_key,
               textRange,
             });
-            setActiveAnnotationTab('list');
+            setActiveCommentTab('list');
             break;
 
           case 'block_content':
@@ -937,51 +934,51 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
       });
     }, [currentBlockIndex, transcript, scrollToBlock, selectedTranscriptId]);
 
-    //***********************
-    // Annotation Handlers *
-    //***********************
+    //********************
+    // Comment Handlers *
+    //********************
 
-    // Focus the annotation in the query parameter on load
-    const hasFocusedAnnotation = useRef(false);
+    // Focus the comment in the query parameter on load
+    const hasFocusedComment = useRef(false);
     useEffect(() => {
       if (
-        initialAnnotationId &&
-        annotations.length > 0 &&
-        !hasFocusedAnnotation.current
+        initialCommentId &&
+        comments.length > 0 &&
+        !hasFocusedComment.current
       ) {
-        // Select the annotation and open the sidebar
-        dispatch(setSelectedAnnotationId(initialAnnotationId));
-        dispatch(setAnnotationSidebarCollapsed(false));
+        // Select the comment and open the sidebar
+        dispatch(setSelectedCommentId(initialCommentId));
+        dispatch(setCommentSidebarCollapsed(false));
 
-        // Find the annotation object
-        const initialFocusedAnnotation = annotations.find(
-          (a) => a.id === initialAnnotationId
+        // Find the comment object
+        const initialFocusedComment = comments.find(
+          (c) => c.id === initialCommentId
         );
 
-        // Scroll to the annotation citation within the transcript
+        // Scroll to the comment citation within the transcript
         if (
-          initialFocusedAnnotation &&
-          initialFocusedAnnotation.citations.length > 0
+          initialFocusedComment &&
+          initialFocusedComment.citations.length > 0
         ) {
-          focusCitationTarget(initialFocusedAnnotation.citations[0].target);
+          focusCitationTarget(initialFocusedComment.citations[0].target);
         }
 
-        hasFocusedAnnotation.current = true;
+        hasFocusedComment.current = true;
       }
-    }, [initialAnnotationId, dispatch, annotations, focusCitationTarget]);
+    }, [initialCommentId, dispatch, comments, focusCitationTarget]);
 
-    // Global click handler to deselect annotations when clicking outside
+    // Global click handler to deselect comments when clicking outside
     useEffect(() => {
-      if (!selectedAnnotationId) return;
+      if (!selectedCommentId) return;
 
       const handleDocumentClick = (e: MouseEvent) => {
         const target = e.target as HTMLElement;
-        // Check if click is inside an annotation card
-        const clickedInsideCard = target.closest('[data-annotation-card]');
+        // Check if click is inside a comment card
+        const clickedInsideCard = target.closest('[data-comment-card]');
 
-        // If click is outside any annotation card, deselect
+        // If click is outside any comment card, deselect
         if (!clickedInsideCard) {
-          dispatch(setSelectedAnnotationId(null));
+          dispatch(setSelectedCommentId(null));
         }
       };
 
@@ -990,7 +987,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
       return () => {
         document.removeEventListener('mousedown', handleDocumentClick);
       };
-    }, [selectedAnnotationId, dispatch]);
+    }, [selectedCommentId, dispatch]);
 
     // Text selection hook for citation creation and menu
     const { menuElement } = useTextSelection({
@@ -1001,7 +998,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
           <button
             onClick={() => {
               dispatch(addCitationToDraft(citation));
-              dispatch(setAnnotationSidebarCollapsed(false));
+              dispatch(setCommentSidebarCollapsed(false));
               dismiss();
             }}
             className="flex items-center gap-2 px-3 py-2 text-sm text-primary bg-background border border-border rounded-md shadow-lg hover:bg-accent transition-colors"
@@ -1013,32 +1010,32 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
       },
     });
 
-    // List mode annotations: all annotation types for current transcript (or all transcripts if showAllTranscripts is true)
-    const filteredAnnotations = useMemo(() => {
+    // List mode comments: all comment types for current transcript (or all transcripts if showAllTranscripts is true)
+    const filteredComments = useMemo(() => {
       const checkInTranscript = (transcriptId: string) => {
-        const annotationTranscriptIdx = transcriptIdToIdx[transcriptId];
-        return annotationTranscriptIdx === transcriptIdx;
+        const commentTranscriptIdx = transcriptIdToIdx[transcriptId];
+        return commentTranscriptIdx === transcriptIdx;
       };
 
-      const shouldIncludeAnnotation = (annotation: Annotation) => {
+      const shouldIncludeComment = (comment: Comment) => {
         // Check if any citation matches the filter criteria
-        const citations = annotation.citations;
+        const citations = comment.citations;
         if (!citations || citations.length === 0) return false;
 
-        if (activeAnnotationTab === 'inline') {
+        if (activeCommentTab === 'inline') {
           return citations.some((citation) => {
             if (citation.target.item.item_type === 'block_content') {
               return checkInTranscript(citation.target.item.transcript_id);
             }
             return false;
           });
-        } else if (activeAnnotationTab === 'list') {
-          // Include all annotations when showing all transcripts
+        } else if (activeCommentTab === 'list') {
+          // Include all comments when showing all transcripts
           if (showAllTranscripts) {
             return true;
           }
           return citations.some((citation) => {
-            // Include annotations on the agent run metadata
+            // Include comments on the agent run metadata
             if (citation.target.item.item_type === 'agent_run_metadata') {
               return true;
             }
@@ -1049,46 +1046,44 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
         return false;
       };
 
-      const filtered: Annotation[] = annotations.filter(
-        shouldIncludeAnnotation
-      );
+      const filtered: Comment[] = comments.filter(shouldIncludeComment);
 
-      if (draftAnnotation && shouldIncludeAnnotation(draftAnnotation)) {
-        filtered.push(draftAnnotation);
+      if (draftComment && shouldIncludeComment(draftComment)) {
+        filtered.push(draftComment);
       }
 
       return filtered;
     }, [
-      annotations,
-      draftAnnotation,
+      comments,
+      draftComment,
       showAllTranscripts,
       transcriptIdToIdx,
       transcriptIdx,
-      activeAnnotationTab,
+      activeCommentTab,
     ]);
 
-    // Memoize what annotations are assigned to what message blocks
+    // Memoize what comments are assigned to what message blocks
     // so we know where to render highlights
-    const blockIdxToAnnotationsMap = useMemo(() => {
-      // Build a map from blockIdxs --> annotations
-      // An annotation can appear in multiple blocks if it has multiple citations
-      const map: Record<number, Annotation[]> = {};
-      for (const annotation of filteredAnnotations) {
-        for (const citation of annotation.citations) {
+    const blockIdxToCommentsMap = useMemo(() => {
+      // Build a map from blockIdxs --> comments
+      // A comment can appear in multiple blocks if it has multiple citations
+      const map: Record<number, Comment[]> = {};
+      for (const comment of filteredComments) {
+        for (const citation of comment.citations) {
           if (citation.target.item.item_type !== 'block_content') continue;
-          // Only show highlights for annotations on the current transcript
+          // Only show highlights for comments on the current transcript
           if (citation.target.item.transcript_id !== selectedTranscriptId)
             continue;
           const blockIdx = citation.target.item.block_idx;
           if (!map[blockIdx]) map[blockIdx] = [];
-          // Avoid adding the same annotation twice to the same block
-          if (!map[blockIdx].includes(annotation)) {
-            map[blockIdx].push(annotation);
+          // Avoid adding the same comment twice to the same block
+          if (!map[blockIdx].includes(comment)) {
+            map[blockIdx].push(comment);
           }
         }
       }
       return map;
-    }, [filteredAnnotations, selectedTranscriptId]);
+    }, [filteredComments, selectedTranscriptId]);
 
     const handleAddComment = useCallback(
       (
@@ -1101,7 +1096,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
         if (!collectionId || !agentRunId) return;
 
         let target: CitationTarget;
-        let tab: AnnotationTab = 'list';
+        let tab: CommentTab = 'list';
 
         switch (params.type) {
           case 'agent_run':
@@ -1159,27 +1154,27 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
         }
 
         dispatch(addCitationToDraft(target));
-        setActiveAnnotationTab(tab);
-        dispatch(setAnnotationSidebarCollapsed(false));
+        setActiveCommentTab(tab);
+        dispatch(setCommentSidebarCollapsed(false));
       },
       [collectionId, agentRunId, selectedTranscriptId, dispatch]
     );
 
-    // Handle clicking on a block title for annotations created on transcript blocks
+    // Handle clicking on a block title for comments created on transcript blocks
     const handleBlockClick = useCallback(
       (blockIdx: number) => {
-        // Find the first annotation for this block
-        const blockAnnotations = filteredAnnotations.filter((a) =>
-          a.citations.some(
+        // Find the first comment for this block
+        const blockComments = filteredComments.filter((c) =>
+          c.citations.some(
             (citation) =>
               citation.target.item.item_type === 'block_content' &&
               citation.target.item.block_idx === blockIdx
           )
         );
 
-        if (blockAnnotations.length > 0) {
+        if (blockComments.length > 0) {
           // Sort by text position and select the first one
-          const sorted = [...blockAnnotations].sort((a, b) => {
+          const sorted = [...blockComments].sort((a, b) => {
             const aCitation = a.citations.find(
               (citation) =>
                 citation.target.item.item_type === 'block_content' &&
@@ -1194,16 +1189,16 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
             const bStart = bCitation?.target.text_range?.target_start_idx ?? -1;
             return aStart - bStart;
           });
-          dispatch(setSelectedAnnotationId(sorted[0].id));
-          setActiveAnnotationTab('inline');
-          dispatch(setAnnotationSidebarCollapsed(false));
+          dispatch(setSelectedCommentId(sorted[0].id));
+          setActiveCommentTab('inline');
+          dispatch(setCommentSidebarCollapsed(false));
         }
       },
-      [filteredAnnotations, dispatch]
+      [filteredComments, dispatch]
     );
 
-    // Determine if we should show annotations area
-    const hasAnnotations = annotations.length > 0 || draftAnnotation !== null;
+    // Determine if we should show comments area
+    const hasComments = comments.length > 0 || draftComment !== null;
 
     return (
       <>
@@ -1383,8 +1378,8 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                     <div
                       className={cn(
                         'flex-1 min-w-0 space-y-1',
-                        hasAnnotations &&
-                          !annotationSidebarCollapsed &&
+                        hasComments &&
+                          !commentSidebarCollapsed &&
                           'border-r border-border'
                       )}
                     >
@@ -1494,22 +1489,20 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                         )}
                     </div>
 
-                    {/* Annotation header (conditionally rendered) */}
+                    {/* Comment header (conditionally rendered) */}
                     <div className="w-80">
-                      <AnnotationSidebarHeader
-                        isCollapsed={annotationSidebarCollapsed}
+                      <CommentSidebarHeader
+                        isCollapsed={commentSidebarCollapsed}
                         onToggleCollapsed={() =>
                           dispatch(
-                            setAnnotationSidebarCollapsed(
-                              !annotationSidebarCollapsed
-                            )
+                            setCommentSidebarCollapsed(!commentSidebarCollapsed)
                           )
                         }
-                        activeTab={activeAnnotationTab}
-                        onTabChange={setActiveAnnotationTab}
+                        activeTab={activeCommentTab}
+                        onTabChange={setActiveCommentTab}
                         showAllTranscripts={showAllTranscripts}
                         onSetShowAllTranscripts={setShowAllTranscripts}
-                        annotationCount={filteredAnnotations.length}
+                        commentCount={filteredComments.length}
                       />
                     </div>
                   </div>
@@ -1520,7 +1513,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                     <div
                       ref={scrollContainerRef}
                       className="absolute inset-0 overflow-y-auto custom-scrollbar"
-                      // Disable browser scroll anchoring, which was causing the viewport to jump when creating a new draft annotation
+                      // Disable browser scroll anchoring, which was causing the viewport to jump when creating a new draft comment
                       style={{ overflowAnchor: 'none' }}
                     >
                       <div className="flex flex-row items-stretch">
@@ -1528,8 +1521,8 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                         <div
                           className={cn(
                             'flex-1 space-y-2',
-                            hasAnnotations &&
-                              !annotationSidebarCollapsed &&
+                            hasComments &&
+                              !commentSidebarCollapsed &&
                               'pr-1 border-r border-border'
                           )}
                         >
@@ -1561,8 +1554,8 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                             )
                               return null;
 
-                            const blockAnnotations =
-                              blockIdxToAnnotationsMap[index] ?? [];
+                            const blockComments =
+                              blockIdxToCommentsMap[index] ?? [];
 
                             const transcriptBlockContentItem: TranscriptBlockContentItem =
                               {
@@ -1580,7 +1573,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                                 index={index}
                                 blockId={blockId}
                                 isHighlighted={highlightedBlock === blockId}
-                                annotations={blockAnnotations}
+                                comments={blockComments}
                                 citedTargets={citedTargets}
                                 prettyPrintJsonMessages={
                                   prettyPrintJsonMessages
@@ -1625,33 +1618,33 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                                     : undefined
                                 }
                                 onBlockClick={() =>
-                                  hasAnnotations
+                                  hasComments
                                     ? handleBlockClick(index)
                                     : undefined
                                 }
                               />
                             );
                           })}
-                          {/* Text selection menu for creating annotations */}
+                          {/* Text selection menu for creating comments */}
                           {hasWritePermission && menuElement}
                         </div>
 
-                        {/* Annotations column */}
-                        {!annotationSidebarCollapsed && (
+                        {/* Comments column */}
+                        {!commentSidebarCollapsed && (
                           <div
                             className={cn(
                               'w-80 bg-muted/50',
-                              activeAnnotationTab === 'list'
+                              activeCommentTab === 'list'
                                 ? 'sticky top-0 self-start h-[calc(100vh-8rem)] overflow-y-auto  custom-scrollbar'
                                 : 'self-stretch'
                             )}
                           >
-                            <AnnotationSidebarContent
-                              annotationsForTranscript={filteredAnnotations}
-                              listModeAnnotations={filteredAnnotations}
+                            <CommentSidebarContent
+                              commentsForTranscript={filteredComments}
+                              listModeComments={filteredComments}
                               scrollContainer={scrollNode}
                               scrollToCitation={focusCitationTarget}
-                              activeTab={activeAnnotationTab}
+                              activeTab={activeCommentTab}
                             />
                           </div>
                         )}
@@ -1662,7 +1655,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                     <div
                       className="absolute bottom-3 flex flex-col gap-1 pointer-events-none"
                       style={{
-                        right: !annotationSidebarCollapsed
+                        right: !commentSidebarCollapsed
                           ? 'calc(320px + 12px)'
                           : '12px',
                       }}

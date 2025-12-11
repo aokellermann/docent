@@ -2,19 +2,19 @@
 
 import { Button } from '@/components/ui/button';
 import {
-  Annotation,
-  useUpdateAnnotationMutation,
-  useDeleteAnnotationMutation,
-  useCreateAnnotationMutation,
+  Comment,
+  useUpdateCommentMutation,
+  useDeleteCommentMutation,
+  useCreateCommentMutation,
 } from '@/app/api/labelApi';
 import { Edit, MoreVertical, Share, Trash2, UserRoundIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { AnnotationForm } from './AnnotationForm';
+import { CommentForm } from './CommentForm';
 import { useState, useRef, useEffect } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
 import {
-  setHoveredAnnotationId,
-  clearDraftAnnotation,
+  setHoveredCommentId,
+  clearDraftComment,
 } from '@/app/store/transcriptSlice';
 import SelectionBadges from '@/components/SelectionBadges';
 import { CitationTarget } from '@/app/types/citationTypes';
@@ -27,22 +27,22 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useHasCollectionWritePermission } from '@/lib/permissions/hooks';
 
-interface AnnotationCardProps {
-  annotation: Annotation;
+interface CommentCardProps {
+  comment: Comment;
   isFocused: boolean;
   onFocus: () => void;
   onNavigateToCitation?: (citation: CitationTarget) => void;
 }
 
-export function AnnotationCard({
-  annotation,
+export function CommentCard({
+  comment,
   isFocused,
   onFocus,
   onNavigateToCitation,
-}: AnnotationCardProps) {
-  const [updateAnnotation] = useUpdateAnnotationMutation();
-  const [deleteAnnotation] = useDeleteAnnotationMutation();
-  const [createAnnotation] = useCreateAnnotationMutation();
+}: CommentCardProps) {
+  const [updateComment] = useUpdateCommentMutation();
+  const [deleteComment] = useDeleteCommentMutation();
+  const [createComment] = useCreateCommentMutation();
 
   const { collection_id: collectionId, agent_run_id: agentRunId } = useParams<{
     collection_id: string;
@@ -50,13 +50,11 @@ export function AnnotationCard({
   }>();
 
   const dispatch = useAppDispatch();
-  const draftAnnotation = useAppSelector(
-    (state) => state.transcript.draftAnnotation
-  );
+  const draftComment = useAppSelector((state) => state.transcript.draftComment);
   const hasWritePermission = useHasCollectionWritePermission();
 
-  // Detect if this is a draft annotation
-  const isDraft = annotation.id === 'draft';
+  // Detect if this is a draft comment
+  const isDraft = comment.id === 'draft';
 
   // For drafts, start in edit mode
   const [isEditing, setIsEditing] = useState(isDraft);
@@ -71,53 +69,51 @@ export function AnnotationCard({
         contentRef.current.scrollHeight > contentRef.current.clientHeight
       );
     }
-  }, [annotation.content, isFocused]);
+  }, [comment.content, isFocused]);
 
   // Use draft content/citations from Redux store if this is a draft
   const effectiveContent =
-    isDraft && draftAnnotation ? draftAnnotation.content : annotation.content;
+    isDraft && draftComment ? draftComment.content : comment.content;
 
   const effectiveCitations =
-    isDraft && draftAnnotation
-      ? draftAnnotation.citations
-      : annotation.citations;
+    isDraft && draftComment ? draftComment.citations : comment.citations;
 
-  // Handler for updating annotation
-  const handleUpdateAnnotation = async (content: string) => {
+  // Handler for updating comment
+  const handleUpdateComment = async (content: string) => {
     if (!collectionId || !agentRunId) return;
-    await updateAnnotation({
+    await updateComment({
       collectionId,
-      annotationId: annotation.id,
+      commentId: comment.id,
       content,
       agentRunId,
     });
   };
 
-  // Handler for deleting annotation
-  const handleDeleteAnnotation = async () => {
+  // Handler for deleting comment
+  const handleDeleteComment = async () => {
     if (!collectionId || !agentRunId) return;
-    await deleteAnnotation({
+    await deleteComment({
       collectionId,
-      annotationId: annotation.id,
+      commentId: comment.id,
       agentRunId,
     });
   };
 
-  // Handler for creating draft annotation
-  const handleCreateAnnotation = async (content: string) => {
-    if (!collectionId || !agentRunId || !draftAnnotation) return;
+  // Handler for creating draft comment
+  const handleCreateComment = async (content: string) => {
+    if (!collectionId || !agentRunId || !draftComment) return;
     try {
-      await createAnnotation({
+      await createComment({
         collectionId,
-        annotation: {
+        comment: {
           agent_run_id: agentRunId,
-          citations: draftAnnotation.citations,
+          citations: draftComment.citations,
           content,
         },
       });
-      dispatch(clearDraftAnnotation());
+      dispatch(clearDraftComment());
     } catch (error) {
-      console.error('Failed to create annotation:', error);
+      console.error('Failed to create comment:', error);
     }
   };
 
@@ -132,16 +128,16 @@ export function AnnotationCard({
 
   const handleSave = async (content: string) => {
     if (isDraft) {
-      await handleCreateAnnotation(content);
+      await handleCreateComment(content);
     } else {
-      await handleUpdateAnnotation(content);
+      await handleUpdateComment(content);
       setIsEditing(false);
     }
   };
 
   const handleCancel = () => {
     if (isDraft) {
-      dispatch(clearDraftAnnotation());
+      dispatch(clearDraftComment());
     } else {
       setIsEditing(false);
     }
@@ -150,7 +146,7 @@ export function AnnotationCard({
   if (isEditing) {
     return (
       <div className="mb-3">
-        <AnnotationForm
+        <CommentForm
           initialContent={effectiveContent}
           onSave={handleSave}
           onCancel={handleCancel}
@@ -171,7 +167,7 @@ export function AnnotationCard({
 
   return (
     <div
-      data-annotation-card
+      data-comment-card
       className={cn(
         'group border rounded-lg p-3 space-y-2 cursor-pointer transition-all mb-3',
         isFocused
@@ -185,40 +181,35 @@ export function AnnotationCard({
           onNavigateToCitation(firstCitation);
         }
       }}
-      onMouseEnter={() =>
-        dispatch(setHoveredAnnotationId(annotation.id ?? null))
-      }
-      onMouseLeave={() => dispatch(setHoveredAnnotationId(null))}
+      onMouseEnter={() => dispatch(setHoveredCommentId(comment.id ?? null))}
+      onMouseLeave={() => dispatch(setHoveredCommentId(null))}
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="bg-muted hover:bg-accent border-border h-7 w-7 border rounded-full flex items-center justify-center cursor-pointer ">
-            {isAnonymous(annotation.user_email) ? (
+            {isAnonymous(comment.user_email) ? (
               <UserRoundIcon className="text-primary h-4 w-4" />
             ) : (
               <span className="text-xs font-medium text-primary">
-                {getInitials(annotation.user_email)}
+                {getInitials(comment.user_email)}
               </span>
             )}
           </div>
           <div>
             <div className="text-xs text-muted-foreground">
               {' '}
-              {annotation.user_email}
+              {comment.user_email}
             </div>
-            {annotation.created_at && (
+            {comment.created_at && (
               <div className="text-[10px] text-muted-foreground">
                 {/* DB will save dates in UTC but strips timezone, need to add it back. */}
-                {new Date(annotation.created_at + 'Z').toLocaleString(
-                  undefined,
-                  {
-                    year: 'numeric',
-                    month: 'short',
-                    day: 'numeric',
-                    hour: 'numeric',
-                    minute: '2-digit',
-                  }
-                )}
+                {new Date(comment.created_at + 'Z').toLocaleString(undefined, {
+                  year: 'numeric',
+                  month: 'short',
+                  day: 'numeric',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                })}
               </div>
             )}
           </div>
@@ -246,7 +237,7 @@ export function AnnotationCard({
             <DropdownMenuItem
               onClick={() => {
                 const url = new URL(window.location.href);
-                url.searchParams.set('annotation_id', annotation.id ?? '');
+                url.searchParams.set('comment_id', comment.id ?? '');
                 navigator.clipboard.writeText(url.toString());
               }}
             >
@@ -256,7 +247,7 @@ export function AnnotationCard({
             {hasWritePermission && (
               <DropdownMenuItem
                 className="text-red-text focus:text-red-text"
-                onClick={handleDeleteAnnotation}
+                onClick={handleDeleteComment}
               >
                 <Trash2 className="size-4 mr-2" />
                 Delete
@@ -267,7 +258,7 @@ export function AnnotationCard({
       </div>
 
       {/* Citation Badges */}
-      {annotation.citations && annotation.citations.length > 0 && (
+      {comment.citations && comment.citations.length > 0 && (
         <div className="mb-2">
           <SelectionBadges
             selections={selectionItems}
@@ -291,7 +282,7 @@ export function AnnotationCard({
             !isFocused && 'line-clamp-2'
           )}
         >
-          {annotation.content}
+          {comment.content}
         </div>
         {!isFocused && isTruncated && (
           <button

@@ -11,27 +11,27 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
-export type AnnotationTab = 'inline' | 'list';
+export type CommentTab = 'inline' | 'list';
 
-interface AnnotationSidebarHeaderProps {
+interface CommentSidebarHeaderProps {
   isCollapsed: boolean;
   onToggleCollapsed: () => void;
-  activeTab: AnnotationTab;
-  onTabChange: (tab: AnnotationTab) => void;
+  activeTab: CommentTab;
+  onTabChange: (tab: CommentTab) => void;
   showAllTranscripts: boolean;
   onSetShowAllTranscripts: (value: boolean) => void;
-  annotationCount: number;
+  commentCount: number;
 }
 
-export const AnnotationSidebarHeader = ({
+export const CommentSidebarHeader = ({
   isCollapsed,
   onToggleCollapsed,
   activeTab,
   onTabChange,
   showAllTranscripts,
   onSetShowAllTranscripts,
-  annotationCount,
-}: AnnotationSidebarHeaderProps) => {
+  commentCount,
+}: CommentSidebarHeaderProps) => {
   return (
     <div
       className={cn(
@@ -51,9 +51,6 @@ export const AnnotationSidebarHeader = ({
             )}
           >
             Inline
-            {/* <div className="bg-muted px-1.5 rounded-full h-5">
-              {inlineAnnotationCount}
-            </div> */}
           </button>
           <button
             onClick={() => onTabChange('list')}
@@ -65,9 +62,6 @@ export const AnnotationSidebarHeader = ({
             )}
           >
             List
-            {/* <div className="bg-muted px-1.5 rounded-full h-5">
-              {listAnnotationCount}
-            </div> */}
           </button>
         </div>
       )}
@@ -116,9 +110,9 @@ export const AnnotationSidebarHeader = ({
             aria-label={isCollapsed ? 'Expand comments' : 'Collapse comments'}
           >
             <MessageSquare className="h-4 w-4" /> Comments
-            {annotationCount > 0 && (
+            {commentCount > 0 && (
               <span className="bg-muted px-1.5 py-0.5 rounded-full text-xs font-medium">
-                {annotationCount}
+                {commentCount}
               </span>
             )}
           </button>

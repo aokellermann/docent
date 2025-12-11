@@ -4,19 +4,19 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useState } from 'react';
 
-interface AnnotationFormProps {
+interface CommentFormProps {
   initialContent?: string;
   onSave: (content: string) => void;
   onCancel: () => void;
   isEditing?: boolean;
 }
 
-export function AnnotationForm({
+export function CommentForm({
   initialContent = '',
   onSave,
   onCancel,
   isEditing = false,
-}: AnnotationFormProps) {
+}: CommentFormProps) {
   const [content, setContent] = useState(initialContent);
 
   const handleSave = () => {

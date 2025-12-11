@@ -10,7 +10,7 @@ from docent._log_util.logger import get_logger
 from docent.data_models import InlineCitation
 from docent.data_models.judge import Label
 from docent_core.docent.db.schemas.auth_models import User
-from docent_core.docent.db.schemas.label import Annotation, LabelSet
+from docent_core.docent.db.schemas.label import Comment, LabelSet
 from docent_core.docent.server.dependencies.database import get_session
 from docent_core.docent.server.dependencies.permissions import (
     Permission,
@@ -87,17 +87,17 @@ async def require_tag_in_collection(
         )
 
 
-async def require_annotation_in_collection(
+async def require_comment_in_collection(
     collection_id: str,
-    annotation_id: str,
+    comment_id: str,
     label_svc: LabelService = Depends(get_label_service),
 ) -> None:
-    """Validate that annotation belongs to collection. Raises 404 if not."""
-    annotation = await label_svc.get_annotation(annotation_id)
-    if annotation is None or annotation.collection_id != collection_id:
+    """Validate that comment belongs to collection. Raises 404 if not."""
+    comment = await label_svc.get_comment(comment_id)
+    if comment is None or comment.collection_id != collection_id:
         raise HTTPException(
             status_code=404,
-            detail=f"Annotation {annotation_id} not found in collection {collection_id}",
+            detail=f"Comment {comment_id} not found in collection {collection_id}",
         )
 
 
@@ -130,12 +130,12 @@ class UpdateLabelSetRequest(BaseModel):
     label_schema: dict[str, Any]
 
 
-class CreateAnnotationRequest(BaseModel):
+class CreateCommentRequest(BaseModel):
     citations: list[InlineCitation]
     content: str
 
 
-class UpdateAnnotationRequest(BaseModel):
+class UpdateCommentRequest(BaseModel):
     content: str
 
 
@@ -432,65 +432,75 @@ async def get_labels_for_agent_run(
     return await label_svc.get_labels_by_agent_run(agent_run_id)
 
 
-###################
-# Annotation CRUD #
-###################
+################
+# Comment CRUD #
+################
 
 
-@label_router.post("/{collection_id}/agent_run/{agent_run_id}/annotation")
-async def create_annotation(
+@label_router.post("/{collection_id}/agent_run/{agent_run_id}/comment")
+async def create_comment(
     collection_id: str,
     agent_run_id: str,
-    request: CreateAnnotationRequest,
+    request: CreateCommentRequest,
     label_svc: LabelService = Depends(get_label_service),
     user: User = Depends(get_user_anonymous_ok),
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
     _run: None = Depends(require_agent_run_in_collection),
 ) -> dict[str, str]:
-    """Create an annotation."""
-    logger.info(f"Creating annotation for user {user.email}")
-    await label_svc.create_annotation(
+    """Create a comment."""
+    logger.info(f"Creating comment for user {user.email}")
+    await label_svc.create_comment(
         user.id,
         collection_id=collection_id,
         agent_run_id=agent_run_id,
         citations=request.citations,
         content=request.content,
     )
-    return {"message": "Annotation created successfully"}
+    return {"message": "Comment created successfully"}
 
 
-@label_router.put("/{collection_id}/annotation/{annotation_id}")
-async def update_annotation(
+@label_router.put("/{collection_id}/comment/{comment_id}")
+async def update_comment(
     collection_id: str,
-    annotation_id: str,
-    request: UpdateAnnotationRequest,
+    comment_id: str,
+    request: UpdateCommentRequest,
     label_svc: LabelService = Depends(get_label_service),
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
-    _annotation: None = Depends(require_annotation_in_collection),
+    _comment: None = Depends(require_comment_in_collection),
 ) -> dict[str, str]:
-    """Update an annotation."""
-    await label_svc.update_annotation(annotation_id, request.content)
-    return {"message": "Annotation updated successfully"}
+    """Update a comment."""
+    await label_svc.update_comment(comment_id, request.content)
+    return {"message": "Comment updated successfully"}
 
 
-@label_router.delete("/{collection_id}/annotation/{annotation_id}")
-async def delete_annotation(
-    annotation_id: str,
+@label_router.delete("/{collection_id}/comment/{comment_id}")
+async def delete_comment(
+    comment_id: str,
     label_svc: LabelService = Depends(get_label_service),
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
-    _annotation: None = Depends(require_annotation_in_collection),
+    _comment: None = Depends(require_comment_in_collection),
 ) -> dict[str, str]:
-    """Delete an annotation."""
-    await label_svc.delete_annotation(annotation_id)
-    return {"message": "Annotation deleted successfully"}
+    """Delete a comment."""
+    await label_svc.delete_comment(comment_id)
+    return {"message": "Comment deleted successfully"}
 
 
-@label_router.get("/{collection_id}/agent_run/{agent_run_id}/annotations")
-async def get_annotations_by_agent_run(
+@label_router.get("/{collection_id}/agent_run/{agent_run_id}/comments")
+async def get_comments_by_agent_run(
     agent_run_id: str,
     label_svc: LabelService = Depends(get_label_service),
     _perm: None = Depends(require_collection_permission(Permission.READ)),
     _run: None = Depends(require_agent_run_in_collection),
-) -> list[Annotation]:
-    """Get all annotations for a specific agent run."""
-    return await label_svc.get_annotations_by_agent_run(agent_run_id)
+) -> list[Comment]:
+    """Get all comments for a specific agent run."""
+    return await label_svc.get_comments_by_agent_run(agent_run_id)
+
+
+@label_router.get("/{collection_id}/comments")
+async def get_comments_by_collection(
+    collection_id: str,
+    label_svc: LabelService = Depends(get_label_service),
+    _perm: None = Depends(require_collection_permission(Permission.READ)),
+) -> list[Comment]:
+    """Get all comments in a collection."""
+    return await label_svc.get_comments_by_collection(collection_id)

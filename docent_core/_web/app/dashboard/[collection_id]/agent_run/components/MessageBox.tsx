@@ -2,7 +2,7 @@ import React, { useMemo, useRef } from 'react';
 import jsonStringFormatter from 'json-string-formatter';
 import { ChatMessage, Content, ToolCall } from '@/app/types/transcriptTypes';
 import { cn } from '@/lib/utils';
-import { Annotation } from '@/app/api/labelApi';
+import { Comment } from '@/app/api/labelApi';
 import {
   CitationTarget,
   CitationTargetTextRange,
@@ -155,7 +155,7 @@ interface MessageBoxProps {
   blockId?: string;
   isHighlighted: boolean;
   citedTargets: CitationTarget[];
-  annotations: Annotation[];
+  comments: Comment[];
   prettyPrintJsonMessages: Set<number>;
   setPrettyPrintJsonMessages: React.Dispatch<React.SetStateAction<Set<number>>>;
   dataContext: TranscriptBlockContentItem;
@@ -176,7 +176,7 @@ export function MessageBox({
   blockId: id,
   isHighlighted,
   citedTargets,
-  annotations,
+  comments,
   prettyPrintJsonMessages,
   dataContext,
   setPrettyPrintJsonMessages,
@@ -255,10 +255,10 @@ export function MessageBox({
       relevantTargets
     );
 
-    // Also handle annotations
-    const annotationIntervals = annotations.flatMap((ann) => {
-      if (!ann.citations || ann.citations.length === 0) return [];
-      const matchingTargets = ann.citations
+    // Also handle comments
+    const commentIntervals = comments.flatMap((cmt) => {
+      if (!cmt.citations || cmt.citations.length === 0) return [];
+      const matchingTargets = cmt.citations
         .map((citation) => citation.target)
         .filter((target) => {
           if (target.item.item_type !== 'block_content') return false;
@@ -272,12 +272,12 @@ export function MessageBox({
       );
       return intervals.map((interval) => ({
         ...interval,
-        isAnnotation: true,
-        annotationId: ann.id,
+        isComment: true,
+        commentId: cmt.id,
       }));
     });
 
-    return [...regularIntervals, ...annotationIntervals];
+    return [...regularIntervals, ...commentIntervals];
   };
 
   /**
@@ -299,10 +299,10 @@ export function MessageBox({
       relevantTargets
     );
 
-    // Also handle annotations without content_idx
-    const annotationIntervals = annotations.flatMap((ann) => {
-      if (!ann.citations || ann.citations.length === 0) return [];
-      const matchingTargets = ann.citations
+    // Also handle comments without content_idx
+    const commentIntervals = comments.flatMap((cmt) => {
+      if (!cmt.citations || cmt.citations.length === 0) return [];
+      const matchingTargets = cmt.citations
         .map((citation) => citation.target)
         .filter((target) => {
           if (target.item.item_type !== 'block_content') return false;
@@ -316,22 +316,22 @@ export function MessageBox({
       );
       return intervals.map((interval) => ({
         ...interval,
-        isAnnotation: true,
-        annotationId: ann.id,
+        isComment: true,
+        commentId: cmt.id,
       }));
     });
 
-    return [...regularIntervals, ...annotationIntervals];
+    return [...regularIntervals, ...commentIntervals];
   };
 
-  const hoveredAnnotationId = useAppSelector(
-    (state) => state.transcript.hoveredAnnotationId
+  const hoveredCommentId = useAppSelector(
+    (state) => state.transcript.hoveredCommentId
   );
 
-  const isHovered = annotations.some(
-    (ann) =>
-      ann.id === hoveredAnnotationId &&
-      ann.citations?.some((citation) => citation.target.text_range === null)
+  const isHovered = comments.some(
+    (cmt) =>
+      cmt.id === hoveredCommentId &&
+      cmt.citations?.some((citation) => citation.target.text_range === null)
   );
 
   //********************

@@ -11,8 +11,8 @@ from docent._log_util import get_logger
 from docent.data_models import InlineCitation
 from docent.data_models.judge import Label
 from docent_core.docent.db.schemas.label import (
-    Annotation,
-    SQLAAnnotation,
+    Comment,
+    SQLAComment,
     SQLALabel,
     SQLALabelSet,
     SQLATag,
@@ -350,10 +350,7 @@ class LabelService:
             )
         )
         # Build a dict mapping label_set_id to count
-        label_counts: dict[str, int] = {}
-        for row in result.all():
-            label_set_id, count = row
-            label_counts[label_set_id] = count
+        label_counts = {label_set_id: count for label_set_id, count in result.all()}
 
         # Combine label sets with their counts
         return [
@@ -382,11 +379,11 @@ class LabelService:
         sqla_labels = result.scalars().all()
         return [sqla_label.to_pydantic() for sqla_label in sqla_labels]
 
-    ###################
-    # Annotation CRUD #
-    ###################
+    ################
+    # Comment CRUD #
+    ################
 
-    async def create_annotation(
+    async def create_comment(
         self,
         user_id: str,
         collection_id: str,
@@ -394,12 +391,7 @@ class LabelService:
         citations: list[InlineCitation],
         content: str,
     ) -> None:
-        """Create an annotation.
-
-        Args:
-            annotation: The annotation to create
-        """
-        sqla_annotation = SQLAAnnotation(
+        sqla_comment = SQLAComment(
             id=str(uuid4()),
             user_id=user_id,
             collection_id=collection_id,
@@ -407,84 +399,68 @@ class LabelService:
             citations=[citation.model_dump() for citation in citations],
             content=content,
         )
-        self.session.add(sqla_annotation)
+        self.session.add(sqla_comment)
 
-    async def get_annotation(self, annotation_id: str) -> Annotation | None:
-        """Get a single annotation by ID.
-
-        Args:
-            annotation_id: The annotation ID
-
-        Returns:
-            The annotation or None if not found
-        """
+    async def get_comment(self, comment_id: str) -> Comment | None:
         result = await self.session.execute(
-            select(SQLAAnnotation, SQLAUser.email)
-            .join(SQLAUser, SQLAAnnotation.user_id == SQLAUser.id)
-            .where(SQLAAnnotation.id == annotation_id)
+            select(SQLAComment, SQLAUser.email)
+            .join(SQLAUser, SQLAComment.user_id == SQLAUser.id)
+            .where(SQLAComment.id == comment_id)
         )
         row = result.one_or_none()
         if row is None:
             return None
-        sqla_annotation, user_email = row
-        return sqla_annotation.to_pydantic(user_email=user_email)
+        sqla_comment, user_email = row
+        return sqla_comment.to_pydantic(user_email=user_email)
 
-    async def get_annotations_by_agent_run(self, agent_run_id: str) -> list[Annotation]:
-        """Get all annotations for a specific agent run.
-
-        Args:
-            agent_run_id: The agent run ID
-
-        Returns:
-            List of annotations for the agent run
-        """
+    async def get_comments_by_agent_run(self, agent_run_id: str) -> list[Comment]:
         result = await self.session.execute(
-            select(SQLAAnnotation, SQLAUser.email)
-            .join(SQLAUser, SQLAAnnotation.user_id == SQLAUser.id)
-            .where(SQLAAnnotation.agent_run_id == agent_run_id)
+            select(SQLAComment, SQLAUser.email)
+            .join(SQLAUser, SQLAComment.user_id == SQLAUser.id)
+            .where(SQLAComment.agent_run_id == agent_run_id)
         )
+        return [
+            sqla_comment.to_pydantic(user_email=user_email)
+            for sqla_comment, user_email in result.all()
+        ]
 
-        annotations: list[Annotation] = []
-        for sqla_annotation, user_email in result.all():
-            annotation = sqla_annotation.to_pydantic(user_email=user_email)
-            annotations.append(annotation)
-        return annotations
+    async def get_comments_by_collection(self, collection_id: str) -> list[Comment]:
+        result = await self.session.execute(
+            select(SQLAComment, SQLAUser.email)
+            .join(SQLAUser, SQLAComment.user_id == SQLAUser.id)
+            .where(SQLAComment.collection_id == collection_id)
+        )
+        return [
+            sqla_comment.to_pydantic(user_email=user_email)
+            for sqla_comment, user_email in result.all()
+        ]
 
-    async def update_annotation(self, annotation_id: str, content: str) -> bool:
-        """Update an annotation's content.
+    async def update_comment(self, comment_id: str, content: str) -> bool:
+        """Update a comment's content.
 
         Args:
-            annotation_id: The annotation ID
-            content: The new annotation content
+            comment_id: The comment ID
+            content: The new comment content
 
         Returns:
             True if updated successfully
 
         Raises:
-            ValueError: If annotation doesn't exist
+            ValueError: If comment doesn't exist
         """
-        result = await self.session.execute(
-            select(SQLAAnnotation).where(SQLAAnnotation.id == annotation_id)
-        )
-        existing_annotation = result.scalar_one_or_none()
-        if existing_annotation is None:
-            raise ValueError(f"Annotation {annotation_id} not found")
+        result = await self.session.execute(select(SQLAComment).where(SQLAComment.id == comment_id))
+        existing_comment = result.scalar_one_or_none()
+        if existing_comment is None:
+            raise ValueError(f"Comment {comment_id} not found")
 
-        existing_annotation.content = content
+        existing_comment.content = content
         return True
 
-    async def delete_annotation(self, annotation_id: str) -> None:
-        """Delete an annotation.
-
-        Args:
-            annotation_id: The annotation ID
-        """
-        result = await self.session.execute(
-            select(SQLAAnnotation).where(SQLAAnnotation.id == annotation_id)
-        )
-        annotation_to_delete = result.scalar_one_or_none()
-        if annotation_to_delete:
-            await self.session.delete(annotation_to_delete)
+    async def delete_comment(self, comment_id: str) -> None:
+        result = await self.session.execute(select(SQLAComment).where(SQLAComment.id == comment_id))
+        comment_to_delete = result.scalar_one_or_none()
+        if comment_to_delete:
+            await self.session.delete(comment_to_delete)
 
     #############
     # Tag CRUD  #

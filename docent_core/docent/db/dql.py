@@ -32,7 +32,7 @@ from sqlglot.optimizer.scope import (
 from docent._log_util import get_logger
 from docent.data_models.agent_run import FilterableFieldType
 from docent_core.docent.db.schemas.auth_models import Permission, ResourceType, User
-from docent_core.docent.db.schemas.label import SQLALabel
+from docent_core.docent.db.schemas.label import SQLALabel, SQLATag
 from docent_core.docent.db.schemas.rubric import (
     SQLAJudgeResult,
     SQLAJudgeResultCentroid,
@@ -649,6 +649,12 @@ def build_default_registry(
         table=SQLALabel.__table__,
         allowed_columns=_columns_for(SQLALabel.__table__),
         collection_predicate_factory=_label_collection_predicate,
+    )
+    registry.register_table(
+        name=SQLATag.__tablename__,
+        table=SQLATag.__table__,
+        allowed_columns=_columns_for(SQLATag.__table__),
+        collection_predicate_factory=_column_equals_collection("collection_id"),
     )
     registry.register_table(
         name=SQLARubricCentroid.__tablename__,

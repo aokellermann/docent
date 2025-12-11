@@ -14,6 +14,7 @@ from pydantic import (
 )
 
 from docent._log_util import get_logger
+from docent.data_models.citation import Comment
 from docent.data_models.metadata_util import dump_metadata
 from docent.data_models.transcript import Transcript, TranscriptGroup
 
@@ -296,17 +297,28 @@ class SelectionSpec(BaseModel):
 
 class AgentRunView:
     def __init__(
-        self, agent_run: AgentRun, agent_run_tree: AgentRunTree, selection_spec: SelectionSpec
+        self,
+        agent_run: AgentRun,
+        agent_run_tree: AgentRunTree,
+        selection_spec: SelectionSpec,
+        comments: list[Comment] | None = None,
     ):
         self._ar = agent_run
         self._ar_tree = agent_run_tree
         self._spec = selection_spec
 
     @classmethod
-    def from_agent_run(cls, agent_run: AgentRun) -> AgentRunView:
+    def from_agent_run(
+        cls, agent_run: AgentRun, comments: list[Comment] | None = None
+    ) -> AgentRunView:
         ar_tree = AgentRunTree.from_agent_run(agent_run)
         spec = SelectionSpec.from_agent_run_tree(ar_tree)
-        return cls(agent_run=agent_run, agent_run_tree=ar_tree, selection_spec=spec)
+        return cls(
+            agent_run=agent_run,
+            agent_run_tree=ar_tree,
+            selection_spec=spec,
+            comments=comments,
+        )
 
     #######################
     # Core text rendering #

@@ -4,7 +4,7 @@
  */
 
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
-import { Annotation } from '../api/labelApi';
+import { Comment } from '../api/labelApi';
 import { AgentRun, SolutionSummary } from '../types/transcriptTypes';
 import { CitationTarget, InlineCitation } from '../types/citationTypes';
 import { TextSelectionItem } from '../../providers/use-text-selection';
@@ -27,8 +27,8 @@ export interface TranscriptState {
   solutionSummaryTaskId?: string;
   // All citations
   allCitations: Record<string, InlineCitation[]>;
-  hoveredAnnotationId: string | null;
-  selectedAnnotationId: string | null;
+  hoveredCommentId: string | null;
+  selectedCommentId: string | null;
   // Agent run sidebar state
   agentRunSidebarTab?: string;
   // Sidebar visibility states for different routes
@@ -39,9 +39,9 @@ export interface TranscriptState {
 
   // Text selections
   textSelections: TextSelectionItem[];
-  // Draft annotation (multi-citation creation flow)
-  draftAnnotation: Annotation | null;
-  annotationSidebarCollapsed: boolean;
+  // Draft comment (multi-citation creation flow)
+  draftComment: Comment | null;
+  commentSidebarCollapsed: boolean;
 }
 
 const initialState: TranscriptState = {
@@ -51,11 +51,11 @@ const initialState: TranscriptState = {
   judgeRightSidebarOpen: true,
   allCitations: {},
 
-  hoveredAnnotationId: null,
-  selectedAnnotationId: null,
+  hoveredCommentId: null,
+  selectedCommentId: null,
   textSelections: [],
-  draftAnnotation: null,
-  annotationSidebarCollapsed: true,
+  draftComment: null,
+  commentSidebarCollapsed: true,
 };
 
 export const transcriptSlice = createSlice({
@@ -136,12 +136,12 @@ export const transcriptSlice = createSlice({
       state.judgeRightSidebarOpen = !state.judgeRightSidebarOpen;
     },
 
-    // Annotation states
-    setHoveredAnnotationId: (state, action: PayloadAction<string | null>) => {
-      state.hoveredAnnotationId = action.payload;
+    // Comment states
+    setHoveredCommentId: (state, action: PayloadAction<string | null>) => {
+      state.hoveredCommentId = action.payload;
     },
-    setSelectedAnnotationId: (state, action: PayloadAction<string | null>) => {
-      state.selectedAnnotationId = action.payload;
+    setSelectedCommentId: (state, action: PayloadAction<string | null>) => {
+      state.selectedCommentId = action.payload;
     },
 
     // Text selections
@@ -149,7 +149,7 @@ export const transcriptSlice = createSlice({
       state.textSelections = action.payload;
     },
     addCitationToDraft: (state, action: PayloadAction<CitationTarget>) => {
-      state.draftAnnotation = {
+      state.draftComment = {
         id: 'draft',
         citations: [
           {
@@ -166,16 +166,16 @@ export const transcriptSlice = createSlice({
       };
     },
     updateDraftContent: (state, action: PayloadAction<string>) => {
-      if (state.draftAnnotation) {
-        state.draftAnnotation.content = action.payload;
+      if (state.draftComment) {
+        state.draftComment.content = action.payload;
       }
     },
-    clearDraftAnnotation: (state) => {
-      state.draftAnnotation = null;
+    clearDraftComment: (state) => {
+      state.draftComment = null;
     },
 
-    setAnnotationSidebarCollapsed: (state, action: PayloadAction<boolean>) => {
-      state.annotationSidebarCollapsed = action.payload;
+    setCommentSidebarCollapsed: (state, action: PayloadAction<boolean>) => {
+      state.commentSidebarCollapsed = action.payload;
     },
 
     resetTranscriptSlice: () => initialState,
@@ -200,16 +200,16 @@ export const {
   toggleAgentRunRightSidebar,
   toggleJudgeRightSidebar,
 
-  // Annotation states
-  setHoveredAnnotationId,
-  setSelectedAnnotationId,
+  // Comment states
+  setHoveredCommentId,
+  setSelectedCommentId,
 
   // Text selections
   setTextSelections,
   addCitationToDraft,
   updateDraftContent,
-  clearDraftAnnotation,
-  setAnnotationSidebarCollapsed,
+  clearDraftComment,
+  setCommentSidebarCollapsed,
 } = transcriptSlice.actions;
 
 export const selectRunCitationsById = (

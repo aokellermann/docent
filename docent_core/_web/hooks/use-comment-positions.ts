@@ -1,26 +1,26 @@
 import { useLayoutEffect, useEffect, useState, useRef } from 'react';
-import { Annotation } from '@/app/api/labelApi';
+import { Comment } from '@/app/api/labelApi';
 
 const CARD_HEIGHT = 150;
 const FOCUSED_CARD_HEIGHT = 250;
 const OVERLAP_THRESHOLD = 80;
 
-function getCardHeight(annotation: Annotation, isFocused: boolean): number {
-  if (annotation.id === 'draft') return FOCUSED_CARD_HEIGHT;
+function getCardHeight(comment: Comment, isFocused: boolean): number {
+  if (comment.id === 'draft') return FOCUSED_CARD_HEIGHT;
   if (isFocused) return FOCUSED_CARD_HEIGHT;
   return CARD_HEIGHT;
 }
 
 function getIdealY(
-  annotation: Annotation,
+  comment: Comment,
   scrollContainer: HTMLElement
 ): number | null {
   // Try highlight element first, then fall back to block element
   let targetElement = document.querySelector(
-    `[data-annotation-id="${annotation.id}"]`
+    `[data-comment-id="${comment.id}"]`
   ) as HTMLElement;
 
-  const firstTarget = annotation.citations?.[0]?.target;
+  const firstTarget = comment.citations?.[0]?.target;
   if (!targetElement && firstTarget?.item.item_type === 'block_content') {
     const blockIdx = firstTarget.item.block_idx;
     targetElement = document.querySelector(
@@ -42,75 +42,75 @@ function getIdealY(
   return Math.max(0, relativeTop - CARD_HEIGHT / 2);
 }
 
-/** Create a stable key that includes annotation citations, not just IDs */
-function getAnnotationsKey(annotations: Annotation[]): string {
-  return annotations
-    .map((a) => {
-      const target = a.citations?.[0]?.target;
-      if (!target) return a.id;
+/** Create a stable key that includes comment citations, not just IDs */
+function getCommentsKey(comments: Comment[]): string {
+  return comments
+    .map((c) => {
+      const target = c.citations?.[0]?.target;
+      if (!target) return c.id;
       const item = target.item;
       const blockIdx = item.item_type === 'block_content' ? item.block_idx : '';
       const startIdx = target.text_range?.target_start_idx ?? '';
-      return `${a.id}:${blockIdx}:${startIdx}`;
+      return `${c.id}:${blockIdx}:${startIdx}`;
     })
     .join(',');
 }
 
 function computePositions(
-  annotations: Annotation[],
+  comments: Comment[],
   scrollContainer: HTMLElement,
-  focusedAnnotationId: string | null
+  focusedCommentId: string | null
 ): Map<string, number> {
-  if (annotations.length === 0) return new Map();
+  if (comments.length === 0) return new Map();
 
-  const focusedIdx = focusedAnnotationId
-    ? annotations.findIndex((a) => a.id === focusedAnnotationId)
+  const focusedIdx = focusedCommentId
+    ? comments.findIndex((c) => c.id === focusedCommentId)
     : -1;
 
   const positions = new Map<string, number>();
 
-  // If focused, start from focused annotation; otherwise start from first
+  // If focused, start from focused comment; otherwise start from first
   const startIdx = focusedIdx >= 0 ? focusedIdx : 0;
-  const startAnnotation = annotations[startIdx];
-  const startIdealY = getIdealY(startAnnotation, scrollContainer);
+  const startComment = comments[startIdx];
+  const startIdealY = getIdealY(startComment, scrollContainer);
 
   if (startIdealY === null) return positions;
 
-  // Place the starting annotation
-  positions.set(startAnnotation.id, startIdealY);
+  // Place the starting comment
+  positions.set(startComment.id, startIdealY);
 
   // Stack downward from start
   let currentY =
-    startIdealY + getCardHeight(startAnnotation, focusedIdx === startIdx);
-  for (let i = startIdx + 1; i < annotations.length; i++) {
-    const annotation = annotations[i];
-    const idealY = getIdealY(annotation, scrollContainer);
+    startIdealY + getCardHeight(startComment, focusedIdx === startIdx);
+  for (let i = startIdx + 1; i < comments.length; i++) {
+    const comment = comments[i];
+    const idealY = getIdealY(comment, scrollContainer);
     if (idealY === null) continue;
 
-    const cardHeight = getCardHeight(annotation, false);
+    const cardHeight = getCardHeight(comment, false);
     if (currentY > idealY - OVERLAP_THRESHOLD) {
-      positions.set(annotation.id, currentY);
+      positions.set(comment.id, currentY);
       currentY += cardHeight;
     } else {
-      positions.set(annotation.id, idealY);
+      positions.set(comment.id, idealY);
       currentY = idealY + cardHeight;
     }
   }
 
-  // Stack upward from start (only if we started from a focused annotation)
+  // Stack upward from start (only if we started from a focused comment)
   if (startIdx > 0) {
     currentY = startIdealY - CARD_HEIGHT;
     for (let i = startIdx - 1; i >= 0; i--) {
-      const annotation = annotations[i];
-      const idealY = getIdealY(annotation, scrollContainer);
+      const comment = comments[i];
+      const idealY = getIdealY(comment, scrollContainer);
       if (idealY === null) continue;
 
-      const cardHeight = getCardHeight(annotation, false);
+      const cardHeight = getCardHeight(comment, false);
       if (currentY < idealY + OVERLAP_THRESHOLD) {
-        positions.set(annotation.id, currentY);
+        positions.set(comment.id, currentY);
         currentY -= cardHeight;
       } else {
-        positions.set(annotation.id, idealY);
+        positions.set(comment.id, idealY);
         currentY = idealY - cardHeight;
       }
     }
@@ -120,27 +120,27 @@ function computePositions(
 }
 
 interface UseCommentPositionsParams {
-  sortedAnnotations: Annotation[];
+  sortedComments: Comment[];
   scrollContainer: HTMLElement | null;
-  focusedAnnotationId: string | null;
+  focusedCommentId: string | null;
   enabled: boolean;
 }
 
 export function useCommentPositions({
-  sortedAnnotations,
+  sortedComments,
   scrollContainer,
-  focusedAnnotationId,
+  focusedCommentId,
   enabled,
 }: UseCommentPositionsParams): Map<string, number> {
   const [positions, setPositions] = useState<Map<string, number>>(new Map());
 
   // Track previous focused ID to detect deselection (someId → null)
-  const prevFocusedIdRef = useRef<string | null>(focusedAnnotationId);
+  const prevFocusedIdRef = useRef<string | null>(focusedCommentId);
   // Track the anchor used for the last position calculation (for resize)
-  const lastAnchorRef = useRef<string | null>(focusedAnnotationId);
+  const lastAnchorRef = useRef<string | null>(focusedCommentId);
 
-  // Create a key that changes when annotation locations change (not just IDs)
-  const annotationsKey = getAnnotationsKey(sortedAnnotations);
+  // Create a key that changes when comment locations change (not just IDs)
+  const commentsKey = getCommentsKey(sortedComments);
 
   // Calculate positions after DOM updates using useLayoutEffect
   // This runs synchronously after all DOM mutations but before paint,
@@ -148,26 +148,26 @@ export function useCommentPositions({
   useLayoutEffect(() => {
     if (!enabled || !scrollContainer) {
       setPositions((prev) => (prev.size === 0 ? prev : new Map()));
-      prevFocusedIdRef.current = focusedAnnotationId;
+      prevFocusedIdRef.current = focusedCommentId;
       return;
     }
 
     // Skip recalculation when deselecting (going from someId → null)
     // This keeps positions stable when clicking away
     const isDeselecting =
-      prevFocusedIdRef.current !== null && focusedAnnotationId === null;
-    prevFocusedIdRef.current = focusedAnnotationId;
+      prevFocusedIdRef.current !== null && focusedCommentId === null;
+    prevFocusedIdRef.current = focusedCommentId;
 
     if (isDeselecting) {
       return;
     }
 
     // Use the new focused ID as anchor, or keep the last anchor if deselected
-    const anchor = focusedAnnotationId ?? lastAnchorRef.current;
+    const anchor = focusedCommentId ?? lastAnchorRef.current;
     lastAnchorRef.current = anchor;
 
     const newPositions = computePositions(
-      sortedAnnotations,
+      sortedComments,
       scrollContainer,
       anchor
     );
@@ -181,9 +181,9 @@ export function useCommentPositions({
       });
       return hasChanged ? newPositions : prev;
     });
-    // sortedAnnotations content is tracked via annotationsKey
+    // sortedComments content is tracked via commentsKey
     // scrollContainer is a direct dependency - when it transitions from null to valid, effect re-runs
-  }, [annotationsKey, focusedAnnotationId, enabled, scrollContainer]);
+  }, [commentsKey, focusedCommentId, enabled, scrollContainer]);
 
   // Listen for window resize
   useEffect(() => {
@@ -191,7 +191,7 @@ export function useCommentPositions({
     const handleResize = () => {
       // Use lastAnchorRef to maintain the same anchor after deselection
       const newPositions = computePositions(
-        sortedAnnotations,
+        sortedComments,
         scrollContainer,
         lastAnchorRef.current
       );
@@ -200,7 +200,7 @@ export function useCommentPositions({
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, annotationsKey, scrollContainer]);
+  }, [enabled, commentsKey, scrollContainer]);
 
   return positions;
 }

@@ -1,6 +1,8 @@
+from datetime import datetime
 from typing import Annotated, Literal, Union
+from uuid import uuid4
 
-from pydantic import BaseModel, Discriminator
+from pydantic import BaseModel, Discriminator, Field
 
 
 class CitationTargetTextRange(BaseModel):
@@ -74,6 +76,17 @@ ResolvedCitationItemUnion = Annotated[
     ],
     Discriminator("item_type"),
 ]
+
+
+class Comment(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    user_email: str
+    collection_id: str
+    agent_run_id: str
+    citations: list[InlineCitation]
+    created_at: datetime
+    content: str
+
 
 RANGE_BEGIN = "<RANGE>"
 RANGE_END = "</RANGE>"

@@ -1,13 +1,12 @@
 from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from docent.data_models.citation import InlineCitation
+from docent.data_models.citation import Comment, InlineCitation
 from docent.data_models.judge import Label
 from docent_core._db_service.schemas.base import SQLABase
 from docent_core.docent.db.schemas.tables import TABLE_AGENT_RUN, TABLE_COLLECTION, TABLE_USER
@@ -15,7 +14,7 @@ from docent_core.docent.db.schemas.tables import TABLE_AGENT_RUN, TABLE_COLLECTI
 TABLE_LABEL = "labels"
 TABLE_LABEL_SET = "label_sets"
 TABLE_LABEL_SET_RUBRIC = "label_set_rubrics"
-TABLE_ANNOTATION = "annotations"
+TABLE_COMMENT = "annotations"  # kept weird name to avoid changing the DB table name
 TABLE_TAG = "tags"
 
 
@@ -111,20 +110,10 @@ class SQLALabelSet(SQLABase):
         )
 
 
-class Annotation(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid4()))
-    user_email: str
-    collection_id: str
-    agent_run_id: str
-    citations: list[InlineCitation]
-    created_at: datetime
-    content: str
+class SQLAComment(SQLABase):
+    """Comments table - stores comments for agent runs."""
 
-
-class SQLAAnnotation(SQLABase):
-    """Annotations table - stores annotations for agent runs."""
-
-    __tablename__ = TABLE_ANNOTATION
+    __tablename__ = TABLE_COMMENT
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
 
@@ -149,8 +138,8 @@ class SQLAAnnotation(SQLABase):
 
     content: Mapped[str] = mapped_column(Text, nullable=False)
 
-    def to_pydantic(self, user_email: str) -> Annotation:
-        return Annotation(
+    def to_pydantic(self, user_email: str) -> Comment:
+        return Comment(
             id=self.id,
             user_email=user_email,
             collection_id=self.collection_id,

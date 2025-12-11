@@ -1,38 +1,38 @@
 'use client';
 
-import { Annotation } from '@/app/api/labelApi';
-import { AnnotationCard } from './AnnotationCard';
+import { Comment } from '@/app/api/labelApi';
+import { CommentCard } from './CommentCard';
 import { CitationTarget } from '@/app/types/citationTypes';
 import { useCallback } from 'react';
 import { useCommentPositions } from '@/hooks/use-comment-positions';
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
-import { setSelectedAnnotationId } from '@/app/store/transcriptSlice';
-import { AnnotationTab } from './AnnotationSidebarHeader';
+import { setSelectedCommentId } from '@/app/store/transcriptSlice';
+import { CommentTab } from './CommentSidebarHeader';
 import { cn } from '@/lib/utils';
 
-interface AnnotationSidebarContentProps {
-  annotationsForTranscript: Annotation[];
-  listModeAnnotations: Annotation[];
+interface CommentSidebarContentProps {
+  commentsForTranscript: Comment[];
+  listModeComments: Comment[];
   scrollContainer?: HTMLElement | null;
   scrollToCitation: (citation: CitationTarget) => void;
-  activeTab: AnnotationTab;
+  activeTab: CommentTab;
 }
 
-export const AnnotationSidebarContent = ({
-  annotationsForTranscript,
-  listModeAnnotations,
+export const CommentSidebarContent = ({
+  commentsForTranscript,
+  listModeComments,
   scrollContainer,
   scrollToCitation,
   activeTab,
-}: AnnotationSidebarContentProps) => {
+}: CommentSidebarContentProps) => {
   const dispatch = useAppDispatch();
-  const selectedAnnotationId = useAppSelector(
-    (state) => state.transcript.selectedAnnotationId
+  const selectedCommentId = useAppSelector(
+    (state) => state.transcript.selectedCommentId
   );
 
-  // Inline mode - positioned annotations for current transcript
+  // Inline mode - positioned comments for current transcript
   // Sort by first citation for positioning
-  const sortedAnnotations = [...annotationsForTranscript].sort((a, b) => {
+  const sortedComments = [...commentsForTranscript].sort((a, b) => {
     const aTarget = a.citations?.[0]?.target;
     const bTarget = b.citations?.[0]?.target;
 
@@ -59,37 +59,37 @@ export const AnnotationSidebarContent = ({
 
   // Use comment positions hook for inline mode
   const positions = useCommentPositions({
-    sortedAnnotations,
+    sortedComments,
     scrollContainer: scrollContainer ?? null,
-    focusedAnnotationId: selectedAnnotationId,
+    focusedCommentId: selectedCommentId,
     enabled: activeTab === 'inline',
   });
 
-  // Handler for clicking outside annotations to deselect
+  // Handler for clicking outside comments to deselect
   // Must be called before any conditional returns to satisfy React hooks rules
   const handleContainerClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       // Only deselect if clicking directly on the container (not on a card)
-      if (e.target === e.currentTarget && selectedAnnotationId) {
-        dispatch(setSelectedAnnotationId(null));
+      if (e.target === e.currentTarget && selectedCommentId) {
+        dispatch(setSelectedCommentId(null));
       }
     },
-    [dispatch, selectedAnnotationId]
+    [dispatch, selectedCommentId]
   );
 
-  // Render List mode - show all annotations in a flat list
+  // Render List mode - show all comments in a flat list
   if (activeTab === 'list') {
     return (
       <div className="flex flex-col p-3 pb-16">
-        {listModeAnnotations.map((annotation) => {
-          if (!annotation.id) return null;
+        {listModeComments.map((comment) => {
+          if (!comment.id) return null;
 
           return (
-            <AnnotationCard
-              key={annotation.id}
-              annotation={annotation}
-              isFocused={selectedAnnotationId === annotation.id}
-              onFocus={() => dispatch(setSelectedAnnotationId(annotation.id))}
+            <CommentCard
+              key={comment.id}
+              comment={comment}
+              isFocused={selectedCommentId === comment.id}
+              onFocus={() => dispatch(setSelectedCommentId(comment.id))}
               onNavigateToCitation={scrollToCitation}
             />
           );
@@ -98,7 +98,7 @@ export const AnnotationSidebarContent = ({
     );
   }
 
-  if (sortedAnnotations.length === 0) {
+  if (sortedComments.length === 0) {
     return (
       <div className="text-xs text-muted-foreground text-center py-8">
         No comments yet
@@ -108,20 +108,20 @@ export const AnnotationSidebarContent = ({
 
   return (
     <div className="relative min-h-full" onClick={handleContainerClick}>
-      {sortedAnnotations.map((annotation) => {
-        if (!annotation.id) return null;
+      {sortedComments.map((comment) => {
+        if (!comment.id) return null;
 
-        const position = positions.get(annotation.id);
+        const position = positions.get(comment.id);
         if (position === undefined) return null;
 
-        const isFocused = selectedAnnotationId === annotation.id;
+        const isFocused = selectedCommentId === comment.id;
 
         // Draft cards appear instantly, existing cards slide smoothly
-        const isDraft = annotation.id === 'draft';
+        const isDraft = comment.id === 'draft';
 
         return (
           <div
-            key={annotation.id}
+            key={comment.id}
             className={cn(
               'absolute left-0 right-0 px-3',
               isFocused ? 'z-10' : 'z-0',
@@ -131,10 +131,10 @@ export const AnnotationSidebarContent = ({
               top: `${position}px`,
             }}
           >
-            <AnnotationCard
-              annotation={annotation}
+            <CommentCard
+              comment={comment}
               isFocused={isFocused}
-              onFocus={() => dispatch(setSelectedAnnotationId(annotation.id))}
+              onFocus={() => dispatch(setSelectedCommentId(comment.id))}
               onNavigateToCitation={scrollToCitation}
             />
           </div>

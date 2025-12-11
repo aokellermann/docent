@@ -653,6 +653,23 @@ class Docent:
         self._handle_response_errors(response)
         return response.json()
 
+    def get_label_sets(self, collection_id: str) -> list[dict[str, Any]]:
+        """Retrieve all label sets in a collection.
+
+        Args:
+            collection_id: ID of the Collection.
+
+        Returns:
+            list: List of label set dictionaries.
+
+        Raises:
+            requests.exceptions.HTTPError: If the API request fails.
+        """
+        url = f"{self._server_url}/label/{collection_id}/label_sets"
+        response = self._session.get(url)
+        self._handle_response_errors(response)
+        return response.json()
+
     def get_labels(
         self, collection_id: str, label_set_id: str, filter_valid_labels: bool = False
     ) -> list[dict[str, Any]]:
@@ -712,6 +729,43 @@ class Docent:
         url = f"{self._server_url}/label/{collection_id}/tag/{tag_id}"
         response = self._session.delete(url)
         self._handle_response_errors(response)
+
+    def get_comments(self, collection_id: str) -> list[dict[str, Any]]:
+        """Get all comments in a collection.
+
+        Args:
+            collection_id: ID of the Collection.
+
+        Returns:
+            list: List of comment dictionaries.
+
+        Raises:
+            requests.exceptions.HTTPError: If the API request fails.
+        """
+        url = f"{self._server_url}/label/{collection_id}/comments"
+        response = self._session.get(url)
+        self._handle_response_errors(response)
+        return response.json()
+
+    def get_comments_for_agent_run(
+        self, collection_id: str, agent_run_id: str
+    ) -> list[dict[str, Any]]:
+        """Get all comments for a specific agent run.
+
+        Args:
+            collection_id: ID of the Collection.
+            agent_run_id: ID of the agent run to get comments for.
+
+        Returns:
+            list: List of comment dictionaries.
+
+        Raises:
+            requests.exceptions.HTTPError: If the API request fails.
+        """
+        url = f"{self._server_url}/label/{collection_id}/agent_run/{agent_run_id}/comments"
+        response = self._session.get(url)
+        self._handle_response_errors(response)
+        return response.json()
 
     def get_agent_run(self, collection_id: str, agent_run_id: str) -> AgentRun | None:
         """Get a specific agent run by its ID.

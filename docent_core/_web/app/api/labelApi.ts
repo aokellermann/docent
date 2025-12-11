@@ -51,7 +51,7 @@ export interface LabelSetName {
   name: string;
 }
 
-export interface Annotation {
+export interface Comment {
   id: string;
   user_email: string;
   collection_id: string;
@@ -61,13 +61,13 @@ export interface Annotation {
   content: string;
 }
 
-export interface NewAnnotation {
+export interface NewComment {
   agent_run_id: string;
   citations: InlineCitation[];
   content: string;
 }
 
-export interface UpdateAnnotationRequest {
+export interface UpdateCommentRequest {
   content: string;
 }
 
@@ -77,7 +77,7 @@ export const labelApi = createApi({
     baseUrl: `${BASE_URL}/rest/label`,
     credentials: 'include',
   }),
-  tagTypes: ['Label', 'LabelSet', 'LabelSetAssociation', 'Annotation'],
+  tagTypes: ['Label', 'LabelSet', 'LabelSetAssociation', 'Comment'],
   endpoints: (build) => ({
     // Label CRUD
     createLabel: build.mutation<
@@ -255,71 +255,71 @@ export const labelApi = createApi({
           : [{ type: 'Label', id: `AGENT_RUN-${agentRunId}` }],
     }),
 
-    // Annotation CRUD
-    createAnnotation: build.mutation<
+    // Comment CRUD
+    createComment: build.mutation<
       { message: string },
-      { collectionId: string; annotation: NewAnnotation }
+      { collectionId: string; comment: NewComment }
     >({
-      query: ({ collectionId, annotation }) => ({
-        url: `/${collectionId}/agent_run/${annotation.agent_run_id}/annotation`,
+      query: ({ collectionId, comment }) => ({
+        url: `/${collectionId}/agent_run/${comment.agent_run_id}/comment`,
         method: 'POST',
-        body: annotation,
+        body: comment,
       }),
-      invalidatesTags: (result, error, { annotation }) => [
-        'Annotation',
-        { type: 'Annotation', id: `AGENT_RUN-${annotation.agent_run_id}` },
+      invalidatesTags: (result, error, { comment }) => [
+        'Comment',
+        { type: 'Comment', id: `AGENT_RUN-${comment.agent_run_id}` },
       ],
     }),
-    updateAnnotation: build.mutation<
+    updateComment: build.mutation<
       { message: string },
       {
         collectionId: string;
-        annotationId: string;
+        commentId: string;
         content: string;
         agentRunId: string;
       }
     >({
-      query: ({ collectionId, annotationId, content }) => ({
-        url: `/${collectionId}/annotation/${annotationId}`,
+      query: ({ collectionId, commentId, content }) => ({
+        url: `/${collectionId}/comment/${commentId}`,
         method: 'PUT',
         body: { content },
       }),
-      invalidatesTags: (result, error, { agentRunId, annotationId }) => [
-        { type: 'Annotation', id: `AGENT_RUN-${agentRunId}` },
-        { type: 'Annotation', id: annotationId },
+      invalidatesTags: (result, error, { agentRunId, commentId }) => [
+        { type: 'Comment', id: `AGENT_RUN-${agentRunId}` },
+        { type: 'Comment', id: commentId },
       ],
     }),
-    deleteAnnotation: build.mutation<
+    deleteComment: build.mutation<
       { message: string },
-      { collectionId: string; annotationId: string; agentRunId: string }
+      { collectionId: string; commentId: string; agentRunId: string }
     >({
-      query: ({ collectionId, annotationId }) => ({
-        url: `/${collectionId}/annotation/${annotationId}`,
+      query: ({ collectionId, commentId }) => ({
+        url: `/${collectionId}/comment/${commentId}`,
         method: 'DELETE',
       }),
-      invalidatesTags: (result, error, { agentRunId, annotationId }) => [
-        { type: 'Annotation', id: `AGENT_RUN-${agentRunId}` },
-        { type: 'Annotation', id: annotationId },
+      invalidatesTags: (result, error, { agentRunId, commentId }) => [
+        { type: 'Comment', id: `AGENT_RUN-${agentRunId}` },
+        { type: 'Comment', id: commentId },
       ],
     }),
-    getAnnotationsForAgentRun: build.query<
-      Annotation[],
+    getCommentsForAgentRun: build.query<
+      Comment[],
       { collectionId: string; agentRunId: string }
     >({
       query: ({ collectionId, agentRunId }) => ({
-        url: `/${collectionId}/agent_run/${agentRunId}/annotations`,
+        url: `/${collectionId}/agent_run/${agentRunId}/comments`,
         method: 'GET',
       }),
       providesTags: (result, error, { agentRunId }) =>
         result
           ? [
-              { type: 'Annotation', id: `AGENT_RUN-${agentRunId}` },
-              ...result.map((annotation) => ({
-                type: 'Annotation' as const,
-                id: annotation.id,
+              { type: 'Comment', id: `AGENT_RUN-${agentRunId}` },
+              ...result.map((comment) => ({
+                type: 'Comment' as const,
+                id: comment.id,
               })),
             ]
-          : [{ type: 'Annotation', id: `AGENT_RUN-${agentRunId}` }],
+          : [{ type: 'Comment', id: `AGENT_RUN-${agentRunId}` }],
     }),
   }),
 });
@@ -344,9 +344,9 @@ export const {
   // Other
   useGetLabelsForAgentRunQuery,
 
-  // Annotation CRUD
-  useCreateAnnotationMutation,
-  useUpdateAnnotationMutation,
-  useDeleteAnnotationMutation,
-  useGetAnnotationsForAgentRunQuery,
+  // Comment CRUD
+  useCreateCommentMutation,
+  useUpdateCommentMutation,
+  useDeleteCommentMutation,
+  useGetCommentsForAgentRunQuery,
 } = labelApi;

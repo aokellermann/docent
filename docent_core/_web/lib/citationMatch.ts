@@ -6,7 +6,7 @@ export interface TextSpanWithCitations {
   start: number;
   end: number;
   citationId: string;
-  annotationId?: string;
+  commentId?: string;
 }
 
 // Position without citation ID (used for caching)

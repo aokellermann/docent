@@ -6,8 +6,8 @@ import {
 import { cn } from '@/lib/utils';
 import { useAppSelector } from '@/app/store/hooks';
 import {
-  setSelectedAnnotationId,
-  setAnnotationSidebarCollapsed,
+  setSelectedCommentId,
+  setCommentSidebarCollapsed,
 } from '@/app/store/transcriptSlice';
 import { useAppDispatch } from '@/app/store/hooks';
 
@@ -34,12 +34,12 @@ const getCitationColors = (
   }
 };
 
-const getAnnotationColors = (
+const getCommentColors = (
   isHighlighted: boolean,
   isHovered: boolean,
   isSelected: boolean
 ) => {
-  // Annotations use purple color scheme to distinguish from regular citations
+  // Comments use purple color scheme to distinguish from regular citations
   if (isHighlighted) {
     return 'bg-purple-600 text-white';
   }
@@ -69,17 +69,17 @@ export const SegmentedText: React.FC<SegmentedTextProps> = ({
 }) => {
   const dispatch = useAppDispatch();
 
-  const hoveredAnnotationId = useAppSelector(
-    (state) => state.transcript.hoveredAnnotationId
+  const hoveredCommentId = useAppSelector(
+    (state) => state.transcript.hoveredCommentId
   );
 
-  const selectedAnnotationId = useAppSelector(
-    (state) => state.transcript.selectedAnnotationId
+  const selectedCommentId = useAppSelector(
+    (state) => state.transcript.selectedCommentId
   );
 
-  const handleAnnotationClick = (annotationId: string) => {
-    dispatch(setSelectedAnnotationId(annotationId));
-    dispatch(setAnnotationSidebarCollapsed(false));
+  const handleCommentClick = (commentId: string) => {
+    dispatch(setSelectedCommentId(commentId));
+    dispatch(setCommentSidebarCollapsed(false));
   };
 
   const segments = computeSegmentsFromIntervals(text, intervals);
@@ -90,31 +90,31 @@ export const SegmentedText: React.FC<SegmentedTextProps> = ({
         if (!seg.citationIds.length)
           return <React.Fragment key={`seg-${i}`}>{seg.text}</React.Fragment>;
 
-        // Check if this segment contains an annotation
-        const annotationInfo = intervals.find(
+        // Check if this segment contains a comment
+        const commentInfo = intervals.find(
           (iv) =>
-            iv.annotationId !== undefined &&
+            iv.commentId !== undefined &&
             seg.citationIds.includes(iv.citationId)
         );
-        const isAnnotation = !!annotationInfo;
+        const isComment = !!commentInfo;
 
         const isHighlighted = highlightedCitationId
           ? seg.citationIds.includes(highlightedCitationId)
           : false;
 
-        const isHovered = hoveredAnnotationId
-          ? annotationInfo?.annotationId === hoveredAnnotationId
+        const isHovered = hoveredCommentId
+          ? commentInfo?.commentId === hoveredCommentId
           : false;
 
-        const isSelected = selectedAnnotationId
-          ? annotationInfo?.annotationId === selectedAnnotationId
+        const isSelected = selectedCommentId
+          ? commentInfo?.commentId === selectedCommentId
           : false;
 
         // Use role-based colors if role is provided and highlightedCitationId exists,
         // otherwise use simple yellow highlighting for metadata
-        // Use annotation colors if this is an annotation, otherwise regular citation colors
-        const colorClass = isAnnotation
-          ? getAnnotationColors(isHighlighted, isHovered, isSelected)
+        // Use comment colors if this is a comment, otherwise regular citation colors
+        const colorClass = isComment
+          ? getCommentColors(isHighlighted, isHovered, isSelected)
           : getCitationColors(role, isHighlighted);
 
         return (
@@ -122,14 +122,14 @@ export const SegmentedText: React.FC<SegmentedTextProps> = ({
             key={`seg-${i}`}
             className={cn(
               colorClass,
-              isAnnotation && 'cursor-pointer transition-all duration-150',
-              isAnnotation && 'hover:border-purple-500/50 hover:border-b-2'
+              isComment && 'cursor-pointer transition-all duration-150',
+              isComment && 'hover:border-purple-500/50 hover:border-b-2'
             )}
             data-citation-ids={seg.citationIds.join(',')}
-            data-annotation-id={annotationInfo?.annotationId}
+            data-comment-id={commentInfo?.commentId}
             onClick={
-              isAnnotation && annotationInfo?.annotationId
-                ? () => handleAnnotationClick(annotationInfo.annotationId!)
+              isComment && commentInfo?.commentId
+                ? () => handleCommentClick(commentInfo.commentId!)
                 : undefined
             }
           >
