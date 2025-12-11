@@ -77,6 +77,7 @@ async def require_rubric_job_in_collection(
         .join(SQLARubric, SQLARubric.id == SQLAJob.job_json["rubric_id"].astext)
         .where(SQLAJob.id == job_id)
         .where(SQLARubric.collection_id == collection_id)
+        .limit(1)
     )
     if result.scalar_one_or_none() is None:
         raise HTTPException(
