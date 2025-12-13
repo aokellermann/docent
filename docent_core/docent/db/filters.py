@@ -94,13 +94,26 @@ def safe_float(col: Any) -> Any:
     )
 
 
+def _build_null_check_clause(sqla_value: Any, value: str) -> ColumnElement[bool]:
+    normalized_value = value.strip().lower()
+    if normalized_value == "null":
+        return sqla_value.is_(None)
+    if normalized_value == "not null":
+        return sqla_value.is_not(None)
+    raise ValueError("Use 'null' or 'not null' with the 'is' operator")
+
+
 def apply_comparison(
     sqla_value: Any,
     value: Any,
-    op: Literal[">", ">=", "<", "<=", "==", "!=", "~*", "!~*"],
+    op: Literal[">", ">=", "<", "<=", "==", "!=", "~*", "!~*", "is"],
 ) -> ColumnElement[bool]:
     """Apply a comparison operator to a SQLAlchemy column."""
-    if op == "==":
+    if op == "is":
+        if not isinstance(value, str):
+            raise ValueError("The 'is' operator requires a string value")
+        return _build_null_check_clause(sqla_value, value)
+    elif op == "==":
         return sqla_value == value
     elif op == "!=":
         return sqla_value != value
@@ -124,12 +137,18 @@ def build_json_filter_clause(
     json_column: Any,
     json_keys: list[str],
     value: Any,
-    op: Literal[">", ">=", "<", "<=", "==", "!=", "~*", "!~*"],
+    op: Literal[">", ">=", "<", "<=", "==", "!=", "~*", "!~*", "is"],
 ) -> ColumnElement[bool]:
     """Build a WHERE clause for filtering on a JSONB column."""
     sqla_value = json_column
     for key in json_keys:
         sqla_value = sqla_value[key]
+
+    if op == "is":
+        if not isinstance(value, str):
+            raise ValueError("The 'is' operator requires a string value")
+        sqla_value = sqla_value.as_string()
+        return apply_comparison(sqla_value, value, op)
 
     if isinstance(value, str):
         sqla_value = sqla_value.as_string()
@@ -172,7 +191,7 @@ class PrimitiveFilter(BaseCollectionFilter):
     type: Literal["primitive"] = "primitive"
     key_path: list[str]
     value: Any
-    op: Literal[">", ">=", "<", "<=", "==", "!=", "~*", "!~*"]
+    op: Literal[">", ">=", "<", "<=", "==", "!=", "~*", "!~*", "is"]
 
     def to_sqla_where_clause(
         self,
@@ -221,7 +240,11 @@ class PrimitiveFilter(BaseCollectionFilter):
                 sqla_value = sqla_value[key]
 
         if mode in {"metadata", "rubric"}:
-            if isinstance(self.value, str):
+            if self.op == "is":
+                if not isinstance(self.value, str):
+                    raise ValueError("The 'is' operator requires a string value")
+                sqla_value = sqla_value.as_string()
+            elif isinstance(self.value, str):
                 sqla_value = sqla_value.as_string()
             elif isinstance(self.value, bool):
                 sqla_value = safe_bool(sqla_value)

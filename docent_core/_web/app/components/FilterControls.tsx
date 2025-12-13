@@ -64,8 +64,10 @@ export const FilterControls = ({
     undefined
   );
   const [metadataOp, setMetadataOp] = useState<string>('==');
+  const [nullSelectOpen, setNullSelectOpen] = useState(false);
   const [stepFilterValue, setStepFilterValue] = useState<number | null>(null);
   const valueFieldRef = useRef<HTMLInputElement>(null);
+  const isNullOperator = metadataOp === 'is';
 
   // Populate form when initialFilter is provided
   useEffect(() => {
@@ -121,7 +123,19 @@ export const FilterControls = ({
     } else {
       parsedKey = metadataKey.trim();
       parsedValue = value;
-      if (metadataType === 'bool') {
+      if (metadataOp === 'is') {
+        const normalized = value.trim().toLowerCase();
+        const isValidNullCheck =
+          normalized === 'null' || normalized === 'not null';
+        if (!isValidNullCheck) {
+          toast({
+            title: 'Invalid value',
+            description: 'Select either "null" or "not null"',
+            variant: 'destructive',
+          });
+          return;
+        }
+      } else if (metadataType === 'bool') {
         parsedValue = value === 'true';
       } else if (metadataType === 'int' || metadataType === 'float') {
         parsedValue = Number(value);
@@ -170,11 +184,18 @@ export const FilterControls = ({
 
   const handleOperatorChange = (value: string) => {
     setMetadataOp(value);
+    if (value === 'is') {
+      setMetadataValue('');
+      setNullSelectOpen(true);
+    }
 
     // Focus the value field after a short delay
-    setTimeout(() => {
-      valueFieldRef.current?.focus();
-    }, 100);
+    if (value !== 'is') {
+      setNullSelectOpen(false);
+      setTimeout(() => {
+        valueFieldRef.current?.focus();
+      }, 100);
+    }
   };
 
   // Handle step filter changes
@@ -236,8 +257,10 @@ export const FilterControls = ({
       const currentOp = metadataOp;
       const validOpsForType =
         selectedField.type === 'str'
-          ? ['~*', '==', '!=', '<', '<=', '>', '>=']
-          : ['==', '!=', '<', '<=', '>', '>='];
+          ? ['~*', '==', '!=', '<', '<=', '>', '>=', 'is']
+          : selectedField.type === 'bool'
+            ? ['==', '!=', 'is']
+            : ['==', '!=', '<', '<=', '>', '>=', 'is'];
 
       if (validOpsForType.includes(currentOp)) {
         // Keep the current operator if it's valid for the new field type
@@ -312,6 +335,9 @@ export const FilterControls = ({
                 <SelectItem value=">=" className="font-mono text-xs">
                   &gt;=
                 </SelectItem>
+                <SelectItem value="is" className="font-mono text-xs">
+                  is
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -350,6 +376,9 @@ export const FilterControls = ({
                 <SelectItem value="!=" className="font-mono text-xs">
                   !=
                 </SelectItem>
+                <SelectItem value="is" className="font-mono text-xs">
+                  is
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -358,7 +387,30 @@ export const FilterControls = ({
           <div className="text-xs text-muted-foreground font-mono ml-1 mb-1">
             Value{metadataType ? ` (${metadataType})` : ''}
           </div>
-          {metadataType === 'bool' ? (
+          {isNullOperator ? (
+            <Select
+              value={metadataValue}
+              open={nullSelectOpen}
+              onOpenChange={setNullSelectOpen}
+              onValueChange={(val) => {
+                setMetadataValue(val);
+                onUpdateMetadataFilter(val);
+                setNullSelectOpen(false);
+              }}
+            >
+              <SelectTrigger className="h-7 text-xs bg-background font-mono text-muted-foreground hover:bg-secondary hover:text-primary">
+                <SelectValue placeholder="Select value" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="null" className="font-mono text-xs">
+                  null
+                </SelectItem>
+                <SelectItem value="not null" className="font-mono text-xs">
+                  not null
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          ) : metadataType === 'bool' ? (
             <Select
               value={metadataValue}
               onValueChange={onUpdateMetadataFilter}
@@ -410,7 +462,7 @@ export const FilterControls = ({
             disabled={
               !metadataKey.trim() ||
               !metadataValue.trim() ||
-              metadataType === 'bool' // Disable button for boolean type since it auto-submits
+              (metadataType === 'bool' && metadataOp !== 'is') // Disable button for boolean type since it auto-submits
             }
             className="h-7 text-xs whitespace-nowrap px-2"
             size="sm"

@@ -674,6 +674,7 @@ class SQLAUserOrganization(SQLABase):
     organization_id = mapped_column(
         String(36), ForeignKey(f"{TABLE_ORGANIZATION}.id"), primary_key=True, index=True
     )
+    role = mapped_column(Text, nullable=False, default="member", index=True)
 
 
 class SQLASession(SQLABase):

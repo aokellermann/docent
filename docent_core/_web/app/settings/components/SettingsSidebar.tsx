@@ -3,7 +3,7 @@
 import { usePathname, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Key, Brain, Gauge, Lock, Shield } from 'lucide-react';
+import { Key, Brain, Gauge, Lock, Shield, Building2 } from 'lucide-react';
 import { type LucideIcon } from 'lucide-react';
 
 interface SidebarItem {
@@ -43,6 +43,12 @@ export const SettingsSidebarItems: Record<string, SidebarItem> = {
     title: 'Usage',
     href: '/settings/usage',
     icon: Gauge,
+  },
+  organizations: {
+    id: 'organizations',
+    title: 'Organizations',
+    href: '/settings/organizations',
+    icon: Building2,
   },
 };
 

@@ -36,6 +36,7 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -65,6 +66,9 @@ from docent_core.docent.db.dql import (
 from docent_core.docent.db.filters import CollectionFilter, ComplexFilter, parse_filter_dict
 from docent_core.docent.db.schemas.auth_models import (
     PERMISSION_LEVELS,
+    OrganizationMember,
+    OrganizationRole,
+    OrganizationWithRole,
     Permission,
     ResourceType,
     SubjectType,
@@ -86,6 +90,7 @@ from docent_core.docent.db.schemas.tables import (
     SQLAIngestionPayload,
     SQLAJob,
     SQLAModelApiKey,
+    SQLAOrganization,
     SQLASearchCluster,
     SQLASearchQuery,
     SQLASearchResult,
@@ -97,6 +102,7 @@ from docent_core.docent.db.schemas.tables import (
     SQLATranscriptEmbedding,
     SQLATranscriptGroup,
     SQLAUser,
+    SQLAUserOrganization,
     SQLAView,
 )
 
@@ -1959,6 +1965,184 @@ class MonoService:
             sqla_users = users_result.scalars().all()
 
             return [user.to_user() for user in sqla_users]
+
+    async def get_organizations_for_user(self, user_id: str) -> list[OrganizationWithRole]:
+        async with self.db.session() as session:
+            result = await session.execute(
+                select(SQLAOrganization, SQLAUserOrganization.role)
+                .join(
+                    SQLAUserOrganization,
+                    SQLAUserOrganization.organization_id == SQLAOrganization.id,
+                )
+                .where(SQLAUserOrganization.user_id == user_id)
+                .order_by(SQLAOrganization.name.asc())
+            )
+            rows = result.all()
+
+        return [
+            OrganizationWithRole(
+                id=org.id,
+                name=org.name,
+                description=org.description,
+                my_role=OrganizationRole(role),
+            )
+            for org, role in rows
+        ]
+
+    async def get_users_in_organization(self, organization_id: str) -> list[User]:
+        async with self.db.session() as session:
+            result = await session.execute(
+                select(SQLAOrganization)
+                .options(selectinload(SQLAOrganization.users))
+                .where(SQLAOrganization.id == organization_id)
+            )
+            org = result.scalar_one_or_none()
+            if org is None:
+                return []
+            return [u.to_user() for u in org.users if not u.is_anonymous]
+
+    async def get_organization_role(
+        self, *, organization_id: str, user_id: str
+    ) -> OrganizationRole | None:
+        async with self.db.session() as session:
+            result = await session.execute(
+                select(SQLAUserOrganization.role).where(
+                    SQLAUserOrganization.organization_id == organization_id,
+                    SQLAUserOrganization.user_id == user_id,
+                )
+            )
+            role = result.scalar_one_or_none()
+            if role is None:
+                return None
+            return OrganizationRole(role)
+
+    async def get_organization_members(self, organization_id: str) -> list[OrganizationMember]:
+        async with self.db.session() as session:
+            result = await session.execute(
+                select(SQLAUser, SQLAUserOrganization.role)
+                .join(SQLAUserOrganization, SQLAUserOrganization.user_id == SQLAUser.id)
+                .where(SQLAUserOrganization.organization_id == organization_id)
+                .options(selectinload(SQLAUser.organizations))
+                .order_by(SQLAUser.email.asc())
+            )
+            rows = result.all()
+
+        members: list[OrganizationMember] = []
+        for sqla_user, role in rows:
+            if sqla_user.is_anonymous:
+                continue
+            members.append(
+                OrganizationMember(
+                    organization_id=organization_id,
+                    user=sqla_user.to_user(),
+                    role=OrganizationRole(role),
+                )
+            )
+        return members
+
+    async def create_organization(
+        self,
+        *,
+        name: str,
+        description: str | None,
+        creator_user_id: str,
+    ) -> OrganizationWithRole:
+        org_id = str(uuid4())
+        async with self.db.session() as session:
+            session.add(
+                SQLAOrganization(
+                    id=org_id,
+                    name=name,
+                    description=description,
+                )
+            )
+            # Ensure the org row exists before inserting the membership row (FK constraint).
+            await session.flush()
+            stmt = pg_insert(SQLAUserOrganization).values(
+                organization_id=org_id,
+                user_id=creator_user_id,
+                role=OrganizationRole.ADMIN.value,
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[
+                    SQLAUserOrganization.user_id,
+                    SQLAUserOrganization.organization_id,
+                ],
+                set_={"role": OrganizationRole.ADMIN.value},
+            )
+            await session.execute(stmt)
+
+        return OrganizationWithRole(
+            id=org_id,
+            name=name,
+            description=description,
+            my_role=OrganizationRole.ADMIN,
+        )
+
+    async def _count_organization_admins(self, organization_id: str) -> int:
+        async with self.db.session() as session:
+            result = await session.execute(
+                select(func.count())
+                .select_from(SQLAUserOrganization)
+                .where(
+                    SQLAUserOrganization.organization_id == organization_id,
+                    SQLAUserOrganization.role == OrganizationRole.ADMIN.value,
+                )
+            )
+            return int(result.scalar_one())
+
+    async def ensure_not_last_org_admin(self, *, organization_id: str, target_user_id: str) -> None:
+        role = await self.get_organization_role(
+            organization_id=organization_id, user_id=target_user_id
+        )
+        if role != OrganizationRole.ADMIN:
+            return
+        admin_count = await self._count_organization_admins(organization_id)
+        if admin_count <= 1:
+            raise ValueError("Organization must have at least one admin")
+
+    async def add_user_to_organization(
+        self, *, organization_id: str, user_id: str, role: OrganizationRole
+    ) -> None:
+        async with self.db.session() as session:
+            stmt = pg_insert(SQLAUserOrganization).values(
+                organization_id=organization_id,
+                user_id=user_id,
+                role=role.value,
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[
+                    SQLAUserOrganization.user_id,
+                    SQLAUserOrganization.organization_id,
+                ],
+                set_={"role": role.value},
+            )
+            await session.execute(stmt)
+
+    async def set_organization_member_role(
+        self, *, organization_id: str, user_id: str, role: OrganizationRole
+    ) -> None:
+        async with self.db.session() as session:
+            result = await session.execute(
+                update(SQLAUserOrganization)
+                .where(
+                    SQLAUserOrganization.organization_id == organization_id,
+                    SQLAUserOrganization.user_id == user_id,
+                )
+                .values(role=role.value)
+            )
+            if (result.rowcount or 0) <= 0:
+                raise ValueError("User is not a member of the organization")
+
+    async def remove_user_from_organization(self, *, organization_id: str, user_id: str) -> int:
+        async with self.db.session() as session:
+            result = await session.execute(
+                delete(SQLAUserOrganization).where(
+                    SQLAUserOrganization.organization_id == organization_id,
+                    SQLAUserOrganization.user_id == user_id,
+                )
+            )
+            return int(result.rowcount or 0)
 
     async def create_user(self, email: str, password: str) -> User:
         """
