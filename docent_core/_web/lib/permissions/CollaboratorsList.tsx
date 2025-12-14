@@ -168,7 +168,8 @@ const CollaboratorsList = ({ collectionId }: CollaboratorsListProps) => {
   return (
     <div className="space-y-1">
       <h3 className="text-sm font-semibold">
-        Collaborators ({userCollaborators?.length})
+        Collaborators (
+        {(userCollaborators?.length ?? 0) + (orgCollaborators?.length ?? 0)})
       </h3>
 
       {userCollaborators.map((collaborator) => (
