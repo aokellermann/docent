@@ -23,7 +23,6 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
-  Check,
   Columns3,
   Loader2,
   FileCode,
@@ -31,19 +30,6 @@ import {
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/command';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -64,7 +50,7 @@ import { cn } from '@/lib/utils';
 import { useDebounce } from '@/hooks/use-debounce';
 import { useParams } from 'next/navigation';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Combobox } from './Combobox';
+import { MultiCombobox, SingleCombobox } from './Combobox';
 import { TableContainer } from './TableContainer';
 import { isDateString, formatDateValue } from '@/lib/dateUtils';
 import UuidPill from '@/components/UuidPill';
@@ -710,25 +696,6 @@ export const AgentRunTable = memo(function AgentRunTable({
   const showFetchOverlay = isFetchingAgentRuns && hasRows;
   const visibleColumns = table.getVisibleLeafColumns();
 
-  const handleToggleColumn = useCallback(
-    (column: string, checked: boolean) => {
-      posthog.capture('agent_run_table_column_toggled', {
-        collectionId: resolvedCollectionId,
-        column: column,
-        action: checked ? 'add' : 'remove',
-      });
-
-      if (checked) {
-        const next = Array.from(new Set([...selectedColumns, column]));
-        onSelectedColumnsChange(next);
-        return;
-      }
-      const next = selectedColumns.filter((item) => item !== column);
-      onSelectedColumnsChange(next);
-    },
-    [onSelectedColumnsChange, resolvedCollectionId, selectedColumns]
-  );
-
   const handleSelectAll = useCallback(() => {
     posthog.capture('agent_run_table_columns_select_all', {
       collectionId: resolvedCollectionId,
@@ -744,6 +711,29 @@ export const AgentRunTable = memo(function AgentRunTable({
 
     onSelectedColumnsChange([]);
   }, [onSelectedColumnsChange, resolvedCollectionId]);
+
+  const handleColumnsChange = useCallback(
+    (nextColumns: string[]) => {
+      const added = nextColumns.find(
+        (column) => !selectedColumns.includes(column)
+      );
+      const removed = selectedColumns.find(
+        (column) => !nextColumns.includes(column)
+      );
+      const changedColumn = added ?? removed;
+
+      if (changedColumn) {
+        posthog.capture('agent_run_table_column_toggled', {
+          collectionId: resolvedCollectionId,
+          column: changedColumn,
+          action: added ? 'add' : 'remove',
+        });
+      }
+
+      onSelectedColumnsChange(nextColumns);
+    },
+    [onSelectedColumnsChange, resolvedCollectionId, selectedColumns]
+  );
 
   // Sort controls handlers
   const handleFieldChange = useCallback(
@@ -788,6 +778,33 @@ export const AgentRunTable = memo(function AgentRunTable({
     [sortableColumns]
   );
 
+  const columnOptions = useMemo(
+    () =>
+      availableColumns.map((column) => ({
+        value: column,
+        label: column,
+      })),
+    [availableColumns]
+  );
+
+  const columnActionItems = useMemo(
+    () => [
+      {
+        key: 'select_all',
+        label: 'Select all',
+        onSelect: handleSelectAll,
+        disabled: !availableColumns.length,
+      },
+      {
+        key: 'clear_all',
+        label: 'Clear all',
+        onSelect: handleClearAll,
+        disabled: selectedColumns.length === 0,
+      },
+    ],
+    [availableColumns, handleClearAll, handleSelectAll, selectedColumns.length]
+  );
+
   return (
     <div className="relative flex flex-col h-full min-h-0 w-full space-y-3 agent-run-table">
       <div className="relative flex flex-wrap items-start gap-2">
@@ -803,7 +820,7 @@ export const AgentRunTable = memo(function AgentRunTable({
           <div className="flex flex-1 flex-wrap items-center gap-1.5 justify-end min-w-0">
             <ArrowUpDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
             <div className="max-w-72">
-              <Combobox
+              <SingleCombobox
                 value={sortField ?? 'none'}
                 onChange={handleFieldChange}
                 options={sortOptions}
@@ -904,71 +921,40 @@ export const AgentRunTable = memo(function AgentRunTable({
           />
 
           {/* Columns selection */}
-          <DropdownMenu onOpenChange={handleColumnsMenuOpenChange}>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 gap-1 text-xs text-muted-foreground flex-shrink-0 mx-1"
-              >
+          <MultiCombobox
+            values={selectedColumns}
+            onChange={handleColumnsChange}
+            options={columnOptions}
+            actionItems={columnActionItems}
+            placeholder="Columns"
+            searchPlaceholder="Search columns..."
+            emptyMessage="No columns found."
+            triggerClassName="w-auto h-7 gap-1 text-xs text-muted-foreground flex-shrink-0 mx-1"
+            triggerProps={{
+              variant: 'outline',
+              size: 'sm',
+            }}
+            valueClassName="flex items-center gap-1"
+            renderValue={(selected) => (
+              <span className="flex items-center gap-1">
                 <Columns3 className="h-3 w-3" />
-                Columns
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              className="min-w-[288px] max-w-[640px] p-0"
-              align="end"
-              style={{
-                width: 'fit-content',
-                maxWidth: '640px',
-              }}
-            >
-              <Command>
-                <CommandInput
-                  ref={columnSearchInputRef}
-                  placeholder="Search columns..."
-                  className="h-8 text-xs"
-                />
-                <CommandList>
-                  <CommandEmpty>No columns found.</CommandEmpty>
-                  <CommandGroup>
-                    <CommandItem
-                      onSelect={() => handleSelectAll()}
-                      className="text-xs text-muted-foreground"
-                    >
-                      Select all
-                    </CommandItem>
-                    <CommandItem
-                      onSelect={() => handleClearAll()}
-                      className="text-xs text-muted-foreground"
-                    >
-                      Clear all
-                    </CommandItem>
-                  </CommandGroup>
-                  <CommandGroup>
-                    {availableColumns.map((column) => {
-                      const checked = selectedColumns.includes(column);
-                      return (
-                        <CommandItem
-                          key={column}
-                          onSelect={() => handleToggleColumn(column, !checked)}
-                          className="text-xs font-mono"
-                        >
-                          <Check
-                            className={cn(
-                              'mr-2 h-4 w-4',
-                              checked ? 'opacity-100' : 'opacity-0'
-                            )}
-                          />
-                          {column}
-                        </CommandItem>
-                      );
-                    })}
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <span className="truncate">
+                  {selected.length ? `Columns (${selected.length})` : 'Columns'}
+                </span>
+              </span>
+            )}
+            commandInputClassName="h-8 text-xs"
+            commandInputRef={columnSearchInputRef}
+            commandListClassName="max-h-80"
+            optionClassName="text-xs font-mono"
+            popoverClassName="min-w-[288px] max-w-[640px]"
+            popoverStyle={{
+              width: 'fit-content',
+              maxWidth: '640px',
+            }}
+            popoverAlign="end"
+            onOpenChange={handleColumnsMenuOpenChange}
+          />
         </div>
       </div>
 

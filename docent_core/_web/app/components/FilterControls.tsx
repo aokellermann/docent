@@ -20,7 +20,7 @@ import {
 import { toast } from '@/hooks/use-toast';
 import { v4 as uuid4 } from 'uuid';
 import { SmartValueInput } from './SmartValueInput';
-import { Combobox } from './Combobox';
+import { SingleCombobox } from './Combobox';
 import { StepFilter } from './StepFilter';
 import { formatFilterFieldLabel } from '../utils/formatMetadataField';
 
@@ -262,7 +262,7 @@ export const FilterControls = ({
           <div className="text-xs text-muted-foreground font-mono ml-1 mb-1">
             Filter by
           </div>
-          <Combobox
+          <SingleCombobox
             value={metadataKey || null}
             onChange={handleFieldChange}
             options={metadataFields.map((field) => ({

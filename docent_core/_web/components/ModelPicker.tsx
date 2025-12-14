@@ -8,7 +8,7 @@ import {
 import { ModelOption } from '@/app/store/rubricSlice';
 import { cn } from '@/lib/utils';
 import { useMemo } from 'react';
-import { Combobox, type ComboboxOption } from '@/app/components/Combobox';
+import { SingleCombobox, type ComboboxOption } from '@/app/components/Combobox';
 
 function nameModel(model: ModelOption, shortenName = false) {
   if (shortenName) {
@@ -123,7 +123,7 @@ export default function ModelPicker({
 
   return (
     <TooltipProvider>
-      <Combobox
+      <SingleCombobox
         value={selectedValue}
         onChange={(value) => {
           const selected = valueToModel.get(value);
