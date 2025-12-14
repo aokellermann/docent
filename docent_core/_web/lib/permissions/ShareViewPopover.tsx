@@ -116,7 +116,7 @@ const AddCollaborator = ({ collectionId }: { collectionId: string }) => {
   }
 
   return (
-    <div className="grid grid-cols-[1fr_7rem_6rem] gap-2 items-center">
+    <div className="grid grid-cols-[1fr_7rem_auto] gap-2 items-center">
       <Input
         value={emailInput}
         onChange={(e) => setEmailInput(e.target.value)}
@@ -137,7 +137,7 @@ const AddCollaborator = ({ collectionId }: { collectionId: string }) => {
         onClick={handleSendInvite}
         disabled={!emailInput.trim()}
         size="sm"
-        className="h-7 w-full"
+        className="h-7"
       >
         <UserPlus size={16} className="mr-1" />
         Invite
@@ -220,7 +220,7 @@ const AddOrganizationCollaborator = ({
   }
 
   return (
-    <div className="grid grid-cols-[1fr_7rem_6rem] gap-2 items-center">
+    <div className="grid grid-cols-[1fr_7rem_auto] gap-2 items-center">
       <Select
         value={selectedOrgId}
         onValueChange={(val) => setSelectedOrgId(val)}
@@ -252,9 +252,10 @@ const AddOrganizationCollaborator = ({
         onClick={handleAddOrganization}
         disabled={!selectedOrgId}
         size="sm"
-        className="h-7 w-full"
+        className="h-7"
       >
-        Add
+        <UserPlus size={16} className="mr-1" />
+        Invite
       </Button>
     </div>
   );
