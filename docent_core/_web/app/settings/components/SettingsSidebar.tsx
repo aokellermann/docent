@@ -1,9 +1,18 @@
 'use client';
 
 import { usePathname, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Key, Brain, Gauge, Lock, Shield, Building2 } from 'lucide-react';
+import {
+  Key,
+  Brain,
+  Gauge,
+  Lock,
+  Shield,
+  Building2,
+  ArrowLeft,
+} from 'lucide-react';
 import { type LucideIcon } from 'lucide-react';
 
 interface SidebarItem {
@@ -59,6 +68,13 @@ export default function SettingsSidebar() {
   return (
     <div className="w-64 space-y-6">
       <Card className="p-4">
+        <Link
+          href="/"
+          className="flex items-center text-sm text-muted-foreground hover:text-foreground mb-4"
+        >
+          <ArrowLeft className="mr-1 h-4 w-4" />
+          Back to Collections
+        </Link>
         <div>
           <h1 className="text-2xl font-bold mb-2">Settings</h1>
         </div>
