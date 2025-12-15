@@ -16,6 +16,10 @@ export const collabApi = createApi({
   }),
   tagTypes: ['Collaborators', 'Users', 'CollectionPermissions'],
   endpoints: (build) => ({
+    getMyOrganizations: build.query<Organization[], void>({
+      query: () => `/organizations`,
+      providesTags: ['Users'],
+    }),
     getCollectionPermissions: build.query<UserPermissions, string>({
       query: (collectionId) => `/${collectionId}/permissions`,
       providesTags: ['CollectionPermissions'],
@@ -83,6 +87,7 @@ export const collabApi = createApi({
 });
 
 export const {
+  useGetMyOrganizationsQuery,
   useGetCollectionPermissionsQuery,
   useGetCollectionsPermissionsQuery,
   useGetOrgUsersQuery,

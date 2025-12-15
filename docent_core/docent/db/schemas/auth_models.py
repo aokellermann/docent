@@ -40,3 +40,18 @@ class Organization(BaseModel):
     id: str
     name: str
     description: str | None = None
+
+
+class OrganizationRole(str, Enum):
+    MEMBER = "member"
+    ADMIN = "admin"
+
+
+class OrganizationWithRole(Organization):
+    my_role: OrganizationRole
+
+
+class OrganizationMember(BaseModel):
+    organization_id: str
+    user: User
+    role: OrganizationRole

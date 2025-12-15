@@ -23,20 +23,22 @@ import {
 import { copyToClipboard } from '@/lib/utils';
 import { Copy, Share2, UserPlus } from 'lucide-react';
 import CollaboratorsList from './CollaboratorsList';
-import { useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   useGetCollaboratorsQuery,
+  useGetMyOrganizationsQuery,
   useLazyGetUserByEmailQuery,
   useUpsertCollaboratorMutation,
   useRemoveCollaboratorMutation,
+  Organization,
 } from './collabSlice';
 import { PermissionLevel } from './types';
 import PermissionDropdown from './PermissionDropdown';
 import { toast } from '@/hooks/use-toast';
 import { useRequireUserContext } from '@/app/contexts/UserContext';
 import {
-  useHasCollectionAdminPermission,
-  useHasCollectionWritePermission,
+  useHasCollectionAdminPermissionForCollection,
+  useHasCollectionWritePermissionForCollection,
 } from './hooks';
 
 const AddCollaborator = ({ collectionId }: { collectionId: string }) => {
@@ -50,7 +52,8 @@ const AddCollaborator = ({ collectionId }: { collectionId: string }) => {
   const [upsertCollaborator] = useUpsertCollaboratorMutation();
   const [getUserByEmail] = useLazyGetUserByEmailQuery();
 
-  const hasWritePermission = useHasCollectionWritePermission();
+  const hasAdminPermission =
+    useHasCollectionAdminPermissionForCollection(collectionId);
 
   // Send invite to new collaborator
   const handleSendInvite = async () => {
@@ -104,34 +107,150 @@ const AddCollaborator = ({ collectionId }: { collectionId: string }) => {
       });
     }
   };
-  if (!hasWritePermission) {
+  if (!hasAdminPermission) {
     return (
       <div className="text-sm text-muted-foreground">
-        You do not have permission to add or edit collaborators.
+        You do not have permission to manage sharing for this collection.
       </div>
     );
   }
 
   return (
-    <div className="flex gap-2 items-center">
+    <div className="grid grid-cols-[1fr_7rem_auto] gap-2 items-center">
       <Input
         value={emailInput}
         onChange={(e) => setEmailInput(e.target.value)}
-        disabled={!hasWritePermission}
+        disabled={!hasAdminPermission}
         placeholder={
-          hasWritePermission
+          hasAdminPermission
             ? 'Enter email address'
-            : "You don't have permission to add collaborators"
+            : "You don't have permission to manage sharing"
         }
-        className="h-7 text-xs"
+        className="h-7 text-xs w-full"
       />
       <PermissionDropdown
         value={inviteePermissionLevel}
         onChange={setInviteePermissionLevel}
+        triggerClassName="w-full"
       />
       <Button
         onClick={handleSendInvite}
         disabled={!emailInput.trim()}
+        size="sm"
+        className="h-7"
+      >
+        <UserPlus size={16} className="mr-1" />
+        Invite
+      </Button>
+    </div>
+  );
+};
+
+const AddOrganizationCollaborator = ({
+  collectionId,
+}: {
+  collectionId: string;
+}) => {
+  const { data: organizations, isLoading } = useGetMyOrganizationsQuery();
+  const [selectedOrgId, setSelectedOrgId] = useState<string>('');
+  const [permissionLevel, setPermissionLevel] =
+    useState<PermissionLevel>('read');
+  const [upsertCollaborator] = useUpsertCollaboratorMutation();
+  const hasAdminPermission =
+    useHasCollectionAdminPermissionForCollection(collectionId);
+
+  useEffect(() => {
+    if (!selectedOrgId && organizations?.length === 1) {
+      setSelectedOrgId(organizations[0].id);
+    }
+  }, [organizations, selectedOrgId]);
+
+  const selectedOrg: Organization | undefined = organizations?.find(
+    (o) => o.id === selectedOrgId
+  );
+
+  const handleAddOrganization = async () => {
+    if (!selectedOrgId) return;
+    try {
+      await upsertCollaborator({
+        subject_id: selectedOrgId,
+        subject_type: 'organization',
+        collection_id: collectionId,
+        permission_level: permissionLevel,
+      }).unwrap();
+      toast({
+        title: 'Organization added',
+        description: selectedOrg?.name
+          ? `Shared with ${selectedOrg.name}`
+          : 'Shared with organization',
+      });
+      setSelectedOrgId('');
+      setPermissionLevel('read');
+    } catch {
+      toast({
+        title: 'Error',
+        description: 'Failed to share with organization. Please try again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="text-sm text-muted-foreground">
+        Loading organizations…
+      </div>
+    );
+  }
+
+  if (!hasAdminPermission) {
+    return (
+      <div className="text-sm text-muted-foreground">
+        You do not have permission to manage sharing for this collection.
+      </div>
+    );
+  }
+
+  if (!organizations?.length) {
+    return (
+      <div className="text-sm text-muted-foreground">
+        You don’t belong to any organizations yet.
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-[1fr_7rem_auto] gap-2 items-center">
+      <Select
+        value={selectedOrgId}
+        onValueChange={(val) => setSelectedOrgId(val)}
+      >
+        <SelectTrigger className="h-7 text-xs w-full">
+          <SelectValue placeholder="Select organization" />
+        </SelectTrigger>
+        <SelectContent>
+          {organizations.map((org) => (
+            <SelectItem key={org.id} value={org.id}>
+              <div className="flex flex-col">
+                <span className="text-xs font-medium">{org.name}</span>
+                {org.description ? (
+                  <span className="text-xs text-muted-foreground">
+                    {org.description}
+                  </span>
+                ) : null}
+              </div>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <PermissionDropdown
+        value={permissionLevel}
+        onChange={setPermissionLevel}
+        triggerClassName="w-full"
+      />
+      <Button
+        onClick={handleAddOrganization}
+        disabled={!selectedOrgId}
         size="sm"
         className="h-7"
       >
@@ -181,8 +300,10 @@ const ShareViewPopover = ({ collectionId }: { collectionId: string }) => {
     [collectionId, upsertCollaborator, removeCollaborator]
   );
 
-  const hasAdminPermission = useHasCollectionAdminPermission();
-  const hasWritePermission = useHasCollectionWritePermission();
+  const hasAdminPermission =
+    useHasCollectionAdminPermissionForCollection(collectionId);
+  const hasWritePermission =
+    useHasCollectionWritePermissionForCollection(collectionId);
   const accessButtonLabel = hasWritePermission ? 'Read-write' : 'Read-only';
   const handleCopyCollectionLink = useCallback(async () => {
     try {
@@ -228,6 +349,12 @@ const ShareViewPopover = ({ collectionId }: { collectionId: string }) => {
         <div className="space-y-1">
           <h3 className="text-sm font-medium">Add collaborators</h3>
           <AddCollaborator collectionId={collectionId} />
+        </div>
+
+        {/* Section 1b: Share with organization */}
+        <div className="space-y-1">
+          <h3 className="text-sm font-medium">Share with organization</h3>
+          <AddOrganizationCollaborator collectionId={collectionId} />
         </div>
 
         {/* Section 2: Access settings */}

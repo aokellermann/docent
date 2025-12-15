@@ -5,20 +5,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { cn } from '@/lib/utils';
 import { PermissionLevel } from './types';
-import {
-  useHasCollectionAdminPermission,
-  useHasCollectionWritePermission,
-} from './hooks';
+import { useHasCollectionAdminPermission } from './hooks';
 
 // Permission Dropdown Component
 interface PermissionDropdownProps {
   value: PermissionLevel;
   onChange: (newPermission: PermissionLevel) => void;
+  triggerClassName?: string;
 }
 
-const PermissionDropdown = ({ value, onChange }: PermissionDropdownProps) => {
-  const hasWritePermission = useHasCollectionWritePermission();
+const PermissionDropdown = ({
+  value,
+  onChange,
+  triggerClassName,
+}: PermissionDropdownProps) => {
   const hasAdminPermission = useHasCollectionAdminPermission();
   const permissionLabels = {
     none: 'No access',
@@ -37,11 +39,9 @@ const PermissionDropdown = ({ value, onChange }: PermissionDropdownProps) => {
     <Select
       value={value}
       onValueChange={(val) => onChange(val as PermissionLevel)}
-      disabled={
-        !hasWritePermission || (value === 'admin' && !hasAdminPermission)
-      }
+      disabled={!hasAdminPermission}
     >
-      <SelectTrigger className="w-28 h-7 text-xs">
+      <SelectTrigger className={cn('h-7 text-xs', triggerClassName ?? 'w-28')}>
         <SelectValue className="text-xs font-medium">
           {permissionLabels[value]}
         </SelectValue>

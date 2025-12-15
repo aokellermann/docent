@@ -794,13 +794,14 @@ export default function ExperimentViewer({
         return;
       }
 
+      const isNullValue = normalizedValue === null;
       const nextFilter: PrimitiveFilter = {
         id: uuid4(),
         name: null,
         type: 'primitive',
         key_path: columnKey.split('.'),
-        value: normalizedValue,
-        op: '==',
+        value: isNullValue ? 'null' : normalizedValue,
+        op: isNullValue ? 'is' : '==',
         supports_sql: true,
         disabled: false,
       };

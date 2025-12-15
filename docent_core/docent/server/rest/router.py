@@ -45,6 +45,9 @@ from docent_core.docent.db.filters import (
     parse_filter_dict,
 )
 from docent_core.docent.db.schemas.auth_models import (
+    OrganizationMember,
+    OrganizationRole,
+    OrganizationWithRole,
     Permission,
     ResourceType,
     SubjectType,
@@ -1349,8 +1352,166 @@ async def get_user_permissions(
 
 
 @user_router.get("/organizations/{org_id}/users")
-async def get_org_users(org_id: str, mono_svc: MonoService = Depends(get_mono_svc)):
-    return [u for u in await mono_svc.get_users() if not u.is_anonymous]
+async def get_org_users(
+    org_id: str,
+    user: User = Depends(get_authenticated_user),
+    mono_svc: MonoService = Depends(get_mono_svc),
+):
+    if org_id not in user.organization_ids:
+        raise HTTPException(status_code=403, detail="You do not belong to this organization.")
+    return await mono_svc.get_users_in_organization(org_id)
+
+
+@user_router.get("/organizations", response_model=list[OrganizationWithRole])
+async def get_my_organizations(
+    user: User = Depends(get_authenticated_user),
+    mono_svc: MonoService = Depends(get_mono_svc),
+):
+    return await mono_svc.get_organizations_for_user(user.id)
+
+
+@user_router.get("/organizations/{org_id}/members", response_model=list[OrganizationMember])
+async def get_organization_members(
+    org_id: str,
+    user: User = Depends(get_authenticated_user),
+    mono_svc: MonoService = Depends(get_mono_svc),
+):
+    if org_id not in user.organization_ids:
+        raise HTTPException(status_code=403, detail="You do not belong to this organization.")
+    return await mono_svc.get_organization_members(org_id)
+
+
+class AddOrganizationMemberRequest(BaseModel):
+    email: str
+    role: OrganizationRole = OrganizationRole.MEMBER
+
+
+class CreateOrganizationRequest(BaseModel):
+    name: str
+    description: str | None = None
+
+
+@user_router.post("/organizations", response_model=OrganizationWithRole)
+async def create_organization(
+    request: CreateOrganizationRequest,
+    user: User = Depends(get_authenticated_user),
+    mono_svc: MonoService = Depends(get_mono_svc),
+):
+    name = request.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Organization name is required.")
+    org = await mono_svc.create_organization(
+        name=name,
+        description=request.description,
+        creator_user_id=user.id,
+    )
+    return org
+
+
+@user_router.post("/organizations/{org_id}/members", response_model=list[OrganizationMember])
+async def add_organization_member(
+    org_id: str,
+    request: AddOrganizationMemberRequest,
+    user: User = Depends(get_authenticated_user),
+    mono_svc: MonoService = Depends(get_mono_svc),
+):
+    async with mono_svc.advisory_lock(org_id, action_id="org_membership"):
+        my_role = await mono_svc.get_organization_role(organization_id=org_id, user_id=user.id)
+        if my_role != OrganizationRole.ADMIN:
+            raise HTTPException(
+                status_code=403,
+                detail="You must be an admin of this organization to manage members.",
+            )
+
+        target_user = await mono_svc.get_user_by_email(request.email)
+        if target_user is None or target_user.is_anonymous:
+            raise HTTPException(
+                status_code=404, detail=f"User with email {request.email} not found"
+            )
+
+        await mono_svc.add_user_to_organization(
+            organization_id=org_id, user_id=target_user.id, role=request.role
+        )
+        return await mono_svc.get_organization_members(org_id)
+
+
+class UpdateOrganizationMemberRoleRequest(BaseModel):
+    role: OrganizationRole
+
+
+@user_router.patch(
+    "/organizations/{org_id}/members/{member_user_id}", response_model=list[OrganizationMember]
+)
+async def update_organization_member_role(
+    org_id: str,
+    member_user_id: str,
+    request: UpdateOrganizationMemberRoleRequest,
+    user: User = Depends(get_authenticated_user),
+    mono_svc: MonoService = Depends(get_mono_svc),
+):
+    async with mono_svc.advisory_lock(org_id, action_id="org_membership"):
+        my_role = await mono_svc.get_organization_role(organization_id=org_id, user_id=user.id)
+        if my_role != OrganizationRole.ADMIN:
+            raise HTTPException(
+                status_code=403,
+                detail="You must be an admin of this organization to manage members.",
+            )
+
+        target_role = await mono_svc.get_organization_role(
+            organization_id=org_id, user_id=member_user_id
+        )
+        is_demoting_admin = (
+            target_role == OrganizationRole.ADMIN and request.role != OrganizationRole.ADMIN
+        )
+        if is_demoting_admin:
+            try:
+                await mono_svc.ensure_not_last_org_admin(
+                    organization_id=org_id,
+                    target_user_id=member_user_id,
+                    target_role=target_role,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        try:
+            await mono_svc.set_organization_member_role(
+                organization_id=org_id, user_id=member_user_id, role=request.role
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return await mono_svc.get_organization_members(org_id)
+
+
+@user_router.delete(
+    "/organizations/{org_id}/members/{member_user_id}", response_model=list[OrganizationMember]
+)
+async def remove_organization_member(
+    org_id: str,
+    member_user_id: str,
+    user: User = Depends(get_authenticated_user),
+    mono_svc: MonoService = Depends(get_mono_svc),
+):
+    async with mono_svc.advisory_lock(org_id, action_id="org_membership"):
+        my_role = await mono_svc.get_organization_role(organization_id=org_id, user_id=user.id)
+        if my_role != OrganizationRole.ADMIN:
+            raise HTTPException(
+                status_code=403,
+                detail="You must be an admin of this organization to manage members.",
+            )
+
+        try:
+            await mono_svc.ensure_not_last_org_admin(
+                organization_id=org_id, target_user_id=member_user_id
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        removed = await mono_svc.remove_user_from_organization(
+            organization_id=org_id, user_id=member_user_id
+        )
+        if removed <= 0:
+            raise HTTPException(status_code=404, detail="User is not a member of the organization")
+        return await mono_svc.get_organization_members(org_id)
 
 
 @user_router.get("/collections/{collection_id}/collaborators")

@@ -9,6 +9,7 @@ import {
   Layers,
   type LucideIcon,
   Search,
+  Home,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useParams, usePathname, useSearchParams } from 'next/navigation';
@@ -167,6 +168,8 @@ const Breadcrumbs: React.FC = () => {
     })
     .filter((crumb) => crumb !== undefined);
 
+  const isSettingsPage = pathname.startsWith('/settings');
+
   const getBreadcrumb = (
     crumb: Crumb & { url: string; uuid?: string },
     index: number
@@ -209,9 +212,25 @@ const Breadcrumbs: React.FC = () => {
     );
   };
 
+  const getHomeCrumb = () => (
+    <div className="flex items-center gap-2" key="home">
+      <Link
+        className={cn(
+          'flex items-center gap-x-2',
+          disableNavigation && '!pointer-events-none'
+        )}
+        href={COLLECTIONS_DASHBOARD_PATH}
+      >
+        <Home className="size-3.5" />
+      </Link>
+      <ChevronRight className="size-3.5" />
+    </div>
+  );
+
   return (
     <div className="text-sm flex items-center justify-between w-full ml-1">
       <div className="flex items-center gap-x-1">
+        {isSettingsPage && getHomeCrumb()}
         {segments.map((crumb, index) => getBreadcrumb(crumb, index))}
       </div>
 
