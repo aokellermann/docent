@@ -21,7 +21,8 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { copyToClipboard } from '@/lib/utils';
-import { Copy, Share2, UserPlus } from 'lucide-react';
+import { Copy, Share2, UserPlus, ExternalLink } from 'lucide-react';
+import Link from 'next/link';
 import CollaboratorsList from './CollaboratorsList';
 import { useEffect, useState, useCallback } from 'react';
 import {
@@ -213,8 +214,16 @@ const AddOrganizationCollaborator = ({
 
   if (!organizations?.length) {
     return (
-      <div className="text-sm text-muted-foreground">
-        You don’t belong to any organizations yet.
+      <div className="text-xs text-muted-foreground">
+        You don&apos;t belong to any organizations.{' '}
+        <Link
+          href="/settings/organizations"
+          className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-0.5"
+        >
+          Create one
+          <ExternalLink size={10} />
+        </Link>{' '}
+        or ask an admin to add you.
       </div>
     );
   }
