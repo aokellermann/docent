@@ -849,6 +849,70 @@ class Docent:
         logger.info(f"Successfully shared Collection '{collection_id}' with {email}")
         return response.json()
 
+    def get_my_organizations(self) -> list[dict[str, Any]]:
+        """List organizations the authenticated user belongs to."""
+        url = f"{self._server_url}/organizations"
+        response = self._session.get(url)
+        self._handle_response_errors(response)
+        return response.json()
+
+    def get_organization_users(self, organization_id: str) -> list[dict[str, Any]]:
+        """List users in an organization.
+
+        Args:
+            organization_id: Organization ID.
+        """
+        url = f"{self._server_url}/organizations/{organization_id}/users"
+        response = self._session.get(url)
+        self._handle_response_errors(response)
+        return response.json()
+
+    def get_collection_collaborators(self, collection_id: str) -> list[dict[str, Any]]:
+        """List collaborators (users, organizations, public) for a collection."""
+        url = f"{self._server_url}/collections/{collection_id}/collaborators"
+        response = self._session.get(url)
+        self._handle_response_errors(response)
+        return response.json()
+
+    def share_collection_with_organization(
+        self,
+        collection_id: str,
+        organization_id: str,
+        *,
+        permission: Literal["read", "write", "admin"] = "read",
+    ) -> dict[str, Any]:
+        """Share a collection with an organization.
+
+        Note: The backend requires admin permission on the collection to manage sharing.
+        """
+        if permission not in {"read", "write", "admin"}:
+            raise ValueError("permission must be one of ['admin', 'read', 'write']")
+
+        url = f"{self._server_url}/collections/{collection_id}/collaborators/upsert"
+        payload = {
+            "subject_id": organization_id,
+            "subject_type": "organization",
+            "collection_id": collection_id,
+            "permission_level": permission,
+        }
+        response = self._session.put(url, json=payload)
+        self._handle_response_errors(response)
+        return response.json()
+
+    def unshare_collection_with_organization(
+        self, collection_id: str, organization_id: str
+    ) -> None:
+        """Remove an organization's access to a collection."""
+        url = f"{self._server_url}/collections/{collection_id}/collaborators/delete"
+        payload = {
+            "subject_id": organization_id,
+            "subject_type": "organization",
+            "collection_id": collection_id,
+        }
+        response = self._session.delete(url, json=payload)
+        self._handle_response_errors(response)
+        return None
+
     def collection_exists(self, collection_id: str) -> bool:
         """Check if a collection exists without raising if it does not."""
         url = f"{self._server_url}/{collection_id}/exists"
