@@ -939,7 +939,9 @@ export const AgentRunTable = memo(function AgentRunTable({
               <span className="flex items-center gap-1">
                 <Columns3 className="h-3 w-3" />
                 <span className="truncate">
-                  {selected.length ? `Columns (${selected.length})` : 'Columns'}
+                  {selected.length
+                    ? `Columns (${selected.length}/${availableColumns.length})`
+                    : 'Columns'}
                 </span>
               </span>
             )}
