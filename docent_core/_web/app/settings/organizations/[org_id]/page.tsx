@@ -114,7 +114,7 @@ export default function OrganizationDetailPage() {
         </div>
       </div>
 
-      <Card className="p-3 space-y-3">
+      <Card className="p-3 space-y-3 shadow-none">
         <div className="flex items-center justify-between gap-3">
           <div className="font-medium">Members</div>
           <div className="text-xs text-muted-foreground">
@@ -134,7 +134,7 @@ export default function OrganizationDetailPage() {
               value={newRole}
               onValueChange={(v) => setNewRole(v as OrganizationRole)}
             >
-              <SelectTrigger className="w-28">
+              <SelectTrigger className="h-7 w-28 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -142,7 +142,7 @@ export default function OrganizationDetailPage() {
                 <SelectItem value="admin">{ROLE_LABELS.admin}</SelectItem>
               </SelectContent>
             </Select>
-            <Button onClick={onAdd} disabled={!email.trim()}>
+            <Button size="sm" onClick={onAdd} disabled={!email.trim()}>
               Add
             </Button>
           </div>
@@ -176,7 +176,7 @@ export default function OrganizationDetailPage() {
                     }
                     disabled={!isAdmin}
                   >
-                    <SelectTrigger className="w-28">
+                    <SelectTrigger className="h-7 w-28 text-xs">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
