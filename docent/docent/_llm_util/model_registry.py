@@ -78,8 +78,17 @@ _REGISTRY: list[tuple[str, ModelInfo]] = [
     ),
     (
         "gemini-2.5-pro",
+        # TODO(mengk, ryan): this is wrong for prompts > 200k
         ModelInfo(
             rate={"input": 1.25, "output": 10.00},
+            context_window=1_000_000,
+        ),
+    ),
+    (
+        "gemini-3-pro-preview",
+        # TODO(mengk, ryan): this is wrong for prompts > 200k
+        ModelInfo(
+            rate={"input": 2.00, "output": 12.00},
             context_window=1_000_000,
         ),
     ),
