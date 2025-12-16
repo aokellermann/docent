@@ -5,7 +5,7 @@ import { PanelLeft, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import AgentRunViewer, {
   AgentRunViewerHandle,
 } from '../../../../agent_run/components/AgentRunViewer';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useGetRubricRunStateQuery } from '@/app/api/rubricApi';
 
 import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
@@ -37,6 +37,8 @@ export default function JudgeResultPage() {
 
   const dispatch = useAppDispatch();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialCommentId = searchParams.get('comment_id');
   const citationNav = useCitationNavigation();
   const rightSidebarOpen = useAppSelector(
     (state) => state.transcript.judgeRightSidebarOpen
@@ -91,10 +93,11 @@ export default function JudgeResultPage() {
 
   // Perform the initial one-time scroll to the first citation once both the
   // agent run and the result are available. Skip if we've already scrolled for
-  // this result. We still call scroll even though `initialTranscriptIdx` is
-  // provided to AgentRunViewer because block positions depend on loaded data.
+  // this result, or if there's an annotation/comment ID in the search params
+  // (the comment focus effect in AgentRunViewer takes precedence).
   useEffect(() => {
     if (alreadyScrolledRef.current) return;
+    if (initialCommentId) return; // Let the comment focus effect handle it
     if (!agentRunId || !result) return;
 
     const citation = citations && citations.length > 0 ? citations[0] : null;
@@ -102,7 +105,7 @@ export default function JudgeResultPage() {
 
     agentRunViewerRef.current?.focusCitationTarget(citation.target);
     alreadyScrolledRef.current = true;
-  }, [agentRunId, result, citations]);
+  }, [agentRunId, result, citations, initialCommentId]);
 
   // Register the handler with the route-scoped provider so other components can invoke it
   // Only register when agentRun is loaded so AgentRunViewer is ready
