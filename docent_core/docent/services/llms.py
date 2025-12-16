@@ -279,6 +279,15 @@ class ProviderPreferences(PublicProviderPreferences):
                 model_name="claude-sonnet-4-5",
                 reasoning_effort="medium",
             ),
+            ModelOption(
+                provider="google",
+                model_name="gemini-3-pro-preview",
+            ),
+            ModelOption(
+                provider="google",
+                model_name="gemini-3-pro-preview",
+                reasoning_effort="medium",
+            ),
         ]
 
     @cached_property
