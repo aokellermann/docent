@@ -198,3 +198,6 @@ inspect_evals
 
 # test data cache
 data/cache
+
+# dont commit package lock, force use of bun lock
+package-lock.json

@@ -89,13 +89,11 @@ interface CreateAnthropicCompatibleBackendRequest {
 }
 
 // Add type discriminator to backend interfaces
-export interface OpenAICompatibleBackendWithType
-  extends OpenAICompatibleBackend {
+export interface OpenAICompatibleBackendWithType extends OpenAICompatibleBackend {
   type: 'openai_compatible';
 }
 
-export interface AnthropicCompatibleBackendWithType
-  extends AnthropicCompatibleBackend {
+export interface AnthropicCompatibleBackendWithType extends AnthropicCompatibleBackend {
   type: 'anthropic_compatible';
 }
 
