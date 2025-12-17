@@ -4,6 +4,11 @@ on:
   push:
     branches: [metr]
   workflow_dispatch:
+    inputs:
+      force_full_deploy:
+        description: 'Force full deployment (skip change detection)'
+        type: boolean
+        default: false
 
 jobs:
   deploy:
@@ -13,4 +18,5 @@ jobs:
       github_environment: metr
       deploy_frontend_apprunner: true
       vercel_environment: Production
+      force_full_deploy: ${{ inputs.force_full_deploy || false }}
     secrets: inherit

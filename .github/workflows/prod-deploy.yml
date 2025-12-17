@@ -4,6 +4,11 @@ on:
   push:
     branches: [prod]
   workflow_dispatch:
+    inputs:
+      force_full_deploy:
+        description: 'Force full deployment (skip change detection)'
+        type: boolean
+        default: false
 
 jobs:
   deploy:
@@ -13,4 +18,5 @@ jobs:
       github_environment: Production
       deploy_frontend_vercel: true
       vercel_environment: production
+      force_full_deploy: ${{ inputs.force_full_deploy || false }}
     secrets: inherit
