@@ -301,6 +301,11 @@ export const AgentRunTable = memo(function AgentRunTable({
   const internalScrollRef = useRef<HTMLDivElement | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [containerHeight, setContainerHeight] = useState(0);
+  // https://nextjs.org/docs/messages/react-hydration-error#solution-1-using-useeffect-to-run-on-the-client-only
+  const [hasMounted, setHasMounted] = useState(false);
+  useEffect(() => {
+    setHasMounted(true);
+  }, []);
   const [isExporting, setIsExporting] = useState(false);
   const { getApiKey: getDownloadApiKey, isLoading: isApiKeyLoading } =
     useDownloadApiKey();
@@ -684,8 +689,10 @@ export const AgentRunTable = memo(function AgentRunTable({
 
   const columnCount = columns.length || 1;
   const hasRows = totalRows > 0;
-  const showSkeletonRows = isLoadingAgentRuns && !hasRows;
-  const showFetchOverlay = isFetchingAgentRuns && hasRows;
+  // Show skeleton rows during SSR/hydration (before mount) to prevent hydration mismatch,
+  // or when actually loading with no data
+  const showSkeletonRows = !hasMounted || (isLoadingAgentRuns && !hasRows);
+  const showFetchOverlay = hasMounted && isFetchingAgentRuns && hasRows;
   const visibleColumns = table.getVisibleLeafColumns();
 
   const handleSelectAll = useCallback(() => {
