@@ -50,11 +50,16 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for accurate comparison on force-push
 
       - name: Detect changes
         uses: dorny/paths-filter@v3
         id: filter
         with:
+          # Compare against previous branch HEAD (handles force-push correctly)
+          # Falls back to default behavior if before is null (new branch)
+          base: ${{ github.event.before != '0000000000000000000000000000000000000000' && github.event.before || '' }}
           filters: |
             backend:
               - 'docent_core/**'
