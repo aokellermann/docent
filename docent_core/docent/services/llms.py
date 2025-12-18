@@ -288,6 +288,15 @@ class ProviderPreferences(PublicProviderPreferences):
                 model_name="gemini-3-pro-preview",
                 reasoning_effort="medium",
             ),
+            ModelOption(
+                provider="google",
+                model_name="gemini-3-flash-preview",
+            ),
+            ModelOption(
+                provider="google",
+                model_name="gemini-3-flash-preview",
+                reasoning_effort="medium",
+            ),
         ]
 
     @cached_property
@@ -424,7 +433,9 @@ class ProviderPreferences(PublicProviderPreferences):
         """
         return [
             ModelOption(provider="openai", model_name="gpt-5", reasoning_effort="low"),
-            ModelOption(provider="google", model_name="gemini-2.5-flash", reasoning_effort="low"),
+            ModelOption(
+                provider="google", model_name="gemini-3-flash-preview", reasoning_effort="low"
+            ),
             ModelOption(
                 provider="anthropic", model_name="claude-haiku-4-5", reasoning_effort="low"
             ),

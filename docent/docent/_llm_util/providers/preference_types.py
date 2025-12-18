@@ -98,6 +98,10 @@ class PublicProviderPreferences(BaseModel):
                 model_name="claude-sonnet-4-5",
                 reasoning_effort="medium",
             ),
+            ModelOption(
+                provider="google",
+                model_name="gemini-3-flash-preview",
+            ),
         ]
 
 
