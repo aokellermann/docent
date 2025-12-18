@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '4'",
@@ -923,15 +923,18 @@ dev = [
     { name = "datasets" },
     { name = "jupyter" },
     { name = "matplotlib" },
-    { name = "mkdocs" },
-    { name = "mkdocs-material" },
-    { name = "mkdocstrings-python" },
     { name = "pre-commit" },
     { name = "pyright" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "rich" },
     { name = "scipy" },
+]
+docs = [
+    { name = "docent-python" },
+    { name = "mkdocs" },
+    { name = "mkdocs-material" },
+    { name = "mkdocstrings-python" },
 ]
 
 [package.metadata]
@@ -944,14 +947,15 @@ requires-dist = [
     { name = "datasets", marker = "extra == 'dev'", specifier = ">=4.0.0" },
     { name = "ddtrace", specifier = ">=4.0.0" },
     { name = "docent-python", editable = "docent" },
+    { name = "docent-python", marker = "extra == 'docs'", editable = "docent" },
     { name = "fastapi", specifier = ">=0.114.1" },
     { name = "greenlet", specifier = ">=3.2.1" },
     { name = "inspect-ai", specifier = ">=0.3.93" },
     { name = "jupyter", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "matplotlib", marker = "extra == 'dev'" },
-    { name = "mkdocs", marker = "extra == 'dev'", specifier = ">=1.6.1" },
-    { name = "mkdocs-material", marker = "extra == 'dev'", specifier = ">=9.6.14" },
-    { name = "mkdocstrings-python", marker = "extra == 'dev'", specifier = ">=1.16.10" },
+    { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6.1" },
+    { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.6.14" },
+    { name = "mkdocstrings-python", marker = "extra == 'docs'", specifier = ">=1.18.2" },
     { name = "opentelemetry-api", specifier = ">=1.34.1" },
     { name = "opentelemetry-proto", specifier = ">=1.34.1" },
     { name = "passlib", extras = ["argon2"], specifier = ">=1.7.4" },
@@ -975,7 +979,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.23.1" },
     { name = "watchdog", specifier = ">=6.0.0" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["dev", "docs"]
 
 [[package]]
 name = "docent-python"
