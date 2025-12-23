@@ -125,7 +125,7 @@ def compute_context_token_estimates(
                 logger.warning(f"Unknown alias prefix: {alias}")
                 continue
 
-            estimates[alias] = len(encoding.encode(text))
+            estimates[alias] = len(encoding.encode(text, disallowed_special=()))
         except Exception as e:
             logger.warning(f"Failed to compute token estimate for {alias}: {e}")
             estimates[alias] = 0

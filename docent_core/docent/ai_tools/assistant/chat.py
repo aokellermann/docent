@@ -22,7 +22,7 @@ GPT_MODEL = "gpt-4"  # Can be adjusted based on the model being used
 def truncate_to_token_limit(text: str, max_tokens: int, model: str = GPT_MODEL) -> str:
     """Truncate text to stay within the specified token limit."""
     encoding = tiktoken.encoding_for_model(model)
-    tokens = encoding.encode(text)
+    tokens = encoding.encode(text, disallowed_special=())
 
     if len(tokens) <= max_tokens:
         return text

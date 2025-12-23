@@ -465,7 +465,7 @@ def chunk_and_tokenize(
     chunk_to_doc: list[int] = []
 
     for i, item in enumerate(text):
-        tokens = encoding.encode(item)
+        tokens = encoding.encode(item, disallowed_special=())
         if len(tokens) <= window_size:
             chunks = [tokens]
         else:

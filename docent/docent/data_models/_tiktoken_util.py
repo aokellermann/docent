@@ -6,13 +6,13 @@ MAX_TOKENS = 100_000
 def get_token_count(text: str, model: str = "gpt-4") -> int:
     """Get the number of tokens in a text under the GPT-4 tokenization scheme."""
     encoding = tiktoken.encoding_for_model(model)
-    return len(encoding.encode(text))
+    return len(encoding.encode(text, disallowed_special=()))
 
 
 def truncate_to_token_limit(text: str, max_tokens: int, model: str = "gpt-4") -> str:
     """Truncate text to stay within the specified token limit."""
     encoding = tiktoken.encoding_for_model(model)
-    tokens = encoding.encode(text)
+    tokens = encoding.encode(text, disallowed_special=())
 
     if len(tokens) <= max_tokens:
         return text

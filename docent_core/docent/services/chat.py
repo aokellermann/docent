@@ -248,14 +248,17 @@ class ChatService:
         # Convert to text format and count tokens
         total_tokens = 0
         for message in context_messages:
-            total_tokens += len(encoding.encode(message.text))
+            total_tokens += len(encoding.encode(message.text, disallowed_special=()))
 
             if isinstance(message, AssistantMessage) and message.tool_calls:
                 for tool_call in message.tool_calls:
                     if hasattr(tool_call, "function") and hasattr(tool_call, "arguments"):
                         args_str = str(tool_call.arguments) if tool_call.arguments else ""
                         total_tokens += len(
-                            encoding.encode(f"\nTool call: {tool_call.function}({args_str})")
+                            encoding.encode(
+                                f"\nTool call: {tool_call.function}({args_str})",
+                                disallowed_special=(),
+                            )
                         )
 
             total_tokens += 10  # Add a small buffer for message formatting overhead
