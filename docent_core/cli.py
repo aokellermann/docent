@@ -149,6 +149,15 @@ def worker(
         signal_handler(signal.SIGINT, None)
 
 
+@app.command(help="Install web dependencies")
+def install_web():
+    # `cd` to the web directory; this is where we run bun from
+    file_path = Path(__file__).parent / "_web"
+    os.chdir(file_path)
+
+    subprocess.run(["bun", "install", "--legacy-peer-deps"], check=True)
+
+
 @app.command(help="Run the website")
 def web(
     backend_url: str = typer.Option(

@@ -42,8 +42,8 @@ if [[ -f ".env" ]]; then
 fi
 
 # Install dependencies in the new worktree
-echo "Running uv sync --extra dev in $path..." >&2
-(cd "$path" && uv sync --extra dev) >&2
+echo "Installing Python and TS dependencies in $path..." >&2
+(cd "$path" && uv sync --extra dev && source .venv/bin/activate && docent_core install_web) >&2
 
 # Print the path so caller can cd to it: cd $(gwa.sh branch)
 echo "$path"
