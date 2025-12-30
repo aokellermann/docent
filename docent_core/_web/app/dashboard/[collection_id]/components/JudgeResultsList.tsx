@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { Loader2, ChevronRight, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AgentRunJudgeResults, RubricCentroid } from '@/app/api/rubricApi';
-import VirtualResultsList from './VirtualResultsList';
+import PaginatedResultsList from './PaginatedResultsList';
 import { SchemaDefinition } from '@/app/types/schema';
 import { Label } from '@/app/api/labelApi';
 import { useHasCollectionWritePermission } from '@/lib/permissions/hooks';
@@ -22,6 +22,8 @@ interface JudgeResultsListProps {
   activeLabelSet: any;
   viewMode: ViewMode;
 }
+
+const RESULTS_PER_PAGE = 25;
 
 export const JudgeResultsList = ({
   centroids,
@@ -57,7 +59,7 @@ export const JudgeResultsList = ({
 
   // Default: flat list grouped by agent run
   return (
-    <VirtualResultsList
+    <PaginatedResultsList
       agentRunResults={agentRunResults}
       activeResultId={activeResultId}
       activeAgentRunId={activeAgentRunId}
@@ -66,6 +68,7 @@ export const JudgeResultsList = ({
       activeLabelSet={activeLabelSet}
       canEditLabels={hasWritePermission}
       viewMode={viewMode}
+      pageSize={RESULTS_PER_PAGE}
     />
   );
 };
@@ -179,7 +182,7 @@ const CentroidsList = ({
           <X className="size-3" />
         </button>
 
-        <VirtualResultsList
+        <PaginatedResultsList
           agentRunResults={selected.agentRunResults}
           activeResultId={activeResultId}
           activeAgentRunId={activeAgentRunId}
@@ -188,6 +191,7 @@ const CentroidsList = ({
           activeLabelSet={activeLabelSet}
           canEditLabels={canEditLabels}
           viewMode={viewMode}
+          pageSize={RESULTS_PER_PAGE}
         />
       </div>
     );
