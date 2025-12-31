@@ -124,24 +124,24 @@ const getRoleStyle = (role: string, isHighlighted: boolean) => {
     switch (role) {
       case 'user':
         return highlighted
-          ? 'bg-muted-foreground/40 border-l-4 border-muted-foreground'
-          : 'bg-gray-50 dark:bg-gray-900/50 border-l-4 border-gray-300 dark:border-gray-700';
+          ? 'bg-muted-foreground/40 border-l-2 border-muted-foreground'
+          : 'bg-gray-50 dark:bg-gray-900/50 border-l-2 border-gray-300 dark:border-gray-700';
       case 'assistant':
         return highlighted
-          ? 'bg-blue-500/40 border-l-4 border-blue-500'
-          : 'bg-blue-50 dark:bg-blue-950/30 border-l-4 border-blue-300 dark:border-blue-700';
+          ? 'bg-blue-500/40 border-l-2 border-blue-500'
+          : 'bg-blue-50 dark:bg-blue-950/30 border-l-2 border-blue-300 dark:border-blue-700';
       case 'system':
         return highlighted
-          ? 'bg-orange-500/40 border-l-4 border-orange-500'
-          : 'bg-orange-50 dark:bg-orange-950/30 border-l-4 border-orange-300 dark:border-orange-700';
+          ? 'bg-orange-500/40 border-l-2 border-orange-500'
+          : 'bg-orange-50 dark:bg-orange-950/30 border-l-2 border-orange-300 dark:border-orange-700';
       case 'tool':
         return highlighted
-          ? 'bg-green-500/40 border-l-4 border-green-500'
-          : 'bg-green-50 dark:bg-green-950/30 border-l-4 border-green-300 dark:border-green-700';
+          ? 'bg-green-500/40 border-l-2 border-green-500'
+          : 'bg-green-50 dark:bg-green-950/30 border-l-2 border-green-300 dark:border-green-700';
       default:
         return highlighted
-          ? 'bg-slate-500/40 border-l-4 border-slate-500'
-          : 'bg-gray-50 dark:bg-gray-900/50 border-l-4 border-gray-300 dark:border-gray-700';
+          ? 'bg-slate-500/40 border-l-2 border-slate-500'
+          : 'bg-gray-50 dark:bg-gray-900/50 border-l-2 border-gray-300 dark:border-gray-700';
     }
   };
 

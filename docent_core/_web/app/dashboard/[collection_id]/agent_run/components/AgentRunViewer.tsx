@@ -32,6 +32,7 @@ import {
   TranscriptGroup,
 } from '@/app/types/transcriptTypes';
 import { TranscriptNavigator, TreeNode } from './TranscriptNavigator';
+import { TranscriptMinimap } from './TranscriptMinimap';
 import UuidPill from '@/components/UuidPill';
 import { useDebounce } from '@/hooks/use-debounce';
 import { useCitationNavigation } from '@/providers/CitationNavigationProvider';
@@ -912,6 +913,20 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
       });
     }, [currentBlockIndex, transcript, scrollToBlock, selectedTranscriptId]);
 
+    // Handler for minimap clicks
+    const handleMinimapBlockClick = useCallback(
+      (blockIdx: number) => {
+        if (selectedTranscriptId) {
+          scrollToBlock({
+            blockIdx,
+            transcriptId: selectedTranscriptId,
+            highlightDuration: 500,
+          });
+        }
+      },
+      [scrollToBlock, selectedTranscriptId]
+    );
+
     //********************
     // Comment Handlers *
     //********************
@@ -1179,7 +1194,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
     const hasComments = comments.length > 0 || draftComment !== null;
 
     return (
-      <div className="h-full flex flex-col min-h-0">
+      <div className="h-full flex flex-col min-h-0 space-y-2">
         {/* Header area Content */}
         {agentRun && (
           <>
@@ -1467,6 +1482,15 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                     </div>
                   </div>
 
+                  {/* Transcript Minimap - above messages */}
+                  <TranscriptMinimap
+                    messages={transcript.messages}
+                    currentBlockIndex={currentBlockIndex}
+                    blockIdxToCommentsMap={blockIdxToCommentsMap}
+                    onBlockClick={handleMinimapBlockClick}
+                    className="flex-shrink-0 px-1 my-2"
+                  />
+
                   {/* Relative wrapper for scroll container and fixed buttons */}
                   <div className="relative flex-1 min-h-0">
                     {/* Shared Scroll Container */}
@@ -1475,6 +1499,25 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                       className="absolute inset-0 overflow-y-auto custom-scrollbar"
                       // Disable browser scroll anchoring, which was causing the viewport to jump when creating a new draft comment
                       style={{ overflowAnchor: 'none' }}
+                      onKeyDown={(e) => {
+                        // Don't intercept key events from input elements
+                        const target = e.target as HTMLElement;
+                        if (
+                          target.tagName === 'INPUT' ||
+                          target.tagName === 'TEXTAREA' ||
+                          target.isContentEditable
+                        ) {
+                          return;
+                        }
+
+                        if (e.key === 'j') {
+                          e.preventDefault();
+                          goToNextBlock();
+                        } else if (e.key === 'k') {
+                          e.preventDefault();
+                          goToPrevBlock();
+                        }
+                      }}
                     >
                       <div className="flex flex-row items-stretch">
                         {/* Messages column */}
