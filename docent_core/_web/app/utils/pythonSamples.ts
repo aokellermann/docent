@@ -4,6 +4,8 @@ import { ComplexFilter } from '@/app/types/collectionTypes';
 export type PythonSampleType = 'agent_runs' | 'dql' | 'rubric_results';
 export type SampleFormat = 'python' | 'notebook';
 
+export const API_KEY_PLACEHOLDER = 'API_KEY_PLACEHOLDER';
+
 interface BasePythonSampleRequest {
   type: PythonSampleType;
   api_key: string;
