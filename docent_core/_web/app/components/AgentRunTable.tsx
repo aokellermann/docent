@@ -64,6 +64,7 @@ import { useDownloadApiKey } from '@/app/hooks/use-download-api-key';
 import {
   downloadPythonSample,
   fetchPythonSample,
+  API_KEY_PLACEHOLDER,
 } from '@/app/utils/pythonSamples';
 import { toast } from 'sonner';
 import { ComplexFilter } from '@/app/types/collectionTypes';
@@ -549,10 +550,9 @@ export const AgentRunTable = memo(function AgentRunTable({
 
     try {
       setIsCopyingDql(true);
-      const apiKey = await getDownloadApiKey();
       const sample = await fetchPythonSample({
         type: 'agent_runs',
-        api_key: apiKey,
+        api_key: API_KEY_PLACEHOLDER,
         server_url: BASE_URL,
         collection_id: resolvedCollectionId,
         columns: exportColumns,
@@ -580,7 +580,6 @@ export const AgentRunTable = memo(function AgentRunTable({
     agentRunIds,
     baseFilter,
     exportColumns,
-    getDownloadApiKey,
     resolvedCollectionId,
     sortDirection,
     sortField,

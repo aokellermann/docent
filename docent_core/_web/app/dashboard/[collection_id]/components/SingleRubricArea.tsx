@@ -59,6 +59,7 @@ import DownloadMenu from '@/app/components/DownloadMenu';
 import { BASE_URL } from '@/app/constants';
 import { useDownloadApiKey } from '@/app/hooks/use-download-api-key';
 import {
+  API_KEY_PLACEHOLDER,
   downloadPythonSample,
   fetchPythonSample,
 } from '@/app/utils/pythonSamples';
@@ -340,10 +341,9 @@ export default function SingleRubricArea({
 
     try {
       setIsCopyingDql(true);
-      const apiKey = await getDownloadApiKey();
       const sample = await fetchPythonSample({
         type: 'rubric_results',
-        api_key: apiKey,
+        api_key: API_KEY_PLACEHOLDER,
         server_url: BASE_URL,
         collection_id: collectionId,
         rubric_id: rubricId,
@@ -359,7 +359,7 @@ export default function SingleRubricArea({
     } finally {
       setIsCopyingDql(false);
     }
-  }, [collectionId, getDownloadApiKey, rubricId, runsFilter, version]);
+  }, [collectionId, rubricId, runsFilter, version]);
 
   const ResultsSection = (
     <>
