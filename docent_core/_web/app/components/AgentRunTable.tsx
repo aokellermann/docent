@@ -173,9 +173,17 @@ export interface AgentRunTableProps {
   filterableColumns?: Set<string>;
 }
 
-const formatMetadataValue = (value: unknown): string => {
-  if (value === null || value === undefined) {
+const formatCellValue = (value: unknown, keyExists: boolean): string => {
+  // For missing keys, return empty string (standard CSV practice)
+  if (!keyExists) {
     return '';
+  }
+  // For existing keys with null/undefined, return the string representation
+  if (value === null) {
+    return 'null';
+  }
+  if (value === undefined) {
+    return 'undefined';
   }
   if (typeof value === 'string' && isDateString(value)) {
     return formatDateValue(value);
@@ -209,6 +217,30 @@ const getNestedValue = (
   }
 
   return current;
+};
+
+const hasNestedKey = (obj: Record<string, unknown>, path: string): boolean => {
+  const keys = path.split('.');
+  let current: unknown = obj;
+
+  for (let i = 0; i < keys.length; i++) {
+    if (
+      current === null ||
+      current === undefined ||
+      typeof current !== 'object'
+    ) {
+      return false;
+    }
+    const key = keys[i];
+    if (!(key in (current as Record<string, unknown>))) {
+      return false;
+    }
+    if (i < keys.length - 1) {
+      current = (current as Record<string, unknown>)[key];
+    }
+  }
+
+  return true;
 };
 
 const SortToggle = memo(function SortToggle({
@@ -370,6 +402,8 @@ export const AgentRunTable = memo(function AgentRunTable({
   // Ref to access metadataData in cell render functions without causing columns useMemo to re-run
   const metadataDataRef = useRef(metadataData);
   metadataDataRef.current = metadataData;
+  const loadingMetadataIdsRef = useRef(loadingMetadataIds);
+  loadingMetadataIdsRef.current = loadingMetadataIds;
   const [scrollTop, setScrollTop] = useState(0);
   const [containerHeight, setContainerHeight] = useState(0);
   // https://nextjs.org/docs/messages/react-hydration-error#solution-1-using-useeffect-to-run-on-the-client-only
@@ -518,11 +552,41 @@ export const AgentRunTable = memo(function AgentRunTable({
           ...fetchedMetadata,
         };
         const rows = agentRunIds.map((runId) =>
-          exportColumns.map((columnKey) =>
-            formatMetadataValue(
-              getCellValue(runId, columnKey, combinedMetadata)
-            )
-          )
+          exportColumns.map((columnKey) => {
+            // Get the value
+            const value = getCellValue(runId, columnKey, combinedMetadata);
+
+            // Special case: agent_run_id always exists
+            if (columnKey === 'agent_run_id') {
+              return formatCellValue(value, true);
+            }
+
+            // Check if key exists in the metadata
+            const processedData = combinedMetadata[runId];
+            let keyExists = false;
+
+            if (processedData) {
+              if (columnKey.startsWith('metadata.')) {
+                const structured = processedData._structured as
+                  | Record<string, unknown>
+                  | undefined;
+                if (
+                  structured?.metadata &&
+                  typeof structured.metadata === 'object'
+                ) {
+                  const metadataKey = columnKey.replace('metadata.', '');
+                  keyExists = hasNestedKey(
+                    structured.metadata as Record<string, unknown>,
+                    metadataKey
+                  );
+                }
+              } else {
+                keyExists = columnKey in processedData;
+              }
+            }
+
+            return formatCellValue(value, keyExists);
+          })
         );
         exportTabularData({
           columns: exportColumns,
@@ -706,14 +770,22 @@ export const AgentRunTable = memo(function AgentRunTable({
         ),
         cell: ({ row }) => {
           const runId = row.original.agentRunId;
+
           // Use ref to avoid re-creating columns when metadataData changes
           const processedData = metadataDataRef.current[runId];
 
+          // Show skeleton if we don't have data OR if loading
+          if (!processedData || loadingMetadataIdsRef.current.has(runId)) {
+            return <Skeleton className="h-4 w-full" />;
+          }
+
           // Access the value based on the column type
           let value: unknown;
+          let keyExists: boolean;
+
           if (columnKey.startsWith('metadata.')) {
             // For metadata columns, try to access from the structured metadata first
-            const structured = processedData?._structured as
+            const structured = processedData._structured as
               | Record<string, unknown>
               | undefined;
             if (
@@ -721,18 +793,29 @@ export const AgentRunTable = memo(function AgentRunTable({
               typeof structured.metadata === 'object'
             ) {
               const metadataKey = columnKey.replace('metadata.', '');
-              // Handle nested metadata access (e.g., metadata.x.y.z)
-              value = getNestedValue(
+              // Check if key exists in nested path
+              keyExists = hasNestedKey(
                 structured.metadata as Record<string, unknown>,
                 metadataKey
               );
+              // Only get value if key exists
+              value = keyExists
+                ? getNestedValue(
+                    structured.metadata as Record<string, unknown>,
+                    metadataKey
+                  )
+                : undefined;
+            } else {
+              keyExists = false;
             }
           } else {
-            value = processedData?.[columnKey];
+            // For regular columns, check if key exists
+            keyExists = columnKey in processedData;
+            value = processedData[columnKey];
           }
 
-          // Format the value
-          const text = formatMetadataValue(value);
+          // Format the value - empty string if key doesn't exist, "null" if key exists with null value
+          const text = formatCellValue(value, keyExists);
           return (
             <span className="text-xs text-foreground truncate block">
               {text}
