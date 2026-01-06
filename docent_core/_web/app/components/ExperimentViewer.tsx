@@ -15,8 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 
-import { ChartsArea } from './ChartsArea';
-import { AgentRunTable } from './AgentRunTable';
+import { AgentRunTable, MAX_SELECTED_COLUMNS } from './AgentRunTable';
 import UploadRunsButton from './UploadRunsButton';
 import UploadRunsDialog from './UploadRunsDialog';
 
@@ -272,7 +271,18 @@ export default function ExperimentViewer({
         if (persisted) {
           const parsedColumns = JSON.parse(persisted);
           if (Array.isArray(parsedColumns)) {
-            setSelectedColumns(parsedColumns);
+            // Migrate: truncate to MAX_SELECTED_COLUMNS if over limit
+            const migratedColumns = parsedColumns.slice(
+              0,
+              MAX_SELECTED_COLUMNS
+            );
+
+            // Persist migrated value if truncated
+            if (parsedColumns.length > MAX_SELECTED_COLUMNS) {
+              localStorage.setItem(key, JSON.stringify(migratedColumns));
+            }
+
+            setSelectedColumns(migratedColumns);
             hasAutoSelectedColumnsRef.current = true;
             setHasLoadedFromStorage(true);
             return;
@@ -895,19 +905,10 @@ export default function ExperimentViewer({
 
   return (
     <div className="flex-1 flex flex-col h-full min-w-0">
-      {/* Header with organization dropdown - always visible */}
-      <div className="flex justify-between items-center shrink-0 mb-2">
-        <div className="flex flex-col">
-          <div className="text-sm font-semibold">Chart Visualization</div>
-        </div>
-      </div>
-
-      <ChartsArea />
-
       <Tabs
         value={activeTab}
         onValueChange={handleTabChange}
-        className="flex-1 flex flex-col space-y-3 min-h-0 mt-3"
+        className="flex-1 flex flex-col space-y-3 min-h-0"
       >
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
           <div className="flex flex-col">
@@ -915,7 +916,7 @@ export default function ExperimentViewer({
               {activeTab === 'filters' && activeRunId
                 ? `${agentRunIds?.length || 0} Runs`
                 : activeTab === 'filters'
-                  ? 'Agent Run List'
+                  ? 'Agent Run Table'
                   : 'DQL Explorer'}
             </div>
             {!activeRunId && (

@@ -10,6 +10,7 @@ import {
   type LucideIcon,
   Search,
   Home,
+  ChartColumn,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useParams, usePathname, useSearchParams } from 'next/navigation';
@@ -80,6 +81,10 @@ const Breadcrumbs: React.FC = () => {
       title: 'Agent Runs',
       url: `${COLLECTIONS_DASHBOARD_PATH}/${collectionId}`,
       icon: Layers,
+    },
+    charts: {
+      title: 'Charts',
+      icon: ChartColumn,
     },
     rubric: {
       title: 'Rubrics',

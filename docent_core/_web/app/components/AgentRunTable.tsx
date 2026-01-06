@@ -32,12 +32,6 @@ import {
 
 import { Button } from '@/components/ui/button';
 import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from '@/components/ui/context-menu';
-import {
   Table,
   TableBody,
   TableCell,
@@ -78,6 +72,7 @@ const ROW_HEIGHT_PX = 32;
 const OVERSCAN_COUNT = 50;
 const METADATA_REQUEST_DEBOUNCE_MS = 150;
 const MIN_SKELETON_ROW_COUNT = 12;
+export const MAX_SELECTED_COLUMNS = 20;
 
 // Debounces metadata fetches to limit repeated requests while scrolling.
 function useDebouncedMetadataRequest(
@@ -216,7 +211,7 @@ const getNestedValue = (
   return current;
 };
 
-function SortToggle({
+const SortToggle = memo(function SortToggle({
   columnKey,
   label,
   sortable,
@@ -275,7 +270,74 @@ function SortToggle({
       )}
     </button>
   );
+});
+
+interface AgentRunTableCellProps {
+  cellId: string;
+  columnIndex: number;
+  columnKey: string;
+  columnSize: number | undefined;
+  columnMaxSize: number | undefined;
+  isActive: boolean;
+  runId: string;
+  cellValue: unknown;
+  isFilterable: boolean;
+  hasFilterValue: boolean;
+  onContextMenu?: (
+    e: React.MouseEvent,
+    rowId: string,
+    columnKey: string,
+    value: unknown
+  ) => void;
+  children: ReactNode;
 }
+
+const AgentRunTableCell = memo(function AgentRunTableCell({
+  cellId,
+  columnIndex,
+  columnKey,
+  columnSize,
+  columnMaxSize,
+  isActive,
+  runId,
+  cellValue,
+  isFilterable,
+  hasFilterValue,
+  onContextMenu,
+  children,
+}: AgentRunTableCellProps) {
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      if (onContextMenu && isFilterable && hasFilterValue) {
+        e.preventDefault();
+        onContextMenu(e, runId, columnKey, cellValue);
+      }
+    },
+    [onContextMenu, isFilterable, hasFilterValue, runId, columnKey, cellValue]
+  );
+
+  return (
+    <TableCell
+      key={cellId}
+      className={`py-1.5 ${
+        columnIndex === 0
+          ? `sticky left-0 z-10 ${
+              isActive
+                ? 'bg-indigo-bg/80'
+                : 'bg-background group-hover:bg-muted transition-colors duration-150'
+            }`
+          : ''
+      }`}
+      style={{
+        width: columnSize,
+        maxWidth: columnMaxSize || columnSize,
+      }}
+      onContextMenu={onContextMenu ? handleContextMenu : undefined}
+    >
+      {children}
+    </TableCell>
+  );
+});
 
 export const AgentRunTable = memo(function AgentRunTable({
   agentRunIds,
@@ -305,6 +367,9 @@ export const AgentRunTable = memo(function AgentRunTable({
   filterableColumns,
 }: AgentRunTableProps) {
   const internalScrollRef = useRef<HTMLDivElement | null>(null);
+  // Ref to access metadataData in cell render functions without causing columns useMemo to re-run
+  const metadataDataRef = useRef(metadataData);
+  metadataDataRef.current = metadataData;
   const [scrollTop, setScrollTop] = useState(0);
   const [containerHeight, setContainerHeight] = useState(0);
   // https://nextjs.org/docs/messages/react-hydration-error#solution-1-using-useeffect-to-run-on-the-client-only
@@ -328,6 +393,13 @@ export const AgentRunTable = memo(function AgentRunTable({
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(
     null
   );
+  const [contextMenuCell, setContextMenuCell] = useState<{
+    rowId: string;
+    columnKey: string;
+    value: unknown;
+    x: number;
+    y: number;
+  } | null>(null);
   const skipNextRowClickRef = useRef(false);
   const columnSearchInputRef = useRef<HTMLInputElement | null>(null);
   const handleColumnsMenuOpenChange = useCallback((open: boolean) => {
@@ -634,7 +706,8 @@ export const AgentRunTable = memo(function AgentRunTable({
         ),
         cell: ({ row }) => {
           const runId = row.original.agentRunId;
-          const processedData = metadataData[runId];
+          // Use ref to avoid re-creating columns when metadataData changes
+          const processedData = metadataDataRef.current[runId];
 
           // Access the value based on the column type
           let value: unknown;
@@ -672,7 +745,6 @@ export const AgentRunTable = memo(function AgentRunTable({
 
     return [baseColumn, ...metadataColumns];
   }, [
-    metadataData,
     onSortChange,
     selectedColumns,
     sortDirection,
@@ -747,13 +819,27 @@ export const AgentRunTable = memo(function AgentRunTable({
   const showSkeletonRows = !hasMounted || (isLoadingAgentRuns && !hasRows);
   const showFetchOverlay = hasMounted && isFetchingAgentRuns && hasRows;
   const visibleColumns = table.getVisibleLeafColumns();
+  const isAtColumnLimit = selectedColumns.length >= MAX_SELECTED_COLUMNS;
 
   const handleSelectAll = useCallback(() => {
     posthog.capture('agent_run_table_columns_select_all', {
       collectionId: resolvedCollectionId,
     });
 
-    onSelectedColumnsChange(availableColumns);
+    // Sort columns alphabetically and take up to MAX_SELECTED_COLUMNS
+    const sortedColumns = [...availableColumns].sort(
+      compareAgentRunColumnNames
+    );
+    const columnsToSelect = sortedColumns.slice(0, MAX_SELECTED_COLUMNS);
+
+    onSelectedColumnsChange(columnsToSelect);
+
+    // Show toast if selection was limited
+    if (availableColumns.length > MAX_SELECTED_COLUMNS) {
+      toast.info(
+        `Selected first ${MAX_SELECTED_COLUMNS} of ${availableColumns.length} columns. Maximum limit is ${MAX_SELECTED_COLUMNS}.`
+      );
+    }
   }, [availableColumns, onSelectedColumnsChange, resolvedCollectionId]);
 
   const handleClearAll = useCallback(() => {
@@ -766,6 +852,11 @@ export const AgentRunTable = memo(function AgentRunTable({
 
   const handleColumnsChange = useCallback(
     (nextColumns: string[]) => {
+      // Guard: prevent exceeding the column limit
+      if (nextColumns.length > MAX_SELECTED_COLUMNS) {
+        return;
+      }
+
       const added = nextColumns.find(
         (column) => !selectedColumns.includes(column)
       );
@@ -818,6 +909,24 @@ export const AgentRunTable = memo(function AgentRunTable({
     }
   }, [onSortChange, resolvedCollectionId, sortField, sortDirection]);
 
+  const handleCellContextMenu = useCallback(
+    (e: React.MouseEvent, rowId: string, columnKey: string, value: unknown) => {
+      e.preventDefault();
+      setContextMenuCell({
+        rowId,
+        columnKey,
+        value,
+        x: e.clientX,
+        y: e.clientY,
+      });
+    },
+    []
+  );
+
+  const handleContextMenuClose = useCallback(() => {
+    setContextMenuCell(null);
+  }, []);
+
   // Prepare sortable fields for the select
   const sortOptions = useMemo(
     () => [
@@ -832,20 +941,28 @@ export const AgentRunTable = memo(function AgentRunTable({
 
   const columnOptions = useMemo(
     () =>
-      availableColumns.map((column) => ({
-        value: column,
-        label: column,
-      })),
-    [availableColumns]
+      availableColumns.map((column) => {
+        const isSelected = selectedColumns.includes(column);
+        const shouldDisable = isAtColumnLimit && !isSelected;
+        return {
+          value: column,
+          label: shouldDisable ? `${column} (limit reached)` : column,
+          disabled: shouldDisable,
+        };
+      }),
+    [availableColumns, selectedColumns, isAtColumnLimit]
   );
 
   const columnActionItems = useMemo(
     () => [
       {
         key: 'select_all',
-        label: 'Select all',
+        label:
+          availableColumns.length > MAX_SELECTED_COLUMNS
+            ? `Select first ${MAX_SELECTED_COLUMNS}`
+            : 'Select all',
         onSelect: handleSelectAll,
-        disabled: !availableColumns.length,
+        disabled: !availableColumns.length || isAtColumnLimit,
       },
       {
         key: 'clear_all',
@@ -854,7 +971,13 @@ export const AgentRunTable = memo(function AgentRunTable({
         disabled: selectedColumns.length === 0,
       },
     ],
-    [availableColumns, handleClearAll, handleSelectAll, selectedColumns.length]
+    [
+      availableColumns.length,
+      handleClearAll,
+      handleSelectAll,
+      selectedColumns.length,
+      isAtColumnLimit,
+    ]
   );
 
   return (
@@ -1183,100 +1306,31 @@ export const AgentRunTable = memo(function AgentRunTable({
                             !filterableColumns ||
                             filterableColumns.has(columnKey);
                           const hasFilterValue = cellValue !== undefined;
-                          const canFilter = isFilterable && hasFilterValue;
-                          const unsupportedSuffix = isFilterable
-                            ? ''
-                            : ' (not supported for field type)';
-
-                          if (!onCreateFilterFromCell) {
-                            return (
-                              <TableCell
-                                key={cell.id}
-                                className={`py-1.5 ${
-                                  index === 0
-                                    ? `sticky left-0 z-10 ${
-                                        isActive
-                                          ? 'bg-indigo-bg/80'
-                                          : 'bg-background group-hover:bg-muted transition-colors duration-150'
-                                      }`
-                                    : ''
-                                }`}
-                                style={{
-                                  width: cell.column.columnDef.size,
-                                  maxWidth:
-                                    cell.column.columnDef.maxSize ||
-                                    cell.column.columnDef.size,
-                                }}
-                              >
-                                {flexRender(
-                                  cell.column.columnDef.cell,
-                                  cell.getContext()
-                                )}
-                              </TableCell>
-                            );
-                          }
 
                           return (
-                            <ContextMenu key={cell.id}>
-                              <ContextMenuTrigger asChild>
-                                <TableCell
-                                  className={`py-1.5 ${
-                                    index === 0
-                                      ? `sticky left-0 z-10 ${
-                                          isActive
-                                            ? 'bg-indigo-bg/80'
-                                            : 'bg-background group-hover:bg-muted transition-colors duration-150'
-                                        }`
-                                      : ''
-                                  }`}
-                                  style={{
-                                    width: cell.column.columnDef.size,
-                                    maxWidth:
-                                      cell.column.columnDef.maxSize ||
-                                      cell.column.columnDef.size,
-                                  }}
-                                >
-                                  {flexRender(
-                                    cell.column.columnDef.cell,
-                                    cell.getContext()
-                                  )}
-                                </TableCell>
-                              </ContextMenuTrigger>
-                              <ContextMenuContent className="w-64">
-                                <ContextMenuItem
-                                  inset
-                                  disabled={!canFilter}
-                                  onSelect={(event) => {
-                                    if (canFilter) {
-                                      skipNextRowClickRef.current = true;
-                                      onCreateFilterFromCell(
-                                        columnKey,
-                                        cellValue,
-                                        'append'
-                                      );
-                                    }
-                                  }}
-                                >
-                                  {`Add filter${unsupportedSuffix}`}
-                                </ContextMenuItem>
-                                <ContextMenuItem
-                                  inset
-                                  disabled={!canFilter}
-                                  onSelect={(event) => {
-                                    if (canFilter) {
-                                      skipNextRowClickRef.current = true;
-                                      onCreateFilterFromCell(
-                                        columnKey,
-                                        cellValue,
-                                        'replace'
-                                      );
-                                    }
-                                  }}
-                                >
-                                  {`Clear filters then add filter${unsupportedSuffix}`}
-                                </ContextMenuItem>
-                              </ContextMenuContent>
-                            </ContextMenu>
+                            <AgentRunTableCell
+                              key={cell.id}
+                              cellId={cell.id}
+                              columnIndex={index}
+                              columnKey={columnKey}
+                              columnSize={cell.column.columnDef.size}
+                              columnMaxSize={cell.column.columnDef.maxSize}
+                              isActive={isActive}
+                              runId={runId}
+                              cellValue={cellValue}
+                              isFilterable={isFilterable}
+                              hasFilterValue={hasFilterValue}
+                              onContextMenu={
+                                onCreateFilterFromCell
+                                  ? handleCellContextMenu
+                                  : undefined
+                              }
+                            >
+                              {flexRender(
+                                cell.column.columnDef.cell,
+                                cell.getContext()
+                              )}
+                            </AgentRunTableCell>
                           );
                         })}
                       </TableRow>
@@ -1295,6 +1349,58 @@ export const AgentRunTable = memo(function AgentRunTable({
           </TableBody>
         </Table>
       </TableContainer>
+
+      {/* Single shared context menu - positioned at cursor on right-click */}
+      {contextMenuCell && onCreateFilterFromCell && (
+        <>
+          {/* Backdrop to catch clicks outside */}
+          <div
+            className="fixed inset-0 z-40"
+            onClick={handleContextMenuClose}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              handleContextMenuClose();
+            }}
+          />
+          {/* Menu */}
+          <div
+            className="fixed z-50 rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95"
+            style={{
+              left: contextMenuCell.x,
+              top: contextMenuCell.y,
+            }}
+          >
+            <button
+              className="flex w-full cursor-pointer select-none items-center rounded-sm px-2 py-1 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
+              onClick={() => {
+                skipNextRowClickRef.current = true;
+                onCreateFilterFromCell(
+                  contextMenuCell.columnKey,
+                  contextMenuCell.value,
+                  'append'
+                );
+                handleContextMenuClose();
+              }}
+            >
+              Add filter
+            </button>
+            <button
+              className="flex w-full cursor-pointer select-none items-center rounded-sm px-2 py-1 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
+              onClick={() => {
+                skipNextRowClickRef.current = true;
+                onCreateFilterFromCell(
+                  contextMenuCell.columnKey,
+                  contextMenuCell.value,
+                  'replace'
+                );
+                handleContextMenuClose();
+              }}
+            >
+              Clear filters then add filter
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 });

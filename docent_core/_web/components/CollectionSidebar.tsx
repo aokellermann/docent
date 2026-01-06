@@ -9,6 +9,7 @@ import {
   Scale,
   ListChecks,
   MessagesSquare,
+  ChartColumn,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useParams, usePathname } from 'next/navigation';
@@ -61,6 +62,11 @@ export function CollectionSidebar() {
       icon: Scale,
     },
     {
+      title: 'Charts',
+      url: `/dashboard/${collectionId}/charts`,
+      icon: ChartColumn,
+    },
+    {
       title: 'Label Sets',
       url: `/dashboard/${collectionId}/labels`,
       icon: Tags,
@@ -71,7 +77,7 @@ export function CollectionSidebar() {
       icon: MessagesSquare,
     },
     {
-      title: 'Jobs',
+      title: 'Ingestion Jobs',
       url: `/dashboard/${collectionId}/jobs`,
       icon: ListChecks,
     },

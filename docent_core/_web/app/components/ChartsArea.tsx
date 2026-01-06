@@ -299,6 +299,12 @@ export function ChartsArea() {
         </button>
       </div>
 
+      {charts.length === 0 && (
+        <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">
+          No charts yet. Click + to add one.
+        </div>
+      )}
+
       {activeChart && (
         <div className="flex flex-col flex-1 bg-background border border-border rounded-b-md rounded-tr-md min-h-0">
           <ChartSettings
