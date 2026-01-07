@@ -4,7 +4,18 @@ import time
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Any, DefaultDict, Dict, Iterable, List, Mapping, Optional, Sequence, cast
+from typing import (
+    Any,
+    DefaultDict,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    TypedDict,
+    cast,
+)
 from uuid import uuid4
 
 from asyncpg.exceptions import DeadlockDetectedError
@@ -43,6 +54,7 @@ from docent_core.docent.db.schemas.auth_models import User
 from docent_core.docent.db.schemas.tables import (
     SQLAAgentRun,
     SQLACollection,
+    SQLATelemetryAccumulation,
     SQLATelemetryAgentRunStatus,
     SQLATelemetryLineage,
     SQLATelemetryLog,
@@ -64,6 +76,43 @@ logger = get_logger(__name__)
 
 LineageEntry = Dict[str, Any]
 
+
+class MessageSourceInfo(TypedDict):
+    """Source information for a single message, used to create lineage entries."""
+
+    message_idx: int
+    raw_span_id: str
+    telemetry_log_id: str | None
+    telemetry_accumulation_id: str | None
+    first_seen_span_start_time: str | None
+    collection_id: str
+    agent_run_id: str
+
+
+class TranscriptSourceInfo(TypedDict):
+    """Source information for a transcript, used to create lineage entries."""
+
+    raw_span_id: str
+    telemetry_log_id: str | None
+    telemetry_accumulation_id: str | None
+    collection_id: str
+    agent_run_id: str
+
+
+class TranscriptLineageData(TypedDict):
+    """
+    Data needed to create lineage entries for a transcript.
+
+    This is returned from _create_transcripts_from_spans and used to create
+    lineage entries AFTER ID reconciliation, ensuring the correct IDs are used.
+    """
+
+    transcript: Transcript
+    raw_transcript_id: str
+    message_sources: list[MessageSourceInfo]
+    transcript_sources: list[TranscriptSourceInfo]
+
+
 AGENT_RUN_LOCK_PREFIX = "telemetry_agent_run_lock"
 TELEMETRY_PROCESSING_TIMEOUT_SECONDS = get_job_timeout_seconds(
     WorkerFunction.TELEMETRY_PROCESSING_JOB
@@ -75,6 +124,79 @@ class TelemetryService:
     def __init__(self, session: AsyncSession, mono_svc: MonoService):
         self.session = session
         self.mono_svc = mono_svc
+
+    async def get_message_otel_payload(
+        self, *, collection_id: str, transcript_id: str, message_id: str
+    ) -> dict[str, Any] | None:
+        """
+        Fetch the OpenTelemetry span payload associated with a transcript message.
+
+        The linkage is maintained via SQLATelemetryLineage rows written during telemetry processing.
+        """
+        lineage_stmt = (
+            select(SQLATelemetryLineage)
+            .where(
+                SQLATelemetryLineage.collection_id == collection_id,
+                SQLATelemetryLineage.derived_type == "transcript_message",
+                SQLATelemetryLineage.derived_id == transcript_id,
+                SQLATelemetryLineage.derived_key == message_id,
+            )
+            .order_by(SQLATelemetryLineage.created_at.asc())
+            .limit(1)
+        )
+        lineage_result = await self.session.execute(lineage_stmt)
+        lineage = lineage_result.scalar_one_or_none()
+        if lineage is None:
+            return None
+
+        telemetry_accumulation_id = lineage.telemetry_accumulation_id
+        if not telemetry_accumulation_id:
+            return None
+
+        span_stmt = select(SQLATelemetryAccumulation).where(
+            SQLATelemetryAccumulation.id == telemetry_accumulation_id
+        )
+        span_result = await self.session.execute(span_stmt)
+        span_row = span_result.scalar_one_or_none()
+        if span_row is None:
+            return None
+
+        return {
+            "telemetry_accumulation_id": span_row.id,
+            "telemetry_log_id": lineage.telemetry_log_id,
+            "raw_span_id": lineage.source_id,
+            "span": span_row.data,
+            "first_seen_span_start_time": cast(dict[str, Any], lineage.attributes or {}).get(
+                "first_seen_span_start_time"
+            ),
+        }
+
+    @staticmethod
+    def _stable_transcript_message_id(transcript_id: str, message_index: int) -> str:
+        """
+        Generate a stable identifier for a message inside a transcript.
+
+        We store transcripts as a single blob (messages list). To reliably join UI message
+        rows to telemetry lineage across re-processing, we need a deterministic per-message
+        identifier that doesn't require a separate messages table.
+        """
+        return str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"docent:transcript_message:{transcript_id}:{message_index}",
+            )
+        )
+
+    def _ensure_transcript_message_ids(self, transcript: Transcript) -> None:
+        """
+        Ensure every transcript message has a stable ID.
+
+        Message IDs are preserved if already present (e.g. emitted by an upstream SDK),
+        otherwise a deterministic ID based on transcript + index is assigned.
+        """
+        for idx, message in enumerate(transcript.messages):
+            if not getattr(message, "id", None):
+                message.id = self._stable_transcript_message_id(transcript.id, idx)
 
     def _agent_run_lock_key(self, collection_id: str, agent_run_id: str) -> str:
         return f"{AGENT_RUN_LOCK_PREFIX}_{collection_id}_{agent_run_id}"
@@ -2051,13 +2173,17 @@ class TelemetryService:
             messages_value = cast(bytes | bytearray | memoryview, row.messages)
             messages_blob: bytes = bytes(messages_value)
             messages_raw = json.loads(messages_blob)
+
             parsed_messages: list[ChatMessage] = []
             for msg in messages_raw:
                 parsed_messages.append(parse_chat_message(msg))
+
             metadata_value = cast(bytes | bytearray | memoryview, row.metadata_json)
             metadata_blob: bytes = bytes(metadata_value)
             metadata_raw = json.loads(metadata_blob)
-            metadata_dict: Dict[str, Any] = metadata_raw if isinstance(metadata_raw, dict) else {}
+            metadata_dict: Dict[str, Any] = (
+                cast(Dict[str, Any], metadata_raw) if isinstance(metadata_raw, dict) else {}
+            )
             transcript = Transcript(
                 id=row.id,
                 name=row.name,
@@ -2106,6 +2232,7 @@ class TelemetryService:
             )
 
             agent_run_transcripts: list[Transcript] = []
+            agent_run_lineage_data: List[TranscriptLineageData] = []
             agent_run_scores: Dict[str, int | float | bool | None] = {}
             agent_run_model: str | None = None
             agent_run_metadata_dict: Dict[str, Any] = {}
@@ -2161,10 +2288,11 @@ class TelemetryService:
                             agent_run_model = span_attrs["gen_ai.response.model"]
                             logger.info(f"    Found model: {agent_run_model}")
 
-                # Create transcripts from spans
-                transcripts_list, transcript_lineage = self._create_transcripts_from_spans(
+                # Create transcripts from spans (lineage entries created later, after ID reconciliation)
+                lineage_data_list = self._create_transcripts_from_spans(
                     transcript_id, transcript_spans
                 )
+                transcripts_list = [data["transcript"] for data in lineage_data_list]
                 logger.info(
                     "    Transcript extraction summary: agent_run_id=%s transcript_id=%s "
                     "span_count=%s transcripts_created=%s",
@@ -2178,7 +2306,6 @@ class TelemetryService:
                     logger.warning(
                         f"    No transcripts created from {len(transcript_spans)} spans for transcript_id: {transcript_id}"
                     )
-                    # Log more details about why no transcripts were created
                     for i, span in enumerate(transcript_spans):
                         span_attrs = span.get("attributes", {})
                         gen_ai_keys = [k for k in span_attrs.keys() if k.startswith("gen_ai")]
@@ -2188,9 +2315,9 @@ class TelemetryService:
                                 f"      Span {i} has no gen_ai keys. All keys: {list(span_attrs.keys())}"
                             )
 
-                # Add transcripts to agent run
+                # Add transcripts and lineage data to agent run
                 agent_run_transcripts.extend(transcripts_list)
-                lineage_entries.extend(transcript_lineage)
+                agent_run_lineage_data.extend(lineage_data_list)
 
             # Create agent run if it has transcripts
             if agent_run_transcripts:
@@ -2296,21 +2423,25 @@ class TelemetryService:
 
                 agent_run_transcript_groups = list(agent_run_transcript_groups_map.values())
 
+                # Reconcile IDs with existing transcripts to preserve telemetry linkage.
+                # _reuse_existing_transcript_ids updates transcript.id and message.id
+                # directly on the Transcript objects in agent_run_transcripts.
                 existing_transcripts_for_run = (
                     existing_transcripts_by_agent_run.get(agent_run_id, [])
                     if existing_transcripts_by_agent_run
                     else []
                 )
                 if existing_transcripts_for_run:
-                    reused_map = self._reuse_existing_transcript_ids(
+                    self._reuse_existing_transcript_ids(
                         agent_run_transcripts, existing_transcripts_for_run
                     )
-                    if reused_map:
-                        for entry in lineage_entries:
-                            if entry.get("derived_type") == "transcript":
-                                derived_id = entry.get("derived_id")
-                                if isinstance(derived_id, str) and derived_id in reused_map:
-                                    entry["derived_id"] = reused_map[derived_id]
+
+                # Create lineage entries AFTER ID reconciliation so they use the
+                # correct (reconciled) IDs. This avoids having to update entries later.
+                transcript_lineage_entries = self._create_lineage_entries_from_data(
+                    agent_run_lineage_data
+                )
+                lineage_entries.extend(transcript_lineage_entries)
 
                 agent_run = AgentRun(
                     id=agent_run_id,
@@ -2331,12 +2462,18 @@ class TelemetryService:
 
     def _reuse_existing_transcript_ids(
         self, new_transcripts: list[Transcript], existing_transcripts: list[Transcript]
-    ) -> dict[str, str]:
+    ) -> tuple[dict[str, str], dict[str, str]]:
         """
-        Reuse transcript IDs when the content matches existing transcripts to avoid churn.
+        Reuse transcript and message IDs when content matches existing transcripts.
+
+        Returns:
+            A tuple of (transcript_id_mapping, message_id_mapping) where:
+            - transcript_id_mapping: old_transcript_id -> matched_transcript_id
+            - message_id_mapping: old_message_id -> matched_message_id
         """
         remaining_existing: dict[str, Transcript] = {t.id: t for t in existing_transcripts}
-        id_mapping: dict[str, str] = {}
+        transcript_id_mapping: dict[str, str] = {}
+        message_id_mapping: dict[str, str] = {}
 
         def threads_match(existing: Transcript, new: Transcript) -> bool:
             return self.matching_thread_start(
@@ -2362,7 +2499,7 @@ class TelemetryService:
             if not matched:
                 continue
 
-            old_id = transcript.id
+            old_transcript_id = transcript.id
             transcript.id = matched.id
             if not transcript.transcript_group_id:
                 transcript.transcript_group_id = matched.transcript_group_id
@@ -2370,33 +2507,62 @@ class TelemetryService:
                 transcript.created_at = matched.created_at
             if not transcript.metadata:
                 transcript.metadata = matched.metadata
-            id_mapping[old_id] = matched.id
+            transcript_id_mapping[old_transcript_id] = matched.id
+
+            # Reuse message IDs from the matched transcript by position.
+            # Message IDs depend on transcript ID, so we need to update them
+            # to preserve telemetry lineage links.
+            for idx, message in enumerate(transcript.messages):
+                old_message_id = getattr(message, "id", None)
+                if idx < len(matched.messages):
+                    existing_message_id = getattr(matched.messages[idx], "id", None)
+                    if existing_message_id:
+                        if old_message_id and old_message_id != existing_message_id:
+                            message_id_mapping[old_message_id] = existing_message_id
+                        message.id = existing_message_id
+                else:
+                    # Message at this index doesn't exist in matched transcript.
+                    # Regenerate a stable ID based on the new (matched) transcript ID.
+                    new_stable_id = self._stable_transcript_message_id(matched.id, idx)
+                    if old_message_id and old_message_id != new_stable_id:
+                        message_id_mapping[old_message_id] = new_stable_id
+                    message.id = new_stable_id
+
             remaining_existing.pop(matched.id, None)
 
-        return id_mapping
+        return transcript_id_mapping, message_id_mapping
 
     def _create_transcripts_from_spans(
         self, raw_transcript_id: str, transcript_spans: List[Dict[str, Any]]
-    ) -> tuple[List[Transcript], List[LineageEntry]]:
+    ) -> List[TranscriptLineageData]:
         """
-        Create Transcript objects from spans and track lineage back to the contributing spans.
+        Create Transcript objects from spans and collect lineage source data.
+
+        Lineage entries are NOT created here - instead, we return the source data
+        needed to create them. This allows lineage entries to be created AFTER
+        ID reconciliation, using the correct (reconciled) IDs.
 
         Args:
             raw_transcript_id: transcript_id as sent in telemetry
             transcript_spans: List of spans for a transcript
 
         Returns:
-            Tuple of (Transcript objects, lineage entries)
+            List of TranscriptLineageData objects containing transcripts and their
+            lineage source information.
         """
         # Store all the chat threads and track which spans contributed to each
         chat_threads: List[List[ChatMessage]] = []
-        thread_span_indices: List[List[int]] = []  # Track which spans contributed to each thread
+        thread_span_indices: List[List[int]] = []
+        thread_message_sources: List[List[Dict[str, Any]]] = []
         span_lookup_by_id: Dict[str, Dict[str, Any]] = {}
 
-        for span_idx, span in enumerate(transcript_spans):
-            # Extract messages from this span
-            span_messages = self._span_to_chat_messages(span)
+        # Prefer chronological processing to keep thread reconstruction stable.
+        transcript_spans_sorted = sorted(
+            transcript_spans, key=lambda span: cast(str, span.get("start_time") or "")
+        )
 
+        for span_idx, span in enumerate(transcript_spans_sorted):
+            span_messages = self._span_to_chat_messages(span)
             if not span_messages:
                 continue
 
@@ -2404,118 +2570,240 @@ class TelemetryService:
             if isinstance(raw_span_id, str) and raw_span_id:
                 span_lookup_by_id.setdefault(raw_span_id, span)
 
-            # Find or create chat thread
+            span_start_time = span.get("start_time")
+            telemetry_log_id = span.get("telemetry_log_id")
+            telemetry_accumulation_id = span.get("telemetry_accumulation_id")
+
             thread_index, action = self._find_or_create_chat_thread(span_messages, chat_threads)
 
             if action == "new":
-                # Create new chat thread
                 chat_threads.append(span_messages)
                 thread_span_indices.append([span_idx])
+                source_entries: List[Dict[str, Any]] = []
+                for message_idx in range(len(span_messages)):
+                    source_entries.append(
+                        {
+                            "message_index": message_idx,
+                            "first_seen_span_start_time": span_start_time,
+                            "raw_span_id": raw_span_id,
+                            "telemetry_log_id": telemetry_log_id,
+                            "telemetry_accumulation_id": telemetry_accumulation_id,
+                        }
+                    )
+                thread_message_sources.append(source_entries)
                 logger.debug(f"    Created new chat thread with {len(span_messages)} messages")
             elif action == "extend" and thread_index is not None:
-                # Found matching thread - add new messages
                 existing_thread = chat_threads[thread_index]
                 new_messages = span_messages[len(existing_thread) :]
-
-                # Update empty tool call results in existing thread with new results
                 self._update_empty_tool_call_results(existing_thread, span_messages)
-
                 chat_threads[thread_index].extend(new_messages)
                 thread_span_indices[thread_index].append(span_idx)
+                existing_sources = thread_message_sources[thread_index]
+                for offset in range(len(new_messages)):
+                    message_idx = len(existing_thread) + offset
+                    existing_sources.append(
+                        {
+                            "message_index": message_idx,
+                            "first_seen_span_start_time": span_start_time,
+                            "raw_span_id": raw_span_id,
+                            "telemetry_log_id": telemetry_log_id,
+                            "telemetry_accumulation_id": telemetry_accumulation_id,
+                        }
+                    )
+                first_message_preview = (
+                    new_messages[0].text[:100].replace("\n", " ") if new_messages else "N/A"
+                )
                 logger.debug(
-                    f"    Extended chat thread {thread_index} with {len(new_messages)} new messages. First new message: {new_messages[0].text[:100].replace('\n', ' ') if new_messages else 'N/A'}"
+                    f"    Extended chat thread {thread_index} with {len(new_messages)} new messages. "
+                    f"First new message: {first_message_preview}"
                 )
             elif action == "skip":
-                # New messages are already contained in existing thread - skip
                 logger.debug(
-                    f"    Skipped span with {len(span_messages)} messages (already contained in thread {thread_index})"
+                    f"    Skipped span with {len(span_messages)} messages "
+                    f"(already contained in thread {thread_index})"
                 )
 
-        # Create transcripts from chat threads
-        transcripts: List[Transcript] = []
-        lineage_entries: List[LineageEntry] = []
+        # Build TranscriptLineageData for each chat thread
+        result: List[TranscriptLineageData] = []
         logger.debug(
             f"    Created {len(chat_threads)} chat threads from {len(transcript_spans)} spans"
         )
 
-        if chat_threads:
-            for i, chat_thread in enumerate(chat_threads):
-                # Create unique transcript ID for each thread
-                thread_transcript_id = str(uuid.uuid4())
-
-                # Determine transcript_group_id for this thread based on contributing spans
-                thread_transcript_group_id = None
-                contributing_span_ids: set[str] = set()
-                contributing_log_ids: dict[str, str | None] = {}
-                contributing_accumulation_ids: dict[str, str | None] = {}
-                if thread_span_indices[i]:
-                    # Use the transcript_group_id from the last span that contributed to this thread
-                    last_contributing_span_idx = thread_span_indices[i][-1]
-                    last_contributing_span = transcript_spans[last_contributing_span_idx]
-                    last_span_attrs = last_contributing_span.get("attributes", {})
-                    thread_transcript_group_id = last_span_attrs.get("transcript_group_id")
-                for idx in thread_span_indices[i]:
-                    span = transcript_spans[idx]
-                    raw_span_id = span.get("raw_span_id")
-                    telemetry_log_id = span.get("telemetry_log_id")
-                    telemetry_accumulation_id = span.get("telemetry_accumulation_id")
-                    if isinstance(raw_span_id, str) and raw_span_id:
-                        contributing_span_ids.add(raw_span_id)
-                        contributing_log_ids[raw_span_id] = telemetry_log_id
-                        contributing_accumulation_ids[raw_span_id] = (
-                            telemetry_accumulation_id
-                            if isinstance(telemetry_accumulation_id, str)
-                            else None
-                        )
-
-                transcript = Transcript(
-                    id=thread_transcript_id,
-                    messages=chat_thread,
-                    transcript_group_id=thread_transcript_group_id,
-                )
-                transcripts.append(transcript)
-                logger.info(
-                    f"    Created transcript {thread_transcript_id} with {len(chat_thread)} messages and transcript_group_id: {thread_transcript_group_id}"
-                )
-
-                # Record transcript-level lineage to each contributing span
-                for raw_span_id in contributing_span_ids:
-                    span = span_lookup_by_id.get(raw_span_id)
-                    span_attrs: Dict[str, Any] = (
-                        cast(Dict[str, Any], span.get("attributes", {}) or {}) if span else {}
-                    )
-                    collection_id = span_attrs.get("collection_id")
-                    agent_run_id = span_attrs.get("agent_run_id")
-                    if isinstance(collection_id, str) and isinstance(agent_run_id, str):
-                        lineage_entries.append(
-                            {
-                                "collection_id": collection_id,
-                                "agent_run_id": agent_run_id,
-                                "derived_type": "transcript",
-                                "derived_id": thread_transcript_id,
-                                "derived_key": None,
-                                "source_type": "span",
-                                "source_id": raw_span_id,
-                                "source_transcript_id": raw_transcript_id,
-                                "telemetry_log_id": contributing_log_ids.get(raw_span_id),
-                                "telemetry_accumulation_id": contributing_accumulation_ids.get(
-                                    raw_span_id
-                                ),
-                                "attributes": None,
-                            }
-                        )
-
-        else:
+        if not chat_threads:
             logger.warning(f"    No messages extracted from {len(transcript_spans)} spans")
-            # Log more details about why no chat threads were created
             total_messages = 0
             for span_idx, span in enumerate(transcript_spans):
                 span_messages = self._span_to_chat_messages(span)
                 total_messages += len(span_messages)
                 logger.debug(f"      Span {span_idx}: extracted {len(span_messages)} messages")
             logger.debug(f"    Total messages extracted from all spans: {total_messages}")
+            return result
 
-        return transcripts, lineage_entries
+        for i, chat_thread in enumerate(chat_threads):
+            thread_transcript_id = str(uuid.uuid4())
+
+            # Determine transcript_group_id from the last contributing span
+            thread_transcript_group_id = None
+            if thread_span_indices[i]:
+                last_contributing_span_idx = thread_span_indices[i][-1]
+                last_contributing_span = transcript_spans[last_contributing_span_idx]
+                last_span_attrs = last_contributing_span.get("attributes", {})
+                thread_transcript_group_id = last_span_attrs.get("transcript_group_id")
+
+            transcript = Transcript(
+                id=thread_transcript_id,
+                messages=chat_thread,
+                transcript_group_id=thread_transcript_group_id,
+            )
+            self._ensure_transcript_message_ids(transcript)
+
+            # Build message source info for lineage
+            message_sources: list[MessageSourceInfo] = []
+            per_message_sources = (
+                thread_message_sources[i] if i < len(thread_message_sources) else []
+            )
+            for message_idx, _ in enumerate(transcript.messages):
+                source_info = (
+                    per_message_sources[message_idx]
+                    if message_idx < len(per_message_sources)
+                    else None
+                )
+                if not source_info:
+                    continue
+
+                source_span_id = source_info.get("raw_span_id")
+                if not isinstance(source_span_id, str) or not source_span_id:
+                    continue
+
+                span = span_lookup_by_id.get(source_span_id)
+                span_attrs: Dict[str, Any] = (
+                    cast(Dict[str, Any], span.get("attributes", {}) or {}) if span else {}
+                )
+                collection_id = span_attrs.get("collection_id")
+                agent_run_id = span_attrs.get("agent_run_id")
+                if not (isinstance(collection_id, str) and isinstance(agent_run_id, str)):
+                    continue
+
+                message_sources.append(
+                    MessageSourceInfo(
+                        message_idx=message_idx,
+                        raw_span_id=source_span_id,
+                        telemetry_log_id=source_info.get("telemetry_log_id"),
+                        telemetry_accumulation_id=source_info.get("telemetry_accumulation_id"),
+                        first_seen_span_start_time=source_info.get("first_seen_span_start_time"),
+                        collection_id=collection_id,
+                        agent_run_id=agent_run_id,
+                    )
+                )
+
+            # Build transcript source info for lineage
+            transcript_sources: list[TranscriptSourceInfo] = []
+            for idx in thread_span_indices[i]:
+                span = transcript_spans[idx]
+                span_raw_id = span.get("raw_span_id")
+                if not isinstance(span_raw_id, str) or not span_raw_id:
+                    continue
+
+                span_attrs = cast(Dict[str, Any], span.get("attributes", {}) or {})
+                collection_id = span_attrs.get("collection_id")
+                agent_run_id = span_attrs.get("agent_run_id")
+                if not (isinstance(collection_id, str) and isinstance(agent_run_id, str)):
+                    continue
+
+                transcript_sources.append(
+                    TranscriptSourceInfo(
+                        raw_span_id=span_raw_id,
+                        telemetry_log_id=span.get("telemetry_log_id"),
+                        telemetry_accumulation_id=(
+                            span.get("telemetry_accumulation_id")
+                            if isinstance(span.get("telemetry_accumulation_id"), str)
+                            else None
+                        ),
+                        collection_id=collection_id,
+                        agent_run_id=agent_run_id,
+                    )
+                )
+
+            result.append(
+                TranscriptLineageData(
+                    transcript=transcript,
+                    raw_transcript_id=raw_transcript_id,
+                    message_sources=message_sources,
+                    transcript_sources=transcript_sources,
+                )
+            )
+
+        return result
+
+    def _create_lineage_entries_from_data(
+        self, lineage_data_list: List[TranscriptLineageData]
+    ) -> List[LineageEntry]:
+        """
+        Create lineage entries from TranscriptLineageData.
+
+        This is called AFTER ID reconciliation, so the transcript and message IDs
+        in the Transcript objects are the final (reconciled) IDs.
+
+        Args:
+            lineage_data_list: List of TranscriptLineageData from _create_transcripts_from_spans
+
+        Returns:
+            List of lineage entries ready for database insertion.
+        """
+        lineage_entries: List[LineageEntry] = []
+
+        for data in lineage_data_list:
+            transcript = data["transcript"]
+            raw_transcript_id = data["raw_transcript_id"]
+
+            # Create message-level lineage entries
+            for msg_source in data["message_sources"]:
+                message_idx = msg_source["message_idx"]
+                if message_idx >= len(transcript.messages):
+                    continue
+
+                message_id = getattr(transcript.messages[message_idx], "id", None)
+                if not isinstance(message_id, str) or not message_id:
+                    continue
+
+                lineage_entries.append(
+                    {
+                        "collection_id": msg_source["collection_id"],
+                        "agent_run_id": msg_source["agent_run_id"],
+                        "derived_type": "transcript_message",
+                        "derived_id": transcript.id,
+                        "derived_key": message_id,
+                        "source_type": "span",
+                        "source_id": msg_source["raw_span_id"],
+                        "source_idx": message_idx,
+                        "source_transcript_id": raw_transcript_id,
+                        "telemetry_log_id": msg_source["telemetry_log_id"],
+                        "telemetry_accumulation_id": msg_source["telemetry_accumulation_id"],
+                        "attributes": {
+                            "first_seen_span_start_time": msg_source["first_seen_span_start_time"]
+                        },
+                    }
+                )
+
+            # Create transcript-level lineage entries
+            for t_source in data["transcript_sources"]:
+                lineage_entries.append(
+                    {
+                        "collection_id": t_source["collection_id"],
+                        "agent_run_id": t_source["agent_run_id"],
+                        "derived_type": "transcript",
+                        "derived_id": transcript.id,
+                        "derived_key": None,
+                        "source_type": "span",
+                        "source_id": t_source["raw_span_id"],
+                        "source_transcript_id": raw_transcript_id,
+                        "telemetry_log_id": t_source["telemetry_log_id"],
+                        "telemetry_accumulation_id": t_source["telemetry_accumulation_id"],
+                        "attributes": None,
+                    }
+                )
+
+        return lineage_entries
 
     def _normalize_lineage_entry_for_upsert(self, entry: LineageEntry) -> LineageEntry:
         """
