@@ -12,6 +12,8 @@ import { SidebarProvider } from '@/components/ui/sidebar';
 import CollectionBreadcrumbs from '../../components/Breadcrumbs';
 import { setCollectionId } from '../../store/collectionSlice';
 import { useAppDispatch } from '../../store/hooks';
+import { useGetCollectionNameQuery } from '../../api/collectionApi';
+import { PageTitle } from '@/components/PageTitle';
 import { Button } from '@/components/ui/button';
 import { useUserContext } from '@/app/contexts/UserContext';
 import { LabelSetsProvider } from '@/providers/use-label-sets';
@@ -33,6 +35,10 @@ export default function DocentDashboardClientLayout({
     redirect(`/dashboard/${collectionId}/rubric/${rubricId}`);
   }
 
+  // Fetch collection name for page title
+  const { data: collectionData } = useGetCollectionNameQuery(collectionId);
+  const pageTitle = collectionData?.name || collectionId;
+
   // Set the collection ID in the store
   useEffect(() => {
     if (collectionId) {
@@ -42,6 +48,7 @@ export default function DocentDashboardClientLayout({
 
   return (
     <SidebarProvider defaultOpen={false}>
+      <PageTitle title={pageTitle} />
       <LabelSetsProvider collectionId={collectionId}>
         <CollectionSidebar />
         <div className="flex flex-col pr-2 pb-2 h-screen w-full bg-sidebar min-h-0 min-w-[900px]">
