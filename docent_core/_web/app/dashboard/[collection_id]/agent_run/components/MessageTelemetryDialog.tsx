@@ -585,6 +585,35 @@ export function MessageTelemetryDialog({
     );
   };
 
+  const CopyableId = ({ label, value }: { label: string; value: string }) => {
+    const [copied, setCopied] = useState(false);
+
+    const handleCopy = async () => {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    };
+
+    return (
+      <span className="inline-flex items-center gap-1">
+        <span>
+          {label}: <span className="font-mono">{value}</span>
+        </span>
+        <button
+          onClick={handleCopy}
+          className="p-0.5 rounded hover:bg-secondary transition-colors"
+          title={`Copy ${label}`}
+        >
+          {copied ? (
+            <Check className="h-3 w-3 text-green-text" />
+          ) : (
+            <Copy className="h-3 w-3 opacity-50 hover:opacity-100" />
+          )}
+        </button>
+      </span>
+    );
+  };
+
   const DetailsSection = ({
     title,
     open,
@@ -636,7 +665,7 @@ export function MessageTelemetryDialog({
           e.stopPropagation();
           void fetchTelemetry();
         }}
-        title="Show OpenTelemetry data for this message"
+        title="Show telemetry data for the call that first introduced this message"
       >
         Telemetry
       </Button>
@@ -644,8 +673,11 @@ export function MessageTelemetryDialog({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-3xl h-[80vh] max-h-[80vh] overflow-hidden !flex !flex-col !top-6 sm:!top-10 !translate-y-0">
           <DialogHeader>
-            <DialogTitle>
-              {payload?.span?.operation_name ?? 'Telemetry'}
+            <DialogTitle className="flex items-center gap-3">
+              <span>{payload?.span?.operation_name ?? 'Telemetry'}</span>
+              {payload?.span?.span_id && (
+                <CopyableId label="span_id" value={payload.span.span_id} />
+              )}
             </DialogTitle>
           </DialogHeader>
           <div className="flex-1 min-h-0 overflow-hidden flex flex-col gap-3">
