@@ -3,6 +3,7 @@
 import {
   redirect,
   useParams,
+  usePathname,
   useRouter,
   useSearchParams,
 } from 'next/navigation';
@@ -18,6 +19,25 @@ import { Button } from '@/components/ui/button';
 import { useUserContext } from '@/app/contexts/UserContext';
 import { LabelSetsProvider } from '@/providers/use-label-sets';
 import { CollectionSidebar } from '@/components/CollectionSidebar';
+
+function getSectionTitle(
+  pathname: string,
+  collectionId: string
+): string | null {
+  const prefix = `/dashboard/${collectionId}/`;
+  if (!pathname.startsWith(prefix)) return null;
+
+  const subpath = pathname.slice(prefix.length).split('/')[0];
+  const sectionMap: Record<string, string> = {
+    rubric: 'Rubrics',
+    labels: 'Label Sets',
+    jobs: 'Jobs',
+    chat: 'Chat',
+    charts: 'Charts',
+    agent_run: 'Agent Run',
+  };
+  return sectionMap[subpath] || null;
+}
 
 export default function DocentDashboardClientLayout({
   children,
@@ -37,7 +57,12 @@ export default function DocentDashboardClientLayout({
 
   // Fetch collection name for page title
   const { data: collectionData } = useGetCollectionNameQuery(collectionId);
-  const pageTitle = collectionData?.name || collectionId;
+  const pathname = usePathname();
+  const sectionTitle = getSectionTitle(pathname, collectionId);
+  const collectionName = collectionData?.name || collectionId;
+  const pageTitle = sectionTitle
+    ? `${collectionName} | ${sectionTitle}`
+    : `${collectionName} | Docent`;
 
   // Set the collection ID in the store
   useEffect(() => {
