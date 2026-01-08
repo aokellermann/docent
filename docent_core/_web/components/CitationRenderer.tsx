@@ -46,6 +46,15 @@ const MARKDOWN_PATTERNS = [
     contentIndex: 2,
     element: 'h1',
   },
+  // Fenced code blocks (must come before inline code)
+  {
+    regex: /```[^\n]*\n([\s\S]*?)```/g,
+    className:
+      'bg-secondary font-mono text-xs p-2 border border-border rounded-lg text-primary my-2 overflow-auto max-h-64 custom-scrollbar',
+    contentIndex: 1,
+    element: 'pre',
+    isBlock: true,
+  },
   // Inline formatting
   {
     regex: /\*\*(.*?)\*\*/g,
@@ -128,6 +137,7 @@ function processMarkdownText(text: string, keyBase: string): JSX.Element[] {
     className: string;
     fullMatch: string;
     isHeading?: boolean;
+    isBlock?: boolean;
     element?: string;
   }> = [];
 
@@ -154,6 +164,7 @@ function processMarkdownText(text: string, keyBase: string): JSX.Element[] {
         className: pattern.className,
         fullMatch: match[0],
         isHeading: pattern.contentIndex === 2,
+        isBlock: 'isBlock' in pattern ? pattern.isBlock : false,
         element: pattern.element,
       });
     }
@@ -192,13 +203,13 @@ function processMarkdownText(text: string, keyBase: string): JSX.Element[] {
       // Trim whitespace around block elements only
       const prevMatch = idx > 0 ? cleanMatches[idx - 1] : null;
 
-      // Trim start if previous element was a heading
-      if (prevMatch?.isHeading) {
+      // Trim start if previous element was a heading or block
+      if (prevMatch?.isHeading || prevMatch?.isBlock) {
         beforeText = beforeText.replace(/^\s+/, '');
       }
 
-      // Trim end if current element is a heading
-      if (match.isHeading) {
+      // Trim end if current element is a heading or block
+      if (match.isHeading || match.isBlock) {
         beforeText = beforeText.replace(/\s+$/, '');
       }
 
@@ -220,7 +231,7 @@ function processMarkdownText(text: string, keyBase: string): JSX.Element[] {
           {
             key: `${keyBase}-md-${idx}`,
             className: cn(match.className, {
-              'whitespace-pre-wrap': !match.isHeading,
+              'whitespace-pre-wrap': !match.isHeading && !match.isBlock,
             }),
           },
           match.content
@@ -244,9 +255,9 @@ function processMarkdownText(text: string, keyBase: string): JSX.Element[] {
   if (currentPos < text.length) {
     let remainingText = text.slice(currentPos);
 
-    // Trim start if previous element was a heading
+    // Trim start if previous element was a heading or block
     const lastMatch = cleanMatches[cleanMatches.length - 1];
-    if (lastMatch?.isHeading) {
+    if (lastMatch?.isHeading || lastMatch?.isBlock) {
       remainingText = remainingText.replace(/^\s+/, '');
     }
 
