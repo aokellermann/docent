@@ -5,10 +5,8 @@
       "Bash(python -m py_compile:*)",
       "Bash(python -m pyright:*)",
       "Bash(python -m pytest:*)",
-      "Bash(pyright:*)",
       "Bash(npx tsc:*)",
       "Bash(npx --package=typescript tsc:*)",
-      "Bash(npm run build:*)",
       "Bash(git:*)",
       "Bash(ls:*)",
       "Bash(find:*)",
@@ -26,7 +24,10 @@
       "WebFetch",
       "Bash(gh pr:*)",
       "Bash(echo:*)",
-      "Bash(ty:*)"
+      "Bash(ty:*)",
+      "Bash(ruff:*)",
+      "Bash(npm run lint:*)",
+      "Bash(npm run lint-fix:*)"
     ],
     "deny": [],
     "ask": []
