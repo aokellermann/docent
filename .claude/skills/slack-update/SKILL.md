@@ -19,6 +19,7 @@ Slack has limited markdown support. Follow these rules:
 - Use `_italics_` if needed
 - Use simple (possibly nested) bullet lists with `*`
 - Use `code` for technical terms, function names, etc.
+- Use ```code blocks``` for code snippets
 - Do NOT use headers (`#`, `##`) or horizontal rules (`---`)
 - Use blank lines to separate sections
 
