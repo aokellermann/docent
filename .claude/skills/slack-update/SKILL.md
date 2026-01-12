@@ -13,10 +13,9 @@ Write the update to `personal/mengk/updates/` with a descriptive filename like `
 
 ## Formatting Rules
 
-Slack has limited markdown support. Follow these rules:
+Follow these rules formatting:
 
 - Use `*bold*` sparingly for emphasis (not `**bold**`)
-- Use `_italics_` if needed
 - Use simple (possibly nested) bullet lists with `*`
 - Use `code` for technical terms, function names, etc.
 - Use ```code blocks``` for code snippets
@@ -29,4 +28,5 @@ Slack has limited markdown support. Follow these rules:
 - Direct and clear - assume the reader is busy
 - No fluff or filler phrases
 - Explain technical details at the right level for the audience (infer from context)
-- Prefer bullet points (including nested bullets) to explain things - they're easier to scan than prose.
+- Avoid gratuitous formatting - only use when appropriate and conveys information better than plain text
+- Prefer bullet points (including nested bullets) to explain things - they're easier to scan than prose
