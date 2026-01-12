@@ -1,35 +1,41 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useRef,
+  useCallback,
+} from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import * as SliderPrimitive from '@radix-ui/react-slider';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useDebounce } from '@/hooks/use-debounce';
 import { useGetMetadataFieldRangeQuery } from '@/app/api/collectionApi';
 
 interface StepFilterProps {
   collectionId: string;
   metadataData: Record<string, Record<string, unknown>>;
   onStepFilterChange: (stepValue: number | null) => void;
+  onStepFilterCommit: (stepValue: number | null) => void;
   currentValue?: number | null;
   disabled?: boolean;
+  commitDelayMs?: number;
 }
 
 export const StepFilter: React.FC<StepFilterProps> = ({
   collectionId,
   metadataData,
   onStepFilterChange,
+  onStepFilterCommit,
   currentValue = null,
   disabled = false,
+  commitDelayMs = 200,
 }) => {
   const [stepValue, setStepValue] = useState<number | null>(null);
   const [inputValue, setInputValue] = useState<string>('');
-  const previousDebouncedValue = useRef<number | null>(null);
-
-  // Debounce the step value changes to avoid too many API calls
-  const debouncedStepValue = useDebounce(stepValue, 75);
+  const commitTimeoutRef = useRef<number | null>(null);
 
   const { data: metadataRangeData } = useGetMetadataFieldRangeQuery(
     { collectionId, fieldName: 'metadata.step' },
@@ -78,19 +84,44 @@ export const StepFilter: React.FC<StepFilterProps> = ({
     }
   }, [stepValue]);
 
-  // Call onChange handler only when debounced value actually changes
-  useEffect(() => {
-    // Only call onChange if the debounced value has actually changed
-    if (debouncedStepValue !== previousDebouncedValue.current) {
-      previousDebouncedValue.current = debouncedStepValue;
-      onStepFilterChange(debouncedStepValue);
+  const clearCommitTimeout = useCallback(() => {
+    if (commitTimeoutRef.current !== null) {
+      window.clearTimeout(commitTimeoutRef.current);
+      commitTimeoutRef.current = null;
     }
-  }, [debouncedStepValue, onStepFilterChange]);
+  }, []);
+
+  const scheduleCommit = useCallback(
+    (value: number | null) => {
+      clearCommitTimeout();
+      commitTimeoutRef.current = window.setTimeout(() => {
+        onStepFilterCommit(value);
+        commitTimeoutRef.current = null;
+      }, commitDelayMs);
+    },
+    [clearCommitTimeout, commitDelayMs, onStepFilterCommit]
+  );
+
+  const flushCommit = useCallback(
+    (value: number | null) => {
+      clearCommitTimeout();
+      onStepFilterCommit(value);
+    },
+    [clearCommitTimeout, onStepFilterCommit]
+  );
+
+  useEffect(() => {
+    return () => {
+      clearCommitTimeout();
+    };
+  }, [clearCommitTimeout]);
 
   // Handle slider change
   const handleSliderChange = (value: number[]) => {
     const newValue = value[0];
     setStepValue(newValue);
+    onStepFilterChange(newValue);
+    scheduleCommit(newValue);
   };
 
   // Handle input change
@@ -102,6 +133,8 @@ export const StepFilter: React.FC<StepFilterProps> = ({
     const numValue = parseInt(value, 10);
     if (value === '') {
       setStepValue(null);
+      onStepFilterChange(null);
+      scheduleCommit(null);
     } else if (
       !isNaN(numValue) &&
       Number.isInteger(numValue) &&
@@ -111,6 +144,8 @@ export const StepFilter: React.FC<StepFilterProps> = ({
       numValue <= stepRange.max
     ) {
       setStepValue(numValue);
+      onStepFilterChange(numValue);
+      scheduleCommit(numValue);
     }
   };
 
@@ -122,12 +157,15 @@ export const StepFilter: React.FC<StepFilterProps> = ({
     ) {
       setInputValue(stepValue?.toString() || '');
     }
+    flushCommit(stepValue);
   };
 
   // Clear the filter
   const handleClear = () => {
     setStepValue(null);
     setInputValue('');
+    onStepFilterChange(null);
+    flushCommit(null);
   };
 
   // Don't render if no step data is available
@@ -160,6 +198,7 @@ export const StepFilter: React.FC<StepFilterProps> = ({
               <SliderPrimitive.Root
                 value={[sliderValue]}
                 onValueChange={handleSliderChange}
+                onValueCommit={(value) => flushCommit(value[0] ?? null)}
                 min={stepRange.min}
                 max={stepRange.max}
                 step={1}

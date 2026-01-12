@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from collections import Counter
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import dataclass
@@ -22,6 +24,7 @@ from uuid import uuid4
 from passlib.context import CryptContext
 from sqlalchemy import (
     ColumnElement,
+    Select,
     Text,
     and_,
     column,
@@ -33,19 +36,21 @@ from sqlalchemy import (
     literal_column,
     or_,
     select,
+    tuple_,
     update,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, aggregate_order_by
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import aliased, selectinload
 from sqlalchemy.sql import FromClause, lateral, text
 from sqlalchemy.types import Numeric
 
 from docent._log_util import get_logger
 from docent.data_models.agent_run import AgentRun, FilterableField, FilterableFieldType
 from docent.data_models.transcript import Transcript, TranscriptGroup
+from docent.judges import ResultType
 from docent_core._db_service.db import DocentDB
 from docent_core._server._broker.redis_client import enqueue_job, get_redis_client
 from docent_core._worker.constants import WorkerFunction, get_queue_name_for_job_type
@@ -63,7 +68,16 @@ from docent_core.docent.db.dql import (
     parameterize_expression,
     parse_dql_query,
 )
-from docent_core.docent.db.filters import CollectionFilter, ComplexFilter, parse_filter_dict
+from docent_core.docent.db.filters import (
+    CollectionFilter,
+    ComplexFilter,
+    FilterSQLContext,
+    build_judge_result_filter_clause,
+    collect_label_set_ids,
+    filter_uses_labels,
+    filter_uses_tags,
+    parse_filter_dict,
+)
 from docent_core.docent.db.schemas.auth_models import (
     PERMISSION_LEVELS,
     OrganizationMember,
@@ -76,7 +90,7 @@ from docent_core.docent.db.schemas.auth_models import (
 )
 from docent_core.docent.db.schemas.chart import SQLAChart
 from docent_core.docent.db.schemas.chat import SQLAChatSession
-from docent_core.docent.db.schemas.label import SQLALabelSet, SQLATag
+from docent_core.docent.db.schemas.label import SQLALabel, SQLALabelSet, SQLATag
 from docent_core.docent.db.schemas.refinement import SQLARefinementAgentSession
 from docent_core.docent.db.schemas.rubric import SQLAJudgeResult, SQLARubric
 from docent_core.docent.db.schemas.tables import (
@@ -153,6 +167,44 @@ def _extract_schema_fields(
             yield from _extract_schema_fields(subschema, new_prefix)
     elif (schema_type := schema.get("type")) in _JSON_SCHEMA_TYPE_MAP:
         yield (prefix, _JSON_SCHEMA_TYPE_MAP[schema_type])
+
+
+def _get_json_path_value(payload: Any, path: Sequence[str]) -> Any:
+    current: Any = payload
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current_dict = cast(dict[str, Any], current)
+        if key not in current_dict:
+            return None
+        current = current_dict[key]
+    return current
+
+
+def _serialize_modal_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (str, int, float, bool)):
+        return str(value)
+    try:
+        return json.dumps(value, sort_keys=True)
+    except TypeError:
+        return str(value)
+
+
+def _pick_modal_value(values: Sequence[Any]) -> tuple[Any, int]:
+    if not values:
+        return None, 0
+
+    counts: Counter[Any] = Counter()
+    for value in values:
+        counts[value] += 1
+
+    modal_value, modal_count = sorted(
+        counts.items(),
+        key=lambda item: (-item[1], _serialize_modal_value(item[0])),
+    )[0]
+    return modal_value, modal_count
 
 
 class _NotGiven:
@@ -884,6 +936,113 @@ class MonoService:
                     sort_expr = SQLAAgentRun.metadata_json
                     for part in path_parts:
                         sort_expr = sort_expr[part]
+                elif sort_field == "tag":
+                    tag_subquery = (
+                        select(
+                            SQLATag.agent_run_id.label("agent_run_id"),
+                            func.string_agg(
+                                aggregate_order_by(SQLATag.value, SQLATag.value),
+                                literal(","),
+                            ).label("tag_sort"),
+                        )
+                        .where(SQLATag.collection_id == ctx.collection_id)
+                        .group_by(SQLATag.agent_run_id)
+                        .subquery()
+                    )
+                    query = query.outerjoin(
+                        tag_subquery, tag_subquery.c.agent_run_id == SQLAAgentRun.id
+                    )
+                    sort_expr = tag_subquery.c.tag_sort
+                elif sort_field.startswith("label."):
+                    parts = sort_field.split(".")
+                    if len(parts) < 3:
+                        raise ValueError("Label sort fields must include a JSON field path.")
+                    label_set_id = parts[1]
+                    json_path_parts = parts[2:]
+                    for part in json_path_parts:
+                        if not part.replace("_", "").replace("-", "").isalnum():
+                            raise ValueError("Invalid label field path")
+
+                    label_expr = SQLALabel.label_value
+                    for part in json_path_parts[:-1]:
+                        label_expr = label_expr.op("->")(part)
+                    label_expr = label_expr.op("->>")(json_path_parts[-1])
+
+                    label_subquery = (
+                        select(
+                            SQLALabel.agent_run_id.label("agent_run_id"),
+                            label_expr.label("label_sort"),
+                        )
+                        .where(SQLALabel.label_set_id == label_set_id)
+                        .subquery()
+                    )
+                    query = query.outerjoin(
+                        label_subquery, label_subquery.c.agent_run_id == SQLAAgentRun.id
+                    )
+                    sort_expr = label_subquery.c.label_sort
+                elif sort_field.startswith("rubric."):
+                    parts = sort_field.split(".")
+                    if len(parts) < 3:
+                        raise ValueError("Rubric sort fields must include a JSON field path.")
+                    rubric_id = parts[1]
+                    json_path_parts = parts[2:]
+                    for part in json_path_parts:
+                        if not part.replace("_", "").replace("-", "").isalnum():
+                            raise ValueError("Invalid rubric field path")
+
+                    rubric_expr = SQLAJudgeResult.output
+                    for part in json_path_parts[:-1]:
+                        rubric_expr = rubric_expr.op("->")(part)
+                    rubric_expr = rubric_expr.op("->>")(json_path_parts[-1])
+
+                    latest_version_subquery = (
+                        select(func.max(SQLARubric.version))
+                        .where(
+                            SQLARubric.id == rubric_id,
+                            SQLARubric.collection_id == ctx.collection_id,
+                        )
+                        .scalar_subquery()
+                    )
+
+                    rubric_counts = (
+                        select(
+                            SQLAJudgeResult.agent_run_id.label("agent_run_id"),
+                            rubric_expr.label("value"),
+                            func.count().label("value_count"),
+                        )
+                        .where(
+                            SQLAJudgeResult.rubric_id == rubric_id,
+                            SQLAJudgeResult.rubric_version == latest_version_subquery,
+                            SQLAJudgeResult.result_type == ResultType.DIRECT_RESULT,
+                        )
+                        .group_by(SQLAJudgeResult.agent_run_id, rubric_expr)
+                        .subquery()
+                    )
+                    rubric_ranked = select(
+                        rubric_counts.c.agent_run_id,
+                        rubric_counts.c.value.label("rubric_sort"),
+                        func.row_number()
+                        .over(
+                            partition_by=rubric_counts.c.agent_run_id,
+                            order_by=(
+                                rubric_counts.c.value_count.desc(),
+                                rubric_counts.c.value.asc().nulls_last(),
+                            ),
+                        )
+                        .label("value_rank"),
+                    ).subquery()
+                    rubric_modal = (
+                        select(
+                            rubric_ranked.c.agent_run_id,
+                            rubric_ranked.c.rubric_sort,
+                        )
+                        .where(rubric_ranked.c.value_rank == 1)
+                        .subquery()
+                    )
+                    query = query.outerjoin(
+                        rubric_modal, rubric_modal.c.agent_run_id == SQLAAgentRun.id
+                    )
+                    sort_expr = rubric_modal.c.rubric_sort
                 else:
                     if sort_field == "agent_run_id":
                         sort_expr = SQLAAgentRun.id
@@ -1152,6 +1311,7 @@ class MonoService:
         ctx: ViewContext,
         agent_run_ids: list[str],
         apply_base_filter: bool = True,
+        fields: list[str] | None = None,
     ) -> dict[str, dict[str, Any]]:
         """
         Efficiently fetch only metadata for the specified agent run IDs.
@@ -1162,6 +1322,7 @@ class MonoService:
             ctx: View context used to apply base filters and permissions.
             agent_run_ids: List of agent run IDs to fetch metadata for.
             apply_base_where_clause: Whether to apply the base where clause.
+            fields: Optional list of additional fields to include.
 
         Returns:
             Mapping of agent_run_id -> structured metadata dict with:
@@ -1172,9 +1333,37 @@ class MonoService:
         if not agent_run_ids:
             return {}
 
+        requested_fields = set(fields or [])
+        include_tags = "tag" in requested_fields
+        label_fields: dict[str, list[list[str]]] = {}
+        rubric_fields: dict[str, list[list[str]]] = {}
+
+        for field_name in requested_fields:
+            parts = field_name.split(".")
+            if parts[0] == "label" and len(parts) >= 3:
+                label_fields.setdefault(parts[1], []).append(parts[2:])
+            elif parts[0] == "rubric" and len(parts) >= 3:
+                rubric_fields.setdefault(parts[1], []).append(parts[2:])
+
         metadata_map: dict[str, dict[str, Any]] = {}
 
         async with self.db.session() as session:
+            latest_rubric_versions: dict[str, int] = {}
+            if rubric_fields:
+                rubric_result = await session.execute(
+                    select(SQLARubric.id, func.max(SQLARubric.version))
+                    .where(
+                        SQLARubric.collection_id == ctx.collection_id,
+                        SQLARubric.id.in_(list(rubric_fields.keys())),
+                    )
+                    .group_by(SQLARubric.id)
+                )
+                latest_rubric_versions = {
+                    rubric_id: version
+                    for rubric_id, version in rubric_result.all()
+                    if version is not None
+                }
+
             # Use batching to avoid exceeding database parameter limits
             batch_size = 10_000
             for i in range(0, len(agent_run_ids), batch_size):
@@ -1200,6 +1389,87 @@ class MonoService:
                         structured_metadata["created_at"] = created_at.isoformat(sep=" ")
 
                     metadata_map[run_id] = structured_metadata
+
+                if include_tags:
+                    tag_result = await session.execute(
+                        select(
+                            SQLATag.agent_run_id,
+                            func.array_agg(aggregate_order_by(SQLATag.value, SQLATag.value)).label(
+                                "tag_values"
+                            ),
+                        )
+                        .where(
+                            SQLATag.collection_id == ctx.collection_id,
+                            SQLATag.agent_run_id.in_(batch_ids),
+                        )
+                        .group_by(SQLATag.agent_run_id)
+                    )
+                    for run_id, tag_values in tag_result.all():
+                        if not tag_values:
+                            continue
+                        structured_metadata = metadata_map.setdefault(
+                            run_id, {"agent_run_id": run_id, "metadata": {}}
+                        )
+                        structured_metadata["tag"] = list(tag_values)
+
+                for label_set_id, paths in label_fields.items():
+                    label_result = await session.execute(
+                        select(SQLALabel.agent_run_id, SQLALabel.label_value).where(
+                            SQLALabel.label_set_id == label_set_id,
+                            SQLALabel.agent_run_id.in_(batch_ids),
+                        )
+                    )
+                    for run_id, label_value in label_result.all():
+                        structured_metadata = metadata_map.setdefault(
+                            run_id, {"agent_run_id": run_id, "metadata": {}}
+                        )
+                        for path in paths:
+                            field_key = f"label.{label_set_id}." + ".".join(path)
+                            structured_metadata[field_key] = _get_json_path_value(
+                                label_value or {}, path
+                            )
+
+                if rubric_fields and latest_rubric_versions:
+                    rubric_pairs = [
+                        (rubric_id, latest_version)
+                        for rubric_id, latest_version in latest_rubric_versions.items()
+                    ]
+                    rubric_result = await session.execute(
+                        select(
+                            SQLAJudgeResult.agent_run_id,
+                            SQLAJudgeResult.rubric_id,
+                            SQLAJudgeResult.output,
+                        ).where(
+                            SQLAJudgeResult.agent_run_id.in_(batch_ids),
+                            SQLAJudgeResult.result_type == ResultType.DIRECT_RESULT,
+                            tuple_(
+                                SQLAJudgeResult.rubric_id,
+                                SQLAJudgeResult.rubric_version,
+                            ).in_(rubric_pairs),
+                        )
+                    )
+                    outputs_by_run: dict[tuple[str, str], list[dict[str, Any]]] = {}
+                    for run_id, rubric_id, output in rubric_result.all():
+                        outputs_by_run.setdefault((run_id, rubric_id), []).append(output)
+
+                    for (run_id, rubric_id), outputs in outputs_by_run.items():
+                        paths = rubric_fields.get(rubric_id)
+                        if not paths or not outputs:
+                            continue
+                        structured_metadata = metadata_map.setdefault(
+                            run_id, {"agent_run_id": run_id, "metadata": {}}
+                        )
+                        rubric_counts = structured_metadata.setdefault("_rubric_counts", {})
+                        total_rollouts = len(outputs)
+                        for path in paths:
+                            field_key = f"rubric.{rubric_id}." + ".".join(path)
+                            values = [_get_json_path_value(output, path) for output in outputs]
+                            modal_value, modal_count = _pick_modal_value(values)
+                            structured_metadata[field_key] = modal_value
+                            rubric_counts[field_key] = {
+                                "matched": modal_count,
+                                "total": total_rollouts,
+                            }
 
         return metadata_map
 
@@ -1296,24 +1566,43 @@ class MonoService:
         return agent_runs[0] if agent_runs else None
 
     async def get_unique_field_values(
-        self, ctx: ViewContext, field_name: str, search: str | None = None, limit: int = 100
+        self,
+        ctx: ViewContext,
+        field_name: str,
+        search: str | None = None,
+        limit: int = 100,
+        filter_obj: CollectionFilter | None = None,
     ) -> list[str]:
         """
         Get unique values for a specific metadata field from agent runs in the collection.
-
-        TODO(mengk, gregor): support rubrics here
 
         Args:
             ctx: The ViewContext to use for the query.
             field_name: The field name (e.g., "metadata.task_id")
             search: Optional search term to filter values (case-insensitive substring match)
             limit: Maximum number of unique values to return (default 100)
+            filter_obj: Optional filter to scope the available values
 
         Returns:
             List of unique string values for the field
         """
         async with self.db.session() as session:
             field_parts = field_name.split(".")
+
+            def apply_agent_run_filter(query: Select[Any]) -> Select[Any]:
+                if filter_obj is None:
+                    return query
+
+                filter_ctx = FilterSQLContext(SQLAAgentRun)
+                filter_clause = filter_obj.to_sqla_where_clause(
+                    SQLAAgentRun,
+                    context=filter_ctx,
+                )
+                for join_spec in filter_ctx.required_joins():
+                    query = query.outerjoin(join_spec.alias, join_spec.onclause)
+                if filter_clause is not None:
+                    query = query.where(filter_clause)
+                return query
 
             # Metadata
             if field_parts[0] == "metadata" and len(field_parts) > 1:
@@ -1327,8 +1616,11 @@ class MonoService:
                     field_expr = field_expr.op("->")(part)
                 field_expr = field_expr.op("->>")(json_path_parts[-1])
 
-                query = select(func.distinct(field_expr)).where(field_expr.isnot(None))
-                query = ctx.apply_base_filter(query)
+                query = select(func.distinct(field_expr)).where(
+                    SQLAAgentRun.collection_id == ctx.collection_id,
+                    field_expr.isnot(None),
+                )
+                query = apply_agent_run_filter(query)
 
                 if search:
                     query = query.where(field_expr.ilike(func.concat("%", search, "%")))
@@ -1349,10 +1641,11 @@ class MonoService:
                     .join(SQLAAgentRun, SQLAAgentRun.id == SQLATag.agent_run_id)
                     .where(
                         SQLATag.collection_id == ctx.collection_id,
+                        SQLAAgentRun.collection_id == ctx.collection_id,
                         tag_value_expr.isnot(None),
                     )
                 )
-                query = ctx.apply_base_filter(query)
+                query = apply_agent_run_filter(query)
 
                 if search:
                     query = query.where(tag_value_expr.ilike(func.concat("%", search, "%")))
@@ -1363,7 +1656,121 @@ class MonoService:
                 values = [row[0] for row in result.fetchall() if row[0] is not None]
                 return sorted(values)
 
-            # Rubrics (+others) are not supported yet
+            # Labels
+            elif field_parts[0] == "label" and len(field_parts) >= 3:
+                label_set_id = field_parts[1]
+                json_path_parts = field_parts[2:]
+                for part in json_path_parts:
+                    if not part.replace("_", "").replace("-", "").isalnum():
+                        return []
+
+                field_expr = SQLALabel.label_value
+                for part in json_path_parts[:-1]:
+                    field_expr = field_expr.op("->")(part)
+                field_expr = field_expr.op("->>")(json_path_parts[-1])
+
+                query = (
+                    select(func.distinct(field_expr))
+                    .select_from(SQLALabel)
+                    .join(SQLAAgentRun, SQLAAgentRun.id == SQLALabel.agent_run_id)
+                    .where(
+                        SQLALabel.label_set_id == label_set_id,
+                        SQLAAgentRun.collection_id == ctx.collection_id,
+                        field_expr.isnot(None),
+                    )
+                )
+                query = apply_agent_run_filter(query)
+
+                if search:
+                    query = query.where(field_expr.ilike(func.concat("%", search, "%")))
+
+                query = query.limit(limit)
+
+                result = await session.execute(query)
+                values = [row[0] for row in result.fetchall() if row[0] is not None]
+                return sorted(values)
+
+            # Rubrics
+            elif field_parts[0] == "rubric" and len(field_parts) >= 3:
+                rubric_id = field_parts[1]
+                json_path_parts = field_parts[2:]
+                for part in json_path_parts:
+                    if not part.replace("_", "").replace("-", "").isalnum():
+                        return []
+
+                field_expr = SQLAJudgeResult.output
+                for part in json_path_parts[:-1]:
+                    field_expr = field_expr.op("->")(part)
+                field_expr = field_expr.op("->>")(json_path_parts[-1])
+
+                latest_version_subquery = (
+                    select(func.max(SQLARubric.version))
+                    .where(
+                        SQLARubric.id == rubric_id,
+                        SQLARubric.collection_id == ctx.collection_id,
+                    )
+                    .scalar_subquery()
+                )
+
+                query = (
+                    select(func.distinct(field_expr))
+                    .select_from(SQLAJudgeResult)
+                    .join(SQLAAgentRun, SQLAAgentRun.id == SQLAJudgeResult.agent_run_id)
+                    .where(
+                        SQLAJudgeResult.rubric_id == rubric_id,
+                        SQLAJudgeResult.rubric_version == latest_version_subquery,
+                        SQLAJudgeResult.result_type == ResultType.DIRECT_RESULT,
+                        field_expr.isnot(None),
+                        SQLAAgentRun.collection_id == ctx.collection_id,
+                    )
+                )
+
+                if filter_obj is not None:
+                    uses_tags = filter_uses_tags(filter_obj)
+                    uses_labels = filter_uses_labels(filter_obj)
+                    label_set_ids: set[str] = (
+                        collect_label_set_ids(filter_obj) if uses_labels else set()
+                    )
+
+                    tag_table = None
+                    if uses_tags:
+                        query = query.outerjoin(SQLATag, SQLATag.agent_run_id == SQLAAgentRun.id)
+                        tag_table = SQLATag
+
+                    label_tables: dict[str, Any] | None = None
+                    if uses_labels:
+                        label_tables = {}
+                        for idx, label_set_id in enumerate(sorted(label_set_ids)):
+                            label_alias = aliased(SQLALabel, name=f"label_filter_{idx}")
+                            query = query.outerjoin(
+                                label_alias,
+                                and_(
+                                    label_alias.agent_run_id == SQLAAgentRun.id,
+                                    label_alias.label_set_id == label_set_id,
+                                ),
+                            )
+                            label_tables[label_set_id] = label_alias
+
+                    filter_clause = build_judge_result_filter_clause(
+                        filter_obj,
+                        rubric_id=rubric_id,
+                        judge_result_table=SQLAJudgeResult,
+                        agent_run_table=SQLAAgentRun,
+                        tag_table=tag_table,
+                        label_tables=label_tables,
+                    )
+                    if filter_clause is not None:
+                        query = query.where(filter_clause)
+
+                if search:
+                    query = query.where(field_expr.ilike(func.concat("%", search, "%")))
+
+                query = query.limit(limit)
+
+                result = await session.execute(query)
+                values = [row[0] for row in result.fetchall() if row[0] is not None]
+                return sorted(values)
+
             else:
                 return []
 
@@ -2939,6 +3346,18 @@ class MonoService:
             for path, field_type in _extract_schema_fields(rubric.output_schema):
                 field_name = f"rubric.{rubric.id}.{path}"
                 all_fields[field_name] = FilterableField(name=field_name, type=field_type)
+
+        # Query label sets for the collection and extract fields from their schemas
+        async with self.db.session() as session:
+            label_set_result = await session.execute(
+                select(SQLALabelSet).where(SQLALabelSet.collection_id == ctx.collection_id)
+            )
+            label_sets = list(label_set_result.scalars().all())
+
+        for label_set in label_sets:
+            for path, field_type in _extract_schema_fields(label_set.label_schema):
+                field_name = f"label.{label_set.id}.{path}"
+                all_fields[field_name] = {"name": field_name, "type": field_type}
 
         judge_where: ColumnElement[bool] | None = None
         if rubric_id is not None:

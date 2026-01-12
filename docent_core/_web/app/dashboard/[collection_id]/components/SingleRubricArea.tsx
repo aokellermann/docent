@@ -20,8 +20,8 @@ import {
   AgentRunJudgeResults,
   useGetRubricQuery,
   useGetLatestRubricVersionQuery,
-  useGetJudgeResultFilterFieldsQuery,
 } from '../../../api/rubricApi';
+import { useFilterFields } from '@/hooks/use-filter-fields';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -165,17 +165,10 @@ export default function SingleRubricArea({
   const [viewMode, setViewMode] = useState<ViewMode>('all');
   const [showFailures, setShowFailures] = useState(false);
 
-  const { data: filterFieldsData } = useGetJudgeResultFilterFieldsQuery(
-    {
-      collectionId: collectionId!,
-      rubricId,
-      version,
-    },
-    {
-      skip: !collectionId,
-    }
-  );
-  const agentRunMetadataFields = filterFieldsData?.fields ?? [];
+  const { fields: agentRunMetadataFields } = useFilterFields({
+    collectionId,
+    context: { mode: 'judge_results', rubricId, rubricVersion: version },
+  });
 
   const {
     // Rubric job status

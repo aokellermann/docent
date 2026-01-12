@@ -63,6 +63,7 @@ import {
 import { toast } from 'sonner';
 import { ComplexFilter } from '@/app/types/collectionTypes';
 import { copyDqlToClipboard } from '@/app/utils/copyDql';
+import { formatFilterFieldLabel } from '@/app/utils/formatMetadataField';
 
 export type AgentRunTableRow = {
   agentRunId: string;
@@ -78,43 +79,48 @@ export const MAX_SELECTED_COLUMNS = 20;
 function useDebouncedMetadataRequest(
   agentRunIds: string[] | undefined,
   metadataData: Record<string, Record<string, unknown>>,
-  loadingMetadataIds: Set<string>,
-  requestedMetadataIds: Set<string>,
   selectedColumns: string[],
   startIndex: number,
   endIndex: number,
   requestMetadataForIds: (
     ids: string[],
-    options?: { force?: boolean }
+    options?: { force?: boolean; fields?: string[] }
   ) => Promise<Record<string, Record<string, unknown>>>
 ) {
+  const selectedMetadataFields = useMemo(
+    () => selectedColumns.filter((column) => column !== 'agent_run_id'),
+    [selectedColumns]
+  );
+
   // Create a key that changes when we need to make a new request
   const requestKey = useMemo(() => {
-    if (!agentRunIds || !agentRunIds.length || selectedColumns.length === 0) {
+    if (
+      !agentRunIds ||
+      !agentRunIds.length ||
+      selectedMetadataFields.length === 0
+    ) {
       return null;
     }
 
     const prefetchStart = Math.max(startIndex - OVERSCAN_COUNT, 0);
     const prefetchEnd = Math.min(endIndex + OVERSCAN_COUNT, agentRunIds.length);
     const idsToCheck = agentRunIds.slice(prefetchStart, prefetchEnd);
-    const missing = idsToCheck.filter(
-      (id) =>
-        !metadataData[id] &&
-        !loadingMetadataIds.has(id) &&
-        !requestedMetadataIds.has(id)
-    );
+    const needsFields = (runId: string) => {
+      const data = metadataData[runId];
+      if (!data) {
+        return true;
+      }
+      const loadedFields = data._loaded_fields as Set<string> | undefined;
+      if (!loadedFields) {
+        return true;
+      }
+      return selectedMetadataFields.some((column) => !loadedFields.has(column));
+    };
+    const missing = idsToCheck.filter((id) => needsFields(id));
 
     // Return a string key that represents the current request state
-    return missing.length > 0 ? missing.sort().join(',') : null;
-  }, [
-    agentRunIds,
-    endIndex,
-    metadataData,
-    loadingMetadataIds,
-    requestedMetadataIds,
-    startIndex,
-    selectedColumns,
-  ]);
+    return missing.length > 0 ? missing.join(',') : null;
+  }, [agentRunIds, endIndex, metadataData, startIndex, selectedMetadataFields]);
 
   // Debounce the request key
   const debouncedRequestKey = useDebounce(
@@ -126,16 +132,16 @@ function useDebouncedMetadataRequest(
   useEffect(() => {
     if (debouncedRequestKey) {
       const idsToRequest = debouncedRequestKey.split(',');
-      void requestMetadataForIds(idsToRequest);
+      void requestMetadataForIds(idsToRequest, {
+        fields: selectedMetadataFields,
+      });
     }
-  }, [debouncedRequestKey, requestMetadataForIds]);
+  }, [debouncedRequestKey, requestMetadataForIds, selectedMetadataFields]);
 }
 
 export interface AgentRunTableProps {
   agentRunIds?: string[];
   metadataData: Record<string, Record<string, unknown>>;
-  loadingMetadataIds: Set<string>;
-  requestedMetadataIds: Set<string>;
   availableColumns: string[];
   selectedColumns: string[];
   onSelectedColumnsChange: (columns: string[]) => void;
@@ -152,7 +158,7 @@ export interface AgentRunTableProps {
   ) => void;
   requestMetadataForIds: (
     ids: string[],
-    options?: { force?: boolean }
+    options?: { force?: boolean; fields?: string[] }
   ) => Promise<Record<string, Record<string, unknown>>>;
   dropZoneHandlers: {
     onDragOver: (event: ReactDragEvent<HTMLDivElement>) => void;
@@ -374,8 +380,6 @@ const AgentRunTableCell = memo(function AgentRunTableCell({
 export const AgentRunTable = memo(function AgentRunTable({
   agentRunIds,
   metadataData,
-  loadingMetadataIds,
-  requestedMetadataIds,
   availableColumns,
   selectedColumns,
   onSelectedColumnsChange,
@@ -402,8 +406,6 @@ export const AgentRunTable = memo(function AgentRunTable({
   // Ref to access metadataData in cell render functions without causing columns useMemo to re-run
   const metadataDataRef = useRef(metadataData);
   metadataDataRef.current = metadataData;
-  const loadingMetadataIdsRef = useRef(loadingMetadataIds);
-  loadingMetadataIdsRef.current = loadingMetadataIds;
   const [scrollTop, setScrollTop] = useState(0);
   const [containerHeight, setContainerHeight] = useState(0);
   // https://nextjs.org/docs/messages/react-hydration-error#solution-1-using-useeffect-to-run-on-the-client-only
@@ -546,6 +548,7 @@ export const AgentRunTable = memo(function AgentRunTable({
       try {
         const fetchedMetadata = await requestMetadataForIds(missingIds, {
           force: true,
+          fields: exportColumns,
         });
         const combinedMetadata = {
           ...metadataData,
@@ -761,7 +764,7 @@ export const AgentRunTable = memo(function AgentRunTable({
         header: () => (
           <SortToggle
             columnKey={columnKey}
-            label={columnKey}
+            label={formatFilterFieldLabel(columnKey)}
             sortable={sortableColumns.has(columnKey)}
             currentSortField={sortField}
             currentSortDirection={sortDirection}
@@ -774,8 +777,12 @@ export const AgentRunTable = memo(function AgentRunTable({
           // Use ref to avoid re-creating columns when metadataData changes
           const processedData = metadataDataRef.current[runId];
 
-          // Show skeleton if we don't have data OR if loading
-          if (!processedData || loadingMetadataIdsRef.current.has(runId)) {
+          const loadedFields = processedData?._loaded_fields as
+            | Set<string>
+            | undefined;
+          const isFieldLoaded = loadedFields?.has(columnKey) ?? false;
+
+          if (!processedData || !isFieldLoaded) {
             return <Skeleton className="h-4 w-full" />;
           }
 
@@ -815,7 +822,22 @@ export const AgentRunTable = memo(function AgentRunTable({
           }
 
           // Format the value - empty string if key doesn't exist, "null" if key exists with null value
-          const text = formatCellValue(value, keyExists);
+          let text = formatCellValue(value, keyExists);
+          if (columnKey === 'tag' && Array.isArray(value)) {
+            text = value.join(', ');
+          }
+          if (columnKey.startsWith('rubric.') && keyExists) {
+            const structured = processedData._structured as
+              | Record<string, unknown>
+              | undefined;
+            const rubricCounts = structured?._rubric_counts as
+              | Record<string, { matched: number; total: number }>
+              | undefined;
+            const count = rubricCounts?.[columnKey];
+            if (count && count.total > 1) {
+              text = `${text} (${count.matched}/${count.total})`;
+            }
+          }
           return (
             <span className="text-xs text-foreground truncate block">
               {text}
@@ -884,8 +906,6 @@ export const AgentRunTable = memo(function AgentRunTable({
   useDebouncedMetadataRequest(
     agentRunIds,
     metadataData,
-    loadingMetadataIds,
-    requestedMetadataIds,
     selectedColumns,
     startIndex,
     endIndex,
@@ -1016,7 +1036,7 @@ export const AgentRunTable = memo(function AgentRunTable({
       { value: 'none', label: 'No sorting' },
       ...Array.from(sortableColumns).map((field) => ({
         value: field,
-        label: field,
+        label: formatFilterFieldLabel(field),
       })),
     ],
     [sortableColumns]
@@ -1027,9 +1047,10 @@ export const AgentRunTable = memo(function AgentRunTable({
       availableColumns.map((column) => {
         const isSelected = selectedColumns.includes(column);
         const shouldDisable = isAtColumnLimit && !isSelected;
+        const label = formatFilterFieldLabel(column);
         return {
           value: column,
-          label: shouldDisable ? `${column} (limit reached)` : column,
+          label: shouldDisable ? `${label} (limit reached)` : label,
           disabled: shouldDisable,
         };
       }),
@@ -1388,7 +1409,9 @@ export const AgentRunTable = memo(function AgentRunTable({
                           const isFilterable =
                             !filterableColumns ||
                             filterableColumns.has(columnKey);
-                          const hasFilterValue = cellValue !== undefined;
+                          const hasFilterValue =
+                            cellValue !== undefined &&
+                            !Array.isArray(cellValue);
 
                           return (
                             <AgentRunTableCell

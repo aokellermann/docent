@@ -12,10 +12,10 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Loader2 } from 'lucide-react';
 import { useState, useMemo } from 'react';
 import { useSelector } from 'react-redux';
-import { useGetAgentRunMetadataFieldsQuery } from '@/app/api/collectionApi';
 import { FilterControls } from '@/app/components/FilterControls';
 import { FilterChips } from '@/app/components/FilterChips';
-import { ComplexFilter } from '@/app/types/collectionTypes';
+import { ComplexFilter, PrimitiveFilter } from '@/app/types/collectionTypes';
+import { useFilterFields } from '@/hooks/use-filter-fields';
 import {
   useStartEvaluationMutation,
   useEstimateCostQuery,
@@ -45,13 +45,19 @@ export default function RunRubricDialog({
   const { activeLabelSet } = useLabelSets(rubricId);
 
   const [filter, setFilter] = useState<ComplexFilter | null>(null);
-
-  const { data: metadataFieldsData } = useGetAgentRunMetadataFieldsQuery(
-    collectionId,
-    {
-      skip: !collectionId,
-    }
+  const [editingFilter, setEditingFilter] = useState<PrimitiveFilter | null>(
+    null
   );
+
+  const handleFiltersChange = (filters: ComplexFilter | null) => {
+    setFilter(filters);
+    setEditingFilter(null);
+  };
+
+  const { fields: agentRunMetadataFields } = useFilterFields({
+    collectionId,
+    context: { mode: 'agent_runs' },
+  });
 
   const costEstimateParams = useMemo(
     () => ({
@@ -95,11 +101,6 @@ export default function RunRubricDialog({
   const costEstimate = cachedResult?.data;
   const isCostLoading = !costEstimate && (isDebouncing || isFetching);
 
-  // Backend doesn't support filtering on rubric outputs
-  const agentRunMetadataFields = (metadataFieldsData?.fields || []).filter(
-    (field) => !field.name.startsWith('rubric.')
-  );
-
   const handleRun = async () => {
     await startEvaluation(costEstimateParams);
     onClose();
@@ -115,19 +116,27 @@ export default function RunRubricDialog({
         <div className="space-y-4">
           {/* Filter */}
           <div className="space-y-2">
-            <Label>Filter agent runs</Label>
+            <div className="flex items-center justify-between">
+              <Label>Filter agent runs</Label>
+              <span className="text-sm text-muted-foreground">
+                {isCostLoading || !costEstimate
+                  ? '...'
+                  : `${costEstimate.agent_run_count} matching`}
+              </span>
+            </div>
             <div className="border rounded-md p-2 space-y-2">
               <FilterControls
                 filters={filter}
-                onFiltersChange={setFilter}
+                onFiltersChange={handleFiltersChange}
                 metadataFields={agentRunMetadataFields}
                 collectionId={collectionId}
                 showStepFilter={false}
+                initialFilter={editingFilter}
               />
               <FilterChips
                 filters={filter}
-                onFiltersChange={setFilter}
-                allowToggle={false}
+                onFiltersChange={handleFiltersChange}
+                onRequestEdit={setEditingFilter}
               />
             </div>
           </div>

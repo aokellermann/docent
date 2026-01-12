@@ -1,3 +1,5 @@
+import asyncio
+import json
 import os
 import tempfile
 import time
@@ -14,6 +16,7 @@ from fastapi import (
     Depends,
     File,
     HTTPException,
+    Query,
     Request,
     Response,
     UploadFile,
@@ -703,12 +706,8 @@ async def agent_run_sortable_fields(
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.READ)),
 ) -> dict[str, list[FilterableField]]:
-    """Get sortable fields for agent runs. Currently supports metadata.x.y fields and created_at."""
+    """Get sortable fields for agent runs."""
     fields: list[FilterableField] = await mono_svc.get_agent_run_metadata_fields(ctx)
-    # Include metadata fields for sorting (metadata.x.y format)
-    fields = [field for field in fields if field["name"].startswith("metadata.")]
-    # Add agent_run_id first, then created_at field as sortable fields
-    fields.insert(0, {"name": "agent_run_id", "type": "str"})
     fields.append({"name": "created_at", "type": "str"})
     return {"fields": fields}
 
@@ -717,12 +716,31 @@ async def agent_run_sortable_fields(
 async def get_field_values(
     field_name: str,
     search: str | None = None,
+    filter_json: str | None = Query(None, alias="filter"),
     mono_svc: MonoService = Depends(get_mono_svc),
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.READ)),
 ):
     """Get unique values for a specific metadata field, limited to 100 items."""
-    unique_values = await mono_svc.get_unique_field_values(ctx, field_name, search)
+    filter_obj: CollectionFilter | None = None
+    if filter_json:
+        try:
+            filter_dict = json.loads(filter_json)
+            filter_obj = parse_filter_dict(filter_dict)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="Invalid filter JSON") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        unique_values = await mono_svc.get_unique_field_values(
+            ctx,
+            field_name,
+            search,
+            filter_obj=filter_obj,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"values": unique_values}
 
 
@@ -806,6 +824,7 @@ async def get_agent_run_ids(
 
 class AgentRunMetadataRequest(BaseModel):
     agent_run_ids: list[str]
+    fields: list[str] | None = None
 
 
 @user_router.post("/{collection_id}/agent_run_metadata")
@@ -815,8 +834,12 @@ async def get_agent_run_metadata(
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.READ)),
 ):
+    # Delay to simulate slow metadata retrieval for UI loading tests.
+    await asyncio.sleep(3)
     # Query metadata directly without loading full agent runs
-    data = await mono_svc.get_metadata_for_agent_runs(ctx, request.agent_run_ids)
+    data = await mono_svc.get_metadata_for_agent_runs(
+        ctx, request.agent_run_ids, fields=request.fields
+    )
     return {k: to_jsonable_python(v) for k, v in data.items()}
 
 

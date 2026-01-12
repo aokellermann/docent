@@ -15,6 +15,7 @@ import {
   PopoverContent,
 } from '@/components/ui/popover';
 import { Command as CommandPrimitive } from 'cmdk';
+import { ComplexFilter } from '@/app/types/collectionTypes';
 import { useGetFieldValuesQuery } from '../api/collectionApi';
 import { useDebounce } from '../../hooks/use-debounce';
 
@@ -28,6 +29,7 @@ interface SmartValueInputProps {
   placeholder?: string;
   className?: string;
   type?: 'text' | 'number';
+  filters?: ComplexFilter | null;
 }
 
 export const SmartValueInput = React.forwardRef<
@@ -45,6 +47,7 @@ export const SmartValueInput = React.forwardRef<
       placeholder = 'Enter value...',
       className,
       type = 'text',
+      filters,
     },
     ref
   ) => {
@@ -57,15 +60,19 @@ export const SmartValueInput = React.forwardRef<
     // Debounce search to avoid too many API calls
     const debouncedSearch = useDebounce(inputValue, 300);
 
-    // Only enable dropdown for certain field types
+    // Enable dropdown for metadata, tag, label, and rubric fields
     const isDropdownField =
-      fieldName.startsWith('metadata.') || fieldName === 'tag';
+      fieldName.startsWith('metadata.') ||
+      fieldName === 'tag' ||
+      fieldName.startsWith('label.') ||
+      fieldName.startsWith('rubric.');
 
     const { data: fieldValuesData, isFetching } = useGetFieldValuesQuery(
       {
         collectionId,
         fieldName,
         search: debouncedSearch || undefined,
+        filter: filters ?? undefined,
       },
       {
         skip: !collectionId || !fieldName || !isDropdownField,

@@ -18,6 +18,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { useGetFieldValuesQuery } from '../api/collectionApi';
+import { ComplexFilter } from '@/app/types/collectionTypes';
 
 interface FieldValueSelectorProps {
   collectionId: string;
@@ -26,6 +27,7 @@ interface FieldValueSelectorProps {
   onValueChange: (value: string) => void;
   placeholder?: string;
   className?: string;
+  filters?: ComplexFilter | null;
 }
 
 export const FieldValueSelector = ({
@@ -35,11 +37,12 @@ export const FieldValueSelector = ({
   onValueChange,
   placeholder = 'Select value...',
   className,
+  filters,
 }: FieldValueSelectorProps) => {
   const [open, setOpen] = useState(false);
 
   const { data: fieldValuesData, isLoading } = useGetFieldValuesQuery(
-    { collectionId, fieldName },
+    { collectionId, fieldName, filter: filters ?? undefined },
     { skip: !collectionId || !fieldName }
   );
 

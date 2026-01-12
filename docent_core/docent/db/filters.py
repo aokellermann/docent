@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, Type, Union
 from uuid import uuid4
 
 from pydantic import BaseModel, Discriminator, Field, field_validator
-from sqlalchemy import Boolean, ColumnElement, Float, String, and_, case, cast, or_
+from sqlalchemy import Boolean, ColumnElement, Float, String, and_, case, cast, func, or_, select
 from sqlalchemy.orm import aliased
 
 from docent._log_util import get_logger
@@ -35,18 +35,28 @@ class FilterSQLContext:
         self._base_table = base_table
         self._rubric_aliases: dict[str, FilterJoinSpec] = {}
         self._tag_alias: FilterJoinSpec | None = None
+        self._label_aliases: dict[str, FilterJoinSpec] = {}
 
     def ensure_rubric_join(self, rubric_id: str) -> FilterJoinSpec:
         spec = self._rubric_aliases.get(rubric_id)
         if spec is not None:
             return spec
 
-        from docent_core.docent.db.schemas.rubric import SQLAJudgeResult
+        from docent_core.docent.db.schemas.rubric import SQLAJudgeResult, SQLARubric
 
         alias = aliased(SQLAJudgeResult, name=f"judge_result_{len(self._rubric_aliases)}")
+        latest_version_subquery = (
+            select(func.max(SQLARubric.version))
+            .where(
+                SQLARubric.id == rubric_id,
+                SQLARubric.collection_id == getattr(self._base_table, "collection_id"),
+            )
+            .scalar_subquery()
+        )
         onclause = and_(
             getattr(alias, "agent_run_id") == getattr(self._base_table, "id"),
             getattr(alias, "rubric_id") == rubric_id,
+            getattr(alias, "rubric_version") == latest_version_subquery,
         )
         spec = FilterJoinSpec(alias=alias, onclause=onclause)
         self._rubric_aliases[rubric_id] = spec
@@ -72,10 +82,30 @@ class FilterSQLContext:
     def get_tag_alias(self) -> FilterJoinSpec:
         return self.ensure_tag_join()
 
+    def ensure_label_join(self, label_set_id: str) -> FilterJoinSpec:
+        spec = self._label_aliases.get(label_set_id)
+        if spec is not None:
+            return spec
+
+        from docent_core.docent.db.schemas.label import SQLALabel
+
+        alias = aliased(SQLALabel, name=f"label_{len(self._label_aliases)}")
+        onclause = and_(
+            getattr(alias, "agent_run_id") == getattr(self._base_table, "id"),
+            getattr(alias, "label_set_id") == label_set_id,
+        )
+        spec = FilterJoinSpec(alias=alias, onclause=onclause)
+        self._label_aliases[label_set_id] = spec
+        return spec
+
+    def get_label_alias(self, label_set_id: str) -> FilterJoinSpec:
+        return self.ensure_label_join(label_set_id)
+
     def required_joins(self) -> tuple[FilterJoinSpec, ...]:
         joins: list[FilterJoinSpec] = list(self._rubric_aliases.values())
         if self._tag_alias is not None:
             joins.append(self._tag_alias)
+        joins.extend(self._label_aliases.values())
         return tuple(joins)
 
 
@@ -235,6 +265,14 @@ class PrimitiveFilter(BaseCollectionFilter):
                 raise ValueError("Tag filters do not support nested paths.")
             join_spec = context.get_tag_alias()
             sqla_value = join_spec.alias.value  # type: ignore[attr-defined]
+        elif mode == "label":
+            if context is None:
+                raise ValueError("Label filters require a SQL compilation context.")
+            if len(self.key_path) < 3:
+                raise ValueError("Label filters must include a JSON field path.")
+            join_spec = context.get_label_alias(self.key_path[1])
+            sqla_value = join_spec.alias.label_value  # type: ignore[attr-defined]
+            json_keys = self.key_path[2:]
         else:
             raise ValueError(f"Unsupported mode: {mode}")
 
@@ -244,7 +282,7 @@ class PrimitiveFilter(BaseCollectionFilter):
             for key in json_keys:
                 sqla_value = sqla_value[key]
 
-        if mode in {"metadata", "rubric"}:
+        if mode in {"metadata", "rubric", "label"}:
             if self.op == "is":
                 if not isinstance(self.value, str):
                     raise ValueError("The 'is' operator requires a string value")
@@ -374,12 +412,50 @@ def filter_uses_tags(filter_obj: CollectionFilter) -> bool:
     return False
 
 
+def filter_uses_labels(filter_obj: CollectionFilter) -> bool:
+    """Check if a filter tree contains any label filters."""
+    if filter_obj.disabled:
+        return False
+
+    if isinstance(filter_obj, PrimitiveFilter):
+        return filter_obj.key_path[0] == "label"
+    elif isinstance(filter_obj, ComplexFilter):
+        return any(filter_uses_labels(f) for f in filter_obj.filters)
+    elif isinstance(filter_obj, AgentRunIdFilter):  # type: ignore[unreachable]
+        return False
+
+    return False
+
+
+def collect_label_set_ids(filter_obj: CollectionFilter) -> set[str]:
+    """Collect label set IDs referenced by label filters."""
+    if filter_obj.disabled:
+        return set()
+
+    if isinstance(filter_obj, PrimitiveFilter):
+        if filter_obj.key_path[0] != "label":
+            return set()
+        if len(filter_obj.key_path) < 2:
+            return set()
+        return {filter_obj.key_path[1]}
+    elif isinstance(filter_obj, ComplexFilter):
+        label_set_ids: set[str] = set()
+        for sub_filter in filter_obj.filters:
+            label_set_ids.update(collect_label_set_ids(sub_filter))
+        return label_set_ids
+    elif isinstance(filter_obj, AgentRunIdFilter):  # type: ignore[unreachable]
+        return set()
+
+    return set()
+
+
 def build_judge_result_filter_clause(
     filter_obj: CollectionFilter,
     rubric_id: str,
     judge_result_table: Type["SQLAJudgeResult"],
     agent_run_table: Type["SQLAAgentRun"],
     tag_table: Any | None = None,
+    label_tables: dict[str, Any] | None = None,
 ) -> ColumnElement[bool] | None:
     """Build WHERE clause for judge result queries.
 
@@ -390,6 +466,7 @@ def build_judge_result_filter_clause(
       - rubric.{rubric_id}.* filters -> applied to judge_result_table.output
       - metadata.* filters -> applied to agent_run_table.metadata_json
       - tag filters -> applied to tag_table.value
+      - label.{label_set_id}.* filters -> applied to label_tables[label_set_id].label_value
       - agent_run_id mode -> applied to agent_run_table.id
       - created_at mode -> applied to agent_run_table.created_at
       - AgentRunIdFilter type -> applied to agent_run_table.id
@@ -400,6 +477,7 @@ def build_judge_result_filter_clause(
         judge_result_table: The SQLAJudgeResult table/alias in the query
         agent_run_table: The SQLAAgentRun table/alias in the query
         tag_table: The SQLATag table/alias for tag filters
+        label_tables: Dict mapping label_set_id to SQLALabel table/alias for label filters
 
     Returns:
         A SQLAlchemy WHERE clause, or None if the filter is disabled
@@ -442,6 +520,21 @@ def build_judge_result_filter_clause(
             if len(filter_obj.key_path) != 1:
                 raise ValueError("Tag filters do not support nested paths.")
             return apply_comparison(tag_table.value, filter_obj.value, filter_obj.op)  # type: ignore[attr-defined]
+        elif mode == "label":
+            if len(filter_obj.key_path) < 3:
+                raise ValueError("Label filters must include a JSON field path.")
+            label_set_id = filter_obj.key_path[1]
+            if label_tables is None or label_set_id not in label_tables:
+                raise ValueError(
+                    f"Label filter references label set '{label_set_id}' but no table provided for it."
+                )
+            json_keys = filter_obj.key_path[2:]
+            return build_json_filter_clause(
+                label_tables[label_set_id].label_value,  # type: ignore[attr-defined]
+                json_keys,
+                filter_obj.value,
+                filter_obj.op,
+            )
         elif mode == "agent_run_id":
             sqla_value = cast(agent_run_table.id, String)  # type: ignore[attr-defined]
             return apply_comparison(sqla_value, filter_obj.value, filter_obj.op)
@@ -451,14 +544,14 @@ def build_judge_result_filter_clause(
         else:
             raise ValueError(
                 f"Unsupported filter mode '{mode}' in judge result context. "
-                f"Only 'rubric', 'metadata', 'tag', 'agent_run_id', and 'created_at' filters are supported."
+                f"Only 'rubric', 'metadata', 'tag', 'label', 'agent_run_id', and 'created_at' filters are supported."
             )
 
     elif isinstance(filter_obj, ComplexFilter):
         where_clauses: list[ColumnElement[bool]] = []
         for sub_filter in filter_obj.filters:
             clause = build_judge_result_filter_clause(
-                sub_filter, rubric_id, judge_result_table, agent_run_table, tag_table
+                sub_filter, rubric_id, judge_result_table, agent_run_table, tag_table, label_tables
             )
             if clause is not None:
                 where_clauses.append(clause)

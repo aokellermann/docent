@@ -133,6 +133,7 @@ export interface CopyRubricRequest {
 export interface EstimateCostResponse {
   cost_cents: number;
   rollouts_needed: number;
+  agent_run_count: number;
   fraction_of_daily_limit: number | null;
   provider: string;
 }

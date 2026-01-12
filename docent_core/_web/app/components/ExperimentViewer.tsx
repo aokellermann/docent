@@ -30,7 +30,6 @@ import {
 import { useDebounce } from '@/hooks/use-debounce';
 import { useDragAndDrop } from '@/hooks/use-drag-drop';
 import {
-  useGetAgentRunIdsQuery,
   useGetAgentRunMetadataFieldsQuery,
   useGetAgentRunSortableFieldsQuery,
   collectionApi,
@@ -63,6 +62,9 @@ const processAgentRunMetadata = (
   result._structured = structuredMetadata;
 
   Object.entries(structuredMetadata).forEach(([key, value]) => {
+    if (key.startsWith('_')) {
+      return;
+    }
     if (key === 'metadata') {
       if (value && typeof value === 'object' && !Array.isArray(value)) {
         // Add top-level keys
@@ -88,12 +90,13 @@ const METADATA_FETCH_BATCH_SIZE = 200;
 
 type CachedExperimentViewerState = {
   metadataData: Record<string, Record<string, unknown>>;
-  discoveredColumns: string[];
   scrollPosition?: number;
   dqlQuery?: string;
   dqlResult?: DqlExecuteResponse | null;
   dqlError?: string | null;
 };
+
+type MetadataFieldsById = Record<string, Set<string>>;
 
 const experimentViewerCache = new Map<string, CachedExperimentViewerState>();
 
@@ -228,12 +231,17 @@ export default function ExperimentViewer({
   const [metadataData, setMetadataData] = useState<
     Record<string, Record<string, unknown>>
   >(() => cachedState?.metadataData ?? {});
-  const [loadingMetadataIds, setLoadingMetadataIds] = useState<Set<string>>(
-    () => new Set()
-  );
-  const [requestedMetadataIds, setRequestedMetadataIds] = useState<Set<string>>(
-    () => new Set()
-  );
+  const metadataDataRef = useRef(metadataData);
+  metadataDataRef.current = metadataData;
+  const [pendingMetadataFieldsById, setPendingMetadataFieldsById] =
+    useState<MetadataFieldsById>({});
+  const metadataRequestIdRef = useRef(0);
+  const activeMetadataRequestRef = useRef<{
+    id: number;
+    abort?: () => void;
+    pending: Map<string, Set<string>>;
+    canceled: boolean;
+  } | null>(null);
 
   // Helper function to get localStorage key for selected columns
   const getColumnsStorageKey = (collectionId: string | undefined) => {
@@ -247,9 +255,6 @@ export default function ExperimentViewer({
 
   const [selectedColumns, setSelectedColumns] = useState<string[]>([]);
   const [hasLoadedFromStorage, setHasLoadedFromStorage] = useState(false);
-  const [discoveredColumns, setDiscoveredColumns] = useState<Set<string>>(
-    () => new Set(cachedState?.discoveredColumns ?? [])
-  );
   const hasAutoSelectedColumnsRef = useRef(false);
   const [hasLoadedSortFromStorage, setHasLoadedSortFromStorage] =
     useState(false);
@@ -257,12 +262,7 @@ export default function ExperimentViewer({
 
   // Load persisted column selection on mount and when collectionId changes
   useEffect(() => {
-    if (cachedState?.discoveredColumns) {
-      setDiscoveredColumns(new Set(cachedState.discoveredColumns));
-    } else {
-      setDiscoveredColumns(new Set());
-      hasAutoSelectedColumnsRef.current = false;
-    }
+    hasAutoSelectedColumnsRef.current = false;
 
     const key = getColumnsStorageKey(collectionId);
     if (key) {
@@ -377,8 +377,51 @@ export default function ExperimentViewer({
     null
   );
 
+  const debugAgentRunsRef = useRef(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    debugAgentRunsRef.current =
+      window.localStorage.getItem('docent.debug.agent_runs') === '1';
+  }, [collectionId]);
+
+  const logAgentRunDebug = useCallback(
+    (event: string, details?: Record<string, unknown>) => {
+      if (!debugAgentRunsRef.current) {
+        return;
+      }
+      if (details) {
+        console.debug('[agent-runs]', event, details);
+        return;
+      }
+      console.debug('[agent-runs]', event);
+    },
+    []
+  );
+
   const [fetchAgentRunMetadata] =
     collectionApi.useLazyGetAgentRunMetadataQuery();
+  const [fetchAgentRunIds] = collectionApi.useLazyGetAgentRunIdsQuery();
+  const [postBaseFilter] = collectionApi.usePostBaseFilterMutation();
+  const baseFilterRequestIdRef = useRef(0);
+  const activeBaseFilterRequestRef = useRef<{
+    id: number;
+    abort?: () => void;
+  } | null>(null);
+  const [agentRunIds, setAgentRunIds] = useState<string[] | undefined>(
+    undefined
+  );
+  const agentRunIdsRef = useRef(agentRunIds);
+  agentRunIdsRef.current = agentRunIds;
+  const [isAgentRunIdsLoading, setIsAgentRunIdsLoading] = useState(false);
+  const [isAgentRunIdsFetching, setIsAgentRunIdsFetching] = useState(false);
+  const agentRunIdsRequestIdRef = useRef(0);
+  const activeAgentRunIdsRequestRef = useRef<{
+    id: number;
+    key: string;
+    abort?: () => void;
+  } | null>(null);
 
   const { data: metadataFieldsData } = useGetAgentRunMetadataFieldsQuery(
     collectionId!,
@@ -391,93 +434,239 @@ export default function ExperimentViewer({
     { skip: !collectionId }
   );
 
-  const { data: baseFilter } = useGetBaseFilterQuery(
+  const { data: serverBaseFilter } = useGetBaseFilterQuery(
     collectionId ? collectionId : skipToken
   );
+  const [appliedBaseFilter, setAppliedBaseFilter] = useState<
+    ComplexFilter | null | undefined
+  >(undefined);
+  const [draftBaseFilter, setDraftBaseFilter] = useState<
+    ComplexFilter | null | undefined
+  >(undefined);
+  const appliedBaseFilterRef = useRef(appliedBaseFilter);
+  appliedBaseFilterRef.current = appliedBaseFilter;
 
-  // Fetch agent run IDs using RTK skipToken
-  const {
-    data: agentRunIds,
-    isLoading: isLoadingAgentRuns,
-    isFetching: isFetchingAgentRuns,
-  } = useGetAgentRunIdsQuery(
-    collectionId
-      ? {
-          collectionId,
-          sortField: sortField || undefined,
-          sortDirection,
+  const getBaseFilterKey = useCallback((filter: ComplexFilter | null) => {
+    return filter ? JSON.stringify(filter) : 'none';
+  }, []);
+
+  useEffect(() => {
+    if (serverBaseFilter === undefined) {
+      return;
+    }
+    if (activeBaseFilterRequestRef.current) {
+      return;
+    }
+    const currentKey =
+      appliedBaseFilterRef.current === undefined
+        ? null
+        : getBaseFilterKey(appliedBaseFilterRef.current);
+    const serverKey = getBaseFilterKey(serverBaseFilter);
+    if (currentKey !== serverKey) {
+      setAppliedBaseFilter(serverBaseFilter);
+      setDraftBaseFilter(serverBaseFilter);
+    }
+  }, [getBaseFilterKey, serverBaseFilter]);
+
+  const applyBaseFilter = useCallback(
+    async (nextFilter: ComplexFilter | null) => {
+      if (!collectionId) {
+        return;
+      }
+      logAgentRunDebug('base_filter_apply', {
+        nextFilterKey: getBaseFilterKey(nextFilter),
+      });
+      setDraftBaseFilter(nextFilter);
+      if (
+        appliedBaseFilterRef.current !== undefined &&
+        getBaseFilterKey(appliedBaseFilterRef.current) ===
+          getBaseFilterKey(nextFilter)
+      ) {
+        return;
+      }
+      if (activeBaseFilterRequestRef.current?.abort) {
+        logAgentRunDebug('base_filter_abort', {
+          requestId: activeBaseFilterRequestRef.current.id,
+        });
+        activeBaseFilterRequestRef.current.abort();
+      }
+
+      const requestId = baseFilterRequestIdRef.current + 1;
+      baseFilterRequestIdRef.current = requestId;
+
+      const triggerResult = postBaseFilter({
+        collection_id: collectionId,
+        filter: nextFilter,
+      });
+
+      activeBaseFilterRequestRef.current = {
+        id: requestId,
+        abort:
+          typeof triggerResult.abort === 'function'
+            ? () => triggerResult.abort()
+            : undefined,
+      };
+      logAgentRunDebug('base_filter_request_start', {
+        requestId,
+        nextFilterKey: getBaseFilterKey(nextFilter),
+      });
+
+      try {
+        const response = await triggerResult.unwrap();
+        if (activeBaseFilterRequestRef.current?.id !== requestId) {
+          return;
         }
-      : skipToken
+        logAgentRunDebug('base_filter_request_success', {
+          requestId,
+          responseKey: getBaseFilterKey(response ?? null),
+        });
+        setAppliedBaseFilter(response ?? null);
+        setDraftBaseFilter(response ?? null);
+      } catch (error) {
+        if (activeBaseFilterRequestRef.current?.id !== requestId) {
+          return;
+        }
+        logAgentRunDebug('base_filter_request_error', { requestId });
+        console.error('Failed to update base filter', error);
+      } finally {
+        if (activeBaseFilterRequestRef.current?.id === requestId) {
+          activeBaseFilterRequestRef.current = null;
+        }
+      }
+    },
+    [collectionId, getBaseFilterKey, logAgentRunDebug, postBaseFilter]
   );
 
-  const isAgentRunQueryPending = isLoadingAgentRuns || isFetchingAgentRuns;
-
-  const derivedColumns = useMemo(() => {
-    const sortableFieldNames = new Set(
-      sortableFieldsData?.fields?.map((field) => field.name) ?? []
-    );
-    const keys = new Set<string>();
-
-    // Only add top-level metadata keys that aren't already in sortable fields
-    Object.values(metadataData).forEach((record) => {
-      Object.keys(record).forEach((key) => {
-        // Only add if it's a metadata.* key and not already in sortable fields
-        if (key.startsWith('metadata.') && !sortableFieldNames.has(key)) {
-          keys.add(key);
-        }
-      });
-    });
-
-    return Array.from(keys).sort();
-  }, [metadataData, sortableFieldsData]);
-
-  // Update discovered columns when new metadata is loaded
-  useEffect(() => {
-    const sortableFieldNames = new Set(
-      sortableFieldsData?.fields?.map((field) => field.name) ?? []
-    );
-    const newDiscoveredColumns = new Set(discoveredColumns);
-
-    // Add any new metadata columns that aren't already in sortable fields
-    Object.values(metadataData).forEach((record) => {
-      Object.keys(record).forEach((key) => {
-        if (key.startsWith('metadata.') && !sortableFieldNames.has(key)) {
-          newDiscoveredColumns.add(key);
-        }
-      });
-    });
-
-    // Only update if we found new columns
-    if (newDiscoveredColumns.size !== discoveredColumns.size) {
-      setDiscoveredColumns(newDiscoveredColumns);
+  const baseFilterKey = useMemo(() => {
+    if (appliedBaseFilter === undefined) {
+      return null;
     }
-  }, [metadataData, sortableFieldsData, discoveredColumns]);
+    return getBaseFilterKey(appliedBaseFilter);
+  }, [appliedBaseFilter, getBaseFilterKey]);
+
+  const agentRunIdsRequestKey = useMemo(() => {
+    if (!collectionId || baseFilterKey === null) {
+      return null;
+    }
+    return `${collectionId}:${sortField ?? ''}:${sortDirection}:${baseFilterKey}`;
+  }, [collectionId, sortField, sortDirection, baseFilterKey]);
+
+  useEffect(() => {
+    if (!agentRunIdsRequestKey || !collectionId) {
+      if (activeAgentRunIdsRequestRef.current?.abort) {
+        logAgentRunDebug('agent_run_ids_abort', {
+          requestId: activeAgentRunIdsRequestRef.current.id,
+          key: activeAgentRunIdsRequestRef.current.key,
+        });
+        activeAgentRunIdsRequestRef.current.abort();
+      }
+      activeAgentRunIdsRequestRef.current = null;
+      setAgentRunIds(undefined);
+      setIsAgentRunIdsLoading(baseFilterKey === null);
+      setIsAgentRunIdsFetching(false);
+      logAgentRunDebug('agent_run_ids_skip', {
+        collectionId,
+        baseFilterKey,
+      });
+      return;
+    }
+
+    if (activeAgentRunIdsRequestRef.current?.key === agentRunIdsRequestKey) {
+      return;
+    }
+
+    if (activeAgentRunIdsRequestRef.current?.abort) {
+      logAgentRunDebug('agent_run_ids_abort', {
+        requestId: activeAgentRunIdsRequestRef.current.id,
+        key: activeAgentRunIdsRequestRef.current.key,
+      });
+      activeAgentRunIdsRequestRef.current.abort();
+    }
+
+    const requestId = agentRunIdsRequestIdRef.current + 1;
+    agentRunIdsRequestIdRef.current = requestId;
+    const triggerResult = fetchAgentRunIds({
+      collectionId,
+      sortField: sortField || undefined,
+      sortDirection,
+    });
+
+    activeAgentRunIdsRequestRef.current = {
+      id: requestId,
+      key: agentRunIdsRequestKey,
+      abort: () => triggerResult.abort(),
+    };
+    logAgentRunDebug('agent_run_ids_request_start', {
+      requestId,
+      key: agentRunIdsRequestKey,
+    });
+    setIsAgentRunIdsFetching(true);
+    if (!agentRunIdsRef.current) {
+      setIsAgentRunIdsLoading(true);
+    }
+
+    triggerResult
+      .unwrap()
+      .then((response) => {
+        if (activeAgentRunIdsRequestRef.current?.id !== requestId) {
+          return;
+        }
+        logAgentRunDebug('agent_run_ids_request_success', {
+          requestId,
+          count: response.length,
+        });
+        setAgentRunIds(response);
+      })
+      .catch((error) => {
+        if (activeAgentRunIdsRequestRef.current?.id !== requestId) {
+          return;
+        }
+        if (error?.name === 'AbortError') {
+          logAgentRunDebug('agent_run_ids_request_aborted', { requestId });
+          return;
+        }
+        logAgentRunDebug('agent_run_ids_request_error', { requestId });
+        console.error('Failed to fetch agent run ids', error);
+      })
+      .finally(() => {
+        if (activeAgentRunIdsRequestRef.current?.id !== requestId) {
+          return;
+        }
+        logAgentRunDebug('agent_run_ids_request_done', { requestId });
+        setIsAgentRunIdsFetching(false);
+        setIsAgentRunIdsLoading(false);
+        activeAgentRunIdsRequestRef.current = null;
+      });
+  }, [
+    agentRunIdsRequestKey,
+    collectionId,
+    fetchAgentRunIds,
+    sortDirection,
+    sortField,
+    logAgentRunDebug,
+    baseFilterKey,
+  ]);
+  const isLoadingAgentRuns = isAgentRunIdsLoading;
+  const isFetchingAgentRuns = isAgentRunIdsFetching;
+
+  const isAgentRunQueryPending =
+    appliedBaseFilter === undefined ||
+    isLoadingAgentRuns ||
+    isFetchingAgentRuns;
 
   const availableColumns = useMemo(() => {
-    // Start with sortable fields from backend
-    const sortableFieldNames =
-      sortableFieldsData?.fields?.map((field) => field.name) ?? [];
-
-    // Filter out agent_run_id since it's a hardcoded column that's always visible
-    const filteredSortableFields = sortableFieldNames.filter(
+    const filterableFieldNames = agentRunMetadataFields.map(
+      (field) => field.name
+    );
+    const filteredFieldNames = filterableFieldNames.filter(
       (key) => key !== 'agent_run_id'
     );
-
-    // Combine sortable fields with both current derived columns and persisted discovered columns
-    const allDiscoveredColumns = Array.from(discoveredColumns).sort();
-    const allColumns = [
-      ...filteredSortableFields,
-      ...derivedColumns,
-      ...allDiscoveredColumns,
-    ];
-
-    // Remove duplicates while preserving order
-    const uniqueColumns = Array.from(new Set(allColumns));
+    const uniqueColumns = Array.from(new Set(filteredFieldNames));
 
     // Sort in column display order:
     // non-config metadata, metadata.config.*, then created_at.
     return uniqueColumns.sort(compareAgentRunColumnNames);
-  }, [derivedColumns, sortableFieldsData, discoveredColumns]);
+  }, [agentRunMetadataFields]);
 
   // Apply default columns exactly once per collection when no user preference exists.
   useEffect(() => {
@@ -498,6 +687,16 @@ export default function ExperimentViewer({
     selectedColumns.length,
     setSelectedColumns,
   ]);
+
+  useEffect(() => {
+    if (availableColumns.length === 0) {
+      return;
+    }
+    setSelectedColumns((prev) => {
+      const next = prev.filter((column) => availableColumns.includes(column));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [availableColumns]);
 
   const sortableColumns = useMemo(
     () =>
@@ -528,9 +727,20 @@ export default function ExperimentViewer({
 
     if (!collectionId) {
       setMetadataData({});
-      setLoadingMetadataIds(new Set<string>());
-      setRequestedMetadataIds(new Set<string>());
-      setDiscoveredColumns(new Set());
+      setPendingMetadataFieldsById({});
+      setAppliedBaseFilter(undefined);
+      setDraftBaseFilter(undefined);
+      setAgentRunIds(undefined);
+      setIsAgentRunIdsLoading(false);
+      setIsAgentRunIdsFetching(false);
+      if (activeBaseFilterRequestRef.current?.abort) {
+        activeBaseFilterRequestRef.current.abort();
+      }
+      activeBaseFilterRequestRef.current = null;
+      if (activeAgentRunIdsRequestRef.current?.abort) {
+        activeAgentRunIdsRequestRef.current.abort();
+      }
+      activeAgentRunIdsRequestRef.current = null;
       setExperimentViewerScrollPosition(undefined);
       setScrollPosition(undefined);
       setDqlQuery(DEFAULT_DQL_QUERY);
@@ -543,9 +753,20 @@ export default function ExperimentViewer({
     const cached = experimentViewerCache.get(collectionId);
     setMetadataData(cached?.metadataData ?? {});
     // Always reset request tracking on navigation so missing metadata can be refetched.
-    setLoadingMetadataIds(new Set());
-    setRequestedMetadataIds(new Set());
-    setDiscoveredColumns(new Set(cached?.discoveredColumns ?? []));
+    setPendingMetadataFieldsById({});
+    setAppliedBaseFilter(undefined);
+    setDraftBaseFilter(undefined);
+    setAgentRunIds(undefined);
+    setIsAgentRunIdsLoading(false);
+    setIsAgentRunIdsFetching(false);
+    if (activeBaseFilterRequestRef.current?.abort) {
+      activeBaseFilterRequestRef.current.abort();
+    }
+    activeBaseFilterRequestRef.current = null;
+    if (activeAgentRunIdsRequestRef.current?.abort) {
+      activeAgentRunIdsRequestRef.current.abort();
+    }
+    activeAgentRunIdsRequestRef.current = null;
     setExperimentViewerScrollPosition(cached?.scrollPosition);
     setScrollPosition(cached?.scrollPosition);
     setDqlQuery(cached?.dqlQuery ?? DEFAULT_DQL_QUERY);
@@ -574,8 +795,7 @@ export default function ExperimentViewer({
 
   const handleUploadSuccess = useCallback(() => {
     setMetadataData({});
-    setLoadingMetadataIds(new Set<string>());
-    setRequestedMetadataIds(new Set<string>());
+    setPendingMetadataFieldsById({});
     dispatch(
       collectionApi.util.invalidateTags([
         'AgentRunIds',
@@ -584,6 +804,64 @@ export default function ExperimentViewer({
     );
   }, [dispatch]);
 
+  const updatePendingFields = useCallback(
+    (mode: 'add' | 'remove', idsToFields: Map<string, Iterable<string>>) => {
+      setPendingMetadataFieldsById((prev) => {
+        const next: MetadataFieldsById = { ...prev };
+        idsToFields.forEach((fields, id) => {
+          const current = new Set(prev[id] ?? []);
+          for (const field of fields) {
+            if (mode === 'add') {
+              current.add(field);
+            } else {
+              current.delete(field);
+            }
+          }
+          if (current.size === 0) {
+            delete next[id];
+          } else {
+            next[id] = current;
+          }
+        });
+        if (debugAgentRunsRef.current) {
+          let pendingFieldsCount = 0;
+          Object.values(next).forEach((fields) => {
+            pendingFieldsCount += fields.size;
+          });
+          logAgentRunDebug('metadata_pending_update', {
+            mode,
+            pendingIds: Object.keys(next).length,
+            pendingFields: pendingFieldsCount,
+          });
+        }
+        return next;
+      });
+    },
+    [logAgentRunDebug]
+  );
+
+  const cancelActiveMetadataRequest = useCallback(() => {
+    const activeRequest = activeMetadataRequestRef.current;
+    if (!activeRequest) {
+      return;
+    }
+    let pendingFieldCount = 0;
+    activeRequest.pending.forEach((fields) => {
+      pendingFieldCount += fields.size;
+    });
+    logAgentRunDebug('metadata_request_abort', {
+      requestId: activeRequest.id,
+      pendingIds: activeRequest.pending.size,
+      pendingFields: pendingFieldCount,
+    });
+    activeRequest.canceled = true;
+    if (activeRequest.abort) {
+      activeRequest.abort();
+    }
+    updatePendingFields('remove', activeRequest.pending);
+    activeMetadataRequestRef.current = null;
+  }, [updatePendingFields]);
+
   useEffect(() => {
     if (!collectionId) {
       return;
@@ -591,7 +869,6 @@ export default function ExperimentViewer({
 
     experimentViewerCache.set(collectionId, {
       metadataData,
-      discoveredColumns: Array.from(discoveredColumns),
       scrollPosition: experimentViewerScrollPosition,
       dqlQuery,
       dqlResult,
@@ -600,7 +877,6 @@ export default function ExperimentViewer({
   }, [
     collectionId,
     metadataData,
-    discoveredColumns,
     experimentViewerScrollPosition,
     dqlQuery,
     dqlResult,
@@ -659,85 +935,248 @@ export default function ExperimentViewer({
   }, [collectionId]);
 
   const requestMetadataForIds = useCallback(
-    async (ids: string[], options?: { force?: boolean }) => {
+    async (ids: string[], options?: { force?: boolean; fields?: string[] }) => {
       if (!collectionId || !ids.length) {
         return {};
       }
 
-      const uniqueIds = Array.from(new Set(ids));
-      const idsToFetch = uniqueIds.filter(
-        (id) =>
-          options?.force ||
-          (!metadataData[id] &&
-            !loadingMetadataIds.has(id) &&
-            !requestedMetadataIds.has(id))
+      const requestedFields = (options?.fields ?? []).filter(
+        (field) => field !== 'agent_run_id'
       );
-
-      if (!idsToFetch.length) {
+      if (requestedFields.length === 0) {
         return {};
       }
 
-      // Mark these IDs as requested immediately to prevent duplicate requests
-      setRequestedMetadataIds((prev) => {
-        const next = new Set(prev);
-        idsToFetch.forEach((id) => next.add(id));
-        return next;
+      const uniqueIds = Array.from(new Set(ids));
+      logAgentRunDebug('metadata_request_prepare', {
+        idsCount: uniqueIds.length,
+        fieldCount: requestedFields.length,
+        force: options?.force ?? false,
       });
+      const missingFieldsById = new Map<string, string[]>();
+      const pendingById = new Map<string, Set<string>>();
+      const currentMetadataData = metadataDataRef.current;
 
-      setLoadingMetadataIds((prev) => {
-        const next = new Set(prev);
-        idsToFetch.forEach((id) => next.add(id));
-        return next;
-      });
-
-      const fetched: Record<string, Record<string, unknown>> = {};
-
-      try {
-        for (let i = 0; i < idsToFetch.length; i += METADATA_FETCH_BATCH_SIZE) {
-          const chunk = idsToFetch.slice(i, i + METADATA_FETCH_BATCH_SIZE);
-          const response = await fetchAgentRunMetadata({
-            collectionId,
-            agent_run_ids: chunk,
-          }).unwrap();
-
-          Object.entries(response).forEach(([runId, structuredMetadata]) => {
-            const processed = processAgentRunMetadata(structuredMetadata);
-            fetched[runId] = processed;
-          });
-
-          setMetadataData((prev) => {
-            const next = { ...prev };
-            Object.entries(response).forEach(([runId, structuredMetadata]) => {
-              next[runId] = processAgentRunMetadata(structuredMetadata);
-            });
-            return next;
-          });
+      uniqueIds.forEach((id) => {
+        const loadedFields =
+          (currentMetadataData[id]?._loaded_fields as
+            | Set<string>
+            | undefined) ?? new Set();
+        const missingFields = requestedFields.filter((field) => {
+          if (options?.force) {
+            return true;
+          }
+          return !loadedFields.has(field);
+        });
+        if (missingFields.length > 0) {
+          missingFieldsById.set(id, missingFields);
+          pendingById.set(id, new Set(missingFields));
         }
-      } catch (error) {
-        console.error('Failed to fetch agent run metadata', error);
-        // On error, remove from requested set so we can retry later
-        setRequestedMetadataIds((prev) => {
-          const next = new Set(prev);
-          idsToFetch.forEach((id) => next.delete(id));
-          return next;
-        });
-        throw error;
-      } finally {
-        setLoadingMetadataIds((prev) => {
-          const next = new Set(prev);
-          idsToFetch.forEach((id) => next.delete(id));
-          return next;
-        });
-      }
+      });
 
-      return fetched;
+      if (missingFieldsById.size === 0) {
+        logAgentRunDebug('metadata_request_skip', {
+          reason: 'no_missing_fields',
+          idsCount: uniqueIds.length,
+          fieldCount: requestedFields.length,
+        });
+        return {};
+      }
+      const activeRequest = activeMetadataRequestRef.current;
+      if (activeRequest) {
+        let coveredByActive = true;
+        for (const [runId, fields] of missingFieldsById.entries()) {
+          const pendingFields = activeRequest.pending.get(runId);
+          if (!pendingFields) {
+            coveredByActive = false;
+            break;
+          }
+          for (const field of fields) {
+            if (!pendingFields.has(field)) {
+              coveredByActive = false;
+              break;
+            }
+          }
+          if (!coveredByActive) {
+            break;
+          }
+        }
+        if (coveredByActive) {
+          logAgentRunDebug('metadata_request_skip', {
+            reason: 'covered_by_active',
+            requestId: activeRequest.id,
+            idsCount: missingFieldsById.size,
+            fieldCount: requestedFields.length,
+          });
+          return {};
+        }
+      }
+      cancelActiveMetadataRequest();
+      const requestId = metadataRequestIdRef.current + 1;
+      metadataRequestIdRef.current = requestId;
+      const requestState = {
+        id: requestId,
+        pending: pendingById,
+        canceled: false,
+        abort: undefined as (() => void) | undefined,
+      };
+      activeMetadataRequestRef.current = requestState;
+      updatePendingFields('add', missingFieldsById);
+      let missingFieldCount = 0;
+      missingFieldsById.forEach((fields) => {
+        missingFieldCount += fields.length;
+      });
+      logAgentRunDebug('metadata_request_start', {
+        requestId,
+        idsCount: missingFieldsById.size,
+        fieldCount: requestedFields.length,
+        missingFieldCount,
+      });
+
+      const runRequest = async () => {
+        const fetched: Record<string, Record<string, unknown>> = {};
+        const groupedRequests = new Map<
+          string,
+          { fields: string[]; ids: string[] }
+        >();
+
+        missingFieldsById.forEach((fields, id) => {
+          const sortedFields = [...fields].sort();
+          const key = sortedFields.join('|');
+          const existing = groupedRequests.get(key);
+          if (existing) {
+            existing.ids.push(id);
+          } else {
+            groupedRequests.set(key, { fields: sortedFields, ids: [id] });
+          }
+        });
+
+        try {
+          for (const { fields, ids } of groupedRequests.values()) {
+            for (let i = 0; i < ids.length; i += METADATA_FETCH_BATCH_SIZE) {
+              if (activeMetadataRequestRef.current?.id !== requestId) {
+                logAgentRunDebug('metadata_request_stale', { requestId });
+                return fetched;
+              }
+
+              const chunk = ids.slice(i, i + METADATA_FETCH_BATCH_SIZE);
+              const triggerResult = fetchAgentRunMetadata({
+                collectionId,
+                agent_run_ids: chunk,
+                fields: fields.length > 0 ? fields : undefined,
+              });
+              requestState.abort = () => triggerResult.abort();
+              const response = await triggerResult.unwrap();
+
+              if (activeMetadataRequestRef.current?.id !== requestId) {
+                logAgentRunDebug('metadata_request_stale', { requestId });
+                return fetched;
+              }
+
+              Object.entries(response).forEach(
+                ([runId, structuredMetadata]) => {
+                  const processed = processAgentRunMetadata(structuredMetadata);
+                  const existing = metadataDataRef.current[runId] ?? {};
+                  const existingLoadedFields =
+                    (existing._loaded_fields as Set<string> | undefined) ??
+                    new Set();
+                  const mergedLoadedFields = new Set([
+                    ...existingLoadedFields,
+                    ...fields,
+                  ]);
+                  fetched[runId] = {
+                    ...existing,
+                    ...processed,
+                    _loaded_fields: mergedLoadedFields,
+                  };
+                }
+              );
+
+              setMetadataData((prev) => {
+                const next = { ...prev };
+                Object.entries(response).forEach(
+                  ([runId, structuredMetadata]) => {
+                    const processed =
+                      processAgentRunMetadata(structuredMetadata);
+                    const existing = next[runId] ?? {};
+                    const existingLoadedFields =
+                      (existing._loaded_fields as Set<string> | undefined) ??
+                      new Set();
+                    const mergedLoadedFields = new Set([
+                      ...existingLoadedFields,
+                      ...fields,
+                    ]);
+                    next[runId] = {
+                      ...existing,
+                      ...processed,
+                      _loaded_fields: mergedLoadedFields,
+                    };
+                  }
+                );
+                return next;
+              });
+              const completedFieldsById = new Map<string, string[]>();
+              chunk.forEach((runId) => {
+                const pendingFields = requestState.pending.get(runId);
+                if (!pendingFields) {
+                  return;
+                }
+                const completedFields = fields.filter((field) =>
+                  pendingFields.has(field)
+                );
+                if (completedFields.length === 0) {
+                  return;
+                }
+                completedFields.forEach((field) => pendingFields.delete(field));
+                if (pendingFields.size === 0) {
+                  requestState.pending.delete(runId);
+                }
+                completedFieldsById.set(runId, completedFields);
+              });
+              if (completedFieldsById.size > 0) {
+                updatePendingFields('remove', completedFieldsById);
+              }
+            }
+          }
+        } catch (error) {
+          if (requestState.canceled) {
+            logAgentRunDebug('metadata_request_canceled', { requestId });
+            return fetched;
+          }
+          console.error('Failed to fetch agent run metadata', error);
+          logAgentRunDebug('metadata_request_error', { requestId });
+          throw error;
+        } finally {
+          if (activeMetadataRequestRef.current?.id === requestId) {
+            if (requestState.pending.size > 0) {
+              const remainingFieldsById = new Map<string, string[]>();
+              requestState.pending.forEach((fields, runId) => {
+                if (fields.size > 0) {
+                  remainingFieldsById.set(runId, Array.from(fields));
+                }
+              });
+              if (remainingFieldsById.size > 0) {
+                updatePendingFields('remove', remainingFieldsById);
+              }
+            }
+            activeMetadataRequestRef.current = null;
+          }
+        }
+
+        logAgentRunDebug('metadata_request_done', {
+          requestId,
+          fetchedCount: Object.keys(fetched).length,
+        });
+        return fetched;
+      };
+
+      return runRequest();
     },
     [
+      cancelActiveMetadataRequest,
       collectionId,
       fetchAgentRunMetadata,
-      loadingMetadataIds,
-      metadataData,
-      requestedMetadataIds,
+      updatePendingFields,
     ]
   );
 
@@ -817,26 +1256,21 @@ export default function ExperimentViewer({
       };
 
       const existingFilters =
-        mode === 'append' ? (baseFilter?.filters ?? []) : [];
+        mode === 'append' ? (draftBaseFilter?.filters ?? []) : [];
       const mergedFilters = [...existingFilters, nextFilter];
       const dedupedFilters = dedupePrimitiveFilters(mergedFilters);
 
       const updatedFilter: ComplexFilter = {
-        id: baseFilter?.id ?? uuid4(),
-        name: baseFilter?.name ?? null,
+        id: draftBaseFilter?.id ?? uuid4(),
+        name: draftBaseFilter?.name ?? null,
         type: 'complex',
         filters: dedupedFilters,
-        op: baseFilter?.op ?? 'and',
-        supports_sql: baseFilter?.supports_sql ?? true,
-        disabled: baseFilter?.disabled,
+        op: draftBaseFilter?.op ?? 'and',
+        supports_sql: draftBaseFilter?.supports_sql ?? true,
+        disabled: draftBaseFilter?.disabled,
       };
 
-      dispatch(
-        collectionApi.endpoints.postBaseFilter.initiate({
-          collection_id: collectionId,
-          filter: updatedFilter,
-        })
-      );
+      void applyBaseFilter(updatedFilter);
 
       posthog.capture('agent_run_table_quick_filter', {
         collectionId,
@@ -845,10 +1279,10 @@ export default function ExperimentViewer({
       });
     },
     [
-      baseFilter,
+      applyBaseFilter,
+      draftBaseFilter,
       collectionId,
       dedupePrimitiveFilters,
-      dispatch,
       normalizeFilterValue,
     ]
   );
@@ -948,13 +1382,15 @@ export default function ExperimentViewer({
           value="filters"
           className="mt-0 flex-1 flex flex-col gap-3 min-h-0 data-[state=active]:flex data-[state=inactive]:hidden"
         >
-          <TranscriptFilterControls metadataData={metadataData} />
+          <TranscriptFilterControls
+            metadataData={metadataData}
+            baseFilter={draftBaseFilter}
+            onFiltersChange={applyBaseFilter}
+          />
           <div className="flex-1 min-w-0 min-h-0 flex">
             <AgentRunTable
               agentRunIds={agentRunIds}
               metadataData={metadataData}
-              loadingMetadataIds={loadingMetadataIds}
-              requestedMetadataIds={requestedMetadataIds}
               availableColumns={availableColumns}
               selectedColumns={selectedColumns}
               onSelectedColumnsChange={setSelectedColumns}
@@ -963,6 +1399,7 @@ export default function ExperimentViewer({
               sortDirection={sortDirection}
               onSortChange={handleSortingChange}
               activeRunId={activeRunId}
+              baseFilter={appliedBaseFilter ?? null}
               requestMetadataForIds={requestMetadataForIds}
               dropZoneHandlers={dropZoneHandlers}
               isDragActive={isDragActive}

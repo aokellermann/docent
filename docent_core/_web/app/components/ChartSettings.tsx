@@ -29,7 +29,7 @@ import {
 } from '../api/chartApi';
 import { FilterControls } from './FilterControls';
 import { FilterChips } from './FilterChips';
-import { useGetAgentRunMetadataFieldsQuery } from '../api/collectionApi';
+import { useFilterFields } from '@/hooks/use-filter-fields';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -158,13 +158,10 @@ export default function ChartSettings({ chart, onChange }: ChartSettingsProps) {
   const { x_key, y_key, series_key, runs_filter } = chart;
   const collectionId = useAppSelector((state) => state.collection.collectionId);
   const hasWritePermission = useHasCollectionWritePermission();
-  const { data: metadataFieldsData } = useGetAgentRunMetadataFieldsQuery(
-    collectionId!,
-    {
-      skip: !collectionId,
-    }
-  );
-  const agentRunMetadataFields = metadataFieldsData?.fields ?? [];
+  const { fields: agentRunMetadataFields } = useFilterFields({
+    collectionId,
+    context: { mode: 'agent_runs' },
+  });
   const [filterPopoverOpen, setFilterPopoverOpen] = useState(false);
   const [editingFilter, setEditingFilter] = useState<PrimitiveFilter | null>(
     null

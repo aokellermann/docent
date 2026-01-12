@@ -1,6 +1,12 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, {
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  useMemo,
+} from 'react';
 import {
   PrimitiveFilter,
   MetadataType,
@@ -66,6 +72,7 @@ export const FilterControls = ({
   const [metadataOp, setMetadataOp] = useState<string>('==');
   const [nullSelectOpen, setNullSelectOpen] = useState(false);
   const [stepFilterValue, setStepFilterValue] = useState<number | null>(null);
+  const [hasStepFilterDraft, setHasStepFilterDraft] = useState(false);
   const valueFieldRef = useRef<HTMLInputElement>(null);
   const isNullOperator = metadataOp === 'is';
 
@@ -89,21 +96,29 @@ export const FilterControls = ({
     }
   }, [initialFilter]);
 
-  // Sync step filter state with existing filters
-  useEffect(() => {
+  const appliedStepValue = useMemo(() => {
     if (!filters?.filters) {
-      setStepFilterValue(null);
-      return;
+      return null;
     }
 
     const equalityFilter = filters.filters.find(isStepEqualityPrimitiveFilter);
-    if (equalityFilter) {
-      setStepFilterValue(equalityFilter.value);
+    return equalityFilter ? equalityFilter.value : null;
+  }, [filters]);
+
+  useEffect(() => {
+    if (!hasStepFilterDraft) {
+      setStepFilterValue(appliedStepValue);
+    }
+  }, [appliedStepValue, hasStepFilterDraft]);
+
+  useEffect(() => {
+    if (!hasStepFilterDraft) {
       return;
     }
-
-    setStepFilterValue(null);
-  }, [filters]);
+    if (appliedStepValue === stepFilterValue) {
+      setHasStepFilterDraft(false);
+    }
+  }, [appliedStepValue, hasStepFilterDraft, stepFilterValue]);
 
   const onUpdateMetadataFilter = (value: string) => {
     if (!metadataKey.trim()) {
@@ -186,52 +201,73 @@ export const FilterControls = ({
     }
   };
 
-  // Handle step filter changes
-  const handleStepFilterChange = useCallback(
+  const applyStepFilterValue = useCallback(
     (stepValue: number | null) => {
-      setStepFilterValue(stepValue);
-
-      // Remove any existing step filter
       const currentFilters =
         filters?.filters.filter((f) => !isStepEqualityPrimitiveFilter(f)) || [];
 
       if (stepValue === null) {
-        // No step filter
         if (currentFilters.length === 0) {
           onFiltersChange(null);
         } else {
           onFiltersChange({
-            ...filters!,
+            ...(filters ?? {
+              id: uuid4(),
+              name: null,
+              type: 'complex',
+              op: 'and',
+              supports_sql: true,
+            }),
             filters: currentFilters,
           });
         }
-      } else {
-        // Add step filter
-        const stepFilter: PrimitiveFilter = {
-          type: 'primitive',
-          key_path: ['metadata', 'step'],
-          value: stepValue,
-          op: '==',
-          id: uuid4(),
-          name: null,
-          supports_sql: true,
-          disabled: false,
-        };
-
-        const newComplexFilter: ComplexFilter = {
-          id: uuid4(),
-          name: null,
-          type: 'complex',
-          filters: [...currentFilters, stepFilter],
-          op: 'and',
-          supports_sql: true,
-        };
-
-        onFiltersChange(newComplexFilter);
+        return;
       }
+
+      const stepFilter: PrimitiveFilter = {
+        type: 'primitive',
+        key_path: ['metadata', 'step'],
+        value: stepValue,
+        op: '==',
+        id: uuid4(),
+        name: null,
+        supports_sql: true,
+        disabled: false,
+      };
+
+      const newComplexFilter: ComplexFilter = {
+        id: uuid4(),
+        name: null,
+        type: 'complex',
+        filters: [...currentFilters, stepFilter],
+        op: 'and',
+        supports_sql: true,
+      };
+
+      onFiltersChange(newComplexFilter);
     },
-    [filters]
+    [filters, onFiltersChange]
   );
+
+  const handleStepFilterChange = useCallback((stepValue: number | null) => {
+    setStepFilterValue(stepValue);
+    setHasStepFilterDraft(true);
+  }, []);
+
+  const handleStepFilterCommit = useCallback(
+    (stepValue: number | null) => {
+      if (stepValue === appliedStepValue) {
+        setHasStepFilterDraft(false);
+        return;
+      }
+      applyStepFilterValue(stepValue);
+    },
+    [appliedStepValue, applyStepFilterValue]
+  );
+
+  const stepFilterDisplayValue = hasStepFilterDraft
+    ? stepFilterValue
+    : appliedStepValue;
 
   // Auto-select type and op when field changes
   const handleFieldChange = (value: string) => {
@@ -425,6 +461,7 @@ export const FilterControls = ({
               onEnter={() => onUpdateMetadataFilter(metadataValue)}
               onSelect={(value) => onUpdateMetadataFilter(value)}
               placeholder="Enter value..."
+              filters={filters ?? null}
             />
           ) : (
             <Input
@@ -466,7 +503,8 @@ export const FilterControls = ({
           collectionId={collectionId}
           metadataData={metadataData}
           onStepFilterChange={handleStepFilterChange}
-          currentValue={stepFilterValue}
+          onStepFilterCommit={handleStepFilterCommit}
+          currentValue={stepFilterDisplayValue}
           disabled={false}
         />
       )}

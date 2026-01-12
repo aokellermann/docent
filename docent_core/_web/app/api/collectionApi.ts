@@ -45,6 +45,7 @@ interface UpdateCollectionRequest {
 
 interface AgentRunMetadataRequest {
   agent_run_ids: string[];
+  fields?: string[];
 }
 
 export interface AgentRunIngestJob {
@@ -142,7 +143,6 @@ export const collectionApi = createApi({
       }),
       invalidatesTags: [
         'BaseFilter',
-        'AgentRunIds',
         'AgentRunMetadataFieldValues',
         'AgentRunMetadataRange',
       ],
@@ -188,11 +188,20 @@ export const collectionApi = createApi({
     }),
     getFieldValues: build.query<
       { values: string[] },
-      { collectionId: string; fieldName: string; search?: string }
+      {
+        collectionId: string;
+        fieldName: string;
+        search?: string;
+        filter?: ComplexFilter | null;
+      }
     >({
-      query: ({ collectionId, fieldName, search }) => {
+      query: ({ collectionId, fieldName, search, filter }) => {
         const url = `/${collectionId}/field_values/${encodeURIComponent(fieldName)}`;
-        return search ? `${url}?search=${encodeURIComponent(search)}` : url;
+        const params = new URLSearchParams();
+        if (search) params.append('search', search);
+        if (filter) params.append('filter', JSON.stringify(filter));
+        const queryString = params.toString();
+        return queryString ? `${url}?${queryString}` : url;
       },
       providesTags: ['AgentRunMetadataFieldValues'],
     }),

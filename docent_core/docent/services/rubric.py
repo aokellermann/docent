@@ -6,9 +6,10 @@ from uuid import uuid4
 
 import anyio
 from pydantic import BaseModel
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from docent._log_util import get_logger
 from docent.data_models.agent_run import AgentRun
@@ -35,7 +36,13 @@ from docent_core.docent.ai_tools.rubric.reflect import (
     run_reflection,
 )
 from docent_core.docent.db.contexts import ViewContext
-from docent_core.docent.db.filters import CollectionFilter, filter_uses_tags, parse_filter_dict
+from docent_core.docent.db.filters import (
+    CollectionFilter,
+    collect_label_set_ids,
+    filter_uses_labels,
+    filter_uses_tags,
+    parse_filter_dict,
+)
 from docent_core.docent.db.schemas.label import SQLALabel, SQLATag
 from docent_core.docent.db.schemas.rubric import (
     SQLAJudgeReflection,
@@ -60,6 +67,7 @@ logger = get_logger(__name__)
 class EstimateCostResponse(BaseModel):
     cost_cents: float
     rollouts_needed: int
+    agent_run_count: int
     fraction_of_daily_limit: float | None
     provider: str
 
@@ -584,8 +592,13 @@ class RubricService:
 
         # Check if we'll need the tag join before building query
         uses_tags = False
+        uses_labels = False
+        label_set_ids: set[str] = set()
         if filter_obj is not None:
             uses_tags = filter_uses_tags(filter_obj)
+            uses_labels = filter_uses_labels(filter_obj)
+            if uses_labels:
+                label_set_ids = collect_label_set_ids(filter_obj)
 
         # Use DISTINCT when joining tags to prevent duplicates from multiple tag matches
         search_query = (
@@ -613,12 +626,27 @@ class RubricService:
                 )
                 tag_table = SQLATag
 
+            label_tables: dict[str, Any] | None = None
+            if uses_labels:
+                label_tables = {}
+                for idx, label_set_id in enumerate(sorted(label_set_ids)):
+                    label_alias = aliased(SQLALabel, name=f"label_filter_{idx}")
+                    search_query = search_query.outerjoin(
+                        label_alias,
+                        and_(
+                            label_alias.agent_run_id == SQLAAgentRun.id,
+                            label_alias.label_set_id == label_set_id,
+                        ),
+                    )
+                    label_tables[label_set_id] = label_alias
+
             filter_clause = build_judge_result_filter_clause(
                 filter_obj,
                 rubric_id=rubric_id,
                 judge_result_table=SQLAJudgeResult,
                 agent_run_table=SQLAAgentRun,
                 tag_table=tag_table,
+                label_tables=label_tables,
             )
             if filter_clause is not None:
                 search_query = search_query.where(filter_clause)
@@ -1586,6 +1614,7 @@ class RubricService:
             return EstimateCostResponse(
                 cost_cents=0.0,
                 rollouts_needed=0,
+                agent_run_count=len(agent_run_ids),
                 fraction_of_daily_limit=None,
                 provider=provider,
             )
@@ -1640,6 +1669,7 @@ class RubricService:
         return EstimateCostResponse(
             cost_cents=total_cost,
             rollouts_needed=total_rollouts_needed,
+            agent_run_count=len(agent_run_ids),
             fraction_of_daily_limit=fraction_of_daily_limit,
             provider=provider,
         )
