@@ -334,6 +334,7 @@ export const rubricApi = createApi({
         n_rollouts_per_input?: number;
         label_set_id?: string | null;
         filter?: ComplexFilter | null;
+        max_parallel?: number | null;
       }
     >({
       query: ({
@@ -343,6 +344,7 @@ export const rubricApi = createApi({
         n_rollouts_per_input,
         label_set_id,
         filter,
+        max_parallel,
       }) => ({
         url: `/${collectionId}/${rubricId}/evaluate`,
         method: 'POST',
@@ -351,6 +353,7 @@ export const rubricApi = createApi({
           n_rollouts_per_input: n_rollouts_per_input ?? 1,
           label_set_id: label_set_id ?? null,
           filter: filter ?? null,
+          max_parallel: max_parallel ?? null,
         },
       }),
       invalidatesTags: (result, error, { rubricId }) => [

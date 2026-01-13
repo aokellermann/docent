@@ -9,7 +9,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Loader2 } from 'lucide-react';
+import { Loader2, ChevronRight } from 'lucide-react';
 import { useState, useMemo } from 'react';
 import { useSelector } from 'react-redux';
 import { FilterControls } from '@/app/components/FilterControls';
@@ -20,9 +20,12 @@ import {
   useStartEvaluationMutation,
   useEstimateCostQuery,
   rubricApi,
+  useGetRubricQuery,
+  useGetJudgeModelsQuery,
 } from '@/app/api/rubricApi';
 import { useLabelSets } from '@/providers/use-label-sets';
 import { useDebounce } from '@/hooks/use-debounce';
+import { useGetAgentRunMetadataFieldsQuery } from '@/app/api/collectionApi';
 
 interface RunRubricDialogProps {
   isOpen: boolean;
@@ -40,6 +43,8 @@ export default function RunRubricDialog({
   const [runMode, setRunMode] = useState<'all' | 'first-n'>('all');
   const [maxResults, setMaxResults] = useState<string>('10');
   const [rolloutsPerInput, setRolloutsPerInput] = useState<string>('1');
+  const [maxParallel, setMaxParallel] = useState<string>('100');
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [startEvaluation, { isLoading: isStarting }] =
     useStartEvaluationMutation();
   const { activeLabelSet } = useLabelSets(rubricId);
@@ -47,6 +52,27 @@ export default function RunRubricDialog({
   const [filter, setFilter] = useState<ComplexFilter | null>(null);
   const [editingFilter, setEditingFilter] = useState<PrimitiveFilter | null>(
     null
+  );
+
+  // Fetch rubric and judge models to determine BYOK status
+  const { data: rubric } = useGetRubricQuery({ collectionId, rubricId });
+  const { data: judgeModels } = useGetJudgeModelsQuery();
+
+  const isByok = useMemo(() => {
+    if (!rubric?.judge_model || !judgeModels) return false;
+    const matchingModel = judgeModels.find(
+      (m) =>
+        m.provider === rubric.judge_model.provider &&
+        m.model_name === rubric.judge_model.model_name
+    );
+    return matchingModel?.uses_byok ?? false;
+  }, [rubric?.judge_model, judgeModels]);
+
+  const { data: metadataFieldsData } = useGetAgentRunMetadataFieldsQuery(
+    collectionId,
+    {
+      skip: !collectionId,
+    }
   );
 
   const handleFiltersChange = (filters: ComplexFilter | null) => {
@@ -102,7 +128,10 @@ export default function RunRubricDialog({
   const isCostLoading = !costEstimate && (isDebouncing || isFetching);
 
   const handleRun = async () => {
-    await startEvaluation(costEstimateParams);
+    await startEvaluation({
+      ...costEstimateParams,
+      max_parallel: maxParallel !== '' ? parseInt(maxParallel, 10) : null,
+    });
     onClose();
   };
 
@@ -187,19 +216,69 @@ export default function RunRubricDialog({
             </RadioGroup>
           </div>
 
-          {/* Rollouts per input */}
+          {/* Additional settings */}
           <div className="space-y-2">
-            <Label htmlFor="rollouts-per-input">Rollouts per agent run</Label>
-            <Input
-              id="rollouts-per-input"
-              type="number"
-              min="1"
-              max="10"
-              placeholder="1"
-              value={rolloutsPerInput}
-              onChange={(e) => setRolloutsPerInput(e.target.value)}
-              className="h-8"
-            />
+            <button
+              type="button"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground"
+            >
+              <ChevronRight
+                size={16}
+                className={`transition-transform ${showAdvanced ? 'rotate-90' : ''}`}
+              />
+              Additional settings
+            </button>
+            {showAdvanced && (
+              <div className="space-y-4 pl-5">
+                {/* Rollouts per input */}
+                <div className="space-y-2">
+                  <Label htmlFor="rollouts-per-input">
+                    Rollouts per agent run
+                  </Label>
+                  <Input
+                    id="rollouts-per-input"
+                    type="number"
+                    min="1"
+                    max="10"
+                    placeholder="1"
+                    value={rolloutsPerInput}
+                    onChange={(e) => setRolloutsPerInput(e.target.value)}
+                    className="h-8"
+                  />
+                </div>
+
+                {/* Max parallel requests */}
+                <div className="space-y-2">
+                  <Label htmlFor="max-parallel">Max parallel requests</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {isByok
+                      ? 'No limit for BYOK models.'
+                      : 'Capped at 100 to respect provider rate limits.'}
+                  </p>
+                  <Input
+                    id="max-parallel"
+                    type="number"
+                    min="1"
+                    max={isByok ? undefined : 100}
+                    placeholder="100"
+                    value={maxParallel}
+                    onChange={(e) => {
+                      let value = e.target.value;
+                      if (
+                        !isByok &&
+                        value !== '' &&
+                        parseInt(value, 10) > 100
+                      ) {
+                        value = '100';
+                      }
+                      setMaxParallel(value);
+                    }}
+                    className="h-8"
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Cost estimate */}
