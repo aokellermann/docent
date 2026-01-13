@@ -1054,7 +1054,8 @@ export default function ExperimentViewer({
         });
 
         try {
-          for (const { fields, ids } of groupedRequests.values()) {
+          const groupedRequestValues = Array.from(groupedRequests.values());
+          for (const { fields, ids } of groupedRequestValues) {
             for (let i = 0; i < ids.length; i += METADATA_FETCH_BATCH_SIZE) {
               if (activeMetadataRequestRef.current?.id !== requestId) {
                 logAgentRunDebug('metadata_request_stale', { requestId });
