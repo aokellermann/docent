@@ -2,16 +2,58 @@
   "$schema": "https://mintlify.com/docs.json",
   "name": "Docent",
   "theme": "mint",
+  "logo": {
+    "light": "/images/logo.png",
+    "dark": "/images/logo.png"
+  },
+  "favicon": "/images/favicon.ico",
   "colors": {
     "primary": "#0f0f0f",
     "light": "#6366f1",
     "dark": "#4f46e5"
   },
   "navigation": {
-    "groups": [
+    "tabs": [
       {
-        "group": "Get Started",
-        "pages": ["quickstart"]
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": ["introduction", "quickstart", "tracing", "support"]
+          },
+          {
+            "group": "Tutorials",
+            "pages": [
+              "tutorials/search-and-clustering",
+              "tutorials/logging-agent-runs",
+              "tutorials/labeling-agent-runs"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              {
+                "group": "Data Models",
+                "pages": [
+                  "concepts/data-models/agent-run",
+                  "concepts/data-models/transcript",
+                  "concepts/data-models/metadata",
+                  "concepts/data-models/chat-messages",
+                  "concepts/data-models/llm-output"
+                ]
+              },
+              "concepts/docent-query-language"
+            ]
+          },
+          {
+            "group": "Self-Hosting",
+            "pages": [
+              "self-hosting/self-host-docent",
+              "self-hosting/environment-variables",
+              "self-hosting/llm-providers"
+            ]
+          }
+        ]
       }
     ]
   },

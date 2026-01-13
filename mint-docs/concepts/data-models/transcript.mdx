@@ -1,0 +1,36 @@
+---
+title: "Transcript"
+description: "The Transcript data model representing a sequence of chat messages"
+---
+
+A `Transcript` object represents a sequence of chat messages (user, assistant, system, tool) from the perspective of *a single* agent. See [Chat Messages](/concepts/data-models/chat-messages) for more details on the chat message schemas.
+
+## Usage
+
+```python
+from docent.data_models import Transcript
+from docent.data_models.chat import UserMessage, AssistantMessage, SystemMessage
+
+transcript = Transcript(
+    messages=[
+        SystemMessage(content="You are a helpful assistant."),
+        UserMessage(content="What is the capital of France?"),
+        AssistantMessage(content="The capital of France is Paris."),
+    ],
+    metadata={
+        "conversation_id": "conv_123",
+        "topic": "geography"
+    }
+)
+```
+
+## API Reference
+
+### Transcript
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `messages` | `list[ChatMessage]` | Sequence of chat messages in the conversation |
+| `metadata` | `dict[str, Any]` | Optional JSON-serializable metadata for the transcript |
+
+For the full API reference, see the Python SDK documentation.

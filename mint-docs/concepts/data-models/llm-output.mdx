@@ -1,0 +1,22 @@
+---
+title: "LLM Output"
+description: "Standardized LLM output data models across providers"
+---
+
+This module defines data models that are standardized across different LLM providers.
+
+## Overview
+
+Docent provides a unified interface for working with LLM outputs regardless of the underlying provider (OpenAI, Anthropic, etc.). This allows you to write provider-agnostic code while still having access to all the relevant output metadata.
+
+## Usage
+
+When working with LLM outputs in Docent, the responses are automatically normalized into a standard format that includes:
+
+- The generated text content
+- Token usage statistics
+- Model information
+- Finish reason
+- Any tool calls that were made
+
+For the full API reference, see the Python SDK documentation.
