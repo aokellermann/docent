@@ -986,7 +986,8 @@ export default function ExperimentViewer({
       const activeRequest = activeMetadataRequestRef.current;
       if (activeRequest) {
         let coveredByActive = true;
-        for (const [runId, fields] of missingFieldsById.entries()) {
+        const missingEntries = Array.from(missingFieldsById.entries());
+        for (const [runId, fields] of missingEntries) {
           const pendingFields = activeRequest.pending.get(runId);
           if (!pendingFields) {
             coveredByActive = false;
