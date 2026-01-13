@@ -246,7 +246,7 @@ const Breadcrumbs: React.FC = () => {
           className="gap-x-2 h-7 cursor-default px-2"
         >
           <Link
-            href="https://docs.transluce.org"
+            href="https://transluce.mintlify.app"
             target="_blank"
             className="flex items-center gap-x-2"
           >
