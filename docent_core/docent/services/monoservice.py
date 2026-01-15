@@ -39,6 +39,7 @@ from sqlalchemy import (
     tuple_,
     update,
 )
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import JSONB, aggregate_order_by
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -192,19 +193,44 @@ def _serialize_modal_value(value: Any) -> str:
         return str(value)
 
 
+def _modal_value_key(value: Any) -> tuple[str, str]:
+    if value is None:
+        return ("none", "")
+    if isinstance(value, (str, int, float, bool)):
+        return (type(value).__name__, str(value))
+    try:
+        return (type(value).__name__, json.dumps(value, sort_keys=True))
+    except TypeError:
+        return (type(value).__name__, str(value))
+
+
 def _pick_modal_value(values: Sequence[Any]) -> tuple[Any, int]:
     if not values:
         return None, 0
 
-    counts: Counter[Any] = Counter()
+    counts: Counter[tuple[str, str]] = Counter()
+    representatives: dict[tuple[str, str], Any] = {}
     for value in values:
-        counts[value] += 1
+        key = _modal_value_key(value)
+        counts[key] += 1
+        representatives.setdefault(key, value)
 
-    modal_value, modal_count = sorted(
+    modal_key, modal_count = sorted(
         counts.items(),
-        key=lambda item: (-item[1], _serialize_modal_value(item[0])),
+        key=lambda item: (-item[1], _serialize_modal_value(representatives[item[0]])),
     )[0]
-    return modal_value, modal_count
+    return representatives[modal_key], modal_count
+
+
+def _log_compiled_query(label: str, query: Any) -> None:
+    try:
+        compiled = query.compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    except Exception as exc:  # pragma: no cover - debug-only
+        logger.info("agent_run_table_sql label=%s error=%s", label, exc)
+        return
+    logger.info("agent_run_table_sql label=%s sql=%s", label, compiled)
 
 
 class _NotGiven:
@@ -1061,6 +1087,7 @@ class MonoService:
             if limit is not None:
                 query = query.limit(limit)
 
+            _log_compiled_query("agent_run_ids", query)
             result = await session.execute(query)
             agent_run_ids = result.scalars().all()
             return list(agent_run_ids)
@@ -1368,6 +1395,7 @@ class MonoService:
             batch_size = 10_000
             for i in range(0, len(agent_run_ids), batch_size):
                 batch_ids = agent_run_ids[i : i + batch_size]
+                batch_index = i // batch_size
 
                 query = select(SQLAAgentRun.id, SQLAAgentRun.metadata_json, SQLAAgentRun.created_at)
                 if apply_base_filter:
@@ -1375,6 +1403,7 @@ class MonoService:
                 # TODO(mengk): use LIMIT and OFFSET instead of the IDs
                 query = query.where(SQLAAgentRun.id.in_(batch_ids))
 
+                _log_compiled_query(f"agent_run_metadata:{batch_index}", query)
                 result = await session.execute(query)
                 for run_id, metadata, created_at in result.all():
                     # Structure the response with metadata in a separate key
@@ -1391,7 +1420,7 @@ class MonoService:
                     metadata_map[run_id] = structured_metadata
 
                 if include_tags:
-                    tag_result = await session.execute(
+                    tag_query = (
                         select(
                             SQLATag.agent_run_id,
                             func.array_agg(aggregate_order_by(SQLATag.value, SQLATag.value)).label(
@@ -1404,6 +1433,8 @@ class MonoService:
                         )
                         .group_by(SQLATag.agent_run_id)
                     )
+                    _log_compiled_query(f"agent_run_metadata_tags:{batch_index}", tag_query)
+                    tag_result = await session.execute(tag_query)
                     for run_id, tag_values in tag_result.all():
                         if not tag_values:
                             continue
@@ -1413,12 +1444,15 @@ class MonoService:
                         structured_metadata["tag"] = list(tag_values)
 
                 for label_set_id, paths in label_fields.items():
-                    label_result = await session.execute(
-                        select(SQLALabel.agent_run_id, SQLALabel.label_value).where(
-                            SQLALabel.label_set_id == label_set_id,
-                            SQLALabel.agent_run_id.in_(batch_ids),
-                        )
+                    label_query = select(SQLALabel.agent_run_id, SQLALabel.label_value).where(
+                        SQLALabel.label_set_id == label_set_id,
+                        SQLALabel.agent_run_id.in_(batch_ids),
                     )
+                    _log_compiled_query(
+                        f"agent_run_metadata_labels:{label_set_id}:{batch_index}",
+                        label_query,
+                    )
+                    label_result = await session.execute(label_query)
                     for run_id, label_value in label_result.all():
                         structured_metadata = metadata_map.setdefault(
                             run_id, {"agent_run_id": run_id, "metadata": {}}
@@ -1434,20 +1468,20 @@ class MonoService:
                         (rubric_id, latest_version)
                         for rubric_id, latest_version in latest_rubric_versions.items()
                     ]
-                    rubric_result = await session.execute(
-                        select(
-                            SQLAJudgeResult.agent_run_id,
+                    rubric_query = select(
+                        SQLAJudgeResult.agent_run_id,
+                        SQLAJudgeResult.rubric_id,
+                        SQLAJudgeResult.output,
+                    ).where(
+                        SQLAJudgeResult.agent_run_id.in_(batch_ids),
+                        SQLAJudgeResult.result_type == ResultType.DIRECT_RESULT,
+                        tuple_(
                             SQLAJudgeResult.rubric_id,
-                            SQLAJudgeResult.output,
-                        ).where(
-                            SQLAJudgeResult.agent_run_id.in_(batch_ids),
-                            SQLAJudgeResult.result_type == ResultType.DIRECT_RESULT,
-                            tuple_(
-                                SQLAJudgeResult.rubric_id,
-                                SQLAJudgeResult.rubric_version,
-                            ).in_(rubric_pairs),
-                        )
+                            SQLAJudgeResult.rubric_version,
+                        ).in_(rubric_pairs),
                     )
+                    _log_compiled_query(f"agent_run_metadata_rubric:{batch_index}", rubric_query)
+                    rubric_result = await session.execute(rubric_query)
                     outputs_by_run: dict[tuple[str, str], list[dict[str, Any]]] = {}
                     for run_id, rubric_id, output in rubric_result.all():
                         outputs_by_run.setdefault((run_id, rubric_id), []).append(output)

@@ -86,6 +86,41 @@ const processAgentRunMetadata = (
   return result;
 };
 
+const mergeStructuredMetadata = (
+  existing: Record<string, unknown> | undefined,
+  incoming: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined => {
+  if (!existing) {
+    return incoming;
+  }
+  if (!incoming) {
+    return existing;
+  }
+
+  const merged: Record<string, unknown> = { ...existing, ...incoming };
+  const existingCounts = existing._rubric_counts;
+  const incomingCounts = incoming._rubric_counts;
+  const hasExistingCounts =
+    !!existingCounts &&
+    typeof existingCounts === 'object' &&
+    !Array.isArray(existingCounts);
+  const hasIncomingCounts =
+    !!incomingCounts &&
+    typeof incomingCounts === 'object' &&
+    !Array.isArray(incomingCounts);
+
+  if (hasExistingCounts && hasIncomingCounts) {
+    merged._rubric_counts = {
+      ...(existingCounts as Record<string, unknown>),
+      ...(incomingCounts as Record<string, unknown>),
+    };
+  } else if (hasExistingCounts && !hasIncomingCounts) {
+    merged._rubric_counts = existingCounts;
+  }
+
+  return merged;
+};
+
 const METADATA_FETCH_BATCH_SIZE = 200;
 
 type CachedExperimentViewerState = {
@@ -1072,6 +1107,13 @@ export default function ExperimentViewer({
                 ([runId, structuredMetadata]) => {
                   const processed = processAgentRunMetadata(structuredMetadata);
                   const existing = metadataDataRef.current[runId] ?? {};
+                  const mergedStructured = mergeStructuredMetadata(
+                    existing._structured as Record<string, unknown> | undefined,
+                    processed._structured as Record<string, unknown> | undefined
+                  );
+                  if (mergedStructured) {
+                    processed._structured = mergedStructured;
+                  }
                   const existingLoadedFields =
                     (existing._loaded_fields as Set<string> | undefined) ??
                     new Set();
@@ -1095,6 +1137,17 @@ export default function ExperimentViewer({
                     const processed =
                       processAgentRunMetadata(structuredMetadata);
                     const existing = next[runId] ?? {};
+                    const mergedStructured = mergeStructuredMetadata(
+                      existing._structured as
+                        | Record<string, unknown>
+                        | undefined,
+                      processed._structured as
+                        | Record<string, unknown>
+                        | undefined
+                    );
+                    if (mergedStructured) {
+                      processed._structured = mergedStructured;
+                    }
                     const existingLoadedFields =
                       (existing._loaded_fields as Set<string> | undefined) ??
                       new Set();
