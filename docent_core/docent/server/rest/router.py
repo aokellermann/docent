@@ -693,7 +693,9 @@ async def agent_run_metadata_fields(
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.READ)),
 ) -> dict[str, list[FilterableField]]:
-    fields: list[FilterableField] = await mono_svc.get_agent_run_metadata_fields(ctx)
+    fields: list[FilterableField] = await mono_svc.get_agent_run_metadata_fields(
+        ctx, include_judge_result_metadata=False
+    )
     fields.append({"name": "created_at", "type": "str"})
 
     return {"fields": fields}
@@ -706,7 +708,9 @@ async def agent_run_sortable_fields(
     _: None = Depends(require_view_permission(Permission.READ)),
 ) -> dict[str, list[FilterableField]]:
     """Get sortable fields for agent runs."""
-    fields: list[FilterableField] = await mono_svc.get_agent_run_metadata_fields(ctx)
+    fields: list[FilterableField] = await mono_svc.get_agent_run_metadata_fields(
+        ctx, include_judge_result_metadata=False
+    )
     fields.append({"name": "created_at", "type": "str"})
     return {"fields": fields}
 
