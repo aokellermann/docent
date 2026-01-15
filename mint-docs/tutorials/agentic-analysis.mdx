@@ -8,12 +8,11 @@ The Docent Agent can flexibly support multi-step workflows that are time-consumi
 
 The Docent Agent saves scripts to your local directory. You can modify and rerun scripts for fine-grained control of the workflow.
 
+### Video Overview
 <video controls width="100%">
   <source src="https://transluce-videos.s3.us-east-1.amazonaws.com/agentic-analysis-demo.mp4" type="video/mp4" />
   Your browser does not support the video tag.
 </video>
-
-
 
 ## Quickstart
 
@@ -288,8 +287,8 @@ result = client.submit_llm_requests(
 ```
 </Accordion>
 
-## Limitations and Future Work
+## Best Practices & Future Work
 
 - For best results, be precise when telling the coding agent what workflow you want to execute
 - The LLM can only cite items that were directly passed as part of the prompt. It cannot, for example, cite items that were cited by a result that was passed as part of the prompt. If the LLM gets confused about this fact, mention it in your prompt. We're working on a cleaner solution.
-- We're developing a more intentional workflow for analyzing judge results.
+- We're currently adding functionality to analyze judge results. Stay tuned!
