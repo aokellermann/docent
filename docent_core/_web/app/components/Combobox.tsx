@@ -70,6 +70,7 @@ type BaseComboboxProps = {
   renderOptionLabel?: (option: ComboboxOption) => ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  headerContent?: ReactNode;
 };
 
 type SingleComboboxProps = BaseComboboxProps & {
@@ -114,6 +115,7 @@ const ComboboxBase = ({
   renderOptionLabel,
   open,
   onOpenChange,
+  headerContent,
   displayValue,
   isOptionSelected,
   onSelectOption,
@@ -181,6 +183,7 @@ const ComboboxBase = ({
         sideOffset={popoverSideOffset}
         alignOffset={popoverAlignOffset}
       >
+        {headerContent}
         <Command>
           <CommandInput
             placeholder={searchPlaceholder}

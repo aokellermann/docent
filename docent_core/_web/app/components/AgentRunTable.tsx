@@ -20,6 +20,7 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 import {
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
@@ -1050,12 +1051,27 @@ export const AgentRunTable = memo(function AgentRunTable({
         const label = formatFilterFieldLabel(column);
         return {
           value: column,
-          label: shouldDisable ? `${label} (limit reached)` : label,
+          label,
           disabled: shouldDisable,
         };
       }),
     [availableColumns, selectedColumns, isAtColumnLimit]
   );
+
+  const columnLimitWarning = useMemo(() => {
+    if (!isAtColumnLimit) {
+      return null;
+    }
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 text-xs bg-amber-50 border-b border-amber-200 text-amber-800">
+        <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+        <span>
+          Maximum of {MAX_SELECTED_COLUMNS} columns selected. Deselect a column
+          to add another.
+        </span>
+      </div>
+    );
+  }, [isAtColumnLimit]);
 
   const columnActionItems = useMemo(
     () => [
@@ -1254,6 +1270,7 @@ export const AgentRunTable = memo(function AgentRunTable({
             }}
             popoverAlign="end"
             onOpenChange={handleColumnsMenuOpenChange}
+            headerContent={columnLimitWarning}
           />
         </div>
       </div>
