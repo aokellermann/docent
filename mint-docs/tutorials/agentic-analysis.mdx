@@ -1,12 +1,19 @@
 Agentically conduct analysis on Docent using Claude Code and Cursor. Docent now integrates with agent harnesses to turn natural language commands into SDK scripts you can modify and rerun.
 
-The Docent Agent can flexibly support complex workflows that are time-consuming to implement manually or beneficial to conduct in parallel. For instance, the agent can support with:
+The Docent Agent can flexibly support multi-step workflows that are time-consuming to implement manually or beneficial to conduct in parallel. For instance, the agent can support:
 
 - **Comparing between checkpoints**. The Docent agent can help identify what changed between multiple versions of a model. In order to answer questions like "What caused a regression between checkpoint A and checkpoint B?" or "These two checkpoints show a quantitative tradeoff on eval scores. What behaviors might explain that?", the agent can compare a successful and failed run against each other at scale.
-- **Triage before deep analysis**: The Docent agent can triage runs before engaging in analysis at scale, improving cost efficiency. For instance, the Docent agent might do a pre-screen with a cheap model that tags transcripts with issues like "sycophancy," "copyright," or "biorisk." A judge with a more detailed rubric and expensive model can then grade harms on only the most suspicious runs.
+- **Triage before deep analysis**: The Docent agent can triage runs before engaging in analysis at scale, improving cost efficiency. For instance, the Docent agent can pre-screen a collection using a cheap model to tag each run with issues like "sycophancy," "copyright," or "biorisk." A judge with a more detailed rubric and expensive model can then grade harms on only the most suspicious runs.
 - **Managing long context**: In collections with long traces or a large volume of transcripts, the Docent agent supports a range of methods for supporting context management. The agent can recursively summarize extracting key observations from each batch, and then observe patterns in the key observations. Recursively passing the results from previous analyses lets the agent handle collection-level questions over large collections of data.
 
-The Docent Agent writes a script saved to your local directory, which you can modify for fine-grained control of the workflow. You can then rerun the script to repeat the analysis with your modifications.
+The Docent Agent saves scripts to your local directory. You can modify and rerun scripts for fine-grained control of the workflow.
+
+<video controls autoplay loop width="100%">
+  <source src="https://transluce-videos.s3.us-east-1.amazonaws.com/agentic-analysis-demo.mp4" type="video/mp4" />
+  Your browser does not support the video tag.
+</video>
+
+
 
 ## Quickstart
 
