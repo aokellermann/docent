@@ -29,15 +29,22 @@ You can use Docent in its own Cursor Workspace by quickly downloading our templa
     ### Step 2: Fill in `DOCENT_API_KEY` and `DOCENT_COLLECTION_ID` in `docent.env`
 
     1. You can generate a Docent API key [at this link](https://docent.transluce.org/settings/api-keys) or navigate there from the Dashboard by clicking on Settings → API Keys.
-    2. The `DOCENT_COLLECTION_ID` is the UUID of the collection you want to analyze. You can copy it quickly from the collections table in the Docent Dashboard by clicking on the ID next to the collection you want to analyze. If you are within a collection, the ID will be available next to the title.
+    2. The `DOCENT_COLLECTION_ID` is the UUID of the collection you want to analyze. You can find it in two places:
 
-    <Frame>
-      <img src="/images/agentic-analysis/copy-collection-id.png" alt="Copy collection ID from dashboard" />
-    </Frame>
-
-    <Frame>
-      <img src="/images/agentic-analysis/collection-id-in-header.png" alt="Collection ID in header" />
-    </Frame>
+    <AccordionGroup>
+      <Accordion title="From the collections table" defaultOpen>
+        Click the ID next to any collection in the Docent Dashboard to copy it.
+        <Frame>
+          <img src="/images/agentic-analysis/copy-collection-id.png" alt="Copy collection ID from dashboard" />
+        </Frame>
+      </Accordion>
+      <Accordion title="From within a collection">
+        When viewing a collection, the ID appears in the header next to the collection name.
+        <Frame>
+          <img src="/images/agentic-analysis/collection-id-in-header.png" alt="Collection ID in header" />
+        </Frame>
+      </Accordion>
+    </AccordionGroup>
   </Tab>
 
   <Tab title="Existing Workspace">
@@ -49,7 +56,7 @@ You can use Docent in its own Cursor Workspace by quickly downloading our templa
 
     ### Step 2: Create docent.env
 
-    This should be in the same directory as your pyproject.toml
+    Create `docent.env` in the same directory as your `pyproject.toml`.
 
     ```
     DOCENT_API_KEY=
@@ -66,13 +73,20 @@ You can use Docent in its own Cursor Workspace by quickly downloading our templa
 
     The `DOCENT_COLLECTION_ID` is the UUID of the collection you want to analyze. You can copy it quickly by clicking on the ID from the Docent Dashboard or at the top of the page inside a collection.
 
-    <Frame>
-      <img src="/images/agentic-analysis/copy-collection-id.png" alt="Copy collection ID from dashboard" />
-    </Frame>
-
-    <Frame>
-      <img src="/images/agentic-analysis/collection-id-in-header.png" alt="Collection ID in header" />
-    </Frame>
+    <AccordionGroup>
+      <Accordion title="From the collections table" defaultOpen>
+        Click the ID next to any collection in the Docent Dashboard to copy it.
+        <Frame>
+          <img src="/images/agentic-analysis/copy-collection-id.png" alt="Copy collection ID from dashboard" />
+        </Frame>
+      </Accordion>
+      <Accordion title="From within a collection">
+        When viewing a collection, the ID appears in the header next to the collection name.
+        <Frame>
+          <img src="/images/agentic-analysis/collection-id-in-header.png" alt="Collection ID in header" />
+        </Frame>
+      </Accordion>
+    </AccordionGroup>
 
     ### Step 5: Configure your AI agent
 
