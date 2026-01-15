@@ -45,15 +45,12 @@ export default function UploadRunsButton({
 
   const handleUseSDKClick = () => {
     // Navigate to docs page - adjust the URL as needed for your docs
-    window.open('https://docs.transluce.org/en/latest/quickstart/', '_blank');
+    window.open('https://transluce.mintlify.app/quickstart', '_blank');
   };
 
   const handleUseTracingClick = () => {
     // Navigate to tracing documentation
-    window.open(
-      'https://docs.transluce.org/en/latest/tracing/introduction/',
-      '_blank'
-    );
+    window.open('https://transluce.mintlify.app/tracing', '_blank');
   };
 
   return (

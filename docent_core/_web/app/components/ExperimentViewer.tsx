@@ -1377,7 +1377,7 @@ export default function ExperimentViewer({
         <div className="text-muted-foreground">No agent runs found</div>
         <Button asChild variant="outline" size="sm">
           <a
-            href="https://docs.transluce.org/en/latest/quickstart/"
+            href="https://transluce.mintlify.app/quickstart"
             target="_blank"
             rel="noopener noreferrer"
           >

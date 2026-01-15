@@ -1,0 +1,85 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "Docent",
+  "theme": "aspen",
+  "logo": {
+    "light": "/images/docent_final_black.png",
+    "dark": "/images/docent_final_white.png"
+  },
+  "fonts": {
+    "family": "Open Sans"
+  },
+  "favicon": "/images/favicon.ico",
+  "navbar": {
+    "links": [
+      {
+        "label": "About Transluce",
+        "href": "https://transluce.org"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Open Docent",
+      "href": "https://docent.transluce.org"
+    }
+  },
+  "colors": {
+    "primary": "#0f0f0f",
+    "light": "#6366f1",
+    "dark": "#4f46e5"
+  },
+  "contextual": {
+    "options": [
+      "copy"
+    ]
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": ["introduction", "quickstart", "tracing", "support"]
+          },
+          {
+            "group": "Tutorials",
+            "pages": [
+              "tutorials/search-and-clustering",
+              "tutorials/logging-agent-runs",
+              "tutorials/labeling-agent-runs"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              {
+                "group": "Data Models",
+                "expanded": true,
+                "pages": [
+                  "concepts/data-models/agent-run",
+                  "concepts/data-models/transcript",
+                  "concepts/data-models/metadata",
+                  "concepts/data-models/chat-messages",
+                  "concepts/data-models/llm-output"
+                ]
+              },
+              "concepts/docent-query-language"
+            ]
+          },
+          {
+            "group": "Self-Hosting",
+            "pages": [
+              "self-hosting/self-host-docent",
+              "self-hosting/environment-variables",
+              "self-hosting/llm-providers"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "footerSocials": {
+    "github": "https://github.com/TransluceAI/docent"
+  }
+}

@@ -1,0 +1,618 @@
+---
+title: "LLM Output"
+---
+
+# LLM output
+
+This module defines data models that are standardized across different LLM providers.
+
+### **FinishReasonType** `module-attribute`
+
+```python
+FinishReasonType = Literal['error', 'stop', 'length', 'tool_calls', 'content_filter', 'function_call', 'streaming', 'refusal']
+```
+
+Possible reasons for an LLM completion to finish.
+
+### **LLMCompletion**
+
+Bases: `BaseModel`
+
+A single completion from an LLM.
+
+**Attributes:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `text` | `str | None` | The generated text content. |
+| `tool_calls` | `list[ToolCall] | None` | List of tool calls made during the completion. |
+| `finish_reason` | `FinishReasonType | None` | Reason why the completion finished. |
+| `top_logprobs` | `list[list[TopLogprob]] | None` | Probability distribution for top token choices. |
+
+<Accordion title="docent/_llm_util/data_models/llm_output.py" icon="code">
+
+```python
+class LLMCompletion(BaseModel):
+    """A single completion from an LLM.
+
+    Attributes:
+        text: The generated text content.
+        tool_calls: List of tool calls made during the completion.
+        finish_reason: Reason why the completion finished.
+        top_logprobs: Probability distribution for top token choices.
+    """
+
+    text: str | None = None
+    tool_calls: list[ToolCall] | None = None
+    finish_reason: FinishReasonType | None = None
+    top_logprobs: list[list[TopLogprob]] | None = None
+    reasoning_tokens: str | None = None
+
+    @property
+    def no_text(self) -> bool:
+        """Check if the completion has no text.
+
+        Returns:
+            bool: True if text is None or empty, False otherwise.
+        """
+        return self.text is None or len(self.text) == 0
+```
+
+</Accordion>
+
+#### **no_text** `property`
+
+```python
+no_text: bool
+```
+
+Check if the completion has no text.
+
+**Returns:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `bool` | `bool` | True if text is None or empty, False otherwise. |
+
+### **LLMOutput** `dataclass`
+
+Container for LLM output, potentially with multiple completions.
+
+Aggregates completions from an LLM along with metadata and error information.
+
+**Attributes:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `model` | `str` | The name/identifier of the model used. |
+| `completions` | `list[LLMCompletion]` | List of individual completions. |
+| `errors` | `list[LLMException]` | List of error types encountered during generation. |
+
+<Accordion title="docent/_llm_util/data_models/llm_output.py" icon="code">
+
+```python
+@dataclass
+class LLMOutput:
+    """Container for LLM output, potentially with multiple completions.
+
+    Aggregates completions from an LLM along with metadata and error information.
+
+    Attributes:
+        model: The name/identifier of the model used.
+        completions: List of individual completions.
+        errors: List of error types encountered during generation.
+    """
+
+    model: str
+    completions: list[LLMCompletion]
+    errors: list[LLMException] = field(default_factory=list)
+    usage: UsageMetrics = field(default_factory=UsageMetrics)
+    from_cache: bool = False
+    duration: float | None = None
+
+    @property
+    def non_empty(self) -> bool:
+        """Check if there are any completions.
+
+        Returns:
+            bool: True if there's at least one completion, False otherwise.
+        """
+        return len(self.completions) > 0
+
+    @property
+    def first(self) -> LLMCompletion | None:
+        """Get the first completion if available.
+
+        Returns:
+            LLMCompletion | None: The first completion or None if no completions exist.
+        """
+        return self.completions[0] if self.non_empty else None
+
+    @property
+    def first_text(self) -> str | None:
+        """Get the text of the first completion if available.
+
+        Returns:
+            str | None: The text of the first completion or None if no completion exists.
+        """
+        return self.first.text if self.first else None
+
+    @property
+    def did_error(self) -> bool:
+        """Check if any errors occurred during generation.
+
+        Returns:
+            bool: True if there were errors, False otherwise.
+        """
+        return bool(self.errors)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "model": self.model,
+            "completions": [comp.model_dump() for comp in self.completions],
+            "errors": [e.error_type_id for e in self.errors],
+            "usage": self.usage.to_dict(),
+            "from_cache": self.from_cache,
+            "duration": self.duration,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "LLMOutput":
+        error_type_map = {e.error_type_id: e for e in LLM_ERROR_TYPES}
+        errors = data.get("errors", [])
+        error_types_to_not_log: list[str] = [
+            CompletionTooLongException.error_type_id,
+            ContextWindowException.error_type_id,
+        ]
+        errors_to_log = [e for e in errors if e not in error_types_to_not_log]
+        if errors_to_log:
+            logger.error(f"Loading LLM output with errors: {errors}")
+        errors = [error_type_map.get(e, LLMException)() for e in errors]
+
+        completions = data.get("completions", [])
+        completions = [LLMCompletion.model_validate(comp) for comp in completions]
+
+        usage: dict[TokenType, int] = {}
+        if data_usage := data.get("usage"):
+            usage = cast(dict[TokenType, int], data_usage)
+
+        return cls(
+            model=data["model"],
+            completions=completions,
+            errors=errors,
+            usage=UsageMetrics(**usage),
+            from_cache=bool(data.get("from_cache", False)),
+            duration=data.get("duration"),
+        )
+```
+
+</Accordion>
+
+#### **non_empty** `property`
+
+```python
+non_empty: bool
+```
+
+Check if there are any completions.
+
+**Returns:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `bool` | `bool` | True if there's at least one completion, False otherwise. |
+
+#### **first** `property`
+
+```python
+first: LLMCompletion | None
+```
+
+Get the first completion if available.
+
+**Returns:**
+
+| Type | Description |
+| --- | --- |
+| `LLMCompletion | None` | LLMCompletion | None: The first completion or None if no completions exist. |
+
+#### **first_text** `property`
+
+```python
+first_text: str | None
+```
+
+Get the text of the first completion if available.
+
+**Returns:**
+
+| Type | Description |
+| --- | --- |
+| `str | None` | str | None: The text of the first completion or None if no completion exists. |
+
+#### **did_error** `property`
+
+```python
+did_error: bool
+```
+
+Check if any errors occurred during generation.
+
+**Returns:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `bool` | `bool` | True if there were errors, False otherwise. |
+
+### **ToolCallPartial** `dataclass`
+
+Partial representation of a tool call before full processing.
+
+Used as an intermediate format before finalizing into a complete ToolCall.
+
+**Parameters:**
+
+| Name | Type | Description | Default |
+| --- | --- | --- | --- |
+| `id` | `str | None` | The identifier for the tool call. | *required* |
+| `function` | `str | None` | The name of the function to call. | *required* |
+| `arguments_raw` | `str | None` | Raw JSON string of arguments for the function. | *required* |
+| `type` | `Literal['function']` | The type of the tool call, always "function". | *required* |
+
+<Accordion title="docent/_llm_util/data_models/llm_output.py" icon="code">
+
+```python
+@dataclass
+class ToolCallPartial:
+    """Partial representation of a tool call before full processing.
+
+    Used as an intermediate format before finalizing into a complete ToolCall.
+
+    Args:
+        id: The identifier for the tool call.
+        function: The name of the function to call.
+        arguments_raw: Raw JSON string of arguments for the function.
+        type: The type of the tool call, always "function".
+    """
+
+    id: str | None
+    function: str | None
+    arguments_raw: str | None
+    type: Literal["function"]
+```
+
+</Accordion>
+
+### **LLMCompletionPartial**
+
+Bases: `LLMCompletion`
+
+Partial representation of an LLM completion before finalization.
+
+Extends LLMCompletion but with tool_calls being a list of ToolCallPartial.
+This is used during the processing stage before tool calls are fully parsed.
+
+**Attributes:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `tool_calls` | `list[ToolCallPartial | None] | None` | List of partial tool call representations. |
+
+<Accordion title="docent/_llm_util/data_models/llm_output.py" icon="code">
+
+```python
+class LLMCompletionPartial(LLMCompletion):
+    """Partial representation of an LLM completion before finalization.
+
+    Extends LLMCompletion but with tool_calls being a list of ToolCallPartial.
+    This is used during the processing stage before tool calls are fully parsed.
+
+    Attributes:
+        tool_calls: List of partial tool call representations.
+    """
+
+    tool_calls: list[ToolCallPartial | None] | None = None  # type: ignore
+```
+
+</Accordion>
+
+#### **no_text** `property`
+
+```python
+no_text: bool
+```
+
+Check if the completion has no text.
+
+**Returns:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `bool` | `bool` | True if text is None or empty, False otherwise. |
+
+### **LLMOutputPartial** `dataclass`
+
+Bases: `LLMOutput`
+
+Partial representation of LLM output before finalization.
+
+Extends LLMOutput but with completions being a list of LLMCompletionPartial.
+Used as an intermediate format during processing.
+
+**Attributes:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `completions` | `list[LLMCompletionPartial]` | List of partial completions. |
+
+<Accordion title="docent/_llm_util/data_models/llm_output.py" icon="code">
+
+```python
+class LLMOutputPartial(LLMOutput):
+    """Partial representation of LLM output before finalization.
+
+    Extends LLMOutput but with completions being a list of LLMCompletionPartial.
+    Used as an intermediate format during processing.
+
+    Attributes:
+        completions: List of partial completions.
+    """
+
+    completions: list[LLMCompletionPartial]  # type: ignore
+```
+
+</Accordion>
+
+#### **non_empty** `property`
+
+```python
+non_empty: bool
+```
+
+Check if there are any completions.
+
+**Returns:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `bool` | `bool` | True if there's at least one completion, False otherwise. |
+
+#### **first** `property`
+
+```python
+first: LLMCompletion | None
+```
+
+Get the first completion if available.
+
+**Returns:**
+
+| Type | Description |
+| --- | --- |
+| `LLMCompletion | None` | LLMCompletion | None: The first completion or None if no completions exist. |
+
+#### **first_text** `property`
+
+```python
+first_text: str | None
+```
+
+Get the text of the first completion if available.
+
+**Returns:**
+
+| Type | Description |
+| --- | --- |
+| `str | None` | str | None: The text of the first completion or None if no completion exists. |
+
+#### **did_error** `property`
+
+```python
+did_error: bool
+```
+
+Check if any errors occurred during generation.
+
+**Returns:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `bool` | `bool` | True if there were errors, False otherwise. |
+
+### **AsyncLLMOutputStreamingCallback**
+
+Bases: `Protocol`
+
+Protocol for asynchronous streaming callbacks with batch index.
+
+Defines the expected signature for callbacks that handle streaming output
+with a batch index.
+
+**Parameters:**
+
+| Name | Type | Description | Default |
+| --- | --- | --- | --- |
+| `batch_index` |  | The index of the current batch. | *required* |
+| `llm_output` |  | The LLM output for the current batch. | *required* |
+
+<Accordion title="docent/_llm_util/data_models/llm_output.py" icon="code">
+
+```python
+class AsyncLLMOutputStreamingCallback(Protocol):
+    """Protocol for asynchronous streaming callbacks with batch index.
+
+    Defines the expected signature for callbacks that handle streaming output
+    with a batch index.
+
+    Args:
+        batch_index: The index of the current batch.
+        llm_output: The LLM output for the current batch.
+    """
+
+    async def __call__(
+        self,
+        batch_index: int,
+        llm_output: LLMOutput,
+    ) -> None: ...
+```
+
+</Accordion>
+
+### **AsyncSingleLLMOutputStreamingCallback**
+
+Bases: `Protocol`
+
+Protocol for asynchronous streaming callbacks without batch indexing.
+
+Defines the expected signature for callbacks that handle streaming output
+without batch indexing.
+
+**Parameters:**
+
+| Name | Type | Description | Default |
+| --- | --- | --- | --- |
+| `llm_output` |  | The LLM output to process. | *required* |
+
+<Accordion title="docent/_llm_util/data_models/llm_output.py" icon="code">
+
+```python
+class AsyncSingleLLMOutputStreamingCallback(Protocol):
+    """Protocol for asynchronous streaming callbacks without batch indexing.
+
+    Defines the expected signature for callbacks that handle streaming output
+    without batch indexing.
+
+    Args:
+        llm_output: The LLM output to process.
+    """
+
+    async def __call__(
+        self,
+        llm_output: LLMOutput,
+    ) -> None: ...
+```
+
+</Accordion>
+
+### **AsyncEmbeddingStreamingCallback**
+
+Bases: `Protocol`
+
+Protocol for sending progress updates for embedding generation.
+
+<Accordion title="docent/_llm_util/data_models/llm_output.py" icon="code">
+
+```python
+class AsyncEmbeddingStreamingCallback(Protocol):
+    """Protocol for sending progress updates for embedding generation."""
+
+    async def __call__(self, progress: int) -> None: ...
+```
+
+</Accordion>
+
+### **finalize_llm_output_partial**
+
+```python
+finalize_llm_output_partial(partial: LLMOutputPartial) -> LLMOutput
+```
+
+Convert a partial LLM output into a finalized LLM output.
+
+Processes tool calls by parsing their arguments from raw JSON strings,
+handles errors in JSON parsing, and provides warnings for truncated completions.
+
+**Parameters:**
+
+| Name | Type | Description | Default |
+| --- | --- | --- | --- |
+| `partial` | `LLMOutputPartial` | The partial LLM output to finalize. | *required* |
+
+**Returns:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `LLMOutput` | `LLMOutput` | The finalized LLM output with processed tool calls. |
+
+**Raises:**
+
+| Type | Description |
+| --- | --- |
+| `CompletionTooLongException` | If the completion was truncated due to length and resulted in empty text. |
+| `ValueError` | If tool call ID or function is missing in the partial data. |
+
+<Accordion title="docent/_llm_util/data_models/llm_output.py" icon="code">
+
+```python
+def finalize_llm_output_partial(partial: LLMOutputPartial) -> LLMOutput:
+    """Convert a partial LLM output into a finalized LLM output.
+
+    Processes tool calls by parsing their arguments from raw JSON strings,
+    handles errors in JSON parsing, and provides warnings for truncated completions.
+
+    Args:
+        partial: The partial LLM output to finalize.
+
+    Returns:
+        LLMOutput: The finalized LLM output with processed tool calls.
+
+    Raises:
+        CompletionTooLongException: If the completion was truncated due to length
+            and resulted in empty text.
+        ValueError: If tool call ID or function is missing in the partial data.
+    """
+
+    def _parse_tool_call(tc_partial: ToolCallPartial):
+        if tc_partial.id is None:
+            raise ValueError("Tool call ID not found in partial; check for parsing errors")
+        if tc_partial.function is None:
+            raise ValueError("Tool call function not found in partial; check for parsing errors")
+
+        arguments: dict[str, Any] = {}
+        # Attempt to load arguments into JSON
+        try:
+            arguments = json.loads(tc_partial.arguments_raw or "{}")
+            parse_error = None
+        # If the tool call arguments are not valid JSON, return an empty dict with the error
+        except Exception as e:
+            arguments = {"__parse_error_raw_args": tc_partial.arguments_raw}
+            parse_error = f"Couldn't parse tool call arguments as JSON: {e}. Original input: {tc_partial.arguments_raw}"
+
+        return ToolCall(
+            id=tc_partial.id,
+            function=tc_partial.function,
+            arguments=arguments,
+            parse_error=parse_error,
+            type=tc_partial.type,
+        )
+
+    output = LLMOutput(
+        model=partial.model,
+        completions=[
+            LLMCompletion(
+                text=c.text,
+                tool_calls=[_parse_tool_call(tc) for tc in (c.tool_calls or []) if tc is not None],
+                finish_reason=c.finish_reason,
+                reasoning_tokens=c.reasoning_tokens,
+            )
+            for c in partial.completions
+        ],
+        usage=partial.usage,
+        from_cache=False,
+    )
+
+    # If the completion is empty and was truncated (likely due to too much reasoning), raise an exception
+    if output.first and output.first.finish_reason == "length" and output.first.no_text:
+        raise CompletionTooLongException(
+            "Completion empty due to truncation. Consider increasing max_new_tokens."
+        )
+    for c in output.completions:
+        if c.finish_reason == "length":
+            logger.warning(
+                "Completion truncated due to length; consider increasing max_new_tokens."
+            )
+
+    return output
+```
+
+</Accordion>

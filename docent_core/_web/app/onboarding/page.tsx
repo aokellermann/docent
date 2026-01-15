@@ -612,7 +612,7 @@ def analyze_document(document_text: str):
                 className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
                 onClick={() =>
                   window.open(
-                    'https://docs.transluce.org/en/latest/tracing/introduction/',
+                    'https://transluce.mintlify.app/tracing',
                     '_blank'
                   )
                 }
@@ -715,7 +715,7 @@ client.add_agent_runs(collection_id, [agent_run])`}
                 variant="outline"
                 className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
                 onClick={() =>
-                  window.open('https://docs.transluce.org/en/latest/', '_blank')
+                  window.open('https://transluce.mintlify.app/', '_blank')
                 }
               >
                 View SDK Docs

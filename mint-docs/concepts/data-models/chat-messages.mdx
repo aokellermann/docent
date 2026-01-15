@@ -1,0 +1,862 @@
+---
+title: "Chat Messages"
+---
+
+# Chat messages
+
+We support 4 types of message objects:
+
+- `SystemMessage`: Instructions and context for the conversation
+- `UserMessage`: Messages from end users to the assistant
+- `AssistantMessage`: Responses from the AI assistant, potentially including tool calls
+- `ToolMessage`: Results from tools invoked during the conversation
+
+Each message has a `content` field, which can either be a `str` or a list of `Content` objects with `text` and/or `reasoning`. We don't support audio/image/video content yet.
+
+Each message also has an optional `metadata` field that can store additional structured information about the message as a dictionary.
+
+### Usage
+
+The easiest way to convert a `dict` into a `ChatMessage` is to use `parse_chat_message`:
+
+```python
+from docent.data_models.chat import parse_chat_message
+
+message_data = [
+    {
+        "role": "user",
+        "content": "What is the capital of France?",
+    },
+    {
+        "role": "assistant",
+        "content": "Paris",
+    },
+]
+
+messages = [parse_chat_message(msg) for msg in message_data]
+```
+
+The function will automatically raise validation errors if the input message does not conform to the schema.
+
+You may also want to create messages manually:
+
+```python
+from docent.data_models.chat import (
+    SystemMessage,
+    UserMessage,
+    AssistantMessage,
+    ContentText,
+    ContentReasoning,
+    ToolCall,
+    ToolCallContent,
+)
+
+messages = [
+    SystemMessage(content="You are a helpful assistant."),
+    UserMessage(content=[ContentText(text="Help me with this problem.")]),
+    AssistantMessage(content="I'll help you solve that.", tool_calls=[ToolCall(id="call_123", function="calculator", arguments={"operation": "add", "a": 5, "b": 3}, view=ToolCallContent(format="markdown", content="Calculating: 5 + 3"))]),
+    ToolMessage(content="8", tool_call_id="call_123", function="calculator"),
+    # Example with metadata
+    SystemMessage(content="Processing user request", metadata={"source": "api", "priority": "high", "timestamp": "2024-01-01T12:00:00Z"}),
+]
+```
+
+### Note on tool calls
+
+There are two parts to a tool call:
+
+- On the `AssistantMessage` itself, the `tool_calls` field contains a list of `ToolCall` objects. These represent calls to various tools the agent has access to.
+- The `ToolMessage` object is the output of the tool, e.g. a list of files after calling `ls`.
+
+![Tool Call Agent Run Example](/images/tool_call.png)
+
+For an example of parsing tool calls, check out the τ-Bench tab in [quickstart](/quickstart).
+
+### **ChatMessage** `module-attribute`
+
+```python
+ChatMessage = Annotated[SystemMessage | UserMessage | AssistantMessage | ToolMessage, Discriminator('role')]
+```
+
+Type alias for any chat message type, discriminated by the role field.
+
+This is the base message union used in Transcript and AgentRun contexts.
+For chat sessions, use ChatSessionMessage instead.
+
+### **DocentChatMessage** `module-attribute`
+
+```python
+DocentChatMessage = Annotated[SystemMessage | UserMessage | DocentAssistantMessage | ToolMessage, Discriminator('role')]
+```
+
+Type alias for chat session messages with chat-specific assistant metadata.
+
+### **BaseChatMessage**
+
+Bases: `BaseModel`
+
+Base class for all chat message types.
+
+**Attributes:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `id` | `str | None` | Optional unique identifier for the message. |
+| `content` | `str | list[Content]` | The message content, either as a string or list of Content objects. |
+| `role` | `Literal['system', 'user', 'assistant', 'tool']` | The role of the message sender (system, user, assistant, tool). |
+| `metadata` | `dict[str, Any] | None` | Additional structured metadata about the message. |
+
+<Accordion title="docent/data_models/chat/message.py" icon="code">
+
+```python
+class BaseChatMessage(BaseModel):
+    """Base class for all chat message types.
+
+    Attributes:
+        id: Optional unique identifier for the message.
+        content: The message content, either as a string or list of Content objects.
+        role: The role of the message sender (system, user, assistant, tool).
+        metadata: Additional structured metadata about the message.
+    """
+
+    id: str | None = None
+    content: str | list[Content]
+    role: Literal["system", "user", "assistant", "tool"]
+    metadata: dict[str, Any] | None = None
+
+    @property
+    def text(self) -> str:
+        """Get the text content of the message.
+
+        Returns:
+            str: The text content of the message. If content is a list,
+                 concatenates all text content elements with newlines.
+        """
+        if isinstance(self.content, str):
+            return self.content
+        else:
+            all_text = [content.text for content in self.content if content.type == "text"]
+            return "\n".join(all_text)
+```
+
+</Accordion>
+
+#### **text** `property`
+
+```python
+text: str
+```
+
+Get the text content of the message.
+
+**Returns:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `str` | `str` | The text content of the message. If content is a list, concatenates all text content elements with newlines. |
+
+### **SystemMessage**
+
+Bases: `BaseChatMessage`
+
+System message in a chat conversation.
+
+**Attributes:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `role` | `Literal['system']` | Always set to "system". |
+
+<Accordion title="docent/data_models/chat/message.py" icon="code">
+
+```python
+class SystemMessage(BaseChatMessage):
+    """System message in a chat conversation.
+
+    Attributes:
+        role: Always set to "system".
+    """
+
+    role: Literal["system"] = "system"  # type: ignore
+```
+
+</Accordion>
+
+#### **text** `property`
+
+```python
+text: str
+```
+
+Get the text content of the message.
+
+**Returns:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `str` | `str` | The text content of the message. If content is a list, concatenates all text content elements with newlines. |
+
+### **UserMessage**
+
+Bases: `BaseChatMessage`
+
+User message in a chat conversation.
+
+**Attributes:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `role` | `Literal['user']` | Always set to "user". |
+| `tool_call_id` | `list[str] | None` | Optional list of tool call IDs this message is responding to. |
+
+<Accordion title="docent/data_models/chat/message.py" icon="code">
+
+```python
+class UserMessage(BaseChatMessage):
+    """User message in a chat conversation.
+
+    Attributes:
+        role: Always set to "user".
+        tool_call_id: Optional list of tool call IDs this message is responding to.
+    """
+
+    role: Literal["user"] = "user"  # type: ignore
+    tool_call_id: list[str] | None = None
+```
+
+</Accordion>
+
+#### **text** `property`
+
+```python
+text: str
+```
+
+Get the text content of the message.
+
+**Returns:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `str` | `str` | The text content of the message. If content is a list, concatenates all text content elements with newlines. |
+
+### **AssistantMessage**
+
+Bases: `BaseChatMessage`
+
+Assistant message in a chat conversation.
+
+**Attributes:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `role` | `Literal['assistant']` | Always set to "assistant". |
+| `model` | `str | None` | Optional identifier for the model that generated this message. |
+| `tool_calls` | `list[ToolCall] | None` | Optional list of tool calls made by the assistant. |
+
+<Accordion title="docent/data_models/chat/message.py" icon="code">
+
+```python
+class AssistantMessage(BaseChatMessage):
+    """Assistant message in a chat conversation.
+
+    Attributes:
+        role: Always set to "assistant".
+        model: Optional identifier for the model that generated this message.
+        tool_calls: Optional list of tool calls made by the assistant.
+    """
+
+    role: Literal["assistant"] = "assistant"  # type: ignore
+    model: str | None = None
+    tool_calls: list[ToolCall] | None = None
+```
+
+</Accordion>
+
+#### **text** `property`
+
+```python
+text: str
+```
+
+Get the text content of the message.
+
+**Returns:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `str` | `str` | The text content of the message. If content is a list, concatenates all text content elements with newlines. |
+
+### **DocentAssistantMessage**
+
+Bases: `AssistantMessage`
+
+Assistant message in a chat session with additional chat-specific metadata.
+
+This extends AssistantMessage with fields that are only relevant in Docent chat contexts
+
+**Attributes:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `citations` | `list[InlineCitation] | None` | Optional list of citations referenced in the message content. |
+| `suggested_messages` | `list[str] | None` | Optional list of suggested followup messages. |
+
+<Accordion title="docent/data_models/chat/message.py" icon="code">
+
+```python
+class DocentAssistantMessage(AssistantMessage):
+    """Assistant message in a chat session with additional chat-specific metadata.
+
+    This extends AssistantMessage with fields that are only relevant in Docent chat contexts
+
+    Attributes:
+        citations: Optional list of citations referenced in the message content.
+        suggested_messages: Optional list of suggested followup messages.
+    """
+
+    citations: list[InlineCitation] | None = None
+    suggested_messages: list[str] | None = None
+```
+
+</Accordion>
+
+#### **text** `property`
+
+```python
+text: str
+```
+
+Get the text content of the message.
+
+**Returns:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `str` | `str` | The text content of the message. If content is a list, concatenates all text content elements with newlines. |
+
+### **ToolMessage**
+
+Bases: `BaseChatMessage`
+
+Tool message in a chat conversation.
+
+**Attributes:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `role` | `Literal['tool']` | Always set to "tool". |
+| `tool_call_id` | `str | None` | Optional ID of the tool call this message is responding to. |
+| `function` | `str | None` | Optional name of the function that was called. |
+| `error` | `dict[str, Any] | None` | Optional error information if the tool call failed. |
+
+<Accordion title="docent/data_models/chat/message.py" icon="code">
+
+```python
+class ToolMessage(BaseChatMessage):
+    """Tool message in a chat conversation.
+
+    Attributes:
+        role: Always set to "tool".
+        tool_call_id: Optional ID of the tool call this message is responding to.
+        function: Optional name of the function that was called.
+        error: Optional error information if the tool call failed.
+    """
+
+    role: Literal["tool"] = "tool"  # type: ignore
+
+    tool_call_id: str | None = None
+    function: str | None = None
+    error: dict[str, Any] | None = None
+```
+
+</Accordion>
+
+#### **text** `property`
+
+```python
+text: str
+```
+
+Get the text content of the message.
+
+**Returns:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `str` | `str` | The text content of the message. If content is a list, concatenates all text content elements with newlines. |
+
+### **parse_chat_message**
+
+```python
+parse_chat_message(message_data: dict[str, Any] | ChatMessage) -> ChatMessage
+```
+
+Parse a message dictionary or object into the appropriate ChatMessage subclass.
+
+This parses base messages without chat-specific fields. For chat sessions,
+use parse_chat_session_message instead.
+
+**Parameters:**
+
+| Name | Type | Description | Default |
+| --- | --- | --- | --- |
+| `message_data` | `dict[str, Any] | ChatMessage` | A dictionary or ChatMessage object representing a chat message. | *required* |
+
+**Returns:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `ChatMessage` | `ChatMessage` | An instance of a ChatMessage subclass based on the role. |
+
+**Raises:**
+
+| Type | Description |
+| --- | --- |
+| `ValueError` | If the message role is unknown. |
+
+<Accordion title="docent/data_models/chat/message.py" icon="code">
+
+```python
+def parse_chat_message(message_data: dict[str, Any] | ChatMessage) -> ChatMessage:
+    """Parse a message dictionary or object into the appropriate ChatMessage subclass.
+
+    This parses base messages without chat-specific fields. For chat sessions,
+    use parse_chat_session_message instead.
+
+    Args:
+        message_data: A dictionary or ChatMessage object representing a chat message.
+
+    Returns:
+        ChatMessage: An instance of a ChatMessage subclass based on the role.
+
+    Raises:
+        ValueError: If the message role is unknown.
+    """
+    if isinstance(message_data, (SystemMessage, UserMessage, AssistantMessage, ToolMessage)):
+        return message_data
+
+    role = message_data.get("role")
+    if role == "system":
+        return SystemMessage.model_validate(message_data)
+    elif role == "user":
+        return UserMessage.model_validate(message_data)
+    elif role == "assistant":
+        return AssistantMessage.model_validate(message_data)
+    elif role == "tool":
+        return ToolMessage.model_validate(message_data)
+    else:
+        raise ValueError(f"Unknown message role: {role}")
+```
+
+</Accordion>
+
+### **parse_docent_chat_message**
+
+```python
+parse_docent_chat_message(message_data: dict[str, Any] | DocentChatMessage) -> DocentChatMessage
+```
+
+Parse a message dictionary or object into the appropriate ChatSessionMessage subclass.
+
+This handles chat session messages which may include ChatAssistantMessage with
+citations and suggested_messages fields.
+
+**Parameters:**
+
+| Name | Type | Description | Default |
+| --- | --- | --- | --- |
+| `message_data` | `dict[str, Any] | DocentChatMessage` | A dictionary or ChatSessionMessage object representing a chat session message. | *required* |
+
+**Returns:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `ChatSessionMessage` | `DocentChatMessage` | An instance of a ChatSessionMessage subclass based on the role. |
+
+**Raises:**
+
+| Type | Description |
+| --- | --- |
+| `ValueError` | If the message role is unknown. |
+
+<Accordion title="docent/data_models/chat/message.py" icon="code">
+
+```python
+def parse_docent_chat_message(
+    message_data: dict[str, Any] | DocentChatMessage,
+) -> DocentChatMessage:
+    """Parse a message dictionary or object into the appropriate ChatSessionMessage subclass.
+
+    This handles chat session messages which may include ChatAssistantMessage with
+    citations and suggested_messages fields.
+
+    Args:
+        message_data: A dictionary or ChatSessionMessage object representing a chat session message.
+
+    Returns:
+        ChatSessionMessage: An instance of a ChatSessionMessage subclass based on the role.
+
+    Raises:
+        ValueError: If the message role is unknown.
+    """
+    if isinstance(
+        message_data,
+        (SystemMessage, UserMessage, DocentAssistantMessage, AssistantMessage, ToolMessage),
+    ):
+        return message_data
+
+    role = message_data.get("role")
+    if role == "system":
+        return SystemMessage.model_validate(message_data)
+    elif role == "user":
+        return UserMessage.model_validate(message_data)
+    elif role == "assistant":
+        return DocentAssistantMessage.model_validate(message_data)
+    elif role == "tool":
+        return ToolMessage.model_validate(message_data)
+    else:
+        raise ValueError(f"Unknown message role: {role}")
+```
+
+</Accordion>
+
+### **Content** `module-attribute`
+
+```python
+Content = Annotated[ContentText | ContentReasoning, Discriminator('type')]
+```
+
+Discriminated union of possible content types using the 'type' field.
+Can be either ContentText or ContentReasoning.
+
+### **BaseContent**
+
+Bases: `BaseModel`
+
+Base class for all content types in chat messages.
+
+Provides the foundation for different content types with a discriminator field.
+
+**Attributes:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `type` | `Literal['text', 'reasoning', 'image', 'audio', 'video']` | The content type identifier, used for discriminating between content types. |
+
+<Accordion title="docent/data_models/chat/content.py" icon="code">
+
+```python
+class BaseContent(BaseModel):
+    """Base class for all content types in chat messages.
+
+    Provides the foundation for different content types with a discriminator field.
+
+    Attributes:
+        type: The content type identifier, used for discriminating between content types.
+    """
+
+    type: Literal["text", "reasoning", "image", "audio", "video"]
+```
+
+</Accordion>
+
+### **ContentText**
+
+Bases: `BaseContent`
+
+Text content for chat messages.
+
+Represents plain text content in a chat message.
+
+**Attributes:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `type` | `Literal['text']` | Fixed as "text" to identify this content type. |
+| `text` | `str` | The actual text content. |
+| `refusal` | `bool | None` | Optional flag indicating if this is a refusal message. |
+
+<Accordion title="docent/data_models/chat/content.py" icon="code">
+
+```python
+class ContentText(BaseContent):
+    """Text content for chat messages.
+
+    Represents plain text content in a chat message.
+
+    Attributes:
+        type: Fixed as "text" to identify this content type.
+        text: The actual text content.
+        refusal: Optional flag indicating if this is a refusal message.
+    """
+
+    type: Literal["text"] = "text"  # type: ignore
+    text: str
+    refusal: bool | None = None
+```
+
+</Accordion>
+
+### **ContentReasoning**
+
+Bases: `BaseContent`
+
+Reasoning content for chat messages.
+
+Represents reasoning or thought process content in a chat message.
+
+**Attributes:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `type` | `Literal['reasoning']` | Fixed as "reasoning" to identify this content type. |
+| `reasoning` | `str` | The actual reasoning text. |
+| `signature` | `str | None` | Optional signature associated with the reasoning. |
+| `redacted` | `bool` | Flag indicating if the reasoning has been redacted. |
+
+<Accordion title="docent/data_models/chat/content.py" icon="code">
+
+```python
+class ContentReasoning(BaseContent):
+    """Reasoning content for chat messages.
+
+    Represents reasoning or thought process content in a chat message.
+
+    Attributes:
+        type: Fixed as "reasoning" to identify this content type.
+        reasoning: The actual reasoning text.
+        signature: Optional signature associated with the reasoning.
+        redacted: Flag indicating if the reasoning has been redacted.
+    """
+
+    type: Literal["reasoning"] = "reasoning"  # type: ignore
+    reasoning: str
+    signature: str | None = None
+    redacted: bool = False
+```
+
+</Accordion>
+
+### **ToolCall** `dataclass`
+
+Tool call information.
+
+**Attributes:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `id` | `str` | Unique identifier for tool call. |
+| `type` | `Literal['function'] | None` | Type of tool call. Can only be "function" or None. |
+| `function` | `str` | Function called. |
+| `arguments` | `dict[str, Any]` | Arguments to function. |
+| `parse_error` | `str | None` | Error which occurred parsing tool call. |
+| `view` | `ToolCallContent | None` | Custom view of tool call input. |
+
+<Accordion title="docent/data_models/chat/tool.py" icon="code">
+
+```python
+@dataclass
+class ToolCall:
+    """Tool call information.
+
+    Attributes:
+        id: Unique identifier for tool call.
+        type: Type of tool call. Can only be "function" or None.
+        function: Function called.
+        arguments: Arguments to function.
+        parse_error: Error which occurred parsing tool call.
+        view: Custom view of tool call input.
+    """
+
+    id: str
+    function: str
+    arguments: dict[str, Any]
+    type: Literal["function"] | None = None
+    parse_error: str | None = None
+    view: ToolCallContent | None = None
+```
+
+</Accordion>
+
+### **ToolCallContent**
+
+Bases: `BaseModel`
+
+Content to include in tool call view.
+
+**Attributes:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `title` | `str | None` | Optional (plain text) title for tool call content. |
+| `format` | `Literal['text', 'markdown']` | Format (text or markdown). |
+| `content` | `str` | Text or markdown content. |
+
+<Accordion title="docent/data_models/chat/tool.py" icon="code">
+
+```python
+class ToolCallContent(BaseModel):
+    """Content to include in tool call view.
+
+    Attributes:
+        title: Optional (plain text) title for tool call content.
+        format: Format (text or markdown).
+        content: Text or markdown content.
+    """
+
+    title: str | None = None
+    format: Literal["text", "markdown"]
+    content: str
+```
+
+</Accordion>
+
+### **ToolParam**
+
+Bases: `BaseModel`
+
+A parameter for a tool function.
+
+**Parameters:**
+
+| Name | Type | Description | Default |
+| --- | --- | --- | --- |
+| `name` |  | The name of the parameter. | *required* |
+| `description` |  | A description of what the parameter does. | *required* |
+| `input_schema` |  | JSON Schema describing the parameter's type and validation rules. | *required* |
+
+<Accordion title="docent/data_models/chat/tool.py" icon="code">
+
+```python
+class ToolParam(BaseModel):
+    """A parameter for a tool function.
+
+    Args:
+        name: The name of the parameter.
+        description: A description of what the parameter does.
+        input_schema: JSON Schema describing the parameter's type and validation rules.
+    """
+
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+```
+
+</Accordion>
+
+### **ToolParams**
+
+Bases: `BaseModel`
+
+Description of tool parameters object in JSON Schema format.
+
+**Parameters:**
+
+| Name | Type | Description | Default |
+| --- | --- | --- | --- |
+| `type` |  | The type of the parameters object, always 'object'. | *required* |
+| `properties` |  | Dictionary mapping parameter names to their ToolParam definitions. | *required* |
+| `required` |  | List of required parameter names. | *required* |
+| `additionalProperties` |  | Whether additional properties are allowed beyond those specified. Always False. | *required* |
+
+<Accordion title="docent/data_models/chat/tool.py" icon="code">
+
+```python
+class ToolParams(BaseModel):
+    """Description of tool parameters object in JSON Schema format.
+
+    Args:
+        type: The type of the parameters object, always 'object'.
+        properties: Dictionary mapping parameter names to their ToolParam definitions.
+        required: List of required parameter names.
+        additionalProperties: Whether additional properties are allowed beyond those
+            specified. Always False.
+    """
+
+    type: Literal["object"] = "object"
+    properties: dict[str, ToolParam] = Field(default_factory=dict)
+    required: list[str] = Field(default_factory=list)
+    additionalProperties: bool = False
+```
+
+</Accordion>
+
+### **ToolInfo**
+
+Bases: `BaseModel`
+
+Specification of a tool (JSON Schema compatible).
+
+If you are implementing a ModelAPI, most LLM libraries can
+be passed this object (dumped to a dict) directly as a function
+specification. For example, in the OpenAI provider:
+
+```python
+ChatCompletionToolParam(
+    type="function",
+    function=tool.model_dump(exclude_none=True),
+)
+```
+
+In some cases the field names don't match up exactly. In that case
+call `model_dump()` on the `parameters` field. For example, in the
+Anthropic provider:
+
+```python
+ToolParam(
+    name=tool.name,
+    description=tool.description,
+    input_schema=tool.parameters.model_dump(exclude_none=True),
+)
+```
+
+**Attributes:**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `name` | `str` | Name of tool. |
+| `description` | `str` | Short description of tool. |
+| `parameters` | `ToolParams` | JSON Schema of tool parameters object. |
+
+<Accordion title="docent/data_models/chat/tool.py" icon="code">
+
+````python
+class ToolInfo(BaseModel):
+    """Specification of a tool (JSON Schema compatible).
+
+    If you are implementing a ModelAPI, most LLM libraries can
+    be passed this object (dumped to a dict) directly as a function
+    specification. For example, in the OpenAI provider:
+
+    ```python
+    ChatCompletionToolParam(
+        type="function",
+        function=tool.model_dump(exclude_none=True),
+    )
+    ```
+
+    In some cases the field names don't match up exactly. In that case
+    call `model_dump()` on the `parameters` field. For example, in the
+    Anthropic provider:
+
+    ```python
+    ToolParam(
+        name=tool.name,
+        description=tool.description,
+        input_schema=tool.parameters.model_dump(exclude_none=True),
+    )
+    ```
+
+    Attributes:
+        name: Name of tool.
+        description: Short description of tool.
+        parameters: JSON Schema of tool parameters object.
+    """
+
+    name: str
+    description: str
+    parameters: ToolParams = Field(default_factory=ToolParams)
+````
+
+</Accordion>

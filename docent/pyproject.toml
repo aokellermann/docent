@@ -51,4 +51,4 @@ allow-direct-references = true
 [project.urls]
 Homepage = "https://github.com/TransluceAI/docent"
 Issues = "https://github.com/TransluceAI/docent/issues"
-Docs = "https://transluce-docent.readthedocs-hosted.com/en/latest"
+Docs = "https://transluce.mintlify.app"
