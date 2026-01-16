@@ -160,6 +160,7 @@ class CodeSampleService:
         rubric_versions: Mapping[str, int] | None = None,
         table_alias: str = "ar",
     ) -> str:
+        # Collect rubric IDs and build CTEs
         rubric_ids = sorted(CodeSampleService.collect_rubric_ids(columns, base_filter, sort_field))
         rubric_ctes: list[str] = []
         rubric_sources: dict[str, str] = {}
@@ -168,6 +169,18 @@ class CodeSampleService:
                 rubric_ids,
                 rubric_versions=rubric_versions,
             )
+
+        # Collect label set IDs and build CTEs
+        label_set_ids = sorted(
+            CodeSampleService.collect_label_set_ids(columns, base_filter, sort_field)
+        )
+        label_ctes: list[str] = []
+        label_sources: dict[str, str] = {}
+        if label_set_ids:
+            label_ctes, label_sources = CodeSampleService._build_label_ctes(label_set_ids)
+
+        # Combine all CTEs
+        all_ctes = rubric_ctes + label_ctes
 
         unique_columns: list[str] = []
         for col in ["agent_run_id", *columns]:
@@ -180,6 +193,7 @@ class CodeSampleService:
                 table_alias,
                 rubric_versions=rubric_versions,
                 rubric_sources=rubric_sources,
+                label_sources=label_sources,
             )
             for column in unique_columns
         ]
@@ -193,6 +207,7 @@ class CodeSampleService:
                 table_alias,
                 rubric_versions=rubric_versions,
                 rubric_sources=rubric_sources,
+                label_sources=label_sources,
             )
         if not sort_expr:
             sort_expr = f"{table_alias}.created_at"
@@ -202,10 +217,11 @@ class CodeSampleService:
             table_alias,
             rubric_versions=rubric_versions,
             rubric_sources=rubric_sources,
+            label_sources=label_sources,
         )
 
         lines = [
-            *(["WITH", ",\n".join(rubric_ctes)] if rubric_ctes else []),
+            *(["WITH", ",\n".join(all_ctes)] if all_ctes else []),
             "SELECT",
             ",\n".join(f"  {line}" for line in select_lines),
             f"FROM agent_runs {table_alias}",
@@ -414,11 +430,52 @@ class CodeSampleService:
         return set()
 
     @staticmethod
+    def collect_label_set_ids(
+        columns: Sequence[str],
+        base_filter: ComplexFilter | None,
+        sort_field: str | None = None,
+    ) -> set[str]:
+        """Collect label set IDs from columns, filters, and sort field."""
+        label_set_ids: set[str] = set()
+        for column in columns:
+            label_info = CodeSampleService._parse_label_column(column)
+            if label_info is not None:
+                label_set_ids.add(label_info[0])
+        if sort_field:
+            label_info = CodeSampleService._parse_label_column(sort_field)
+            if label_info is not None:
+                label_set_ids.add(label_info[0])
+        if base_filter:
+            label_set_ids.update(CodeSampleService._collect_label_set_ids_from_filter(base_filter))
+        return label_set_ids
+
+    @staticmethod
+    def _collect_label_set_ids_from_filter(filter_obj: CollectionFilter) -> set[str]:
+        """Collect label set IDs from a filter object."""
+        if getattr(filter_obj, "disabled", False):
+            return set()
+        if isinstance(filter_obj, PrimitiveFilter):
+            if filter_obj.key_path and filter_obj.key_path[0] == "label":
+                if len(filter_obj.key_path) >= 2:
+                    return {filter_obj.key_path[1]}
+            return set()
+        if isinstance(filter_obj, ComplexFilter):
+            label_set_ids: set[str] = set()
+            for sub_filter in filter_obj.filters:
+                label_set_ids.update(
+                    CodeSampleService._collect_label_set_ids_from_filter(sub_filter)
+                )
+            return label_set_ids
+        # AgentRunIdFilter doesn't contain label set IDs
+        return set()
+
+    @staticmethod
     def build_where_clause(
         filter_obj: ComplexFilter | None,
         table_alias: str,
         rubric_versions: Mapping[str, int] | None = None,
         rubric_sources: Mapping[str, str] | None = None,
+        label_sources: Mapping[str, str] | None = None,
     ) -> str:
         if not filter_obj:
             return ""
@@ -427,6 +484,7 @@ class CodeSampleService:
             table_alias,
             rubric_versions=rubric_versions,
             rubric_sources=rubric_sources,
+            label_sources=label_sources,
         )
         return f"WHERE {condition}" if condition else ""
 
@@ -510,6 +568,127 @@ class CodeSampleService:
             f"WHERE t.agent_run_id = {table_alias}.id "
             f"AND t.collection_id = {table_alias}.collection_id)"
         )
+
+    @staticmethod
+    def _parse_label_column(column: str) -> tuple[str, list[str]] | None:
+        """Parse a label column like 'label.{label_set_id}.{json_path}'.
+
+        Returns (label_set_id, json_path) or None if not a label column.
+        """
+        if not column.startswith("label."):
+            return None
+        parts = column.split(".")
+        if len(parts) < 3:
+            return None
+        label_set_id = parts[1]
+        if not label_set_id:
+            return None
+        return label_set_id, parts[2:]
+
+    @staticmethod
+    def _build_label_expression(
+        label_set_id: str,
+        json_path: Sequence[str],
+        table_alias: str,
+        comparison_value: object | None = None,
+        label_sources: Mapping[str, str] | None = None,
+    ) -> str:
+        """Build a subquery expression to fetch a label value for an agent run."""
+        if not json_path:
+            raise ValueError("Label path cannot be empty")
+
+        label_source = label_sources.get(label_set_id) if label_sources else None
+        value_expr = CodeSampleService._build_json_text_accessor("l.label_value", json_path)
+
+        if label_source:
+            # Use CTE alias
+            subquery = (
+                f"(SELECT {value_expr} "
+                f"FROM {label_source} l "
+                f"WHERE l.agent_run_id = {table_alias}.id)"
+            )
+        else:
+            # Fallback to direct table query
+            escaped_label_set_id = CodeSampleService._escape_literal(label_set_id)
+            subquery = (
+                f"(SELECT {value_expr} "
+                "FROM labels l "
+                f"WHERE l.agent_run_id = {table_alias}.id "
+                f"AND l.label_set_id = '{escaped_label_set_id}')"
+            )
+
+        if isinstance(comparison_value, (int, float)):
+            return f"CAST({subquery} AS DOUBLE PRECISION)"
+        if isinstance(comparison_value, bool):
+            return f"CAST({subquery} AS BOOLEAN)"
+        return subquery
+
+    @staticmethod
+    def _build_label_filter_clause(
+        filter_obj: PrimitiveFilter,
+        table_alias: str,
+        label_sources: Mapping[str, str] | None = None,
+    ) -> str | None:
+        """Build a filter clause for label filters."""
+        if len(filter_obj.key_path) < 3:
+            raise ValueError("Label filters must include a JSON field path.")
+
+        label_set_id = filter_obj.key_path[1]
+        json_path = filter_obj.key_path[2:]
+        label_source = label_sources.get(label_set_id) if label_sources else None
+        value_expr = CodeSampleService._build_json_text_accessor("l.label_value", json_path)
+
+        if label_source:
+            # Use CTE alias
+            from_clause = f"{label_source} l"
+            where_base = f"l.agent_run_id = {table_alias}.id"
+        else:
+            # Fallback to direct table query
+            escaped_label_set_id = CodeSampleService._escape_literal(label_set_id)
+            from_clause = "labels l"
+            where_base = (
+                f"l.agent_run_id = {table_alias}.id AND l.label_set_id = '{escaped_label_set_id}'"
+            )
+
+        op = str(filter_obj.op)
+        if op == "is":
+            normalized = (
+                filter_obj.value.strip().lower() if isinstance(filter_obj.value, str) else None
+            )
+            if normalized == "null":
+                # Check if no label exists OR label value is null
+                return (
+                    "NOT EXISTS ("
+                    f"SELECT 1 FROM {from_clause} "
+                    f"WHERE {where_base} "
+                    f"AND {value_expr} IS NOT NULL)"
+                )
+            if normalized == "not null":
+                return (
+                    "EXISTS ("
+                    f"SELECT 1 FROM {from_clause} "
+                    f"WHERE {where_base} "
+                    f"AND {value_expr} IS NOT NULL)"
+                )
+            formatted_value = CodeSampleService._format_value(filter_obj.value)
+            return (
+                "EXISTS ("
+                f"SELECT 1 FROM {from_clause} "
+                f"WHERE {where_base} "
+                f"AND {value_expr} IS {formatted_value})"
+            )
+
+        formatted_value = CodeSampleService._format_value(filter_obj.value)
+        if op in {"==", "!=", ">", ">=", "<", "<=", "~*", "!~*"}:
+            sql_op = "=" if op == "==" else op
+            return (
+                "EXISTS ("
+                f"SELECT 1 FROM {from_clause} "
+                f"WHERE {where_base} "
+                f"AND {value_expr} {sql_op} {formatted_value})"
+            )
+
+        return None
 
     @staticmethod
     def _build_tag_sort_expression(table_alias: str) -> str:
@@ -661,6 +840,7 @@ class CodeSampleService:
         comparison_value: object | None = None,
         rubric_versions: Mapping[str, int] | None = None,
         rubric_sources: Mapping[str, str] | None = None,
+        label_sources: Mapping[str, str] | None = None,
     ) -> str | None:
         if not key_path:
             return None
@@ -687,6 +867,18 @@ class CodeSampleService:
             if rest:
                 return None
             return CodeSampleService._build_tag_sort_expression(table_alias)
+        if root == "label":
+            if len(rest) < 2:
+                return None
+            label_set_id = rest[0]
+            json_path = rest[1:]
+            return CodeSampleService._build_label_expression(
+                label_set_id,
+                json_path,
+                table_alias,
+                comparison_value=comparison_value,
+                label_sources=label_sources,
+            )
         if root == "agent_run_id":
             return f"{table_alias}.id"
         if root == "created_at":
@@ -709,6 +901,7 @@ class CodeSampleService:
         table_alias: str,
         rubric_versions: Mapping[str, int] | None = None,
         rubric_sources: Mapping[str, str] | None = None,
+        label_sources: Mapping[str, str] | None = None,
     ) -> str | None:
         if filter_obj.disabled or filter_obj.supports_sql is False:
             return None
@@ -716,12 +909,18 @@ class CodeSampleService:
         if filter_obj.key_path and filter_obj.key_path[0] == "tag":
             return CodeSampleService._build_tag_filter_clause(filter_obj, table_alias)
 
+        if filter_obj.key_path and filter_obj.key_path[0] == "label":
+            return CodeSampleService._build_label_filter_clause(
+                filter_obj, table_alias, label_sources=label_sources
+            )
+
         field_expr = CodeSampleService._build_field_expression(
             filter_obj.key_path,
             table_alias,
             filter_obj.value,
             rubric_versions=rubric_versions,
             rubric_sources=rubric_sources,
+            label_sources=label_sources,
         )
         if not field_expr:
             return None
@@ -762,6 +961,7 @@ class CodeSampleService:
         table_alias: str,
         rubric_versions: Mapping[str, int] | None = None,
         rubric_sources: Mapping[str, str] | None = None,
+        label_sources: Mapping[str, str] | None = None,
     ) -> str | None:
         if (
             getattr(filter_obj, "disabled", False)
@@ -775,6 +975,7 @@ class CodeSampleService:
                 table_alias,
                 rubric_versions=rubric_versions,
                 rubric_sources=rubric_sources,
+                label_sources=label_sources,
             )
         if isinstance(filter_obj, AgentRunIdFilter):
             return CodeSampleService._build_agent_run_id_clause(filter_obj, table_alias)
@@ -788,6 +989,7 @@ class CodeSampleService:
                     table_alias,
                     rubric_versions=rubric_versions,
                     rubric_sources=rubric_sources,
+                    label_sources=label_sources,
                 )
                 for child in getattr(filter_obj, "filters", [])
             )
@@ -804,6 +1006,7 @@ class CodeSampleService:
         table_alias: str,
         rubric_versions: Mapping[str, int] | None = None,
         rubric_sources: Mapping[str, str] | None = None,
+        label_sources: Mapping[str, str] | None = None,
     ) -> str:
         if column == "agent_run_id":
             return f"{table_alias}.id AS agent_run_id"
@@ -842,6 +1045,25 @@ class CodeSampleService:
                 rubric_sources=rubric_sources,
             )
             return f"{expr} AS {alias}"
+        if column.startswith("label."):
+            label_info = CodeSampleService._parse_label_column(column)
+            if label_info is None:
+                alias = CodeSampleService._sanitize_identifier(column.replace(".", "_"))
+                return f"NULL AS {alias}"
+            label_set_id, json_path = label_info
+            expr = CodeSampleService._build_label_expression(
+                label_set_id,
+                json_path,
+                table_alias,
+                label_sources=label_sources,
+            )
+            # Build alias using CTE name if available, otherwise use short ID
+            alias = CodeSampleService._build_label_column_alias(
+                label_set_id,
+                json_path,
+                label_sources=label_sources,
+            )
+            return f"{expr} AS {alias}"
         return f"{table_alias}.{column} AS {column}"
 
     @staticmethod
@@ -854,6 +1076,20 @@ class CodeSampleService:
         if not prefix:
             short_id = rubric_id.split("-", maxsplit=1)[0]
             prefix = CodeSampleService._sanitize_identifier(f"rubric_{short_id}")
+        parts = [prefix, *[part for part in json_path if part]]
+        return CodeSampleService._sanitize_identifier("_".join(parts))
+
+    @staticmethod
+    def _build_label_column_alias(
+        label_set_id: str,
+        json_path: Sequence[str],
+        label_sources: Mapping[str, str] | None = None,
+    ) -> str:
+        """Build a column alias for label columns, using CTE name if available."""
+        prefix = label_sources.get(label_set_id) if label_sources else None
+        if not prefix:
+            short_id = label_set_id.split("-", maxsplit=1)[0]
+            prefix = CodeSampleService._sanitize_identifier(f"label_{short_id}")
         parts = [prefix, *[part for part in json_path if part]]
         return CodeSampleService._sanitize_identifier("_".join(parts))
 
@@ -886,6 +1122,34 @@ class CodeSampleService:
                     f"    WHERE jr.rubric_id = '{escaped_id}'",
                     f"      AND {version_clause}",
                     f"      AND jr.result_type = '{result_type}'",
+                    "  )",
+                ]
+            )
+            ctes.append(cte)
+        return ctes, alias_map
+
+    @staticmethod
+    def _build_label_ctes(
+        label_set_ids: Sequence[str],
+    ) -> tuple[list[str], dict[str, str]]:
+        """Build CTEs for label sets, returning (cte_strings, label_set_id -> alias map)."""
+        ctes: list[str] = []
+        alias_map: dict[str, str] = {}
+        alias_counts: dict[str, int] = {}
+        for label_set_id in label_set_ids:
+            short_id = label_set_id.split("-", maxsplit=1)[0]
+            base_alias = CodeSampleService._sanitize_identifier(f"label_{short_id}")
+            alias_index = alias_counts.get(base_alias, 0)
+            alias_counts[base_alias] = alias_index + 1
+            alias = base_alias if alias_index == 0 else f"{base_alias}_{alias_index}"
+            alias_map[label_set_id] = alias
+            escaped_id = CodeSampleService._escape_literal(label_set_id)
+            cte = "\n".join(
+                [
+                    f"  {alias} AS (",
+                    "    SELECT l.agent_run_id, l.label_value",
+                    "    FROM labels l",
+                    f"    WHERE l.label_set_id = '{escaped_id}'",
                     "  )",
                 ]
             )
