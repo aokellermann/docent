@@ -410,8 +410,7 @@ class CodeSampleService:
             for sub_filter in filter_obj.filters:
                 rubric_ids.update(CodeSampleService._collect_rubric_ids_from_filter(sub_filter))
             return rubric_ids
-        if isinstance(filter_obj, AgentRunIdFilter):
-            return set()
+        # AgentRunIdFilter doesn't contain rubric IDs
         return set()
 
     @staticmethod
@@ -866,7 +865,7 @@ class CodeSampleService:
         ctes: list[str] = []
         alias_map: dict[str, str] = {}
         alias_counts: dict[str, int] = {}
-        for index, rubric_id in enumerate(rubric_ids):
+        for _, rubric_id in enumerate(rubric_ids):
             short_id = rubric_id.split("-", maxsplit=1)[0]
             base_alias = CodeSampleService._sanitize_identifier(f"rubric_{short_id}")
             alias_index = alias_counts.get(base_alias, 0)

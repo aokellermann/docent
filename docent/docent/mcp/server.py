@@ -21,10 +21,10 @@ def get_client() -> Docent:
     return _client
 
 
-mcp = FastMCP("docent", json_response=True)
+mcp = FastMCP("docent", json_response=True)  # type: ignore[reportUnknownVariableType]
 
 
-@mcp.tool()
+@mcp.tool()  # type: ignore[reportUnknownMemberType, reportUntypedFunctionDecorator]
 def get_metadata_fields(collection_id: str) -> str:
     "Get the available metadata fields for agent runs in a collection. Use this to discover what metadata keys are available for filtering and analysis."
     client = get_client()
@@ -74,7 +74,7 @@ def get_metadata_fields(collection_id: str) -> str:
         return f"Error fetching metadata fields: {e}"
 
 
-@mcp.tool()
+@mcp.tool()  # type: ignore[reportUnknownMemberType, reportUntypedFunctionDecorator]
 def list_result_sets(collection_id: str, prefix: str | None = None) -> str:
     "List result sets in a collection. Use this to discover what result sets exist in a collection, optionally filtered by name prefix."
     client = get_client()
@@ -107,7 +107,7 @@ def list_result_sets(collection_id: str, prefix: str | None = None) -> str:
         return f"Error fetching result sets: {e}"
 
 
-@mcp.tool()
+@mcp.tool()  # type: ignore[reportUnknownMemberType, reportUntypedFunctionDecorator]
 def navigate_to(collection_id: str, path: str) -> str:
     "Open a page in the Docent dashboard in the browser. For a result set, path is `/results/<result_set_name>`"
     client = get_client()
@@ -135,4 +135,4 @@ def main():
     if args.config_file:
         _config_file = args.config_file
 
-    mcp.run(transport="stdio")
+    mcp.run(transport="stdio")  # type: ignore[reportUnknownMemberType]
