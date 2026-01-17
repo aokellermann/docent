@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Type, Union
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Sequence, Type, Union
 from uuid import uuid4
 
 from pydantic import BaseModel, Discriminator, Field, field_validator
 from sqlalchemy import Boolean, ColumnElement, Float, String, and_, case, cast, func, or_, select
+from sqlalchemy.exc import InvalidRequestError
 from sqlalchemy.orm import aliased
 
 from docent._log_util import get_logger
+from docent.judges import ResultType
 
 if TYPE_CHECKING:
     from docent_core.docent.db.schemas.rubric import SQLAJudgeResult
@@ -33,37 +35,94 @@ class FilterSQLContext:
         base_table: Type["SQLAAgentRun"],
     ) -> None:
         self._base_table = base_table
-        self._rubric_aliases: dict[str, FilterJoinSpec] = {}
+        self._rubric_aliases: dict[tuple[str, tuple[str, ...]], FilterJoinSpec] = {}
         self._tag_alias: FilterJoinSpec | None = None
         self._label_aliases: dict[str, FilterJoinSpec] = {}
 
-    def ensure_rubric_join(self, rubric_id: str) -> FilterJoinSpec:
-        spec = self._rubric_aliases.get(rubric_id)
+    def ensure_rubric_join(self, rubric_id: str, json_path: Sequence[str]) -> FilterJoinSpec:
+        key = (rubric_id, tuple(json_path))
+        spec = self._rubric_aliases.get(key)
         if spec is not None:
             return spec
 
         from docent_core.docent.db.schemas.rubric import SQLAJudgeResult, SQLARubric
 
-        alias = aliased(SQLAJudgeResult, name=f"judge_result_{len(self._rubric_aliases)}")
+        if not json_path:
+            raise ValueError("Rubric filters must include a JSON field path.")
+
+        field_expr = SQLAJudgeResult.output
+        for part in json_path[:-1]:
+            field_expr = field_expr.op("->")(part)
+        field_expr = cast(field_expr.op("->>")(json_path[-1]), String)
+
         latest_version_subquery = (
             select(func.max(SQLARubric.version))
             .where(
                 SQLARubric.id == rubric_id,
                 SQLARubric.collection_id == getattr(self._base_table, "collection_id"),
             )
+            .correlate(self._base_table)
             .scalar_subquery()
         )
-        onclause = and_(
-            getattr(alias, "agent_run_id") == getattr(self._base_table, "id"),
-            getattr(alias, "rubric_id") == rubric_id,
-            getattr(alias, "rubric_version") == latest_version_subquery,
+
+        rubric_counts = (
+            select(
+                SQLAJudgeResult.agent_run_id.label("agent_run_id"),
+                self._base_table.collection_id.label("collection_id"),
+                field_expr.label("value"),
+                func.count().label("value_count"),
+            )
+            .select_from(SQLAJudgeResult)
+            .join(self._base_table, SQLAJudgeResult.agent_run_id == self._base_table.id)
+            .where(
+                SQLAJudgeResult.rubric_id == rubric_id,
+                SQLAJudgeResult.rubric_version == latest_version_subquery,
+                SQLAJudgeResult.result_type == ResultType.DIRECT_RESULT,
+            )
+            .group_by(
+                SQLAJudgeResult.agent_run_id,
+                self._base_table.collection_id,
+                field_expr,
+            )
+            .subquery()
         )
-        spec = FilterJoinSpec(alias=alias, onclause=onclause)
-        self._rubric_aliases[rubric_id] = spec
+        rubric_ranked = select(
+            rubric_counts.c.agent_run_id,
+            rubric_counts.c.collection_id,
+            rubric_counts.c.value.label("rubric_value"),
+            func.row_number()
+            .over(
+                partition_by=(
+                    rubric_counts.c.agent_run_id,
+                    rubric_counts.c.collection_id,
+                ),
+                order_by=(
+                    rubric_counts.c.value_count.desc(),
+                    rubric_counts.c.value.asc().nulls_last(),
+                ),
+            )
+            .label("value_rank"),
+        ).subquery()
+        rubric_modal = (
+            select(
+                rubric_ranked.c.agent_run_id,
+                rubric_ranked.c.collection_id,
+                rubric_ranked.c.rubric_value,
+            )
+            .where(rubric_ranked.c.value_rank == 1)
+            .subquery(f"rubric_value_{len(self._rubric_aliases)}")
+        )
+
+        onclause = and_(
+            rubric_modal.c.agent_run_id == getattr(self._base_table, "id"),
+            rubric_modal.c.collection_id == getattr(self._base_table, "collection_id"),
+        )
+        spec = FilterJoinSpec(alias=rubric_modal, onclause=onclause)
+        self._rubric_aliases[key] = spec
         return spec
 
-    def get_rubric_alias(self, rubric_id: str) -> FilterJoinSpec:
-        return self.ensure_rubric_join(rubric_id)
+    def get_rubric_alias(self, rubric_id: str, json_path: Sequence[str]) -> FilterJoinSpec:
+        return self.ensure_rubric_join(rubric_id, json_path)
 
     def ensure_tag_join(self) -> FilterJoinSpec:
         if self._tag_alias is not None:
@@ -127,6 +186,15 @@ def safe_float(col: Any) -> Any:
         ),
         else_=None,
     )
+
+
+def safe_text(col: Any) -> Any:
+    if hasattr(col, "as_string"):
+        try:
+            return col.as_string()
+        except InvalidRequestError:
+            return cast(col, String)
+    return cast(col, String)
 
 
 def _build_null_check_clause(sqla_value: Any, value: str) -> ColumnElement[bool]:
@@ -255,9 +323,10 @@ class PrimitiveFilter(BaseCollectionFilter):
                 raise ValueError("Rubric filters require a SQL compilation context.")
             if len(self.key_path) < 3:
                 raise ValueError("Rubric filters must include a JSON field path.")
-            join_spec = context.get_rubric_alias(self.key_path[1])
-            sqla_value = join_spec.alias.output  # type: ignore[attr-defined]
             json_keys = self.key_path[2:]
+            join_spec = context.get_rubric_alias(self.key_path[1], json_keys)
+            sqla_value = join_spec.alias.c.rubric_value
+            json_keys = None
         elif mode == "tag":
             if context is None:
                 raise ValueError("Tag filters require a SQL compilation context.")
@@ -286,9 +355,9 @@ class PrimitiveFilter(BaseCollectionFilter):
             if self.op == "is":
                 if not isinstance(self.value, str):
                     raise ValueError("The 'is' operator requires a string value")
-                sqla_value = sqla_value.as_string()
+                sqla_value = safe_text(sqla_value)
             elif isinstance(self.value, str):
-                sqla_value = sqla_value.as_string()
+                sqla_value = safe_text(sqla_value)
             elif isinstance(self.value, bool):
                 sqla_value = safe_bool(sqla_value)
             elif isinstance(self.value, (int, float)):

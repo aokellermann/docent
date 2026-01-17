@@ -244,6 +244,10 @@ def run():
     queue_name = _resolve_worker_queue_name()
     logger.info("Worker will consume queue %s", queue_name)
 
+    # run_worker requires an explicit loop, so we create one
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
     run_worker(
         {
             "functions": [run_job],

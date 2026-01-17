@@ -15,7 +15,11 @@ async def rubric_job(ctx: ViewContext, job: SQLAJob):
             raise ValueError("User is required to run a rubric job")
 
         usage_svc = UsageService(db.session)
-        llm_svc = LLMService(db.session, ctx.user, usage_svc)
+        max_parallel = job.job_json.get("max_parallel")
+        if max_parallel is not None:
+            llm_svc = LLMService(db.session, ctx.user, usage_svc, max_parallel)
+        else:
+            llm_svc = LLMService(db.session, ctx.user, usage_svc)
         rs = RubricService(session, db.session, mono_svc, llm_svc)
 
         await rs.run_rubric_job(ctx, job)

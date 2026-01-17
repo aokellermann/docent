@@ -298,6 +298,7 @@ class RubricService:
         n_rollouts_per_input: int = 1,
         label_set_id: str | None = None,
         filter: dict[str, Any] | None = None,
+        max_parallel: int | None = None,
     ):
         """Start a job to evaluate the rubric."""
 
@@ -318,6 +319,7 @@ class RubricService:
                     "n_rollouts_per_input": n_rollouts_per_input,
                     "label_set_id": label_set_id,
                     "filter": filter,
+                    "max_parallel": max_parallel,
                 },
             )
         )

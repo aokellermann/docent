@@ -226,9 +226,9 @@ async def get_judge_result_filter_fields(
     Returns metadata fields, tag, agent_run_id, and rubric output fields
     scoped to the specified rubric and optional version.
     """
-    from docent.data_models.agent_run import FilterableField
+    from docent.data_models.agent_run import FilterableFieldWithSamples
 
-    fields: list[FilterableField] = await mono_svc.get_agent_run_metadata_fields(
+    fields: list[FilterableFieldWithSamples] = await mono_svc.get_agent_run_metadata_fields(
         ctx,
         rubric_id=rubric_id,
         rubric_version=version,
@@ -403,6 +403,7 @@ class StartFilteredEvalJobRequest(BaseModel):
     n_rollouts_per_input: int = 1
     label_set_id: str | None = None
     filter: dict[str, Any] | None = None
+    max_parallel: int | None = None
 
 
 @rubric_router.post("/{collection_id}/{rubric_id}/estimate_cost")
@@ -440,9 +441,31 @@ async def start_eval_rubric_job(
 ):
     """Start or get an existing evaluation job for the specified rubric."""
 
+    # Check if user has a custom API key for the judge model's provider
+    if ctx.user:
+        overrides = await mono_svc.get_api_key_overrides(ctx.user)
+        is_byok = sq_rubric.judge_model.get("provider") in overrides
+    else:
+        is_byok = False
+
+    # Validate and constrain max_parallel based on BYOK status
+    DEFAULT_MAX_PARALLEL = 100
+    NON_BYOK_MAX_PARALLEL_LIMIT = 100
+
+    max_parallel = request.max_parallel
+    if max_parallel is None:
+        max_parallel = DEFAULT_MAX_PARALLEL
+    elif max_parallel < 1:
+        raise HTTPException(status_code=400, detail="max_parallel must be at least 1")
+    elif not is_byok and max_parallel > NON_BYOK_MAX_PARALLEL_LIMIT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"max_parallel cannot exceed {NON_BYOK_MAX_PARALLEL_LIMIT} without a custom API key (BYOK)",
+        )
+
     logger.info(
-        f"Starting evaluation job for rubric {rubric_id} with max results {request.max_agent_runs} "
-        f"and {request.n_rollouts_per_input} rollouts per input"
+        f"Starting evaluation job for rubric {rubric_id} with max results {request.max_agent_runs}, "
+        f"{request.n_rollouts_per_input} rollouts per input, and max_parallel={max_parallel}"
     )
     job_id = await rubric_svc.start_or_get_eval_rubric_job(
         ctx,
@@ -451,14 +474,8 @@ async def start_eval_rubric_job(
         request.n_rollouts_per_input,
         request.label_set_id,
         request.filter,
+        max_parallel,
     )
-
-    # Check if user has a custom API key (just for analytics purposes)
-    if ctx.user:
-        overrides = await mono_svc.get_api_key_overrides(ctx.user)
-        is_byok = sq_rubric.judge_model.get("provider") in overrides
-    else:
-        is_byok = False
 
     analytics.track_event(
         "start_eval_rubric_job",
@@ -469,6 +486,7 @@ async def start_eval_rubric_job(
             "text": sq_rubric.rubric_text,
             "judge_model": sq_rubric.judge_model,
             "is_byok": is_byok,
+            "max_parallel": max_parallel,
         },
     )
 

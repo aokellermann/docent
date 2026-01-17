@@ -33,6 +33,7 @@ from docent._log_util import get_logger
 from docent.data_models.agent_run import FilterableFieldType
 from docent_core.docent.db.schemas.auth_models import Permission, ResourceType, User
 from docent_core.docent.db.schemas.label import SQLALabel, SQLATag
+from docent_core.docent.db.schemas.result_tables import SQLAResult, SQLAResultSet
 from docent_core.docent.db.schemas.rubric import (
     SQLAJudgeResult,
     SQLAJudgeResultCentroid,
@@ -481,6 +482,28 @@ def _judge_result_centroid_collection_predicate(
     return exp.Exists(this=subquery)
 
 
+def _result_collection_predicate(table_alias: str, collection_id: str) -> SqlGlotExpression:
+    """Filter results by ensuring their linked result_set belongs to the collection."""
+
+    subquery = (
+        exp.select(exp.Literal.string("1"))  # type: ignore[reportUnknownMemberType]
+        .from_(SQLAResultSet.__tablename__)  # type: ignore[reportUnknownMemberType]
+        .where(  # type: ignore[reportUnknownMemberType]
+            exp.and_(  # type: ignore[reportUnknownMemberType]
+                exp.EQ(
+                    this=exp.column("collection_id", table=SQLAResultSet.__tablename__),
+                    expression=exp.Literal.string(collection_id),  # type: ignore[reportUnknownMemberType]
+                ),
+                exp.EQ(
+                    this=exp.column("id", table=SQLAResultSet.__tablename__),
+                    expression=exp.column("result_set_id", table=table_alias),
+                ),
+            )
+        )
+    )
+    return exp.Exists(this=subquery)
+
+
 class DQLRegistry:
     """Keeps track of which database tables and columns DQL callers may access."""
 
@@ -668,6 +691,12 @@ def build_default_registry(
         allowed_columns=_columns_for(SQLAJudgeResultCentroid.__table__),
         collection_predicate_factory=_judge_result_centroid_collection_predicate,
     )
+    registry.register_table(
+        name=SQLAResult.__tablename__,
+        table=SQLAResult.__table__,
+        allowed_columns=_columns_for(SQLAResult.__table__),
+        collection_predicate_factory=_result_collection_predicate,
+    )
 
     if json_fields:
         for table_name, infos in json_fields.items():
@@ -753,7 +782,9 @@ def parameterize_expression(
 
     sql = _render_sql(cloned, sql_dialect)
     if params:
-        for name in params:
+        # Sort by name length descending to avoid prefix collisions
+        # (e.g., $__dql_param_1 matching prefix of $__dql_param_16)
+        for name in sorted(params.keys(), key=len, reverse=True):
             cast_type = cast_hints.get(name)
             if cast_type is not None:
                 replacement = f"(:{name})::{cast_type}"
@@ -794,6 +825,12 @@ def _apply_collection_filter(
     target = scope.expression
     if isinstance(target, exp.Subquery):
         target = target.this
+    elif isinstance(target, exp.CTE):
+        cte_body = target.this
+        if isinstance(cte_body, exp.Subquery):
+            target = cte_body.this
+        else:
+            target = cte_body
     if not isinstance(target, exp.Select):
         return
 
@@ -1076,8 +1113,13 @@ def _validate_scope(
 ) -> bool:
     """Validate a scope and its descendants, returning whether a collection predicate was applied."""
 
+    cached_scope = getattr(scope, "_collection_scoped", None)
+    if isinstance(cached_scope, bool):
+        return cached_scope
+
     base_alias_map: dict[str, AllowedTable] = {}
     derived_aliases: set[str] = set()
+    derived_scopes: list[Scope] = []
     collection_filter_applied = False
 
     sources = cast(Mapping[str, object], getattr(scope, "sources", {}))
@@ -1101,6 +1143,7 @@ def _validate_scope(
                 collection_filter_applied = True
         elif isinstance(source, Scope):
             derived_aliases.add(alias_key)
+            derived_scopes.append(source)
         else:
             raise DQLValidationError(f"Unsupported FROM source type '{type(source).__name__}'.")
 
@@ -1114,7 +1157,15 @@ def _validate_scope(
     _validate_columns(columns, merged_alias_map, derived_aliases)
     _reject_stars(cast(SqlGlotExpression, scope.expression))
 
-    for child in _iter_scope_children(scope):
+    child_scopes = list(_iter_scope_children(scope))
+    if derived_scopes:
+        child_scope_ids = {id(child) for child in child_scopes}
+        for derived in derived_scopes:
+            if id(derived) not in child_scope_ids:
+                child_scopes.append(derived)
+                child_scope_ids.add(id(derived))
+
+    for child in child_scopes:
         if _validate_scope(child, registry, collection_id, parent_alias_map=merged_alias_map):
             collection_filter_applied = True
 
@@ -1122,6 +1173,7 @@ def _validate_scope(
     if not collection_filter_applied:
         raise DQLValidationError("Must reference at least one table.")
 
+    setattr(scope, "_collection_scoped", collection_filter_applied)
     return collection_filter_applied
 
 
