@@ -314,9 +314,7 @@ class ChatService:
         spec = LLMContextSpec.model_validate(sq_chat_session.context_serialized)
 
         if lookup.type == "agent_run":
-            agent_runs = await self.mono_svc.get_agent_runs(
-                ctx=None, agent_run_ids=[lookup.id], apply_base_filter=False
-            )
+            agent_runs = await self.mono_svc.get_agent_runs(ctx=None, agent_run_ids=[lookup.id])
             if not agent_runs:
                 raise ValueError(f"Agent run {lookup.id} not found")
 
@@ -538,9 +536,7 @@ class ChatService:
         if not has_unparsed_citations:
             return session
 
-        agent_run = await self.mono_svc.get_agent_run(
-            ctx, session.agent_run_id, apply_base_where_clause=False
-        )
+        agent_run = await self.mono_svc.get_agent_run(ctx, session.agent_run_id)
         if agent_run is None:
             return session
 
@@ -693,9 +689,7 @@ class ChatService:
             raise ValueError("ViewContext is required for single-run chat sessions")
 
         # Get agent run for system prompt and citation parsing
-        agent_run = await self.mono_svc.get_agent_run(
-            ctx, sqla_session.agent_run_id, apply_base_where_clause=False
-        )
+        agent_run = await self.mono_svc.get_agent_run(ctx, sqla_session.agent_run_id)
         if agent_run is None:
             raise ValueError(f"Agent run {sqla_session.agent_run_id} not found")
 

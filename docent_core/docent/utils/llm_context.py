@@ -53,9 +53,7 @@ async def load_context_objects(spec: LLMContextSpec, mono_svc: MonoService) -> L
 
     agent_run_ids_to_fetch = [arid for arid in agent_run_ids if arid not in object_cache]
     if agent_run_ids_to_fetch:
-        agent_runs = await mono_svc.get_agent_runs(
-            ctx=None, agent_run_ids=agent_run_ids_to_fetch, apply_base_filter=False
-        )
+        agent_runs = await mono_svc.get_agent_runs(ctx=None, agent_run_ids=agent_run_ids_to_fetch)
         for agent_run in agent_runs:
             object_cache[agent_run.id] = agent_run
             for transcript in agent_run.transcripts:

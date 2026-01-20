@@ -1185,16 +1185,13 @@ class MonoService:
         ctx: ViewContext | None = None,
         agent_run_ids: list[str] | None = None,
         limit: int | None = None,
-        apply_base_filter: bool = True,
         batch_size: int = 10_000,
     ) -> list[AgentRun]:
         """
         Get all agent runs for a given Collection ID.
+        TODO(ryan, mengk): ctx is optional because multi-run chat could have items from
+            different collections. We should figure out a way to make this more explicit.
         """
-        # If we don't have agent_run_ids or need to apply base where clause, ctx is required
-        if agent_run_ids is None and ctx is None:
-            raise ValueError("ctx is required when agent_run_ids is not provided")
-
         async with self.db.session() as session:
             # If we don't have the agent run ids, get them first
             if agent_run_ids is None:
@@ -1214,10 +1211,8 @@ class MonoService:
                 batch_ids = agent_run_ids[i : i + batch_size]
 
                 query = select(SQLAAgentRun)
-                if apply_base_filter:
-                    if ctx is None:
-                        raise ValueError("ctx is required when apply_base_where_clause is True")
-                    query = ctx.apply_base_filter(query)
+                if ctx is not None:
+                    query = query.where(SQLAAgentRun.collection_id == ctx.collection_id)
                 # TODO(mengk): use LIMIT and OFFSET instead of the IDs
                 query = query.where(SQLAAgentRun.id.in_(batch_ids))
 
@@ -1391,6 +1386,8 @@ class MonoService:
                 query = select(SQLAAgentRun.id, SQLAAgentRun.metadata_json, SQLAAgentRun.created_at)
                 if apply_base_filter:
                     query = ctx.apply_base_filter(query)
+                else:
+                    query = query.where(SQLAAgentRun.collection_id == ctx.collection_id)
                 # TODO(mengk): use LIMIT and OFFSET instead of the IDs
                 query = query.where(SQLAAgentRun.id.in_(batch_ids))
 
@@ -1563,23 +1560,18 @@ class MonoService:
                     f"Agent run {agent_run_id} not found in collection {collection_id}"
                 )
 
-    async def get_agent_run(
-        self, ctx: ViewContext, agent_run_id: str, apply_base_where_clause: bool = True
-    ) -> AgentRun | None:
+    async def get_agent_run(self, ctx: ViewContext, agent_run_id: str) -> AgentRun | None:
         """
         Get an AgentRun from the database by its ID.
 
         Args:
             ctx: The ViewContext to use for the query.
             agent_run_id: The ID of the agent run to get.
-            apply_base_where_clause: Whether to apply the base where clause to the query.
 
         Returns:
             The agent run.
         """
-        agent_runs = await self.get_agent_runs(
-            ctx, agent_run_ids=[agent_run_id], apply_base_filter=apply_base_where_clause
-        )
+        agent_runs = await self.get_agent_runs(ctx, agent_run_ids=[agent_run_id])
         assert len(agent_runs) <= 1, f"Found {len(agent_runs)} AgentRuns with ID {agent_run_id}"
         return agent_runs[0] if agent_runs else None
 

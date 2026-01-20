@@ -220,7 +220,7 @@ export const collectionApi = createApi({
       { collectionId: string; agentRunId: string }
     >({
       query: ({ collectionId, agentRunId }) => ({
-        url: `/${collectionId}/agent_run?agent_run_id=${agentRunId}&apply_base_where_clause=false`,
+        url: `/${collectionId}/agent_run?agent_run_id=${agentRunId}`,
         method: 'GET',
       }),
     }),
@@ -229,7 +229,7 @@ export const collectionApi = createApi({
       { collectionId: string; agentRunId: string; fullTree?: boolean }
     >({
       query: ({ collectionId, agentRunId, fullTree = false }) => ({
-        url: `/${collectionId}/agent_run_with_tree?agent_run_id=${agentRunId}&apply_base_where_clause=false&full_tree=${fullTree}`,
+        url: `/${collectionId}/agent_run_with_tree?agent_run_id=${agentRunId}&full_tree=${fullTree}`,
         method: 'GET',
       }),
     }),

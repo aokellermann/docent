@@ -768,7 +768,6 @@ async def get_metadata_field_range(
 @user_router.get("/{collection_id}/agent_run")
 async def get_agent_run(
     agent_run_id: str,
-    apply_base_where_clause: bool = True,
     mono_svc: MonoService = Depends(get_mono_svc),
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.READ)),
@@ -778,25 +777,23 @@ async def get_agent_run(
 
     Args:
         agent_run_id: The ID of the agent run to get.
-        apply_base_where_clause: Whether to apply the base where clause to the query.
 
     Returns:
         The agent run.
     """
 
-    return await mono_svc.get_agent_run(ctx, agent_run_id, apply_base_where_clause)
+    return await mono_svc.get_agent_run(ctx, agent_run_id)
 
 
 @user_router.get("/{collection_id}/agent_run_with_tree")
 async def get_agent_run_with_tree(
     agent_run_id: str,
-    apply_base_where_clause: bool = True,
     full_tree: bool = False,
     mono_svc: MonoService = Depends(get_mono_svc),
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.READ)),
 ):
-    agent_run = await mono_svc.get_agent_run(ctx, agent_run_id, apply_base_where_clause)
+    agent_run = await mono_svc.get_agent_run(ctx, agent_run_id)
     if not agent_run:
         raise HTTPException(status_code=404, detail=f"Agent run {agent_run_id} not found")
 
