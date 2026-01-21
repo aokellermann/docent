@@ -142,12 +142,6 @@ resource "aws_apprunner_service" "api" {
       egress_type       = "VPC"
       vpc_connector_arn = aws_apprunner_vpc_connector.main.arn
     }
-    dynamic "ingress_configuration" {
-      for_each = local.enable_tailscale ? [1] : []
-      content {
-        is_publicly_accessible = false
-      }
-    }
   }
 
   health_check_configuration {
@@ -180,76 +174,6 @@ resource "aws_apprunner_auto_scaling_configuration_version" "api" {
 
   tags = {
     Name        = "${var.project_name}-${var.deployment}-api-autoscaling"
-    Deployment = var.deployment
-  }
-}
-
-# Frontend App Runner Service (conditionally created)
-resource "aws_apprunner_service" "frontend" {
-  count = var.enable_frontend_app_runner ? 1 : 0
-
-  service_name = "${var.project_name}-${var.deployment}-frontend"
-
-  source_configuration {
-    authentication_configuration {
-      access_role_arn = aws_iam_role.app_runner_access.arn
-    }
-    image_repository {
-      image_identifier      = "${aws_ecr_repository.frontend.repository_url}:latest"
-      image_configuration {
-        port = "3000"
-        runtime_environment_variables = {
-          NODE_ENV = "production"
-          HOSTNAME = "0.0.0.0"
-        }
-      }
-      image_repository_type = "ECR"
-    }
-  }
-
-  instance_configuration {
-    cpu               = var.frontend_app_runner_cpu
-    memory            = var.frontend_app_runner_memory
-    instance_role_arn = aws_iam_role.app_runner_instance.arn
-  }
-
-  network_configuration {
-    egress_configuration {
-      egress_type       = "VPC"
-      vpc_connector_arn = aws_apprunner_vpc_connector.main.arn
-    }
-    dynamic "ingress_configuration" {
-      for_each = local.enable_tailscale ? [1] : []
-      content {
-        is_publicly_accessible = false
-      }
-    }
-  }
-
-
-  auto_scaling_configuration_arn = aws_apprunner_auto_scaling_configuration_version.frontend[0].arn
-
-  tags = {
-    Name        = "${var.project_name}-${var.deployment}-frontend"
-    Deployment = var.deployment
-  }
-}
-
-resource "aws_apprunner_auto_scaling_configuration_version" "frontend" {
-  count = var.enable_frontend_app_runner ? 1 : 0
-
-  auto_scaling_configuration_name = "${var.project_name}-${var.deployment}-fe-autoscaling"
-
-  max_concurrency = var.frontend_app_runner_max_concurrency
-  max_size        = var.frontend_app_runner_max_size
-  min_size        = var.frontend_app_runner_min_size
-
-  lifecycle {
-    create_before_destroy = true
-  }
-
-  tags = {
-    Name        = "${var.project_name}-${var.deployment}-fe-autoscaling"
     Deployment = var.deployment
   }
 }

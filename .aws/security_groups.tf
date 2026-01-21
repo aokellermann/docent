@@ -126,34 +126,6 @@ resource "aws_security_group" "datadog_agent" {
   }
 }
 
-resource "aws_security_group" "vpc_endpoints" {
-  name_prefix = "${var.project_name}-${var.deployment}-vpc-endpoints-"
-  vpc_id      = aws_vpc.main.id
-
-  ingress {
-    from_port       = 443
-    to_port         = 443
-    protocol        = "tcp"
-    security_groups = [aws_security_group.app_runner.id, aws_security_group.ecs_tasks.id]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name        = "${var.project_name}-${var.deployment}-vpc-endpoints-sg"
-    Deployment = var.deployment
-  }
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
 # https://tailscale.com/kb/1082/firewall-ports
 # This article describes how to configure relevant firewall ports for Tailscale.
 resource "aws_security_group" "bastion" {

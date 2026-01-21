@@ -44,3 +44,103 @@ resource "aws_db_instance" "postgres" {
     Deployment = var.deployment
   }
 }
+
+resource "aws_cloudwatch_metric_alarm" "rds_cpu_utilization" {
+  count = var.rds_alarm_sns_topic_arn != "" ? 1 : 0
+
+  alarm_name          = "${var.project_name}-${var.deployment}-rds-cpu-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/RDS"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 80
+  alarm_description   = "RDS CPU utilization exceeds 80%"
+
+  dimensions = {
+    DBInstanceIdentifier = aws_db_instance.postgres.identifier
+  }
+
+  alarm_actions = [var.rds_alarm_sns_topic_arn]
+  ok_actions    = [var.rds_alarm_sns_topic_arn]
+
+  tags = {
+    Deployment = var.deployment
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "rds_freeable_memory" {
+  count = var.rds_alarm_sns_topic_arn != "" ? 1 : 0
+
+  alarm_name          = "${var.project_name}-${var.deployment}-rds-memory-low"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "FreeableMemory"
+  namespace           = "AWS/RDS"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 268435456 # 256 MB in bytes
+  alarm_description   = "RDS freeable memory below 256 MB"
+
+  dimensions = {
+    DBInstanceIdentifier = aws_db_instance.postgres.identifier
+  }
+
+  alarm_actions = [var.rds_alarm_sns_topic_arn]
+  ok_actions    = [var.rds_alarm_sns_topic_arn]
+
+  tags = {
+    Deployment = var.deployment
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "rds_disk_queue_depth" {
+  count = var.rds_alarm_sns_topic_arn != "" ? 1 : 0
+
+  alarm_name          = "${var.project_name}-${var.deployment}-rds-io-queue-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "DiskQueueDepth"
+  namespace           = "AWS/RDS"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 64
+  alarm_description   = "RDS disk queue depth exceeds 64"
+
+  dimensions = {
+    DBInstanceIdentifier = aws_db_instance.postgres.identifier
+  }
+
+  alarm_actions = [var.rds_alarm_sns_topic_arn]
+  ok_actions    = [var.rds_alarm_sns_topic_arn]
+
+  tags = {
+    Deployment = var.deployment
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "rds_free_storage_space" {
+  count = var.rds_alarm_sns_topic_arn != "" ? 1 : 0
+
+  alarm_name          = "${var.project_name}-${var.deployment}-rds-storage-low"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "FreeStorageSpace"
+  namespace           = "AWS/RDS"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 5368709120 # 5 GB in bytes
+  alarm_description   = "RDS free storage space below 5 GB"
+
+  dimensions = {
+    DBInstanceIdentifier = aws_db_instance.postgres.identifier
+  }
+
+  alarm_actions = [var.rds_alarm_sns_topic_arn]
+  ok_actions    = [var.rds_alarm_sns_topic_arn]
+
+  tags = {
+    Deployment = var.deployment
+  }
+}

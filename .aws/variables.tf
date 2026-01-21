@@ -60,6 +60,12 @@ variable "rds_multi_az" {
   default     = false
 }
 
+variable "rds_alarm_sns_topic_arn" {
+  description = "ARN of SNS topic for RDS alarms (empty to disable alarms)"
+  type        = string
+  default     = ""
+}
+
 variable "db_username" {
   description = "Database username"
   type        = string
@@ -205,44 +211,6 @@ variable "bastion_public_key" {
   type        = string
   default     = ""
 }
-
-
-variable "enable_frontend_app_runner" {
-  description = "Enable App Runner deployment for the Next.js frontend"
-  type        = bool
-  default     = false
-}
-
-variable "frontend_app_runner_cpu" {
-  description = "CPU units for Frontend App Runner (256, 512, 1024, 2048, 4096)"
-  type        = number
-  default     = 1024
-}
-
-variable "frontend_app_runner_memory" {
-  description = "Memory for Frontend App Runner (512, 1024, 2048, 3072, 4096, 6144, 8192, 10240, 12288)"
-  type        = number
-  default     = 2048
-}
-
-variable "frontend_app_runner_max_concurrency" {
-  description = "Maximum concurrency for Frontend App Runner"
-  type        = number
-  default     = 100
-}
-
-variable "frontend_app_runner_min_size" {
-  description = "Minimum number of Frontend App Runner instances"
-  type        = number
-  default     = 1
-}
-
-variable "frontend_app_runner_max_size" {
-  description = "Maximum number of Frontend App Runner instances"
-  type        = number
-  default     = 10
-}
-
 
 variable "create_datadog_integration" {
   description = "Whether to create Datadog AWS integration resources (only needed once per AWS account)"

@@ -140,5 +140,33 @@ resource "aws_instance" "bastion" {
   tags = {
     Name       = "${var.project_name}-${var.deployment}-bastion"
     Deployment = var.deployment
+    Role       = "bastion"
+  }
+}
+
+# The bastion isn't part of the application, so it wouldn't get overloaded by high traffic the way the db/API/worker would.
+# However, Vanta wants to see CPU monitoring on every EC2 instance.
+resource "aws_cloudwatch_metric_alarm" "bastion_cpu_utilization" {
+  count = var.rds_alarm_sns_topic_arn != "" ? 1 : 0
+
+  alarm_name          = "${var.project_name}-${var.deployment}-bastion-cpu-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 80
+  alarm_description   = "Bastion CPU utilization exceeds 80%"
+
+  dimensions = {
+    InstanceId = aws_instance.bastion.id
+  }
+
+  alarm_actions = [var.rds_alarm_sns_topic_arn]
+  ok_actions    = [var.rds_alarm_sns_topic_arn]
+
+  tags = {
+    Deployment = var.deployment
   }
 }

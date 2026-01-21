@@ -719,7 +719,7 @@ class TelemetryAccumulationService:
             )
         )
 
-        deleted_count = result.rowcount or 0
+        deleted_count: int = getattr(result, "rowcount", None) or 0
         await self.session.commit()
 
         logger.info(f"Deleted {deleted_count} accumulation records matching {key_pattern}")
@@ -752,7 +752,7 @@ class TelemetryAccumulationService:
                 ]
             )
             result = await self.session.execute(delete(SQLATelemetryAccumulation).where(predicate))
-            deleted_count += result.rowcount or 0
+            deleted_count += getattr(result, "rowcount", None) or 0
 
         await self.session.commit()
 

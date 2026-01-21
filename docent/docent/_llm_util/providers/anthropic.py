@@ -5,6 +5,7 @@ import backoff
 # all errors: https://docs.anthropic.com/en/api/errors
 from anthropic import (
     AsyncAnthropic,
+    AsyncStream,
     AuthenticationError,
     BadRequestError,
     NotFoundError,
@@ -12,7 +13,6 @@ from anthropic import (
     RateLimitError,
     UnprocessableEntityError,
 )
-from anthropic._types import NOT_GIVEN
 from anthropic.types import (
     InputJSONDelta,
     Message,
@@ -230,27 +230,31 @@ async def get_anthropic_chat_completion_streaming_async(
         )
 
     system, input_messages = parse_chat_messages(messages)
-    input_tools = parse_tools(tools) if tools else NOT_GIVEN
 
     try:
         async with async_timeout_ctx(timeout):
-            stream = await client.messages.create(
-                model=model_name,
-                messages=input_messages,
-                thinking=(
-                    {
-                        "type": "enabled",
-                        "budget_tokens": reasoning_budget(max_new_tokens, reasoning_effort),
-                    }
-                    if reasoning_effort
-                    else NOT_GIVEN
-                ),
-                tools=input_tools,
-                tool_choice=_parse_tool_choice(tool_choice) or NOT_GIVEN,
-                max_tokens=max_new_tokens,
-                temperature=temperature,
-                system=system if system is not None else NOT_GIVEN,
-                stream=True,
+            create_kwargs: dict[str, Any] = {
+                "model": model_name,
+                "messages": input_messages,
+                "max_tokens": max_new_tokens,
+                "temperature": temperature,
+                "stream": True,
+            }
+            if reasoning_effort:
+                create_kwargs["thinking"] = {
+                    "type": "enabled",
+                    "budget_tokens": reasoning_budget(max_new_tokens, reasoning_effort),
+                }
+            if tools:
+                create_kwargs["tools"] = parse_tools(tools)
+            if tool_choice_param := _parse_tool_choice(tool_choice):
+                create_kwargs["tool_choice"] = tool_choice_param
+            if system is not None:
+                create_kwargs["system"] = system
+
+            stream = cast(
+                AsyncStream[RawMessageStreamEvent],
+                await client.messages.create(**create_kwargs),
             )
 
             llm_output_partial = None
@@ -426,27 +430,28 @@ async def get_anthropic_chat_completion_async(
         )
 
     system, input_messages = parse_chat_messages(messages)
-    input_tools = parse_tools(tools) if tools else NOT_GIVEN
 
     try:
         async with async_timeout_ctx(timeout):
-            raw_output = await client.messages.create(
-                model=model_name,
-                messages=input_messages,
-                thinking=(
-                    {
-                        "type": "enabled",
-                        "budget_tokens": reasoning_budget(max_new_tokens, reasoning_effort),
-                    }
-                    if reasoning_effort
-                    else NOT_GIVEN
-                ),
-                tools=input_tools,
-                tool_choice=_parse_tool_choice(tool_choice) or NOT_GIVEN,
-                max_tokens=max_new_tokens,
-                temperature=temperature,
-                system=system if system is not None else NOT_GIVEN,
-            )
+            create_kwargs: dict[str, Any] = {
+                "model": model_name,
+                "messages": input_messages,
+                "max_tokens": max_new_tokens,
+                "temperature": temperature,
+            }
+            if reasoning_effort:
+                create_kwargs["thinking"] = {
+                    "type": "enabled",
+                    "budget_tokens": reasoning_budget(max_new_tokens, reasoning_effort),
+                }
+            if tools:
+                create_kwargs["tools"] = parse_tools(tools)
+            if tool_choice_param := _parse_tool_choice(tool_choice):
+                create_kwargs["tool_choice"] = tool_choice_param
+            if system is not None:
+                create_kwargs["system"] = system
+
+            raw_output = cast(Message, await client.messages.create(**create_kwargs))
 
             output = parse_anthropic_completion(raw_output, model_name)
             if output.first and output.first.finish_reason == "length" and output.first.no_text:

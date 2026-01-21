@@ -921,5 +921,5 @@ async def cleanup_old_chat_sessions(session: AsyncSession, days_old: int = 7) ->
     )
     # Ensure the deletion is persisted
     await session.commit()
-    deleted_count = result.rowcount or 0
+    deleted_count: int = getattr(result, "rowcount", None) or 0
     return deleted_count
