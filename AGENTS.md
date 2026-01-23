@@ -2,6 +2,9 @@
 
 ## Python
 
+If you are Codex, make sure you are running Python with the local `.venv/bin/python` interpreter. Furthermore, any Python-related modules you run must also be in that `bin` folder.
+If you are Claude, you already correctly do this by default.
+
 ### Type Checking with `pyright`
 
 Configuration is in `pyproject.toml`. Use `pyright` for Python type checking:
