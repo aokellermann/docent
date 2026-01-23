@@ -3,9 +3,185 @@ title: "Docent Query Language (DQL)"
 description: "A read-only SQL subset for ad-hoc exploration in Docent"
 ---
 
-Docent Query Language is a read-only SQL subset that supports ad-hoc exploration in Docent.
+Docent Query Language (DQL) is a read-only SQL subset that supports ad-hoc exploration in Docent. Queries can only run over a single collection by design (if you need multi-collection support, please reach out to us!)
 
-Queries can only run over a single collection by design (if you need multi-collection support, please reach out to us!)
+## Getting Started with the SDK
+
+The Python SDK provides several methods for executing DQL queries and working with results.
+
+### Basic Query Execution
+
+```python
+from docent import Docent
+
+client = Docent()
+
+# Execute a DQL query
+result = client.execute_dql(
+    collection_id="your-collection-id",
+    dql="SELECT id, name FROM agent_runs LIMIT 10"
+)
+
+# Result contains columns, rows, and metadata
+print(result["columns"])  # ['id', 'name']
+print(result["rows"])     # [[...], [...], ...]
+```
+
+### Getting the Schema
+
+Before writing queries, you can discover available tables and columns:
+
+```python
+schema = client.get_dql_schema("your-collection-id")
+# Explore available tables and their columns
+for table in schema["tables"]:
+    print(f"{table['name']}: {[col['name'] for col in table['columns']]}")
+```
+
+### Converting Results
+
+DQL results come as columns and rows arrays. Convert them to more convenient formats:
+
+```python
+# Convert to list of dictionaries
+result = client.execute_dql("your-collection-id", "SELECT id, name FROM agent_runs")
+rows = client.dql_result_to_dicts(result)
+for row in rows:
+    print(f"Run: {row['name']} (ID: {row['id']})")
+
+# Convert to pandas DataFrame (experimental)
+df = client.dql_result_to_df_experimental(result)
+print(df.head())
+```
+
+## SDK Method Reference
+
+### `execute_dql(collection_id, dql)`
+
+Primary method for running DQL queries.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `collection_id` | `str` | ID of the collection to query |
+| `dql` | `str` | The DQL query string |
+
+**Returns:** `dict` with keys:
+- `columns` - List of column names
+- `rows` - List of row data arrays
+- `truncated` - Boolean indicating if results were capped
+- `applied_limit` - The limit that was applied
+- `row_count` - Number of rows returned
+- `execution_time_ms` - Query execution time in milliseconds
+- `requested_limit` - The LIMIT specified in the query (or null)
+- `selected_columns` - Detailed column information with source tracking
+
+**Example:**
+
+```python
+result = client.execute_dql(
+    collection_id="my-collection",
+    dql="SELECT id, name FROM agent_runs WHERE metadata_json->>'status' = 'completed' LIMIT 10"
+)
+```
+
+---
+
+### `get_dql_schema(collection_id)`
+
+Retrieve available tables and columns for a collection.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `collection_id` | `str` | ID of the collection |
+
+**Returns:** `dict` containing table definitions with column names, types, nullable flags, primary key indicators, and foreign key references.
+
+**Example:**
+
+```python
+schema = client.get_dql_schema("my-collection")
+# Explore available tables and their columns
+for table in schema["tables"]:
+    print(f"{table['name']}: {[col['name'] for col in table['columns']]}")
+```
+
+---
+
+### `dql_result_to_dicts(dql_result)`
+
+Convert a DQL result to a list of dictionaries.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `dql_result` | `dict` | Result from `execute_dql()` |
+
+**Returns:** `list[dict]` where each dict maps column names to values.
+
+**Example:**
+
+```python
+result = client.execute_dql("your-collection-id", "SELECT id, name FROM agent_runs")
+rows = client.dql_result_to_dicts(result)
+for row in rows:
+    print(f"Run: {row['name']} (ID: {row['id']})")
+```
+
+---
+
+### `dql_result_to_df_experimental(dql_result)`
+
+Convert a DQL result to a pandas DataFrame. Automatically attempts to cast string values to numeric types where possible.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `dql_result` | `dict` | Result from `execute_dql()` |
+
+**Returns:** `pd.DataFrame`
+
+**Example:**
+
+```python
+result = client.execute_dql("your-collection-id", "SELECT id, name, created_at FROM agent_runs")
+df = client.dql_result_to_df_experimental(result)
+print(df.head())
+```
+
+<Note>This method is experimental and the casting behavior may change.</Note>
+
+---
+
+### `select_agent_run_ids(collection_id, where_clause, limit)`
+
+Convenience helper to fetch agent run IDs matching a filter.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `collection_id` | `str` | ID of the collection |
+| `where_clause` | `str \| None` | Optional WHERE clause (without the WHERE keyword) |
+| `limit` | `int \| None` | Optional limit on results |
+
+**Returns:** `list[str]` of agent run IDs.
+
+**Example:**
+
+```python
+# Get IDs of completed runs from production
+run_ids = client.select_agent_run_ids(
+    "your-collection-id",
+    where_clause="metadata_json->>'status' = 'completed' AND metadata_json->>'environment' = 'prod'",
+    limit=100
+)
+```
 
 ## Available Tables and Columns
 
@@ -15,6 +191,11 @@ Queries can only run over a single collection by design (if you need multi-colle
 | `transcripts` | Individual transcripts tied to an agent run; stores serialized messages and per-transcript metadata. |
 | `transcript_groups` | Hierarchical groupings of transcripts for runs. |
 | `judge_results` | Scored rubric outputs keyed by agent run and rubric version. |
+| `labels` | Labels applied to agent runs. |
+| `tags` | Tags applied to agent runs. |
+| `rubric_centroids` | Clustered rubric score categories. |
+| `judge_result_centroids` | Junction table for judge result clustering. |
+| `results` | Results from result sets. |
 
 ### agent_runs
 
@@ -39,6 +220,7 @@ Queries can only run over a single collection by design (if you need multi-colle
 | `transcript_group_id` | Optional grouping identifier. |
 | `messages` | Binary-encoded JSON payload of message turns. |
 | `metadata_json` | Binary-encoded metadata describing the transcript. |
+| `dict_key` | Dictionary key for transcript identification. |
 | `created_at` | Timestamp recorded during ingest. |
 
 ### transcript_groups
@@ -46,7 +228,7 @@ Queries can only run over a single collection by design (if you need multi-colle
 | Column | Description |
 | --- | --- |
 | `id` | Transcript group identifier. |
-| `collection_id` | Collection that owns the transcript. |
+| `collection_id` | Collection that owns the group. |
 | `agent_run_id` | Parent run identifier; joins back to `agent_runs.id`. |
 | `name` | Optional name for the group. |
 | `description` | Optional descriptive text. |
@@ -63,12 +245,17 @@ Queries can only run over a single collection by design (if you need multi-colle
 | `rubric_id` | Rubric identifier. |
 | `rubric_version` | Version of the rubric used when scoring. |
 | `output` | JSON representation of rubric outputs. |
+| `value` | Deprecated: use `output` instead. |
 | `result_metadata` | Optional JSON metadata attached to the result. |
 | `result_type` | Enum describing the rubric output type. |
 
 ## JSON Metadata Paths
 
-Docent stores user-supplied metadata as JSON, and can be access in Postgres style. Here are some examples:
+Docent stores user-supplied metadata as JSON, and can be accessed in Postgres style. Here are some examples:
+
+<Note>
+JSON operators work on `agent_runs.metadata_json`, `transcript_groups.metadata_json`, `judge_results.output`, and `judge_results.result_metadata` (stored as JSONB). The `transcripts.metadata_json` column is stored as binary and does not support direct JSON operators in queries.
+</Note>
 
 ### Access Patterns
 
@@ -77,16 +264,6 @@ Docent stores user-supplied metadata as JSON, and can be access in Postgres styl
 SELECT id, name
 FROM agent_runs
 WHERE metadata_json->>'environment' = 'staging';
-```
-
-```sql
--- Retrieve nested transcript metadata
-SELECT
-  id,
-  metadata_json->'conversation'->>'speaker' AS speaker,
-  metadata_json->'conversation'->>'topic' AS topic
-FROM transcripts
-WHERE metadata_json->>'status' = 'flagged';
 ```
 
 ```sql
@@ -110,7 +287,7 @@ DQL supported keywords:
 | `WITH` (CTEs) |
 | `UNION [ALL]`, `INTERSECT`, `EXCEPT` |
 | `GROUP BY`, `HAVING` |
-| Aggregations (`COUNT`, `AVG`, `MIN`, `MAX`, `SUM`, `STDDEV_POP`, `STDDEV_SAMP`, `VAR_POP`, `VAR_SAMP`, `ARRAY_AGG`, `STRING_AGG`, `JSON_AGG`, `JSONB_AGG`, `JSON_OBJECT_AGG`, `PERCENTILE_CONT`, `PERCENTILE_DISC` (`WITHIN GROUP`)) |
+| Aggregations (`COUNT`, `AVG`, `MIN`, `MAX`, `SUM`, `STDDEV_POP`, `STDDEV_SAMP`, `ARRAY_AGG`, `STRING_AGG`, `JSON_AGG`, `JSONB_AGG`, `JSON_OBJECT_AGG`, `PERCENTILE_CONT`, `PERCENTILE_DISC` (`WITHIN GROUP`)) |
 | Window functions (`ROW_NUMBER`, `RANK`, `DENSE_RANK`, `NTILE`, `LAG`, `LEAD`, `FIRST_VALUE`, `LAST_VALUE`, `NTH_VALUE`, `PERCENT_RANK`, `CUME_DIST`) |
 | `ORDER BY`, `LIMIT`, `OFFSET` |
 | Conditional & null helpers (`CASE`, `COALESCE`, `NULLIF`) |
@@ -118,18 +295,74 @@ DQL supported keywords:
 | Comparison operators (`=`, `!=`, `<`, `<=`, `>`, `>=`, `IS`, `IS NOT`, `IS DISTINCT FROM`, `IN`, `BETWEEN`, `LIKE`, `ILIKE`, `EXISTS`, `SIMILAR TO`, `~`, `~*`, `!~`, `!~*`) |
 | Arithmetic & math (`+`, `-`, `*`, `/`, `%`, `POWER`, `ABS`, `SIGN`, `SQRT`, `LN`, `LOG`, `EXP`, `GREATEST`, `LEAST`, `FLOOR`, `CEIL`, `ROUND`, `RANDOM`) |
 | String helpers (`SUBSTRING`, `LEFT`, `RIGHT`, `LENGTH`, `UPPER`, `LOWER`, `INITCAP`, `TRIM`, `REPLACE`, `SPLIT_PART`, `POSITION`, `CONCAT`, `CONCAT_WS`, `STRING_AGG`) |
-| JSON operators & functions (`->`, `->>`, `#>`, `#>>`, `@>`, `?`, `?|`, `?&`, `jsonb_build_object`, `jsonb_build_array`, `json_agg`, `jsonb_agg`, `json_object_agg`, `jsonb_set`, `jsonb_path_query`, `jsonb_path_exists`) |
-| Date/time basics (`CURRENT_DATE`, `CURRENT_TIME`, `CURRENT_TIMESTAMP`, `NOW()`, `EXTRACT`, `DATE_TRUNC`, `AGE`, `AT TIME ZONE`, `timezone()`) |
-| Interval arithmetic (`timestamp +/- INTERVAL`, `INTERVAL` literals, `MAKE_INTERVAL`, `JUSTIFY_DAYS`, `JUSTIFY_HOURS`, `JUSTIFY_INTERVAL`) |
-| Construction & conversion (`MAKE_DATE`, `MAKE_TIME`, `MAKE_TIMESTAMP`, `MAKE_TIMESTAMPTZ`, `TO_CHAR`, `TO_DATE`, `TO_TIMESTAMP`, `DATE_PART`) |
-| Array helpers (`ARRAY[...]`, `array_cat`, `array_length`, `cardinality`, `unnest`, `ARRAY(SELECT ...)`, `= ANY`, `= ALL`, `array_position`, `array_remove`) |
+| JSON operators & functions (`->`, `->>`, `#>`, `#>>`, `@>`, `?`, `?|`, `?&`, `json_agg`, `jsonb_agg`, `json_object_agg`) |
+| Date/time basics (`CURRENT_DATE`, `CURRENT_TIME`, `CURRENT_TIMESTAMP`, `NOW()`, `EXTRACT`, `DATE_TRUNC`, `AT TIME ZONE`) |
+| Interval arithmetic (`timestamp +/- INTERVAL`, `INTERVAL` literals) |
+| Construction & conversion (`MAKE_DATE`, `MAKE_TIME`, `MAKE_TIMESTAMP`, `TO_CHAR`) |
+| Array helpers (`array_cat`, `unnest`) |
 | Type helpers (`CAST`, `::`) |
 
-Unsupported constructs include `*`, user-defined functions, and any DDL or DML commands.
+Unsupported constructs include wildcard `*` in SELECT clauses (e.g., `SELECT *`, `COUNT(*)`), user-defined functions, and any DDL or DML commands.
+
+## Common Patterns
+
+Quick-reference snippets for frequent tasks.
+
+### Filter by Metadata Field
+
+```sql
+SELECT id, name FROM agent_runs
+WHERE metadata_json->>'environment' = 'prod'
+```
+
+### Filter by Date Range
+
+```sql
+SELECT id, name, created_at FROM agent_runs
+WHERE created_at >= NOW() - INTERVAL '7 days'
+ORDER BY created_at DESC
+```
+
+### Count by Category
+
+```sql
+SELECT
+  metadata_json->>'model' AS model,
+  COUNT() AS run_count
+FROM agent_runs
+GROUP BY metadata_json->>'model'
+ORDER BY run_count DESC
+```
+
+### Check if Metadata Field Exists
+
+```sql
+SELECT id, name FROM agent_runs
+WHERE metadata_json ? 'custom_field'
+```
+
+### Numeric Comparison on JSON Field
+
+```sql
+SELECT id, name FROM agent_runs
+WHERE CAST(metadata_json->>'score' AS DOUBLE PRECISION) > 0.8
+```
+
+### Get Transcripts with Their Agent Runs
+
+```sql
+SELECT
+  ar.name AS run_name,
+  t.name AS transcript_name
+FROM agent_runs ar
+JOIN transcripts t ON t.agent_run_id = ar.id
+```
 
 ## Examples
 
-### Recent Runs
+### Basic Queries
+
+#### Recent Runs
 
 ```sql
 SELECT
@@ -143,7 +376,34 @@ ORDER BY created_at DESC
 LIMIT 10;
 ```
 
-### Transcript Counts per Group
+### Aggregations
+
+#### Completion Rate by Environment
+
+Aggregates per-environment success rates by normalizing metadata into a CTE.
+
+```sql
+WITH normalized_runs AS (
+  SELECT
+    metadata_json->>'environment' AS environment,
+    metadata_json->>'status' AS status
+  FROM agent_runs
+  WHERE metadata_json ? 'environment'
+)
+SELECT
+  environment,
+  COUNT() AS total_runs,
+  SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed_runs,
+  CAST(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS DOUBLE PRECISION)
+    / NULLIF(COUNT(), 0) AS completion_rate
+FROM normalized_runs
+GROUP BY environment
+ORDER BY total_runs DESC;
+```
+
+### Joins and CTEs
+
+#### Transcript Counts per Group
 
 ```sql
 SELECT
@@ -157,7 +417,28 @@ HAVING COUNT(t.id) > 1
 ORDER BY transcript_count DESC;
 ```
 
-### Flagged Judge Results
+#### Transcript Coverage Audit
+
+Finds transcript groups that are marked as `must_have` but have no associated transcripts.
+
+```sql
+SELECT
+  tg.id AS group_id,
+  tg.name AS group_name,
+  COUNT(t.id) AS transcript_count
+FROM transcript_groups tg
+LEFT JOIN transcripts t
+  ON t.transcript_group_id = tg.id
+  AND t.collection_id = tg.collection_id
+WHERE tg.metadata_json->>'priority' = 'must_have'
+GROUP BY tg.id, tg.name
+HAVING COUNT(t.id) = 0
+ORDER BY group_name;
+```
+
+### Advanced Patterns
+
+#### Flagged Judge Results
 
 ```sql
 SELECT
@@ -177,30 +458,7 @@ ORDER BY score DESC
 LIMIT 25;
 ```
 
-### Completion Rate by Environment
-
-Aggregates per-environment success rates by normalizing metadata into a CTE.
-
-```sql
-WITH normalized_runs AS (
-  SELECT
-    metadata_json->>'environment' AS environment,
-    metadata_json->>'status' AS status
-  FROM agent_runs
-  WHERE metadata_json ? 'environment'
-)
-SELECT
-  environment,
-  COUNT(*) AS total_runs,
-  SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed_runs,
-  CAST(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS DOUBLE PRECISION)
-    / NULLIF(COUNT(*), 0) AS completion_rate
-FROM normalized_runs
-GROUP BY environment
-ORDER BY total_runs DESC;
-```
-
-### Latest Rubric Scores by Model
+#### Latest Rubric Scores by Model
 
 Pulls the most recent rubric result per run, then joins runs to surface the model responsible for the score.
 
@@ -229,24 +487,49 @@ ORDER BY CAST(jr.output->>'score' AS DOUBLE PRECISION) DESC
 LIMIT 15;
 ```
 
-### Transcript Coverage Audit
+## Troubleshooting
 
-Finds transcript groups that are marked as `must_have` but have no associated transcripts.
+### "column X does not exist"
+
+- DQL requires explicit column selection. Wildcards (`*`) are not supported.
+- Check the schema using `client.get_dql_schema(collection_id)` to see available columns.
+
+### Numeric comparisons not working as expected
+
+JSON fields are strings by default. Cast them for numeric operations:
 
 ```sql
-SELECT
-  tg.id AS group_id,
-  tg.name AS group_name,
-  COUNT(t.id) AS transcript_count
-FROM transcript_groups tg
-LEFT JOIN transcripts t
-  ON t.transcript_group_id = tg.id
-  AND t.collection_id = tg.collection_id
-WHERE tg.metadata_json->>'priority' = 'must_have'
-GROUP BY tg.id, tg.name
-HAVING COUNT(t.id) = 0
-ORDER BY group_name;
+-- Wrong: string comparison
+WHERE metadata_json->>'score' > '0.5'
+
+-- Correct: numeric comparison
+WHERE CAST(metadata_json->>'score' AS DOUBLE PRECISION) > 0.5
 ```
+
+### Query returns no results but data exists
+
+- Check that you're querying the correct collection
+- Verify metadata field names are exact matches (case-sensitive)
+- Use `?` operator to check if a field exists before filtering on it
+
+### Results truncated unexpectedly
+
+DQL caps results at 10,000 rows. Use `LIMIT` and `OFFSET` for pagination:
+
+```sql
+-- First page
+SELECT id, name FROM agent_runs LIMIT 1000 OFFSET 0
+-- Second page
+SELECT id, name FROM agent_runs LIMIT 1000 OFFSET 1000
+```
+
+### "syntax error" on valid-looking SQL
+
+Some SQL features aren't supported in DQL:
+
+- No `*` wildcard in SELECT
+- No `INSERT`, `UPDATE`, `DELETE`
+- No user-defined functions
 
 ## Restrictions and Best Practices
 
@@ -256,4 +539,4 @@ ORDER BY group_name;
 - **Collection scoping**: A single query can only access data within a single collection.
 - **Limit enforcement**: Every query is capped at 10,000 rows by the server. If you omit `LIMIT` or request more, Docent automatically applies the cap—use pagination (`OFFSET`/`LIMIT`) or offline exports for larger result sets.
 - **JSON performance**: Metadata fields are stored as JSON; heavy traversal across large collections can be slower than filtering on indexed scalar columns. Prefer top-level fields when available.
-- **Type awareness**: The registry tracks datatypes for JSON metadata paths. When a path supports multiple types Docent may fall back to string comparisons, so cast where precision matters (e.g., `CAST(metadata_json->>'duration_ms' AS BIGINT)`).
+- **Type awareness**: JSON metadata paths are exposed in the schema with a generic `json` type. Since the underlying values may be strings, numbers, or other JSON types, cast values explicitly when precision matters (e.g., `CAST(metadata_json->>'duration_ms' AS BIGINT)`).
