@@ -69,7 +69,8 @@
                   "concepts/data-models/llm-output"
                 ]
               },
-              "concepts/docent-query-language"
+              "concepts/docent-query-language",
+              "concepts/rubrics-and-judges"
             ]
           },
           {

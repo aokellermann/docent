@@ -1,0 +1,367 @@
+---
+title: "Rubrics and Judges"
+description: "Define evaluation criteria and run LLM-based judges on agent runs"
+---
+
+Docent helps you create and optimize LLM-based judges that evaluate agent runs against your criteria. A **rubric** is a configuration object that defines how a judge works, and a **judge** is a callable that evaluates an [AgentRun](/concepts/data-models/agent-run) using that rubric configuration.
+
+You can create and manage judges directly in the Docent web UI. This page focuses on the underlying data model and how to use the SDK to create and run judges programmatically.
+
+## The Data Model
+
+A rubric defines the complete configuration for a judge. Here's an example:
+
+```python
+from docent.judges.types import Rubric, OutputParsingMode, PromptTemplateMessage
+from docent._llm_util.providers.preference_types import ModelOption
+
+rubric = Rubric(
+    prompt_templates=[
+        PromptTemplateMessage(
+            role="user",
+            content="""
+Evaluate this agent run against the rubric.
+
+Rubric:
+<rubric>
+{rubric}
+</rubric>
+
+Agent run:
+<agent_run>
+{agent_run}
+</agent_run>
+
+Output your evaluation as JSON in <response>...</response> tags.
+Schema: {output_schema}
+""",
+        ),
+    ],
+    rubric_text="""
+    Evaluate whether the agent successfully completed the user's request.
+
+    Decision procedure:
+    1. Identify what the user asked for
+    2. Check if the agent's final response addresses the request
+    3. Verify the response is accurate and complete
+    """,
+    output_schema={
+        "type": "object",
+        "properties": {
+            "label": {"type": "string", "enum": ["pass", "fail"]},
+            "explanation": {"type": "string", "citations": True},
+        },
+        "required": ["label", "explanation"],
+        "additionalProperties": False,
+    },
+    judge_model=ModelOption(
+        provider="openai",
+        model_name="gpt-4o",
+    ),
+    output_parsing_mode=OutputParsingMode.XML_KEY,
+    response_xml_key="response",
+)
+```
+
+Let's break down each of the key configuration options shown above.
+
+### prompt_templates
+
+A list of messages that form the judge's prompt. Templates must collectively include all three variables: `{agent_run}`, `{rubric}`, and `{output_schema}`. Variables can be distributed across multiple messages in the list.
+
+```python
+from docent.judges.types import PromptTemplateMessage
+
+rubric = Rubric(
+    rubric_text="...",
+    output_schema={...},
+    prompt_templates=[
+        PromptTemplateMessage(
+            role="user",
+            content="""
+Evaluate this agent run against the rubric.
+
+Rubric:
+<rubric>
+{rubric}
+</rubric>
+
+Agent run:
+<agent_run>
+{agent_run}
+</agent_run>
+
+Output your evaluation as JSON in <response>...</response> tags.
+Schema: {output_schema}
+""",
+        ),
+    ],
+)
+```
+
+**Template Variables**
+
+Prompt templates must collectively include all three of these variables, which are automatically substituted:
+
+| Variable | Description |
+| --- | --- |
+| `{agent_run}` | The rendered transcript of the agent run being evaluated |
+| `{rubric}` | The `rubric_text` field content |
+| `{output_schema}` | JSON-formatted output schema |
+
+Validation will fail if any required variable is missing or if templates contain other undefined variables.
+
+### rubric_text
+
+The core evaluation criteria that the judge follows. This text is substituted into the `{rubric}` template variable in the prompt.
+
+Write clear decision procedures that the judge can follow step-by-step. Be specific about what constitutes success or failure.
+
+### output_schema
+
+A JSON schema defining the structure of the judge's output.
+
+```python
+output_schema={
+    "type": "object",
+    "properties": {
+        "label": {"type": "string", "enum": ["pass", "fail"]},
+        "score": {"type": "integer", "minimum": 1, "maximum": 5},
+        "explanation": {"type": "string", "citations": True},
+    },
+    "required": ["label", "score", "explanation"],
+    "additionalProperties": False,
+}
+```
+
+**Metaschema Rules**
+
+We will post a link to the full JSON metadata schema soon. In the meantime, judge output schemas must generally follow these rules:
+
+- Root must be `type: "object"` with `properties`
+- `additionalProperties` is optional, but if present must be `false`
+- Supported types: `string`, `integer`, `number`, `boolean`, `array`, `object` (recursive objects are allowed)
+- Arrays require an `items` schema; objects require `properties`
+- Special: `"citations": true` on string fields enables transcript references
+- `anyOf`, `oneOf`, `allOf` are not supported
+
+**Example with Citations**
+
+```python
+output_schema={
+    "type": "object",
+    "properties": {
+        "issues": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string", "citations": True},
+                    "severity": {"type": "string", "enum": ["low", "medium", "high"]},
+                },
+                "required": ["description", "severity"],
+                "additionalProperties": False,
+            },
+        },
+        "overall_score": {"type": "integer", "minimum": 1, "maximum": 10},
+    },
+    "required": ["issues", "overall_score"],
+    "additionalProperties": False,
+}
+```
+
+When `"citations": true` is set on a string field, the judge must include citations to specific parts of the transcript in its response. The Docent web UI automatically parses and links these citations. SDK users must manually convert results using `JudgeResultWithCitations.from_judge_result()` to resolve citation references.
+
+### judge_model
+
+Specifies which LLM to use for evaluation. Uses `ModelOption` with provider, model name, and optional reasoning effort.
+
+```python
+from docent._llm_util.providers.preference_types import ModelOption
+
+rubric = Rubric(
+    rubric_text="...",
+    output_schema={...},
+    judge_model=ModelOption(
+        provider="openai",
+        model_name="gpt-5",
+        reasoning_effort="high",
+    ),
+)
+```
+
+**Supported Providers**
+
+| Provider String | Description |
+| --- | --- |
+| `openai` | OpenAI |
+| `anthropic` | Anthropic |
+| `google` | Google |
+| `openrouter` | OpenRouter |
+
+**Model Names**
+
+Any model from the supported providers can be used as a judge. Use the exact model string that the provider uses:
+
+- OpenAI: `gpt-4o`, `gpt-4o-mini`, `o1`, `o3-mini`, etc.
+- Anthropic: `claude-sonnet-4-5`, `claude-sonnet-4-20250514`, etc.
+- Google: `gemini-2.0-flash`, `gemini-1.5-pro`, etc.
+- OpenRouter: Uses a different format with the provider prefix, e.g., `anthropic/claude-3-opus`, `openai/gpt-4o`
+
+**Reasoning Effort**
+
+Some reasoning models support a `reasoning_effort` parameter that controls how much computation the model uses. Typical values are `minimal`, `low`, `medium`, and `high`. Not all models support this parameter—it is primarily available for OpenAI's reasoning models (o1, o3-mini, etc.).
+
+### output_parsing_mode
+
+Defines how the LLM output is parsed:
+
+- `XML_KEY` (default): Extract JSON from within XML tags (e.g., `<response>...</response>`). When using this mode, at least one prompt template must contain the XML tag `<{response_xml_key}>` (e.g., `<response>` by default).
+- `CONSTRAINED_DECODING`: Parse entire output as JSON (uses structured output). Supported by OpenAI and OpenRouter. Not yet implemented for Anthropic or Google (will raise `NotImplementedError`).
+
+```python
+from docent.judges.types import OutputParsingMode
+
+rubric = Rubric(
+    rubric_text="...",
+    output_schema={...},
+    output_parsing_mode=OutputParsingMode.CONSTRAINED_DECODING,
+)
+```
+
+### response_xml_key
+
+When using `XML_KEY` parsing mode, specifies the tag name to extract the response from. Defaults to `"response"`.
+
+Note: At least one prompt template must contain the corresponding XML tag (e.g., `<answer>...</answer>` if using `response_xml_key="answer"`).
+
+```python
+rubric = Rubric(
+    rubric_text="...",
+    output_schema={...},
+    response_xml_key="answer",  # Extract from <answer>...</answer>
+)
+```
+
+## SDK Methods
+
+### create_rubric()
+
+Upload a rubric to a collection. Returns the rubric ID.
+
+```python
+rubric_id = client.create_rubric(collection_id, rubric)
+```
+
+### get_rubric()
+
+Retrieve a rubric configuration object by ID. Optionally specify a version.
+
+```python
+rubric = client.get_rubric(collection_id, rubric_id)
+rubric = client.get_rubric(collection_id, rubric_id, version=2)
+```
+
+### get_judge()
+
+Get a callable `BaseJudge` instance for running evaluations. Optionally specify a version.
+
+```python
+judge = client.get_judge(collection_id, rubric_id)
+
+# Run the judge on an agent run (async)
+result = await judge(agent_run)
+```
+
+### list_rubrics()
+
+List all rubrics in a collection.
+
+```python
+rubrics = client.list_rubrics(collection_id)
+```
+
+## Running the Judge
+
+The `build_judge` function creates an async callable that wraps LLM providers. It takes a `Rubric` configuration and an LLM service, and returns a judge you can call directly on any `AgentRun`.
+
+```python
+import asyncio
+from docent._llm_util.llm_svc import BaseLLMService
+from docent.judges.impl import build_judge
+from docent.judges.types import Rubric, ResultType
+from docent.data_models.agent_run import AgentRun
+from docent.data_models.transcript import Transcript
+from docent.data_models.chat.message import UserMessage, AssistantMessage
+
+# Define the rubric
+rubric = Rubric(
+    rubric_text="""
+    Evaluate whether the agent provided a helpful and accurate response.
+
+    Decision procedure:
+    1. Check if the agent understood the user's question
+    2. Verify the response directly addresses the question
+    3. Assess accuracy of any factual claims
+    """,
+    output_schema={
+        "type": "object",
+        "properties": {
+            "label": {"type": "string", "enum": ["helpful", "not helpful"]},
+            "explanation": {"type": "string", "citations": True},
+        },
+        "required": ["label", "explanation"],
+        "additionalProperties": False,
+    },
+)
+
+# Create the LLM service (reads API keys from environment variables)
+llm_svc = BaseLLMService()
+
+# Build the judge
+judge = build_judge(rubric, llm_svc)
+
+# Create an agent run to evaluate
+agent_run = AgentRun(
+    transcripts=[
+        Transcript(
+            messages=[
+                UserMessage(content="What is the capital of France?"),
+                AssistantMessage(content="The capital of France is Paris."),
+            ]
+        )
+    ]
+)
+
+# Run the judge (async)
+async def evaluate():
+    result = await judge(agent_run)
+
+    if result.result_type == ResultType.DIRECT_RESULT:
+        print(f"Label: {result.output['label']}")
+        print(f"Explanation: {result.output['explanation']}")
+    else:
+        print(f"Judge failed: {result.result_metadata}")
+
+asyncio.run(evaluate())
+```
+
+The `BaseLLMService` reads API keys from environment variables depending on the model provider:
+- OpenAI: `OPENAI_API_KEY`
+- Anthropic: `ANTHROPIC_API_KEY`
+- Google: `GOOGLE_API_KEY`
+- OpenRouter: `OPENROUTER_API_KEY`
+
+### JudgeResult
+
+The judge returns a `JudgeResult` object with these fields:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | `str` | Unique identifier for this result |
+| `agent_run_id` | `str` | ID of the evaluated agent run |
+| `rubric_id` | `str` | ID of the rubric used |
+| `rubric_version` | `int` | Version of the rubric |
+| `output` | `dict[str, Any]` | Parsed output matching your `output_schema` |
+| `result_metadata` | `dict[str, Any] \| None` | Additional metadata (contains errors on failure), or `None` |
+| `result_type` | `ResultType` | `DIRECT_RESULT` on success, `FAILURE` on error |
