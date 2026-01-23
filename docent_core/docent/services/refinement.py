@@ -541,11 +541,6 @@ class RefinementService:
                                 rsession.rubric_version = updated_rubric.version
 
                                 logger.info(f"Adding new rubric version: {updated_rubric.version}")
-
-                                await self.rubric_svc.start_or_get_eval_rubric_job(
-                                    ctx,
-                                    updated_rubric.id,
-                                )
                         else:
                             raise ValueError(f"Unsupported tool call: {tc.function}")
                     except Exception as e:
