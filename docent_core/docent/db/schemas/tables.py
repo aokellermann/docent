@@ -366,6 +366,9 @@ class SQLACollection(SQLABase):
         DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False
     )
 
+    # True if this collection was created via cloning
+    is_clone: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
+
     views: Mapped[list["SQLAView"]] = relationship(
         "SQLAView",
         back_populates="collection",

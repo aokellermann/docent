@@ -55,6 +55,7 @@ from docent.data_models.agent_run import (
     FilterableFieldWithSamples,
 )
 from docent.data_models.transcript import Transcript, TranscriptGroup
+from docent.data_models.util import clone_agent_run_with_random_ids
 from docent.judges import ResultType
 from docent.sdk.llm_context import LLMContextSpec
 from docent_core._db_service.db import DocentDB
@@ -532,6 +533,114 @@ class MonoService:
                 .values(**values_to_update)
             )
         logger.info(f"Updated Collection {collection_id} with values: {values_to_update}")
+
+    async def clone_collection(
+        self,
+        source_collection_id: str,
+        user: User,
+        new_name: str | None = None,
+        new_description: str | None = None,
+    ) -> tuple[str, int]:
+        """
+        Deep copy a collection with all its agent runs.
+
+        This creates a new collection and copies all agent runs from the source collection,
+        generating new IDs for all entities while preserving relationships.
+
+        Args:
+            source_collection_id: ID of the collection to clone
+            user: User performing the clone operation
+            new_name: Name for the new collection (defaults to "{source name} (Copy)")
+            new_description: Description for the new collection (defaults to source description)
+
+        Returns:
+            Tuple of (new_collection_id, number_of_agent_runs_cloned)
+
+        Raises:
+            ValueError: If source collection doesn't exist
+        """
+        # Fetch source collection metadata
+        async with self.db.session() as session:
+            result = await session.execute(
+                select(SQLACollection).where(SQLACollection.id == source_collection_id)
+            )
+            source_collection = result.scalar_one_or_none()
+            if not source_collection:
+                raise ValueError(f"Source collection {source_collection_id} not found")
+
+        # Determine new collection name and description
+        final_name = new_name or (
+            f"{source_collection.name} (Copy)" if source_collection.name else None
+        )
+        final_description = new_description or source_collection.description
+
+        # Create the new collection
+        new_collection_id = await self.create_collection(
+            user=user,
+            name=final_name,
+            description=final_description,
+        )
+
+        # Mark it as a clone
+        async with self.db.session() as session:
+            await session.execute(
+                update(SQLACollection)
+                .where(SQLACollection.id == new_collection_id)
+                .values(is_clone=True)
+            )
+
+        # Set up contexts for source and target collections
+        source_ctx = ViewContext(
+            collection_id=source_collection_id,
+            view_id="default",
+            user=user,
+            base_filter=None,
+        )
+        target_ctx = ViewContext(
+            collection_id=new_collection_id,
+            view_id="default",
+            user=user,
+            base_filter=None,
+        )
+
+        # Get all agent run IDs from source collection (IDs are lightweight)
+        agent_run_ids = await self.get_agent_run_ids(ctx=source_ctx)
+
+        if not agent_run_ids:
+            logger.info(
+                f"Cloned collection {source_collection_id} to {new_collection_id} with 0 agent runs"
+            )
+            return new_collection_id, 0
+
+        # Process agent runs in batches to avoid loading everything into memory
+        batch_size = 100
+        total_cloned = 0
+        total_batches = (len(agent_run_ids) + batch_size - 1) // batch_size
+
+        for batch_num, i in enumerate(range(0, len(agent_run_ids), batch_size), start=1):
+            # Fetch this batch of agent runs with full data
+            batch_ids = agent_run_ids[i : i + batch_size]
+            source_agent_runs = await self.get_agent_runs(ctx=source_ctx, agent_run_ids=batch_ids)
+
+            # Clone each agent run with new IDs
+            cloned_agent_runs = [
+                clone_agent_run_with_random_ids(agent_run) for agent_run in source_agent_runs
+            ]
+
+            # Insert the cloned batch
+            await self.add_agent_runs(ctx=target_ctx, agent_runs=cloned_agent_runs)
+
+            total_cloned += len(cloned_agent_runs)
+            logger.info(
+                f"Cloned batch {batch_num}/{total_batches} "
+                f"({len(cloned_agent_runs)} agent runs) for collection {new_collection_id}"
+            )
+
+        logger.info(
+            f"Cloned collection {source_collection_id} to {new_collection_id} "
+            f"with {total_cloned} agent runs"
+        )
+        return new_collection_id, total_cloned
 
     async def collection_exists(self, collection_id: str) -> bool:
         async with self.db.session() as session:

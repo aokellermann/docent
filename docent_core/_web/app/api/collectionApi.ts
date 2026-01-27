@@ -43,6 +43,18 @@ interface UpdateCollectionRequest {
   description?: string;
 }
 
+interface CloneCollectionRequest {
+  collection_id: string;
+  name?: string;
+  description?: string;
+}
+
+interface CloneCollectionResponse {
+  collection_id: string;
+  status: string;
+  agent_runs_cloned: number;
+}
+
 interface AgentRunMetadataRequest {
   agent_run_ids: string[];
   fields?: string[];
@@ -120,6 +132,22 @@ export const collectionApi = createApi({
         body,
       }),
       invalidatesTags: ['Collection'],
+    }),
+    cloneCollection: build.mutation<
+      CloneCollectionResponse,
+      CloneCollectionRequest
+    >({
+      query: ({ collection_id, ...body }) => ({
+        url: `/${collection_id}/clone`,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: [
+        'Collection',
+        'AgentRunIds',
+        'AgentRunMetadata',
+        'AgentRunMetadataFields',
+      ],
     }),
     deleteCollection: build.mutation<void, string>({
       query: (collection_id) => ({
@@ -350,6 +378,7 @@ export const {
   useGetCollectionsQuery,
   useCreateCollectionMutation,
   useUpdateCollectionMutation,
+  useCloneCollectionMutation,
   useDeleteCollectionMutation,
   useGetBaseFilterQuery,
   usePostBaseFilterMutation,

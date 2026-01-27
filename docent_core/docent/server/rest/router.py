@@ -483,6 +483,53 @@ async def create_collection(
     return {"collection_id": collection_id}
 
 
+class CloneCollectionRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+
+
+@user_router.post("/{collection_id}/clone", status_code=201)
+async def clone_collection(
+    request: CloneCollectionRequest,
+    collection_id: str = Depends(require_collection_exists),
+    user: User = Depends(get_authenticated_user),
+    mono_svc: MonoService = Depends(get_mono_svc),
+    _: None = Depends(require_collection_permission(Permission.READ)),
+    analytics: AnalyticsClient = Depends(use_posthog_user_context),
+):
+    """Clone an existing collection with all its agent runs.
+
+    Creates a deep copy of the collection, generating new IDs for all entities
+    while preserving relationships. Only agent runs and their transcripts/groups
+    are copied - other collection-level entities (views, filters, charts, rubrics)
+    are not included.
+    """
+    new_collection_id, agent_runs_cloned = await mono_svc.clone_collection(
+        source_collection_id=collection_id,
+        user=user,
+        new_name=request.name,
+        new_description=request.description,
+    )
+
+    # Track with PostHog
+    analytics.track_event(
+        "collection_cloned",
+        properties={
+            "source_collection_id": collection_id,
+            "new_collection_id": new_collection_id,
+            "agent_runs_cloned": agent_runs_cloned,
+            "name": request.name,
+            "description": request.description,
+        },
+    )
+
+    return {
+        "collection_id": new_collection_id,
+        "status": "completed",
+        "agent_runs_cloned": agent_runs_cloned,
+    }
+
+
 class UpdateCollectionRequest(BaseModel):
     name: str | None = None
     description: str | None = None

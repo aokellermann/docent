@@ -1,6 +1,6 @@
 'use client';
 
-import { CheckIcon, Loader2, Pencil, Trash2, XIcon } from 'lucide-react';
+import { CheckIcon, Copy, Loader2, Pencil, Trash2, XIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
@@ -13,8 +13,21 @@ import UuidPill from '@/components/UuidPill';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { formatDateValue } from '@/lib/dateUtils';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { useUserContext } from '@/app/contexts/UserContext';
 
-import { useUpdateCollectionMutation } from '../api/collectionApi';
+import {
+  useUpdateCollectionMutation,
+  useCloneCollectionMutation,
+} from '../api/collectionApi';
 
 export interface CollectionRowProps {
   collection: Collection;
@@ -37,11 +50,17 @@ export default function CollectionRow({
   onDelete,
 }: CollectionRowProps) {
   const router = useRouter();
+  const { user } = useUserContext();
 
   // Local editing state
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState(collection.name ?? '');
   const [description, setDescription] = useState(collection.description ?? '');
+
+  // Clone dialog state
+  const [isCloneDialogOpen, setIsCloneDialogOpen] = useState(false);
+  const [cloneName, setCloneName] = useState('');
+  const [cloneDescription, setCloneDescription] = useState('');
 
   /* ----------------------------- Event handlers ---------------------------- */
   const openCollection = (e?: React.MouseEvent) => {
@@ -77,6 +96,8 @@ export default function CollectionRow({
   };
 
   const [updateCollection] = useUpdateCollectionMutation();
+  const [cloneCollection, { isLoading: isCloning }] =
+    useCloneCollectionMutation();
 
   const saveChanges = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -91,6 +112,53 @@ export default function CollectionRow({
     toast.success('The collection has been updated successfully');
 
     setIsEditing(false);
+  };
+
+  const triggerClone = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    // If user is not logged in, redirect to signup
+    if (!user || user.is_anonymous) {
+      const currentPath = window.location.pathname;
+      const signupUrl = `/signup?redirect=${encodeURIComponent(currentPath)}`;
+      router.push(signupUrl);
+      return;
+    }
+
+    // Open clone dialog
+    const defaultName = collection.name
+      ? `${collection.name} (Copy)`
+      : 'Cloned Collection';
+    setCloneName(defaultName);
+    setCloneDescription(collection.description ?? '');
+    setIsCloneDialogOpen(true);
+  };
+
+  const handleClone = async () => {
+    if (!user || user.is_anonymous) return;
+
+    try {
+      const result = await cloneCollection({
+        collection_id: collection.id,
+        name: cloneName.trim() || undefined,
+        description: cloneDescription.trim() || undefined,
+      }).unwrap();
+
+      toast.success(
+        `Collection cloned successfully! ${result.agent_runs_cloned} agent runs copied.`
+      );
+
+      setIsCloneDialogOpen(false);
+
+      // Navigate to the new collection
+      router.push(`${COLLECTIONS_DASHBOARD_PATH}/${result.collection_id}`);
+    } catch (error: any) {
+      console.error('Failed to clone collection:', error);
+      const message =
+        error?.data?.detail || error?.message || 'Failed to clone collection';
+      toast.error(message);
+    }
   };
 
   const triggerDelete = (e: React.MouseEvent) => {
@@ -232,6 +300,19 @@ export default function CollectionRow({
                 <Button
                   variant="ghost"
                   size="icon"
+                  className="h-auto w-auto text-muted-foreground group-hover:text-indigo-text p-0"
+                  onClick={triggerClone}
+                  title={
+                    !user || user.is_anonymous
+                      ? 'Sign up to clone collection'
+                      : 'Clone collection'
+                  }
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
                   className="h-auto w-auto text-muted-foreground group-hover:text-blue-text p-0"
                   onClick={startEditing}
                   disabled={!hasWritePermission}
@@ -251,11 +332,92 @@ export default function CollectionRow({
                 </Button>
               </div>
             ) : (
-              <div className="text-muted-foreground text-xs">Read only</div>
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-auto w-auto text-muted-foreground group-hover:text-indigo-text p-0"
+                  onClick={triggerClone}
+                  title={
+                    !user || user.is_anonymous
+                      ? 'Sign up to clone collection'
+                      : 'Clone collection'
+                  }
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </Button>
+                <div className="text-muted-foreground text-xs">Read only</div>
+              </div>
             )}
           </div>
         )}
       </TableCell>
+
+      {/* Clone Dialog */}
+      <Dialog open={isCloneDialogOpen} onOpenChange={setIsCloneDialogOpen}>
+        <DialogContent onClick={(e) => e.stopPropagation()}>
+          <DialogHeader>
+            <DialogTitle>Clone Collection</DialogTitle>
+            <DialogDescription>
+              Create a copy of this collection with all agent runs. Rubrics,
+              charts, and other configuration will not be copied.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="clone-name">Name</Label>
+              <Input
+                id="clone-name"
+                value={cloneName}
+                onChange={(e) => setCloneName(e.target.value)}
+                placeholder="Enter collection name"
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="clone-description">Description (optional)</Label>
+              <Input
+                id="clone-description"
+                value={cloneDescription}
+                onChange={(e) => setCloneDescription(e.target.value)}
+                placeholder="Enter description"
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsCloneDialogOpen(false);
+              }}
+              disabled={isCloning}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleClone();
+              }}
+              disabled={isCloning}
+            >
+              {isCloning ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Cloning...
+                </>
+              ) : (
+                'Clone Collection'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </TableRow>
   );
 }
