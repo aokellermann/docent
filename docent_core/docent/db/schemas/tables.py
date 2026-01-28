@@ -848,8 +848,8 @@ class SQLAApiKey(SQLABase):
     created_at = mapped_column(
         DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False
     )
-    disabled_at = mapped_column(DateTime, nullable=True, index=True)
-    last_used_at = mapped_column(DateTime, nullable=True, index=True)
+    disabled_at = mapped_column(DateTime, nullable=True)
+    last_used_at = mapped_column(DateTime, nullable=True)
 
     user: Mapped["SQLAUser"] = relationship("SQLAUser", backref="api_keys")
 
