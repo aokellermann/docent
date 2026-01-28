@@ -3475,10 +3475,23 @@ class MonoService:
             )
             return result.rowcount > 0
 
+    def _should_update_last_used_at(self, last_used_at: datetime | None) -> bool:
+        """
+        Check if last_used_at should be updated (minute-level granularity).
+
+        We use minute-level granularity to reduce write load on the database,
+        since API keys can be used very frequently.
+        """
+        if last_used_at is None:
+            return True
+        now = datetime.now(UTC).replace(tzinfo=None)
+        # Compare at minute granularity by truncating seconds and microseconds
+        return now.replace(second=0, microsecond=0) != last_used_at.replace(second=0, microsecond=0)
+
     async def get_user_by_api_key(self, raw_api_key: str) -> User | None:
         """
         Validate an API key and return the associated user.
-        Updates last_used_at timestamp if key is valid.
+        Updates last_used_at timestamp if key is valid (at minute-level granularity).
 
         Supports both new key_id pattern and legacy Argon2 hashes for migration.
         """
@@ -3522,11 +3535,12 @@ class MonoService:
             if api_key_data and api_key_data.key_hash:
                 # Verify the raw key against Argon2 hash
                 if pwd_context.verify(raw_api_key, api_key_data.key_hash):
-                    await session.execute(
-                        update(SQLAApiKey)
-                        .where(SQLAApiKey.id == api_key_data.id)
-                        .values(last_used_at=datetime.now(UTC).replace(tzinfo=None))
-                    )
+                    if self._should_update_last_used_at(api_key_data.last_used_at):
+                        await session.execute(
+                            update(SQLAApiKey)
+                            .where(SQLAApiKey.id == api_key_data.id)
+                            .values(last_used_at=datetime.now(UTC).replace(tzinfo=None))
+                        )
                     return api_key_data.user.to_user()
 
             # Final fallback: Argon2-only verification for keys without fingerprint (legacy keys)
@@ -3544,13 +3558,13 @@ class MonoService:
                 if api_key_data.key_hash and pwd_context.verify(raw_api_key, api_key_data.key_hash):
                     # Backfill fingerprint for legacy key on first successful use
                     fingerprint = self._create_fingerprint(raw_api_key)
+                    update_values: dict[str, datetime | str] = {"fingerprint": fingerprint}
+                    if self._should_update_last_used_at(api_key_data.last_used_at):
+                        update_values["last_used_at"] = datetime.now(UTC).replace(tzinfo=None)
                     await session.execute(
                         update(SQLAApiKey)
                         .where(SQLAApiKey.id == api_key_data.id)
-                        .values(
-                            fingerprint=fingerprint,
-                            last_used_at=datetime.now(UTC).replace(tzinfo=None),
-                        )
+                        .values(**update_values)
                     )
                     logger.info(f"Backfilled fingerprint for legacy API key {api_key_data.id}")
                     return api_key_data.user.to_user()
