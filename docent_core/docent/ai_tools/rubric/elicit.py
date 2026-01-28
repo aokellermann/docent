@@ -4,7 +4,7 @@ import asyncio
 import json
 import re
 from collections.abc import Sequence
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, Field
 
@@ -16,8 +16,16 @@ from docent.data_models.citation import InlineCitation
 from docent.judges.types import Rubric
 from docent.sdk.llm_context import LLMContext, resolve_citations_with_context
 
+if TYPE_CHECKING:
+    from docent_core.docent.ai_tools.rubric.user_model import UserData
+
 logger = get_logger(__name__)
 
+# DEFAULT_MODEL_OPTION = ModelOption(
+#     provider="openai",
+#     model_name="gpt-5.2-2025-12-11",
+#     reasoning_effort=None,
+# )
 DEFAULT_MODEL_OPTION = ModelOption(
     provider="anthropic",
     model_name="claude-opus-4-5-20251101",
@@ -35,6 +43,23 @@ DEFAULT_MODEL_OPTION = ModelOption(
 # )
 
 
+class SubRubricProposal(BaseModel):
+    """A proposed sub-rubric extracted from the main rubric."""
+
+    name: str  # Short descriptive name
+    description: str  # What this sub-rubric measures
+    key_indicators: list[str]  # Specific behaviors/patterns it captures
+
+
+class DecompositionProposal(BaseModel):
+    """A proposed decomposition of the current rubric into sub-rubrics."""
+
+    summary: str  # Overview of why decomposition might help
+    proposed_sub_rubrics: list[SubRubricProposal]
+    recommendation: str  # Advice on whether to decompose
+    confidence: str  # HIGH/MEDIUM/LOW
+
+
 class ElicitedQuestionOption(BaseModel):
     title: str | None = None
     title_citations: list[InlineCitation] = Field(default_factory=list[InlineCitation])
@@ -49,14 +74,13 @@ class ElicitedQuestion(BaseModel):
     framed_question_citations: list[InlineCitation] = Field(default_factory=list[InlineCitation])
     question_context: str | None = None
     question_context_citations: list[InlineCitation] = Field(default_factory=list[InlineCitation])
-    ambiguity_explanation: str | None = None
-    ambiguity_explanation_citations: list[InlineCitation] = Field(
-        default_factory=list[InlineCitation]
-    )
     example_options: list[ElicitedQuestionOption] = Field(
         default_factory=list[ElicitedQuestionOption]
     )
     error: str | None = None
+    # Novelty rating assessed during extraction (HIGH/MEDIUM/LOW)
+    novelty_rating: str | None = None
+    novelty_rationale: str | None = None
 
 
 class BottleneckExtractionInput(BaseModel):
@@ -81,7 +105,6 @@ class RubricChangeBottleneck(BaseModel):
     proposed_change: str
     example_from_run: str | None
     confidence: str  # "high", "medium", "low"
-    reasoning: str
 
 
 class BottleneckExtractionResult(BaseModel):
@@ -183,8 +206,8 @@ For each case (limit to {max_questions} most important, and it's completely fine
 1. A brief title capturing the essence of what this question is about
 2. A standalone context summarizing the relevant situation
 3. A succinct question asking for the user's judgment
-4. An explanation of WHY this is ambiguous under the rubric
-5. Example answer options
+4. Example answer options
+5. A novelty rating and rationale
 
 **FORMATTING GUIDANCE**:
 - **Title**: A general description of the core ambiguity that could apply to other agent runs. No citations in titles.
@@ -193,9 +216,14 @@ For each case (limit to {max_questions} most important, and it's completely fine
   - "Should this count as a successful completion?"
   - "Is this response appropriately concise?"
   - "Does this meet the rubric's standard for error handling?"
-- **Ambiguity Explanation**: Explain specifically: (1) which rubric criterion or phrase is ambiguous, (2) how two reasonable evaluators could interpret it differently for this case, (3) why this ambiguity matters for scoring. Use citations to reference rubric language if helpful.
 
-Use bracket notation like [T0B5] or [T0B5:<RANGE>exact text<RANGE>] to cite specific passages. Citations can appear in context, question, and ambiguity_explanation.
+Use bracket notation like [T0B5] or [T0B5:<RANGE>exact text<RANGE>] to cite specific passages. Citations can appear in context and question.
+
+**NOVELTY RATING CRITERIA**:
+Rate each question's novelty relative to the rubric:
+- **HIGH**: Addresses something completely unrelated to the specific provisions made in the current rubric (a blind spot the rubric author didn't foresee)
+- **MEDIUM**: Related to something already stated but potentially asks about a new dimension or related clarification
+- **LOW**: Addresses something that is fairly unambiguously resolved given the rubric
 
 Output your response as a JSON object:
 {{
@@ -204,13 +232,14 @@ Output your response as a JSON object:
             "title": "A general description of the core ambiguity",
             "context": "A standalone summary of the situation. Include what the agent was asked to do, what it actually did, and the outcome. Use citations. This should be readable as a complete 'case study' without needing the full agent run.",
             "question": "A short question asking for the user's judgment (one sentence).",
-            "ambiguity_explanation": "Explain: (1) which rubric criterion/phrase is ambiguous, (2) how two evaluators could interpret it differently here, (3) why this matters for scoring.",
             "example_options": [
                 {{
                     "title": "Option title",
                     "description": "What this option means"
                 }}
-            ]
+            ],
+            "novelty_rating": "HIGH|MEDIUM|LOW",
+            "novelty_rationale": "Brief explanation of why this rating was assigned"
         }}
     ]
 }}
@@ -224,7 +253,7 @@ Focus on quality over quantity. Return an empty list if the rubric is sufficient
 def create_question_deduplication_prompt(
     questions: list[ElicitedQuestion],
     rubric_description: str,
-    max_questions: int = 10,
+    max_questions: int,
     max_context_length: int = 500,
 ) -> str:
     """
@@ -240,6 +269,7 @@ def create_question_deduplication_prompt(
         Prompt string for the LLM
     """
     question_entries: list[str] = []
+    has_pre_assessed_novelty = False
 
     for i, q in enumerate(questions):
         if q.error:
@@ -255,84 +285,85 @@ def create_question_deduplication_prompt(
 --- {q_id} ---
 Agent Run ID: {q.agent_run_id}
 Context: {context}
-Question: {framed_question}
-"""
+Question: {framed_question}"""
+
+        # Include pre-assessed novelty rating if available
+        if q.novelty_rating:
+            has_pre_assessed_novelty = True
+            entry += f"\nPre-assessed Novelty: {q.novelty_rating}"
+            if q.novelty_rationale:
+                entry += f"\nRationale: {q.novelty_rationale}"
+
+        entry += "\n"
         question_entries.append(entry)
 
     questions_str = "\n".join(question_entries)
 
-    return f"""You are selecting the most valuable questions for clarifying a rubric used to evaluate AI agents.
+    # Add note about pre-assessed ratings if any questions have them
+    pre_assessed_note = ""
+    if has_pre_assessed_novelty:
+        pre_assessed_note = """
+**Note on Pre-assessed Novelty**: Questions have pre-assessed novelty ratings (HIGH/MEDIUM/LOW) from the extraction step. Use these ratings as-is for prioritization—they indicate how much the question addresses a blind spot vs. something already covered in the rubric.
+"""
+
+    return f"""You are selecting questions to ask a user to clarify their rubric for evaluating AI agents.
 
 CURRENT RUBRIC:
 {rubric_description}
 
-Below are {len(question_entries)} candidate questions extracted from agent run analysis. Many questions may address similar or overlapping ambiguities. Your task is to select the most valuable questions (up to {max_questions} maximum).
-
+Below are {len(question_entries)} candidate questions extracted from agent run analysis. Each question has a pre-assessed novelty rating (HIGH/MEDIUM/LOW) indicating how much it addresses a blind spot vs. something already covered in the rubric.
+{pre_assessed_note}
 CANDIDATE QUESTIONS:
 {questions_str}
 
-SELECTION CRITERIA:
+## Your Task
 
-Your task has two parts: (1) assess the quality of individual questions, then (2) select a diverse set from the highest-quality candidates.
+Select a set of questions that is **MECE** (Mutually Exclusive, Collectively Exhaustive):
 
-### Part 1: Individual Question Quality
+### 1. Mutually Exclusive (Deduplication)
 
-Rate each question on these dimensions:
+**No two selected questions should address the same underlying ambiguity.**
 
-**Novelty/Surprise** - Does this question reveal a BLIND SPOT in the rubric—something it doesn't address at all? Questions exposing gaps the rubric author didn't foresee are far more valuable than questions clarifying ambiguities in existing criteria.
-   - HIGH: Addresses something completely unrelated to the specific provisions made in the current rubric
-   - MEDIUM: Related to something already stated but potentially asks about a new dimension or related clarification
-   - LOW: Addresses something that is fairly unambiguously resolved given the rubric
+- If multiple questions ask about the same issue (even if framed differently), select only the single best representative
+- Questions are duplicates if resolving one would effectively resolve the other
+- Err on the side of fewer, distinct questions over more overlapping ones
 
-Note: It is completely acceptable if there are no HIGH or MEDIUM novelty questions. If all questions address topics already clearly covered by the rubric, report them with LOW novelty scores.
+### 2. Collectively Exhaustive (Coverage)
 
-**Impact** - Would different answers to this question meaningfully change how runs are scored? Avoid questions where the answer is obvious or wouldn't affect judgment.
+**Don't omit high-value questions that address distinct rubric gaps.**
 
-**Concreteness** - Is the question grounded in specific agent behavior from the runs, or is it an abstract hypothetical? Well-grounded questions are more actionable.
+- Ensure the selected set covers the range of distinct ambiguities identified
+- Prefer breadth (covering different aspects of the rubric) over depth (multiple questions about one aspect)
+- HIGH novelty questions addressing blind spots should generally be included unless they duplicate another selected question
 
-### Part 2: Collection Properties
+### 3. Prioritization
 
-When selecting your final set, ensure:
+When choosing between non-duplicate questions:
 
-**Diversity** - Avoid selecting questions that address the same or overlapping gaps. Each selected question should clarify a distinct aspect not covered by others in the set.
+1. **Novelty**: Prefer HIGH > MEDIUM > LOW (use the pre-assessed ratings)
+2. **Impact**: Among same-novelty questions, prefer those where different answers would meaningfully change how runs are scored
 
-**Coverage** - Ensure the selected questions span different evaluation dimensions (e.g., not all about error handling, not all about response quality). Aim for breadth across the rubric's concerns.
+## Constraints
 
-**SELECTION STRATEGY (Priority-Based)**:
+**Maximum questions: {max_questions}**
 
-Select questions using this priority order:
+This is a hard ceiling, not a target. Return fewer questions if:
+- There aren't {max_questions} distinct ambiguities
+- Lower-priority questions would be duplicative or low-impact
+- The rubric is already clear on most points
 
-1. **First**: Select all HIGH novelty questions (up to {max_questions})
-   - These reveal blind spots in the rubric - most valuable
-   - If you have enough HIGH novelty questions, STOP HERE
+It is completely acceptable—even expected—to return significantly fewer than {max_questions} questions.
 
-2. **Then, only if needed**: If fewer than ~3-5 HIGH novelty questions, consider MEDIUM novelty
-   - Add MEDIUM questions that would meaningfully improve the rubric
-   - Maintain diversity - don't add questions that overlap with already-selected ones
+## Output Format
 
-3. **Rarely**: LOW novelty questions should almost never be selected
-   - Only if the rubric is exceptionally clear and you need to surface edge cases
-
-**Key principles**:
-- `max_questions` ({max_questions}) is a HARD MAXIMUM, not a target - you may return fewer
-- If all candidates are LOW novelty, it's fine to return 0 questions
-- Quality over quantity: 3 HIGH novelty questions > 10 mixed questions
-- Explain your selection reasoning in the output
-
-OUTPUT FORMAT:
 Output as JSON:
 {{
-    "selection_reasoning": "Found N HIGH novelty questions; [included/excluded] MEDIUM because...",
     "selected_questions": [
         {{
             "question_id": "Q003",
-            "novelty_rating": "HIGH|MEDIUM|LOW",
-            "selection_rationale": "Why this question was selected based on the criteria above",
-            "similar_questions_excluded": ["Q007", "Q015"],
-            "similarity_note": "Brief explanation of why excluded questions are similar/redundant"
+            "selection_rationale": "Brief explanation of why this was selected and what distinct ambiguity it addresses"
         }}
-    ],
-    "summary": "Brief summary of how the selected questions cover different dimensions of the rubric"
+    ]
 }}
 """
 
@@ -367,7 +398,6 @@ Analyze the user's answer and determine:
 4. A specific proposed change to the rubric language/logic
 5. Any example from the agent run that illustrates this
 6. Your confidence in this interpretation (high, medium, low)
-7. Your reasoning
 
 Output as JSON:
 {{
@@ -376,11 +406,10 @@ Output as JSON:
     "key_insight": "What the user's answer reveals about how the rubric should handle this case",
     "proposed_change": "Specific language or logic to add/modify in the rubric",
     "example_from_run": "A concrete example from the agent run that illustrates this, or null",
-    "confidence": "high|medium|low",
-    "reasoning": "Why you interpreted the answer this way and why this change is appropriate"
+    "confidence": "high|medium|low"
 }}
 
-If the user's answer doesn't suggest any rubric changes (e.g., they think the current rubric is fine), use change_type="no_change" and explain in reasoning.
+If the user's answer doesn't suggest any rubric changes (e.g., they think the current rubric is fine), use change_type="no_change".
 """
 
 
@@ -489,6 +518,289 @@ If the output schema needs changes, provide the updated JSON schema. Otherwise, 
 A brief summary (2-5 sentences) of what principles were extracted and how the rubric was updated to capture them.
 </change_summary>
 """
+
+
+def create_user_model_update_prompt(
+    user_data: "UserData",
+    current_model_text: str,
+) -> str:
+    """Create prompt for updating the user model based on collected feedback."""
+    # Format QA pairs
+    qa_entries: list[str] = []
+    for i, qa in enumerate(user_data.qa_pairs, 1):
+        entry = f"""
+--- Feedback {i} ---
+Question Context: {qa.question_context or "N/A"}
+Question: {qa.question}
+User's Answer: {qa.answer}
+Custom Response: {"Yes" if qa.is_custom_response else "No"}
+"""
+        qa_entries.append(entry)
+
+    qa_section = "\n".join(qa_entries) if qa_entries else "No feedback collected yet."
+
+    return f"""You are synthesizing a user's intent and preferences for evaluating AI agent behavior.
+
+INITIAL RUBRIC (what the user started with):
+{user_data.initial_rubric}
+
+CURRENT USER MODEL (your previous understanding):
+{current_model_text}
+
+COLLECTED FEEDBACK (questions the user answered):
+{qa_section}
+
+Your task: Update the user model to reflect what you've learned from this feedback.
+
+The user model should capture:
+1. **Core Intent**: What the user fundamentally cares about measuring
+2. **Interpretation Preferences**: How they resolve ambiguous cases - cite specific examples from the question contexts
+3. **Priorities**: What matters more vs less, with concrete illustrations from the feedback
+4. **Grounded Examples**: Include 2-3 specific cases from the feedback that best illustrate the user's preferences
+
+IMPORTANT: Ground every insight in SPECIFIC details from the question contexts above.
+- Quote or reference actual agent behaviors that informed the user's judgments
+- Avoid abstract generalizations - each principle should be anchored to actual data
+- If describing a pattern, cite at least one concrete case that exemplifies it
+- When the question context includes agent actions or outputs, reference those specifics
+
+Write an updated user model as markdown. Be concise but comprehensive.
+Focus on ACTIONABLE insights that would help a judge understand how this user thinks.
+
+Output your response in this format:
+<user_model>
+[Your updated user model in markdown]
+</user_model>
+"""
+
+
+async def update_user_model(
+    user_data: "UserData",
+    current_model_text: str,
+    llm_svc: BaseLLMService,
+) -> str:
+    """
+    Update the user model based on collected feedback.
+
+    Args:
+        user_data: The UserData containing initial rubric and QA pairs
+        current_model_text: The current user model text
+        llm_svc: LLM service for API calls
+
+    Returns:
+        Updated user model text (markdown string)
+    """
+    # Skip if no new QA pairs
+    if not user_data.qa_pairs:
+        return current_model_text
+
+    prompt = create_user_model_update_prompt(user_data, current_model_text)
+
+    outputs = await llm_svc.get_completions(
+        inputs=[[{"role": "user", "content": prompt}]],
+        model_options=[DEFAULT_MODEL_OPTION],
+        max_new_tokens=4096,
+        temperature=0.7,
+        timeout=120.0,
+    )
+
+    output = outputs[0]
+
+    if output.did_error:
+        logger.warning(f"Failed to update user model: {output.errors}")
+        return current_model_text
+
+    llm_response = output.completions[0].text or ""
+
+    # Parse user_model tag
+    match = re.search(r"<user_model>(.*?)</user_model>", llm_response, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+
+    # Fallback: return the whole response if no tags
+    return llm_response.strip() or current_model_text
+
+
+def create_decomposition_analysis_prompt(
+    user_data: "UserData",
+    current_model_text: str,
+    previous_proposal: DecompositionProposal | None = None,
+    user_feedback: str | None = None,
+) -> str:
+    """Create prompt for analyzing potential rubric decomposition into sub-rubrics."""
+    # Format QA pairs with context
+    qa_entries: list[str] = []
+    for i, qa in enumerate(user_data.qa_pairs, 1):
+        entry = f"""
+--- Feedback {i} ---
+Agent Run ID: {qa.agent_run_id}
+Question Context: {qa.question_context or "N/A"}
+Question: {qa.question}
+User's Answer: {qa.answer}
+Custom Response: {"Yes" if qa.is_custom_response else "No"}
+"""
+        qa_entries.append(entry)
+
+    qa_section = "\n".join(qa_entries) if qa_entries else "No feedback collected yet."
+    n_qa_pairs = len(user_data.qa_pairs)
+
+    prompt = f"""You are analyzing whether a rubric for evaluating AI agents should be split into multiple sub-rubrics.
+
+INITIAL RUBRIC:
+{user_data.initial_rubric}
+
+CURRENT USER MODEL (after {n_qa_pairs} rounds of feedback):
+{current_model_text}
+
+COLLECTED FEEDBACK ({n_qa_pairs} QA pairs):
+{qa_section}
+
+## Your Task
+
+Analyze whether the user's feedback reveals DISTINCT evaluation dimensions that would be better served by separate rubrics.
+
+Look for evidence of:
+1. **Conflated Concepts**: Does the user's feedback address fundamentally different concerns that happen to be lumped together?
+2. **Tension in Priorities**: Do some answers suggest competing values that are hard to balance in a single rubric?
+3. **Distinct Measurement Axes**: Are there behaviors that should be evaluated independently rather than as part of one score?
+
+## Important Guidelines
+
+- **Ground every observation in specific QA pairs**: Reference actual feedback, not hypotheticals
+- **Always provide suggestions**: You MUST propose at least one sub-rubric decomposition, even if you believe the current rubric is already well-structured
+- **Focus on practical utility**: Would separate rubrics actually help measurement?
+- **Use confidence to indicate benefit**: Use HIGH confidence when decomposition would clearly improve measurement, MEDIUM when it would provide modest benefits, and LOW when the rubric is already fairly coherent but decomposition could still offer minor improvements
+
+## Output Format
+
+Output your response as a JSON object:
+{{
+    "summary": "1-2 sentence overview of your analysis and whether decomposition would help",
+    "proposed_sub_rubrics": [
+        {{
+            "name": "Short descriptive name for this sub-rubric",
+            "description": "What this sub-rubric would measure",
+            "key_indicators": [
+                "Specific behavior or pattern this sub-rubric would capture",
+                "Another indicator"
+            ]
+        }}
+    ],
+    "recommendation": "Clear advice on whether to decompose this rubric, and why",
+    "confidence": "HIGH|MEDIUM|LOW"
+}}
+
+You MUST always propose at least one sub-rubric. If the current rubric is coherent, propose the most reasonable decomposition anyway and explain in the recommendation that while the rubric is fairly well-structured, this decomposition could offer specific benefits.
+"""
+
+    # Add feedback section if previous proposal and user feedback are provided
+    if previous_proposal and user_feedback:
+        feedback_section = f"""
+
+## Previous Proposal
+
+You previously proposed the following decomposition:
+{previous_proposal.model_dump_json(indent=2)}
+
+## User Feedback
+
+The user provided the following feedback on your proposal:
+{user_feedback}
+
+Please revise your decomposition based on this feedback. The user may be:
+- Asking for different sub-rubric boundaries
+- Requesting more/fewer sub-rubrics
+- Pointing out that certain aspects were missed
+- Clarifying their priorities
+"""
+        return prompt + feedback_section
+
+    return prompt
+
+
+async def analyze_rubric_decomposition(
+    user_data: "UserData",
+    current_model_text: str,
+    llm_svc: BaseLLMService,
+    previous_proposal: DecompositionProposal | None = None,
+    user_feedback: str | None = None,
+) -> DecompositionProposal | None:
+    """
+    Analyze whether the current rubric should be decomposed into sub-rubrics.
+
+    This function examines the collected QA pairs and current user model to identify
+    whether the user's feedback reveals distinct evaluation dimensions that would be
+    better served by separate rubrics.
+
+    Args:
+        user_data: The UserData containing initial rubric and QA pairs
+        current_model_text: The current user model text
+        llm_svc: LLM service for API calls
+        previous_proposal: Optional previous decomposition proposal for refinement
+        user_feedback: Optional user feedback on the previous proposal
+
+    Returns:
+        DecompositionProposal if analysis succeeds, None on error
+    """
+    # Skip if no QA pairs
+    if not user_data.qa_pairs:
+        logger.info("Skipping decomposition analysis: no QA pairs collected")
+        return None
+
+    prompt = create_decomposition_analysis_prompt(
+        user_data,
+        current_model_text,
+        previous_proposal=previous_proposal,
+        user_feedback=user_feedback,
+    )
+
+    outputs = await llm_svc.get_completions(
+        inputs=[[{"role": "user", "content": prompt}]],
+        model_options=[DEFAULT_MODEL_OPTION],
+        max_new_tokens=4096,
+        temperature=0.7,
+        timeout=120.0,
+    )
+
+    output = outputs[0]
+
+    if output.did_error:
+        logger.warning(f"Failed to analyze rubric decomposition: {output.errors}")
+        return None
+
+    llm_response = output.completions[0].text or ""
+
+    # Parse JSON response
+    parsed = parse_llm_json_response(llm_response, keys=("summary", "proposed_sub_rubrics"))
+
+    if not parsed:
+        logger.warning("Failed to parse decomposition analysis JSON response")
+        return None
+
+    try:
+        # Parse sub-rubrics
+        sub_rubrics: list[SubRubricProposal] = []
+        raw_sub_rubrics: list[Any] = parsed.get("proposed_sub_rubrics", [])
+        for sr in raw_sub_rubrics:
+            if isinstance(sr, dict):
+                sr_dict = cast(dict[str, Any], sr)
+                sub_rubrics.append(
+                    SubRubricProposal(
+                        name=str(sr_dict.get("name", "")),
+                        description=str(sr_dict.get("description", "")),
+                        key_indicators=list(sr_dict.get("key_indicators", [])),
+                    )
+                )
+
+        return DecompositionProposal(
+            summary=parsed.get("summary", ""),
+            proposed_sub_rubrics=sub_rubrics,
+            recommendation=parsed.get("recommendation", ""),
+            confidence=parsed.get("confidence", "LOW"),
+        )
+    except Exception as e:
+        logger.warning(f"Failed to create DecompositionProposal: {e}")
+        return None
 
 
 async def extract_questions_from_agent_runs(
@@ -621,13 +933,6 @@ async def extract_questions_from_agent_runs(
                 context_text, context, validate_text_ranges=True
             )
 
-            # Resolve citations in ambiguity explanation
-            raw_explanation = q_dict.get("ambiguity_explanation", "")
-            explanation_text = raw_explanation if isinstance(raw_explanation, str) else ""
-            ambiguity_explanation, ambiguity_explanation_citations = resolve_citations_with_context(
-                explanation_text, context, validate_text_ranges=True
-            )
-
             # Process example options
             example_options: list[ElicitedQuestionOption] = []
             raw_options: list[Any] = q_dict.get("example_options", []) or []
@@ -656,6 +961,14 @@ async def extract_questions_from_agent_runs(
                     )
                 )
 
+            # Extract novelty rating and rationale
+            raw_novelty_rating = q_dict.get("novelty_rating")
+            novelty_rating = raw_novelty_rating if isinstance(raw_novelty_rating, str) else None
+            raw_novelty_rationale = q_dict.get("novelty_rationale")
+            novelty_rationale = (
+                raw_novelty_rationale if isinstance(raw_novelty_rationale, str) else None
+            )
+
             results.append(
                 ElicitedQuestion(
                     agent_run_id=agent_run_id,
@@ -664,9 +977,9 @@ async def extract_questions_from_agent_runs(
                     framed_question_citations=framed_question_citations,
                     question_context=question_context,
                     question_context_citations=question_context_citations,
-                    ambiguity_explanation=ambiguity_explanation,
-                    ambiguity_explanation_citations=ambiguity_explanation_citations,
                     example_options=example_options,
+                    novelty_rating=novelty_rating,
+                    novelty_rationale=novelty_rationale,
                 )
             )
 
@@ -678,11 +991,40 @@ async def extract_questions_from_agent_runs(
     return results
 
 
+def sort_questions_by_novelty(
+    questions: list[ElicitedQuestion],
+    max_questions: int | None = None,
+) -> list[ElicitedQuestion]:
+    """
+    Sort questions by novelty rating (HIGH > MEDIUM > LOW > None).
+
+    This utility enables pre-aggregation sorting so that if context window is exceeded,
+    only the highest-novelty questions are included in the deduplication step.
+
+    Args:
+        questions: List of ElicitedQuestion objects to sort
+        max_questions: Optional limit - if provided, truncate to this many questions
+
+    Returns:
+        Sorted (and optionally truncated) list of ElicitedQuestion objects
+    """
+    novelty_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2, None: 3}
+
+    sorted_questions = sorted(
+        questions,
+        key=lambda q: (novelty_order.get(q.novelty_rating, 3), q.agent_run_id or ""),
+    )
+
+    if max_questions is not None:
+        return sorted_questions[:max_questions]
+    return sorted_questions
+
+
 async def deduplicate_and_select_questions(
     questions: list[ElicitedQuestion],
     llm_svc: BaseLLMService,
     rubric_description: str,
-    max_questions: int = 10,
+    max_questions: int,
 ) -> tuple[list[ElicitedQuestion], dict[str, Any]]:
     """
     Deduplicate and select the most diverse/interesting questions from a list.
@@ -695,7 +1037,7 @@ async def deduplicate_and_select_questions(
         questions: List of ElicitedQuestion objects to deduplicate
         llm_svc: LLM service for making API calls
         rubric_description: The rubric text to evaluate novelty against
-        max_questions: Maximum number of questions to select (default: 10).
+        max_questions: Maximum number of questions to select.
             This is a hard upper limit, not a target - the LLM may return fewer
             based on quality (prioritizing HIGH novelty questions).
 
@@ -705,9 +1047,6 @@ async def deduplicate_and_select_questions(
         - Metadata dict with keys:
             - selected_ids: list of question IDs that were selected
             - rationales: dict mapping question_id to selection_rationale
-            - excluded_similar: dict mapping question_id to list of excluded similar IDs
-            - selection_reasoning: explanation of the selection strategy used
-            - summary: overall summary of selection
             - error: error message if any, None otherwise
 
     Edge cases handled:
@@ -726,17 +1065,12 @@ async def deduplicate_and_select_questions(
     metadata: dict[str, Any] = {
         "selected_ids": [],
         "rationales": {},
-        "novelty_ratings": {},
-        "excluded_similar": {},
-        "selection_reasoning": "",
-        "summary": "",
         "error": None,
     }
 
     # Edge case: empty input
     if not questions:
         logger.info("No questions to deduplicate")
-        metadata["summary"] = "No questions provided"
         return [], metadata
 
     # Filter out questions with errors
@@ -747,7 +1081,6 @@ async def deduplicate_and_select_questions(
     if not valid_questions:
         logger.info("All questions have errors, returning empty list")
         metadata["error"] = "All input questions had errors"
-        metadata["summary"] = "All input questions had errors"
         return [], metadata
 
     # Edge case: fewer valid questions than max_questions - return all valid questions
@@ -761,10 +1094,6 @@ async def deduplicate_and_select_questions(
                 q_id = f"Q{i:03d}"
                 metadata["selected_ids"].append(q_id)
                 metadata["rationales"][q_id] = "Selected (fewer candidates than max_questions)"
-        metadata["summary"] = (
-            f"All {len(valid_questions)} valid questions selected "
-            f"(fewer than max_questions={max_questions})"
-        )
         return valid_questions, metadata
 
     # Create prompt and call LLM
@@ -789,9 +1118,6 @@ async def deduplicate_and_select_questions(
             f"LLM error during deduplication, falling back to first {max_questions}: {error_msg}"
         )
         metadata["error"] = f"LLM error (fallback used): {error_msg}"
-        metadata["summary"] = (
-            f"LLM error - returned first {max_questions} valid questions as fallback"
-        )
 
         # Fallback: return first max_questions valid questions
         fallback_questions = valid_questions[:max_questions]
@@ -805,7 +1131,7 @@ async def deduplicate_and_select_questions(
 
     # Parse LLM response
     llm_response = output.completions[0].text
-    parsed = parse_llm_json_response(llm_response or "", keys=("selected_questions", "summary"))
+    parsed = parse_llm_json_response(llm_response or "", keys=("selected_questions",))
 
     # Handle JSON parse failure - fallback to first max_questions valid questions
     if not parsed or "selected_questions" not in parsed:
@@ -813,9 +1139,6 @@ async def deduplicate_and_select_questions(
             f"Failed to parse deduplication response, falling back to first {max_questions}"
         )
         metadata["error"] = "JSON parse error (fallback used)"
-        metadata["summary"] = (
-            f"JSON parse error - returned first {max_questions} valid questions as fallback"
-        )
 
         # Fallback: return first max_questions valid questions
         fallback_questions = valid_questions[:max_questions]
@@ -829,8 +1152,6 @@ async def deduplicate_and_select_questions(
 
     # Process successful response
     selected_questions_data = parsed["selected_questions"]
-    metadata["selection_reasoning"] = parsed.get("selection_reasoning", "")
-    metadata["summary"] = parsed.get("summary", "")
 
     # Build index mapping from Q### IDs to question indices
     selected_indices: list[int] = []
@@ -842,8 +1163,6 @@ async def deduplicate_and_select_questions(
                 selected_indices.append(idx)
                 metadata["selected_ids"].append(q_id)
                 metadata["rationales"][q_id] = item.get("selection_rationale", "")
-                metadata["novelty_ratings"][q_id] = item.get("novelty_rating", "")
-                metadata["excluded_similar"][q_id] = item.get("similar_questions_excluded", [])
 
     # Build the result list preserving order from LLM
     selected_questions = [questions[idx] for idx in selected_indices]
@@ -937,7 +1256,6 @@ async def extract_bottleneck(
             proposed_change=parsed.get("proposed_change", ""),
             example_from_run=parsed.get("example_from_run"),
             confidence=parsed.get("confidence", "medium"),
-            reasoning=parsed.get("reasoning", ""),
         )
         return BottleneckExtractionResult(
             question_index=input.question_index,

@@ -3,7 +3,7 @@
 ## Python
 
 If you are Codex, make sure you are running Python with the local `.venv/bin/python` interpreter. Furthermore, any Python-related modules you run must also be in that `bin` folder.
-If you are Claude, you already correctly do this by default.
+If you are Claude, your commands are run from the correct directory by default, so DO NOT prefix commands with `.venv/bin`.
 
 ### Type Checking with `pyright`
 
