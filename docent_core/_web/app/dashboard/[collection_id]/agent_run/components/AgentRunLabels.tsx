@@ -959,14 +959,18 @@ export default function AgentRunLabels({
       collectionId,
       agentRunId,
     });
-  const { data: labels, isLoading: isLoadingLabels } =
-    useGetLabelsForAgentRunQuery({
-      collectionId,
-      agentRunId,
-    });
+  const {
+    data: labels,
+    isLoading: isLoadingLabels,
+    isFetching: isFetchingLabels,
+  } = useGetLabelsForAgentRunQuery({
+    collectionId,
+    agentRunId,
+  });
 
   // Need both queries to complete before rendering labels
-  const isLoading = isLoadingLabels || isLoadingLabelSets;
+  // Include isFetchingLabels to show loading state during refetch after save
+  const isLoading = isLoadingLabels || isLoadingLabelSets || isFetchingLabels;
 
   // Create a map of label set IDs to label sets for easy lookup
   const labelSetMap = useMemo(() => {
