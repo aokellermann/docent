@@ -28,7 +28,7 @@ import { cn } from '@/lib/utils';
 import UuidPill from '@/components/UuidPill';
 import { SettingsSidebarItems } from '@/app/settings/components/SettingsSidebar';
 import { CloneCollectionButton } from '@/components/CloneCollectionButton';
-import { useHasCollectionWritePermissionForCollection } from '@/lib/permissions/hooks';
+import { useGetCollectionPermissionsQuery } from '@/lib/permissions/collabSlice';
 
 interface Crumb {
   title: string;
@@ -75,9 +75,15 @@ const Breadcrumbs: React.FC = () => {
       : skipToken
   );
 
-  const hasWritePermission = useHasCollectionWritePermissionForCollection(
-    collectionId ?? ''
-  );
+  const { data: permissions, isLoading: permissionsLoading } =
+    useGetCollectionPermissionsQuery(collectionId ?? '', {
+      skip: !collectionId,
+    });
+  const permissionLevel =
+    permissions?.collection_permissions?.[collectionId ?? ''] ?? 'none';
+  const isReadOnly =
+    !permissionsLoading &&
+    (permissionLevel === 'read' || permissionLevel === 'none');
 
   const crumbs: Record<string, Crumb> = {
     dashboard: {
@@ -340,7 +346,7 @@ const Breadcrumbs: React.FC = () => {
             collectionName={collectionName}
             className={cn(
               'gap-x-2 h-7 px-2',
-              !hasWritePermission &&
+              isReadOnly &&
                 'bg-blue-500 hover:bg-blue-600 text-white hover:text-white border-blue-500 hover:border-blue-600'
             )}
           />
