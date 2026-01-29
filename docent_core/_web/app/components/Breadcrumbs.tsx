@@ -27,6 +27,8 @@ import { skipToken } from '@reduxjs/toolkit/query';
 import { cn } from '@/lib/utils';
 import UuidPill from '@/components/UuidPill';
 import { SettingsSidebarItems } from '@/app/settings/components/SettingsSidebar';
+import { CloneCollectionButton } from '@/components/CloneCollectionButton';
+import { useHasCollectionWritePermissionForCollection } from '@/lib/permissions/hooks';
 
 interface Crumb {
   title: string;
@@ -71,6 +73,10 @@ const Breadcrumbs: React.FC = () => {
     collectionId && resultSetIdOrName
       ? { collectionId, resultSetIdOrName }
       : skipToken
+  );
+
+  const hasWritePermission = useHasCollectionWritePermissionForCollection(
+    collectionId ?? ''
   );
 
   const crumbs: Record<string, Crumb> = {
@@ -285,7 +291,7 @@ const Breadcrumbs: React.FC = () => {
           className="gap-x-2 h-7 cursor-default px-2"
         >
           <Link
-            href="https://transluce.mintlify.app"
+            href="https://docs.transluce.org"
             target="_blank"
             className="flex items-center gap-x-2"
           >
@@ -308,6 +314,21 @@ const Breadcrumbs: React.FC = () => {
             Slack
           </Link>
         </Button>
+
+        {/* Clone collection */}
+        {collectionId && (
+          <CloneCollectionButton
+            variant="outline"
+            size="sm"
+            showLabel={true}
+            collectionName={collectionName}
+            className={cn(
+              'gap-x-2 h-7 px-2',
+              !hasWritePermission &&
+                'bg-blue-500 hover:bg-blue-600 text-white hover:text-white border-blue-500 hover:border-blue-600'
+            )}
+          />
+        )}
 
         {/* Share view */}
         {collectionId && <ShareViewPopover collectionId={collectionId} />}

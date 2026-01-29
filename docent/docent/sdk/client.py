@@ -5,7 +5,11 @@ import time
 import webbrowser
 from itertools import islice
 from pathlib import Path
-from typing import IO, Any, Iterable, Iterator, Literal, TypeVar, cast
+from typing import IO, TYPE_CHECKING, Any, Iterable, Iterator, Literal, TypeVar, cast
+
+if TYPE_CHECKING:
+    from docent.judges.impl import BaseJudge
+    from docent.judges.types import Rubric
 
 import pandas as pd
 import requests
@@ -581,8 +585,117 @@ class Docent:
         self._handle_response_errors(response)
         return response.json()
 
+    def create_rubric(
+        self,
+        collection_id: str,
+        rubric: "Rubric",
+    ) -> str:
+        """Create a new rubric in a collection.
+
+        Args:
+            collection_id: ID of the Collection.
+            rubric: The Rubric configuration to create. Must have version=1.
+
+        Returns:
+            str: The ID of the created rubric.
+
+        Raises:
+            requests.exceptions.HTTPError: If the API request fails.
+            ValueError: If rubric.version != 1.
+
+        Example:
+            >>> from docent.sdk import Docent, Rubric
+            >>> client = Docent(api_key="...")
+            >>> rubric = Rubric(
+            ...     rubric_text="Judge whether the agent completed the task...",
+            ...     output_schema={
+            ...         "type": "object",
+            ...         "properties": {
+            ...             "label": {"type": "string", "enum": ["pass", "fail"]},
+            ...             "explanation": {"type": "string"},
+            ...         },
+            ...         "required": ["label", "explanation"],
+            ...     },
+            ... )
+            >>> rubric_id = client.create_rubric(collection_id, rubric)
+        """
+        url = f"{self._server_url}/rubric/{collection_id}/rubric"
+        payload = {"rubric": rubric.model_dump(mode="json")}
+        response = self._session.post(url, json=payload)
+        self._handle_response_errors(response)
+        return response.json()
+
+    def get_rubric(
+        self,
+        collection_id: str,
+        rubric_id: str,
+        version: int | None = None,
+    ) -> "Rubric":
+        """Get a rubric configuration by ID.
+
+        Args:
+            collection_id: ID of the Collection.
+            rubric_id: ID of the rubric to retrieve.
+            version: Optional version number. If None, returns latest version.
+
+        Returns:
+            Rubric: The rubric configuration object.
+
+        Raises:
+            requests.exceptions.HTTPError: If the API request fails.
+        """
+        from docent.judges.types import Rubric
+
+        url = f"{self._server_url}/rubric/{collection_id}/rubric/{rubric_id}"
+        params = {"version": version} if version is not None else None
+        response = self._session.get(url, params=params)
+        self._handle_response_errors(response)
+        return Rubric.model_validate(response.json())
+
+    def get_judge(
+        self,
+        collection_id: str,
+        rubric_id: str,
+        version: int | None = None,
+    ) -> "BaseJudge":
+        """Get a ready-to-use judge by rubric ID.
+
+        Downloads the rubric configuration and creates a callable judge.
+        API keys are read from environment variables (OPENAI_API_KEY,
+        ANTHROPIC_API_KEY, etc.) based on the rubric's configured provider.
+
+        Args:
+            collection_id: ID of the Collection.
+            rubric_id: ID of the rubric/judge to retrieve.
+            version: Optional version number. If None, returns latest version.
+
+        Returns:
+            BaseJudge: A callable judge. Use `await judge(agent_run)` to run.
+
+        Raises:
+            requests.exceptions.HTTPError: If the API request fails.
+
+        Example:
+            >>> judge = client.get_judge(collection_id, rubric_id)
+            >>> # Inspect the config
+            >>> print(judge.cfg.rubric_text)
+            >>> # Run locally (async)
+            >>> result = await judge(agent_run)
+        """
+        from docent._llm_util.llm_svc import BaseLLMService
+        from docent.judges.impl import build_judge
+
+        rubric = self.get_rubric(collection_id, rubric_id, version)
+        llm_svc = BaseLLMService()  # reads API keys from environment
+        return build_judge(rubric, llm_svc)
+
     def get_rubric_run_state(
-        self, collection_id: str, rubric_id: str, version: int | None = None
+        self,
+        collection_id: str,
+        rubric_id: str,
+        version: int | None = None,
+        filter_dict: dict[str, Any] | None = None,
+        include_failures: bool = False,
     ) -> dict[str, Any]:
         """Get rubric run state for a given collection and rubric.
 
@@ -590,6 +703,8 @@ class Docent:
             collection_id: ID of the Collection.
             rubric_id: The ID of the rubric to get run state for.
             version: The version of the rubric to get run state for. If None, the latest version is used.
+            filter_dict: Optional filter dictionary to apply to the results.
+            include_failures: Whether to include failed results in the response.
 
         Returns:
             dict: Dictionary containing rubric run state with results, job_id, and total_results_needed.
@@ -598,7 +713,14 @@ class Docent:
             requests.exceptions.HTTPError: If the API request fails.
         """
         url = f"{self._server_url}/rubric/{collection_id}/{rubric_id}/rubric_run_state"
-        response = self._session.get(url, params={"version": version})
+        body = {
+            "filter_dict": filter_dict,
+            "include_failures": include_failures,
+        }
+        params: dict[str, Any] = {}
+        if version is not None:
+            params["version"] = version
+        response = self._session.post(url, json=body, params=params)
         self._handle_response_errors(response)
         return response.json()
 

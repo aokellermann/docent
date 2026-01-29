@@ -4,8 +4,8 @@ import {
   Home,
   Tags,
   Layers,
-  PanelLeftOpen,
-  PanelLeftClose,
+  // PanelLeftOpen,
+  // PanelLeftClose,
   Scale,
   ListChecks,
   MessagesSquare,
@@ -29,7 +29,7 @@ import {
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
+  // SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -44,7 +44,7 @@ export function CollectionSidebar() {
   const params = useParams();
   const pathname = usePathname();
   const collectionId = params.collection_id as string;
-  const { state, toggleSidebar } = useSidebar();
+  const { state } = useSidebar();
 
   const { data: collectionNameResp } = useGetCollectionNameQuery(collectionId, {
     skip: !collectionId,
@@ -207,7 +207,7 @@ export function CollectionSidebar() {
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
-        <SidebarFooter className="p-2 pb-3 text-muted-foreground">
+        {/* <SidebarFooter className="p-2 pb-3 text-muted-foreground">
           {isCollapsed ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -232,7 +232,7 @@ export function CollectionSidebar() {
               <PanelLeftClose size={16} />
             </Button>
           )}
-        </SidebarFooter>
+        </SidebarFooter> */}
       </Sidebar>
     </TooltipProvider>
   );

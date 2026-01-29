@@ -1522,7 +1522,8 @@ class TelemetryService:
             )
 
             result = await self.session.execute(update_stmt)
-            completed_rows.append((agent_run_id, processed_version, result.rowcount))
+            rowcount: int = getattr(result, "rowcount", None) or 0
+            completed_rows.append((agent_run_id, processed_version, rowcount))
 
         await self.session.commit()
 

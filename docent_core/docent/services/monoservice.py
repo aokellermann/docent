@@ -53,6 +53,7 @@ from docent.data_models.agent_run import (
     FilterableFieldWithSamples,
 )
 from docent.data_models.transcript import Transcript, TranscriptGroup
+from docent.data_models.util import clone_agent_run_with_random_ids
 from docent.judges import ResultType
 from docent.sdk.llm_context import LLMContextSpec
 from docent_core._db_service.db import DocentDB
@@ -527,6 +528,114 @@ class MonoService:
                 .values(**values_to_update)
             )
         logger.info(f"Updated Collection {collection_id} with values: {values_to_update}")
+
+    async def clone_collection(
+        self,
+        source_collection_id: str,
+        user: User,
+        new_name: str | None = None,
+        new_description: str | None = None,
+    ) -> tuple[str, int]:
+        """
+        Deep copy a collection with all its agent runs.
+
+        This creates a new collection and copies all agent runs from the source collection,
+        generating new IDs for all entities while preserving relationships.
+
+        Args:
+            source_collection_id: ID of the collection to clone
+            user: User performing the clone operation
+            new_name: Name for the new collection (defaults to "{source name} (Copy)")
+            new_description: Description for the new collection (defaults to source description)
+
+        Returns:
+            Tuple of (new_collection_id, number_of_agent_runs_cloned)
+
+        Raises:
+            ValueError: If source collection doesn't exist
+        """
+        # Fetch source collection metadata
+        async with self.db.session() as session:
+            result = await session.execute(
+                select(SQLACollection).where(SQLACollection.id == source_collection_id)
+            )
+            source_collection = result.scalar_one_or_none()
+            if not source_collection:
+                raise ValueError(f"Source collection {source_collection_id} not found")
+
+        # Determine new collection name and description
+        final_name = new_name or (
+            f"{source_collection.name} (Copy)" if source_collection.name else None
+        )
+        final_description = new_description or source_collection.description
+
+        # Create the new collection
+        new_collection_id = await self.create_collection(
+            user=user,
+            name=final_name,
+            description=final_description,
+        )
+
+        # Mark it as a clone
+        async with self.db.session() as session:
+            await session.execute(
+                update(SQLACollection)
+                .where(SQLACollection.id == new_collection_id)
+                .values(is_clone=True)
+            )
+
+        # Set up contexts for source and target collections
+        source_ctx = ViewContext(
+            collection_id=source_collection_id,
+            view_id="default",
+            user=user,
+            base_filter=None,
+        )
+        target_ctx = ViewContext(
+            collection_id=new_collection_id,
+            view_id="default",
+            user=user,
+            base_filter=None,
+        )
+
+        # Get all agent run IDs from source collection (IDs are lightweight)
+        agent_run_ids = await self.get_agent_run_ids(ctx=source_ctx)
+
+        if not agent_run_ids:
+            logger.info(
+                f"Cloned collection {source_collection_id} to {new_collection_id} with 0 agent runs"
+            )
+            return new_collection_id, 0
+
+        # Process agent runs in batches to avoid loading everything into memory
+        batch_size = 100
+        total_cloned = 0
+        total_batches = (len(agent_run_ids) + batch_size - 1) // batch_size
+
+        for batch_num, i in enumerate(range(0, len(agent_run_ids), batch_size), start=1):
+            # Fetch this batch of agent runs with full data
+            batch_ids = agent_run_ids[i : i + batch_size]
+            source_agent_runs = await self.get_agent_runs(ctx=source_ctx, agent_run_ids=batch_ids)
+
+            # Clone each agent run with new IDs
+            cloned_agent_runs = [
+                clone_agent_run_with_random_ids(agent_run) for agent_run in source_agent_runs
+            ]
+
+            # Insert the cloned batch
+            await self.add_agent_runs(ctx=target_ctx, agent_runs=cloned_agent_runs)
+
+            total_cloned += len(cloned_agent_runs)
+            logger.info(
+                f"Cloned batch {batch_num}/{total_batches} "
+                f"({len(cloned_agent_runs)} agent runs) for collection {new_collection_id}"
+            )
+
+        logger.info(
+            f"Cloned collection {source_collection_id} to {new_collection_id} "
+            f"with {total_cloned} agent runs"
+        )
+        return new_collection_id, total_cloned
 
     async def collection_exists(self, collection_id: str) -> bool:
         async with self.db.session() as session:
@@ -1092,16 +1201,13 @@ class MonoService:
         ctx: ViewContext | None = None,
         agent_run_ids: list[str] | None = None,
         limit: int | None = None,
-        apply_base_filter: bool = True,
         batch_size: int = 10_000,
     ) -> list[AgentRun]:
         """
         Get all agent runs for a given Collection ID.
+        TODO(ryan, mengk): ctx is optional because multi-run chat could have items from
+            different collections. We should figure out a way to make this more explicit.
         """
-        # If we don't have agent_run_ids or need to apply base where clause, ctx is required
-        if agent_run_ids is None and ctx is None:
-            raise ValueError("ctx is required when agent_run_ids is not provided")
-
         async with self.db.session() as session:
             # If we don't have the agent run ids, get them first
             if agent_run_ids is None:
@@ -1121,10 +1227,8 @@ class MonoService:
                 batch_ids = agent_run_ids[i : i + batch_size]
 
                 query = select(SQLAAgentRun)
-                if apply_base_filter:
-                    if ctx is None:
-                        raise ValueError("ctx is required when apply_base_where_clause is True")
-                    query = ctx.apply_base_filter(query)
+                if ctx is not None:
+                    query = query.where(SQLAAgentRun.collection_id == ctx.collection_id)
                 # TODO(mengk): use LIMIT and OFFSET instead of the IDs
                 query = query.where(SQLAAgentRun.id.in_(batch_ids))
 
@@ -1300,6 +1404,8 @@ class MonoService:
                 query = select(SQLAAgentRun.id, SQLAAgentRun.metadata_json, SQLAAgentRun.created_at)
                 if apply_base_filter:
                     query = ctx.apply_base_filter(query)
+                else:
+                    query = query.where(SQLAAgentRun.collection_id == ctx.collection_id)
                 # TODO(mengk): use LIMIT and OFFSET instead of the IDs
                 query = query.where(SQLAAgentRun.id.in_(batch_ids))
 
@@ -1479,23 +1585,18 @@ class MonoService:
                     f"Agent run {agent_run_id} not found in collection {collection_id}"
                 )
 
-    async def get_agent_run(
-        self, ctx: ViewContext, agent_run_id: str, apply_base_where_clause: bool = True
-    ) -> AgentRun | None:
+    async def get_agent_run(self, ctx: ViewContext, agent_run_id: str) -> AgentRun | None:
         """
         Get an AgentRun from the database by its ID.
 
         Args:
             ctx: The ViewContext to use for the query.
             agent_run_id: The ID of the agent run to get.
-            apply_base_where_clause: Whether to apply the base where clause to the query.
 
         Returns:
             The agent run.
         """
-        agent_runs = await self.get_agent_runs(
-            ctx, agent_run_ids=[agent_run_id], apply_base_filter=apply_base_where_clause
-        )
+        agent_runs = await self.get_agent_runs(ctx, agent_run_ids=[agent_run_id])
         assert len(agent_runs) <= 1, f"Found {len(agent_runs)} AgentRuns with ID {agent_run_id}"
         return agent_runs[0] if agent_runs else None
 
@@ -3290,10 +3391,23 @@ class MonoService:
             )
             return result.rowcount > 0
 
+    def _should_update_last_used_at(self, last_used_at: datetime | None) -> bool:
+        """
+        Check if last_used_at should be updated (minute-level granularity).
+
+        We use minute-level granularity to reduce write load on the database,
+        since API keys can be used very frequently.
+        """
+        if last_used_at is None:
+            return True
+        now = datetime.now(UTC).replace(tzinfo=None)
+        # Compare at minute granularity by truncating seconds and microseconds
+        return now.replace(second=0, microsecond=0) != last_used_at.replace(second=0, microsecond=0)
+
     async def get_user_by_api_key(self, raw_api_key: str) -> User | None:
         """
         Validate an API key and return the associated user.
-        Updates last_used_at timestamp if key is valid.
+        Updates last_used_at timestamp if key is valid (at minute-level granularity).
 
         Supports both new key_id pattern and legacy Argon2 hashes for migration.
         """
@@ -3337,11 +3451,12 @@ class MonoService:
             if api_key_data and api_key_data.key_hash:
                 # Verify the raw key against Argon2 hash
                 if pwd_context.verify(raw_api_key, api_key_data.key_hash):
-                    await session.execute(
-                        update(SQLAApiKey)
-                        .where(SQLAApiKey.id == api_key_data.id)
-                        .values(last_used_at=datetime.now(UTC).replace(tzinfo=None))
-                    )
+                    if self._should_update_last_used_at(api_key_data.last_used_at):
+                        await session.execute(
+                            update(SQLAApiKey)
+                            .where(SQLAApiKey.id == api_key_data.id)
+                            .values(last_used_at=datetime.now(UTC).replace(tzinfo=None))
+                        )
                     return api_key_data.user.to_user()
 
             # Final fallback: Argon2-only verification for keys without fingerprint (legacy keys)
@@ -3359,13 +3474,13 @@ class MonoService:
                 if api_key_data.key_hash and pwd_context.verify(raw_api_key, api_key_data.key_hash):
                     # Backfill fingerprint for legacy key on first successful use
                     fingerprint = self._create_fingerprint(raw_api_key)
+                    update_values: dict[str, datetime | str] = {"fingerprint": fingerprint}
+                    if self._should_update_last_used_at(api_key_data.last_used_at):
+                        update_values["last_used_at"] = datetime.now(UTC).replace(tzinfo=None)
                     await session.execute(
                         update(SQLAApiKey)
                         .where(SQLAApiKey.id == api_key_data.id)
-                        .values(
-                            fingerprint=fingerprint,
-                            last_used_at=datetime.now(UTC).replace(tzinfo=None),
-                        )
+                        .values(**update_values)
                     )
                     logger.info(f"Backfilled fingerprint for legacy API key {api_key_data.id}")
                     return api_key_data.user.to_user()

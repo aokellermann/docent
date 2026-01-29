@@ -356,7 +356,7 @@ StorageSegment = str | dict[str, str]
 class PromptData(BaseModel):
     """Serialized prompt data with alias references and context spec."""
 
-    segments: list[StorageSegment] = Field(default_factory=lambda: [])
+    segments: list[StorageSegment] = Field(default_factory=lambda: [])  # type: ignore[assignment]
     spec: LLMContextSpec = Field(default_factory=LLMContextSpec)
 
     def to_storage(self) -> tuple[dict[str, Any], list[StorageSegment]]:

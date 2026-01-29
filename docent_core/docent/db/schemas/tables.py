@@ -366,6 +366,9 @@ class SQLACollection(SQLABase):
         DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False
     )
 
+    # True if this collection was created via cloning
+    is_clone: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
+
     views: Mapped[list["SQLAView"]] = relationship(
         "SQLAView",
         back_populates="collection",
@@ -845,8 +848,8 @@ class SQLAApiKey(SQLABase):
     created_at = mapped_column(
         DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), nullable=False
     )
-    disabled_at = mapped_column(DateTime, nullable=True, index=True)
-    last_used_at = mapped_column(DateTime, nullable=True, index=True)
+    disabled_at = mapped_column(DateTime, nullable=True)
+    last_used_at = mapped_column(DateTime, nullable=True)
 
     user: Mapped["SQLAUser"] = relationship("SQLAUser", backref="api_keys")
 

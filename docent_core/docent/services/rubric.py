@@ -484,9 +484,7 @@ class RubricService:
                 """Resolves an agent run by grabbing it from the database.
                 The AgentRun may not be found, in which case this returns None.
                 """
-                return await self.service.get_agent_run(
-                    ctx, agent_run_id, apply_base_where_clause=False
-                )
+                return await self.service.get_agent_run(ctx, agent_run_id)
 
             return _resolver
 
@@ -752,9 +750,7 @@ class RubricService:
         agent_run_ids = {r.agent_run_id for r in needs_resolution.values()}
         agent_runs_map: dict[str, AgentRun] = {}
         for agent_run_id in agent_run_ids:
-            agent_run = await self.service.get_agent_run(
-                ctx, agent_run_id, apply_base_where_clause=False
-            )
+            agent_run = await self.service.get_agent_run(ctx, agent_run_id)
             if agent_run:
                 agent_runs_map[agent_run_id] = agent_run
 
