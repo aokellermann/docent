@@ -680,7 +680,7 @@ async def import_runs_from_file(
 
     # Compute counts using the staged file (request body may be closed after return)
     count_new_runs = load_inspect.get_total_samples(Path(temp_path), format)
-    await mono_svc.check_space_for_runs(ctx, count_new_runs)
+    await mono_svc.dont_actually_check_space_for_runs(ctx, count_new_runs)
 
     # Create an in-memory stream for SSE
     send_stream, recv_stream = anyio.create_memory_object_stream[dict[str, Any]](

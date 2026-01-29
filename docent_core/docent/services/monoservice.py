@@ -926,13 +926,18 @@ class MonoService:
             # Fill in zero counts for collections with no label sets
             return {cid: counts.get(cid) if cid in counts else 0 for cid in collection_ids}
 
-    async def check_space_for_runs(self, ctx: ViewContext, new_runs: int):
-        existing_runs = await self.count_collection_agent_runs(ctx.collection_id)
-        agent_run_limit = 1_000_000
-        if existing_runs + new_runs > agent_run_limit:
-            raise ValueError(
-                f"Number of agent runs in the current collection is too large. Current limit: {agent_run_limit}, Current count: {existing_runs}, New runs: {new_runs}"
-            )
+    async def dont_actually_check_space_for_runs(self, ctx: ViewContext, new_runs: int):
+        # NOTE(mengk): temporarily disabled to avoid silently "dropping" runs, hence confusing users
+        # TODO(mengk): figure out a longer term solution for this
+
+        # existing_runs = await self.count_collection_agent_runs(ctx.collection_id)
+        # agent_run_limit = 1_000_000
+        # if existing_runs + new_runs > agent_run_limit:
+        #     raise ValueError(
+        #         f"Number of agent runs in the current collection is too large. Current limit: {agent_run_limit}, Current count: {existing_runs}, New runs: {new_runs}"
+        #     )
+
+        return
 
     async def add_agent_runs(
         self,
