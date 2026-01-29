@@ -969,8 +969,10 @@ export default function AgentRunLabels({
   });
 
   // Need both queries to complete before rendering labels
-  // Include isFetchingLabels to show loading state during refetch after save
-  const isLoading = isLoadingLabels || isLoadingLabelSets || isFetchingLabels;
+  // Include isFetchingLabels only when no labels exist, to show loading during refetch after save
+  const hasNoLabels = !labels || labels.length === 0;
+  const isLoading =
+    isLoadingLabels || isLoadingLabelSets || (isFetchingLabels && hasNoLabels);
 
   // Create a map of label set IDs to label sets for easy lookup
   const labelSetMap = useMemo(() => {
