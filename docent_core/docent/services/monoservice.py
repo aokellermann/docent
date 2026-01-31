@@ -2566,6 +2566,12 @@ class MonoService:
                 update(SQLAJob).filter(SQLAJob.id == job_id).values(status=status)
             )
 
+    async def set_job_runtime_info(self, job_id: str, runtime_info: dict[str, Any]):
+        async with self.db.session() as session:
+            await session.execute(
+                update(SQLAJob).filter(SQLAJob.id == job_id).values(runtime_info=runtime_info)
+            )
+
     async def set_job_json(self, job_id: str, job_json: dict[str, Any]):
         async with self.db.session() as session:
             await session.execute(

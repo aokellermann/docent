@@ -66,6 +66,7 @@ export interface AgentRunIngestJob {
   type: string;
   created_at: string;
   collection_id: string;
+  error_message?: string | null;
 }
 
 interface AgentRunIngestJobsResponse {
