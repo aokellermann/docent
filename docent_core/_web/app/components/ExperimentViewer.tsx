@@ -1395,7 +1395,7 @@ export default function ExperimentViewer({
         <div className="text-muted-foreground">No agent runs found</div>
         <Button asChild variant="outline" size="sm">
           <a
-            href="https://docs.transluce.org/quickstart"
+            href="https://docs.transluce.org/get-started/quickstart"
             target="_blank"
             rel="noopener noreferrer"
           >
