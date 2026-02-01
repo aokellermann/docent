@@ -68,22 +68,7 @@ export const dataTableApi = createApi({
         method: 'POST',
         body: { name, dql, state },
       }),
-      async onQueryStarted({ collectionId }, { dispatch, queryFulfilled }) {
-        try {
-          const { data } = await queryFulfilled;
-          dispatch(
-            dataTableApi.util.updateQueryData(
-              'listDataTables',
-              { collectionId },
-              (draft) => {
-                draft.unshift(data);
-              }
-            )
-          );
-        } catch {
-          // If mutation fails, RTK Query invalidates cache automatically
-        }
-      },
+      invalidatesTags: ['DataTables'],
     }),
     updateDataTable: build.mutation<DataTable, DataTableUpdatePayload>({
       query: ({ collectionId, dataTableId, name, dql, state }) => ({
@@ -91,30 +76,10 @@ export const dataTableApi = createApi({
         method: 'POST',
         body: { name, dql, state },
       }),
-      async onQueryStarted(
-        { collectionId, dataTableId },
-        { dispatch, queryFulfilled }
-      ) {
-        try {
-          const { data } = await queryFulfilled;
-          dispatch(
-            dataTableApi.util.updateQueryData(
-              'listDataTables',
-              { collectionId },
-              (draft) => {
-                const index = draft.findIndex(
-                  (table) => table.id === dataTableId
-                );
-                if (index >= 0) {
-                  draft[index] = data;
-                }
-              }
-            )
-          );
-        } catch {
-          // If mutation fails, RTK Query invalidates cache automatically
-        }
-      },
+      invalidatesTags: (_result, _error, { dataTableId }) => [
+        { type: 'DataTables', id: dataTableId },
+        { type: 'DataTables', id: 'LIST' },
+      ],
     }),
     deleteDataTable: build.mutation<
       { status: string },
@@ -124,30 +89,10 @@ export const dataTableApi = createApi({
         url: `/${collectionId}/${dataTableId}`,
         method: 'DELETE',
       }),
-      async onQueryStarted(
-        { collectionId, dataTableId },
-        { dispatch, queryFulfilled }
-      ) {
-        try {
-          await queryFulfilled;
-          dispatch(
-            dataTableApi.util.updateQueryData(
-              'listDataTables',
-              { collectionId },
-              (draft) => {
-                const index = draft.findIndex(
-                  (table) => table.id === dataTableId
-                );
-                if (index >= 0) {
-                  draft.splice(index, 1);
-                }
-              }
-            )
-          );
-        } catch {
-          // If mutation fails, RTK Query invalidates cache automatically
-        }
-      },
+      invalidatesTags: (_result, _error, { dataTableId }) => [
+        { type: 'DataTables', id: dataTableId },
+        { type: 'DataTables', id: 'LIST' },
+      ],
     }),
     duplicateDataTable: build.mutation<
       DataTable,
@@ -157,22 +102,7 @@ export const dataTableApi = createApi({
         url: `/${collectionId}/${dataTableId}/duplicate`,
         method: 'POST',
       }),
-      async onQueryStarted({ collectionId }, { dispatch, queryFulfilled }) {
-        try {
-          const { data } = await queryFulfilled;
-          dispatch(
-            dataTableApi.util.updateQueryData(
-              'listDataTables',
-              { collectionId },
-              (draft) => {
-                draft.unshift(data);
-              }
-            )
-          );
-        } catch {
-          // If mutation fails, RTK Query invalidates cache automatically
-        }
-      },
+      invalidatesTags: ['DataTables'],
     }),
     generateName: build.mutation<GenerateNameResponse, GenerateNamePayload>({
       query: ({ collectionId, dql }) => ({

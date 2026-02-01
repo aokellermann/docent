@@ -85,7 +85,6 @@ export default function DataTableExplorer({
   const [isListOpen, setIsListOpen] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(urlTableId);
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
-  const titleInputRef = useRef<HTMLInputElement | null>(null);
   const [draftTableId, setDraftTableId] = useState<string | null>(null);
   const [localNames, setLocalNames] = useState<Record<string, string>>({});
   const resultCacheRef = useRef<Record<string, DqlExecuteResponse | null>>({});
@@ -236,14 +235,6 @@ export default function DataTableExplorer({
     }
     setDraftName(getDisplayName(activeTable));
   }, [activeTable?.id, editingTitleId, getDisplayName]);
-
-  useEffect(() => {
-    if (!activeTable || editingTitleId !== activeTable.id) {
-      return;
-    }
-    titleInputRef.current?.focus();
-    titleInputRef.current?.select();
-  }, [activeTable?.id, editingTitleId]);
 
   const debouncedDql = useDebounce(draftDql, AUTO_SAVE_DEBOUNCE_MS);
   const stateSignature = useMemo(
@@ -462,14 +453,6 @@ export default function DataTableExplorer({
       setDraftTableId(table.id);
     },
     [activeId, getDisplayName, router, searchParams]
-  );
-
-  const handleRename = useCallback(
-    (table: DataTable) => {
-      handleSelectTable(table);
-      setEditingTitleId(table.id);
-    },
-    [handleSelectTable]
   );
 
   const [isAutoRenaming, setIsAutoRenaming] = useState(false);
@@ -712,10 +695,6 @@ export default function DataTableExplorer({
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleRename(table)}>
-                            <Pencil className="mr-2 h-3.5 w-3.5" />
-                            Rename
-                          </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => handleAutoRename(table)}
                             disabled={isAutoRenaming}
@@ -782,9 +761,10 @@ export default function DataTableExplorer({
               )}
               {editingTitleId === activeTable.id && canEdit ? (
                 <Input
-                  ref={titleInputRef}
+                  autoFocus
                   value={draftName}
                   onChange={(event) => setDraftName(event.target.value)}
+                  onFocus={(event) => event.target.select()}
                   onBlur={handleNameBlur}
                   onKeyDown={handleNameKeyDown}
                   className="h-auto w-full max-w-[24rem] border-0 bg-transparent p-0 text-sm font-semibold shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"

@@ -201,6 +201,7 @@ ALLOWED_EXPRESSION_TYPES: tuple[type[exp.Expression], ...] = (
     exp.CovarSamp,
     exp.ArrayAgg,
     exp.Median,
+    exp.Mode,
     exp.PercentileCont,
     exp.PercentileDisc,
     exp.GroupConcat,
@@ -366,10 +367,6 @@ ALLOWED_EXPRESSION_TYPES: tuple[type[exp.Expression], ...] = (
 # These are checked case-insensitively
 ALLOWED_ANONYMOUS_FUNCTIONS: frozenset[str] = frozenset(
     {
-        # Ordered-set aggregate functions
-        "mode",
-        # String aggregation
-        "string_agg",
         # JSONB construction
         "jsonb_build_object",
     }
@@ -1069,7 +1066,8 @@ def _iter_query_sources(query: SqlGlotExpression) -> list[SqlGlotExpression]:
                 if join_source is not None:
                     sources.append(join_source)
 
-    from_expr = query.args.get("from")
+    # sqlglot uses "from_" as the key (not "from") to avoid Python keyword conflict
+    from_expr = query.args.get("from_") or query.args.get("from")
     joins = cast(Sequence[SqlGlotExpression] | None, query.args.get("joins"))
     extend_from_clause(from_expr)
     extend_joins(joins)
@@ -1077,7 +1075,8 @@ def _iter_query_sources(query: SqlGlotExpression) -> list[SqlGlotExpression]:
     if not sources and isinstance(query, exp.Query):
         select_node = query.args.get("this")
         if isinstance(select_node, exp.Select):
-            extend_from_clause(select_node.args.get("from"))
+            select_from = select_node.args.get("from_") or select_node.args.get("from")
+            extend_from_clause(select_from)
             extend_joins(cast(Sequence[SqlGlotExpression] | None, select_node.args.get("joins")))
     return sources
 
@@ -1190,7 +1189,8 @@ def _build_cte_lineage(
 ) -> dict[str, dict[str, tuple[ColumnReference, ...]]]:
     cte_expressions: dict[str, SqlGlotExpression] = {}
 
-    with_expr = expression.args.get("with")
+    # sqlglot uses "with_" as the key (not "with") to avoid Python keyword conflict
+    with_expr = expression.args.get("with_") or expression.args.get("with")
     if isinstance(with_expr, exp.With):
         for cte in list(with_expr.expressions or []):
             if isinstance(cte, exp.CTE):

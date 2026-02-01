@@ -246,27 +246,22 @@ async def execute_dql_query(
     request: DQLExecuteRequest,
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.READ)),
-    mono_svc: MonoService = Depends(get_mono_svc),
     dql_svc: DQLService = Depends(get_dql_service),
 ) -> DQLExecuteResponse:
     if ctx.user is None:
         raise HTTPException(status_code=400, detail="User context unavailable.")
-
-    json_fields = await mono_svc.get_json_metadata_fields_map(collection_id)
 
     try:
         result = await dql_svc.execute_query(
             user=ctx.user,
             collection_id=collection_id,
             dql=request.dql,
-            json_fields=json_fields,
         )
     except (DQLParseError, DQLValidationError, DQLExecutionError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     registry = build_default_registry(
         collection_id=collection_id,
-        json_fields=json_fields,
     )
     service_link_hints, transcript_ids = dql_svc.build_link_hints(result, registry=registry)
     transcript_id_map = await dql_svc.get_agent_run_ids_for_transcripts(
