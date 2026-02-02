@@ -216,12 +216,12 @@ def test_get_selected_columns_includes_alias_metadata() -> None:
         SelectedColumn(
             output_name="run_id",
             expression_sql="ar.id AS run_id",
-            source_columns=(ColumnReference(table="ar", column="id"),),
+            source_columns=(ColumnReference(table="agent_runs", column="id"),),
         ),
         SelectedColumn(
             output_name="created_at",
             expression_sql="ar.created_at",
-            source_columns=(ColumnReference(table="ar", column="created_at"),),
+            source_columns=(ColumnReference(table="agent_runs", column="created_at"),),
         ),
     ]
 
