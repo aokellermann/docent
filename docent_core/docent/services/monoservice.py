@@ -131,6 +131,7 @@ from docent_core.docent.db.schemas.tables import (
     SQLAUserOrganization,
     SQLAView,
 )
+from docent_core.docent.exceptions import BadRequestError, ConflictError, NotFoundError
 
 logger = get_logger(__name__)
 
@@ -1041,6 +1042,108 @@ class MonoService:
         )
 
         return deleted_count
+
+    async def move_agent_run(
+        self,
+        agent_run_id: str,
+        source_collection_id: str,
+        destination_collection_id: str,
+    ) -> None:
+        """
+        Move an agent run from one collection to another.
+
+        This updates the collection_id in agent_runs, transcripts, and transcript_groups.
+        It will fail if there are any related rows in other tables (labels, tags, search results,
+        judge results, etc.) that would become orphaned or inconsistent.
+
+        Args:
+            agent_run_id: The ID of the agent run to move
+            source_collection_id: The collection the agent run currently belongs to
+            destination_collection_id: The collection to move the agent run to
+
+        Raises:
+            ValueError: If agent run not found, or has related data in other tables
+        """
+        from docent_core.docent.db.schemas.label import SQLAComment, SQLALabel, SQLATag
+        from docent_core.docent.db.schemas.rubric import (
+            SQLAJudgeReflection,
+            SQLAJudgeResult,
+            SQLAJudgeRunLabel,
+        )
+
+        async with self.db.session() as session:
+            # 1. Verify agent run exists in source collection
+            agent_run_result = await session.execute(
+                select(SQLAAgentRun).where(
+                    SQLAAgentRun.id == agent_run_id,
+                    SQLAAgentRun.collection_id == source_collection_id,
+                )
+            )
+            sq_agent_run = agent_run_result.scalar_one_or_none()
+            if sq_agent_run is None:
+                raise NotFoundError(
+                    f"Agent run {agent_run_id} not found in collection {source_collection_id}"
+                )
+
+            # 2. Check for blocking rows in related tables
+            # These tables have agent_run_id and would become inconsistent if we just moved the agent run
+            blocking_found: list[str] = []
+
+            # Check each table for rows referencing this agent run
+            for table_name, table_class in [
+                ("telemetry_agent_run_status", SQLATelemetryAgentRunStatus),
+                ("transcript_embeddings", SQLATranscriptEmbedding),
+                ("search_results", SQLASearchResult),
+                ("telemetry_lineage", SQLATelemetryLineage),
+                ("labels", SQLALabel),
+                ("annotations", SQLAComment),
+                ("tags", SQLATag),
+                ("judge_run_labels", SQLAJudgeRunLabel),
+                ("judge_results", SQLAJudgeResult),
+                ("judge_reflections", SQLAJudgeReflection),
+                ("chat_sessions", SQLAChatSession),
+            ]:
+                count_result = await session.execute(
+                    select(func.count()).where(
+                        table_class.agent_run_id == agent_run_id  # type: ignore[attr-defined]
+                    )
+                )
+                count = count_result.scalar() or 0
+                if count > 0:
+                    blocking_found.append(f"{table_name}: {count} row(s)")
+
+            if blocking_found:
+                raise ConflictError(
+                    f"Cannot move agent run {agent_run_id} because it has related data in: "
+                    f"{', '.join(blocking_found)}. "
+                    "Delete or move the related data first."
+                )
+
+            # 3. Update collection_id in agent_runs, transcripts, transcript_groups
+            await session.execute(
+                update(SQLAAgentRun)
+                .where(SQLAAgentRun.id == agent_run_id)
+                .values(collection_id=destination_collection_id)
+            )
+
+            await session.execute(
+                update(SQLATranscript)
+                .where(SQLATranscript.agent_run_id == agent_run_id)
+                .values(collection_id=destination_collection_id)
+            )
+
+            await session.execute(
+                update(SQLATranscriptGroup)
+                .where(SQLATranscriptGroup.agent_run_id == agent_run_id)
+                .values(collection_id=destination_collection_id)
+            )
+
+            await session.commit()
+
+        logger.info(
+            f"Moved agent run {agent_run_id} from collection {source_collection_id} "
+            f"to collection {destination_collection_id}"
+        )
 
     async def get_agent_run_ids(
         self,
@@ -2650,17 +2753,17 @@ class MonoService:
         """
         job = await self.get_job(job_id)
         if job is None:
-            raise ValueError(f"Job {job_id} not found")
+            raise NotFoundError(f"Job {job_id} not found")
 
         job_collection_id = job.job_json.get("collection_id") if job.job_json else None
         if job_collection_id != collection_id:
-            raise ValueError(f"Job {job_id} not found in collection {collection_id}")
+            raise NotFoundError(f"Job {job_id} not found in collection {collection_id}")
 
         if job.type != WorkerFunction.AGENT_RUN_INGEST_JOB.value:
-            raise ValueError(f"Job {job_id} is not an agent run ingest job")
+            raise BadRequestError(f"Job {job_id} is not an agent run ingest job")
 
         if job.status != JobStatus.CANCELED:
-            raise ValueError(
+            raise BadRequestError(
                 f"Job {job_id} cannot be retried: status is {job.status.value}, expected CANCELED"
             )
 
@@ -2671,7 +2774,7 @@ class MonoService:
             )
             payload = result.scalar_one_or_none()
             if payload is None:
-                raise ValueError(f"Job {job_id} cannot be retried: payload no longer exists")
+                raise BadRequestError(f"Job {job_id} cannot be retried: payload no longer exists")
 
             # Reset status to PENDING
             await session.execute(
