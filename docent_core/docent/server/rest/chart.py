@@ -68,17 +68,20 @@ async def create_chart(
     _: None = Depends(require_collection_permission(Permission.WRITE)),
     analytics: AnalyticsClient = Depends(use_posthog_user_context),
 ) -> dict[str, str]:
-    async with mono_svc.db.session() as session:
-        chart_service = ChartsService(session, mono_svc.db)
-        chart_id = await chart_service.create_chart(
-            ctx=ctx,
-            name=request.name,
-            series_key=request.series_key,
-            x_key=request.x_key,
-            y_key=request.y_key,
-            chart_type=request.chart_type,
-            data_table_id=request.data_table_id,
-        )
+    try:
+        async with mono_svc.db.session() as session:
+            chart_service = ChartsService(session, mono_svc.db)
+            chart_id = await chart_service.create_chart(
+                ctx=ctx,
+                name=request.name,
+                series_key=request.series_key,
+                x_key=request.x_key,
+                y_key=request.y_key,
+                chart_type=request.chart_type,
+                data_table_id=request.data_table_id,
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     analytics.track_event(
         "create_chart",
@@ -125,9 +128,12 @@ async def update_chart(
     elif "runs_filter" in request.model_fields_set:
         update_fields["runs_filter_dict"] = None
 
-    async with mono_svc.db.session() as session:
-        chart_service = ChartsService(session, mono_svc.db)
-        await chart_service.update_chart(ctx=ctx, chart_id=chart_id, updates=update_fields)
+    try:
+        async with mono_svc.db.session() as session:
+            chart_service = ChartsService(session, mono_svc.db)
+            await chart_service.update_chart(ctx=ctx, chart_id=chart_id, updates=update_fields)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     analytics.track_event(
         "update_chart",
@@ -194,6 +200,8 @@ async def get_data_table_columns(
             ]
     except HTTPException:
         raise
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get data table columns: {str(e)}")
 
@@ -218,6 +226,8 @@ async def get_chart_data(
 
     except HTTPException:
         raise
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get chart data: {str(e)}")
 

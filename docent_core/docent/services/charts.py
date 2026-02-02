@@ -355,6 +355,8 @@ class ChartsService:
 
         # Skip validation for data table mode - column names are used directly
         if data_table_id:
+            # Validate the data table exists in this collection
+            await self._get_data_table(ctx.collection_id, data_table_id)
             corrected_x_key = x_key
             corrected_series_key = series_key
             corrected_y_key = y_key
@@ -427,6 +429,9 @@ class ChartsService:
 
         # Skip validation for data table mode - column names are used directly
         if uses_data_table:
+            # Validate data table exists if switching to a new one
+            if "data_table_id" in updates and updates["data_table_id"] is not None:
+                await self._get_data_table(ctx.collection_id, updates["data_table_id"])
             updates["x_key"] = current_x_key
             updates["series_key"] = current_series_key
             updates["y_key"] = current_y_key
