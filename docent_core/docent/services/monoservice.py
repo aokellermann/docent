@@ -140,7 +140,8 @@ T = TypeVar("T")
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
 EMPTY_TEXT_ARRAY = literal_column("'{}'::text[]")  # type: ignore[reportUnknownVariableType]
-MAX_DQL_RESULT_LIMIT: Final[int] = 10_000
+MAX_DQL_RESULT_LIMIT: Final[int] = 100_000
+DEFAULT_DQL_MAX_ROWS: Final[int] = 10_000
 
 
 def _infer_filter_type_from_types(
@@ -1323,7 +1324,13 @@ class MonoService:
         collection_id: str,
         dql: str,
         json_fields: dict[str, list[JsonFieldInfo]] | None = None,
+        max_rows: int = DEFAULT_DQL_MAX_ROWS,
     ) -> DQLQueryResult:
+        if max_rows > MAX_DQL_RESULT_LIMIT:
+            raise BadRequestError(
+                f"max_rows ({max_rows}) exceeds the maximum allowed limit ({MAX_DQL_RESULT_LIMIT})"
+            )
+
         await ensure_dql_collection_access(
             mono_service=self,
             user=user,
@@ -1343,7 +1350,7 @@ class MonoService:
         selected_columns = extract_selected_columns(expression)
         query_expression = cast(QueryExpression, expression)
         requested_limit = get_query_limit_value(query_expression)
-        server_cap = MAX_DQL_RESULT_LIMIT
+        server_cap = max_rows
         applied_limit = server_cap if requested_limit is None else min(requested_limit, server_cap)
 
         if requested_limit is None or requested_limit > server_cap:

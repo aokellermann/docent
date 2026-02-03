@@ -51,6 +51,7 @@ class DQLSchemaResponse(BaseModel):
 
 class DQLExecuteRequest(BaseModel):
     dql: str
+    max_rows: int = 10_000
 
 
 class DQLColumnReferenceModel(BaseModel):
@@ -226,6 +227,7 @@ async def execute_dql_query(
             user=ctx.user,
             collection_id=collection_id,
             dql=request.dql,
+            max_rows=request.max_rows,
         )
     except (DQLParseError, DQLValidationError, DQLExecutionError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
