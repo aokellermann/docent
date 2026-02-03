@@ -8,6 +8,7 @@ import sys
 import time
 
 import httpx
+import pandas as pd
 
 DEFAULT_OUTER_BATCH_SIZE = 10000
 DEFAULT_INNER_BATCH_SIZE = 1000
@@ -46,6 +47,14 @@ def get_headers(api_key: str) -> dict[str, str]:
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     return headers
+
+
+def read_ids_from_csv(csv_path: str) -> list[str]:
+    """Read agent run IDs from a CSV file with an 'id' column."""
+    df = pd.read_csv(csv_path)
+    if "id" not in df.columns:
+        raise ValueError(f"CSV file must have an 'id' column. Found columns: {list(df.columns)}")
+    return df["id"].tolist()
 
 
 async def execute_dql_query(
@@ -101,20 +110,24 @@ async def batch_move_agent_runs(
     inner_batch_size: int,
     dry_run: bool,
     dql_query_template: str,
+    csv_ids: list[str] | None = None,
 ) -> None:
     """Orchestrate the batch move of agent runs using two-level batching.
 
-    Outer batch: Fetches a large set of runs via DQL
+    Outer batch: Fetches a large set of runs via DQL (or uses provided csv_ids)
     Inner batch: Splits outer batch into smaller chunks sent concurrently to the API
     """
     print("=" * 60)
     print("Batch Move Agent Runs (Two-Level Batching)")
     print("=" * 60)
     print(f"Mode:                   {'DRY RUN' if dry_run else 'LIVE'}")
+    print(f"Source:                 {'CSV file' if csv_ids else 'DQL query'}")
     print(f"Source Collection:      {source_collection_id}")
     print(f"Destination Collection: {destination_collection_id}")
     print(f"Outer Batch Size:       {outer_batch_size}")
     print(f"Inner Batch Size:       {inner_batch_size}")
+    if csv_ids:
+        print(f"Total IDs from CSV:     {len(csv_ids)}")
     print("=" * 60)
     if dry_run:
         print("\n*** DRY RUN MODE - No moves will be performed ***")
@@ -127,30 +140,49 @@ async def batch_move_agent_runs(
     all_failed_ids: list[tuple[str, str]] = []  # (id, error_msg)
     outer_batch_num = 0
 
+    # If CSV IDs provided, split into outer batches
+    csv_outer_batches: list[list[str]] | None = None
+    if csv_ids:
+        csv_outer_batches = [
+            csv_ids[i : i + outer_batch_size] for i in range(0, len(csv_ids), outer_batch_size)
+        ]
+
     async with httpx.AsyncClient() as client:
         while True:
             outer_batch_num += 1
-            query = dql_query_template.format(
-                source_collection_id=source_collection_id,
-                outer_batch_size=outer_batch_size,
-            )
 
-            print(f"\n[Outer Batch {outer_batch_num}] Fetching next batch...")
-            dql_start = time.perf_counter()
-            result = await execute_dql_query(
-                base_url, source_collection_id, api_key, query
-            )
-            dql_elapsed = time.perf_counter() - dql_start
-            print(f"  DQL query completed in {dql_elapsed:.2f}s")
-            rows = result.get("rows", [])
-            outer_batch_count = len(rows)
+            # Get batch_ids either from CSV or DQL
+            if csv_outer_batches is not None:
+                # CSV mode: get next outer batch from pre-split list
+                if outer_batch_num > len(csv_outer_batches):
+                    print("  No more agent runs to move.")
+                    break
+                batch_ids = csv_outer_batches[outer_batch_num - 1]
+                outer_batch_count = len(batch_ids)
+                print(
+                    f"\n[Outer Batch {outer_batch_num}] Processing {outer_batch_count} IDs from CSV..."
+                )
+            else:
+                # DQL mode: fetch next batch via query
+                query = dql_query_template.format(
+                    source_collection_id=source_collection_id,
+                    outer_batch_size=outer_batch_size,
+                )
 
-            if outer_batch_count == 0:
-                print("  No more agent runs to move.")
-                break
+                print(f"\n[Outer Batch {outer_batch_num}] Fetching next batch...")
+                dql_start = time.perf_counter()
+                result = await execute_dql_query(base_url, source_collection_id, api_key, query)
+                dql_elapsed = time.perf_counter() - dql_start
+                print(f"  DQL query completed in {dql_elapsed:.2f}s")
+                rows = result.get("rows", [])
+                outer_batch_count = len(rows)
 
-            # Extract agent run IDs (first column)
-            batch_ids = [row[0] for row in rows]
+                if outer_batch_count == 0:
+                    print("  No more agent runs to move.")
+                    break
+
+                # Extract agent run IDs (first column)
+                batch_ids = [row[0] for row in rows]
 
             # Split into inner batches
             inner_batches = [
@@ -158,7 +190,7 @@ async def batch_move_agent_runs(
                 for i in range(0, len(batch_ids), inner_batch_size)
             ]
             print(
-                f"  Fetched {outer_batch_count} agent runs, "
+                f"  Processing {outer_batch_count} agent runs, "
                 f"splitting into {len(inner_batches)} inner batches..."
             )
 
@@ -211,8 +243,8 @@ async def batch_move_agent_runs(
                     f"{total_success} succeeded, {total_failed} failed"
                 )
 
-            # Check if we've processed all results
-            if outer_batch_count < outer_batch_size:
+            # Check if we've processed all results (DQL mode only)
+            if csv_outer_batches is None and outer_batch_count < outer_batch_size:
                 print("  Last batch reached (fewer than outer_batch_size results)")
                 break
 
@@ -299,6 +331,12 @@ Examples:
         default=DEFAULT_DQL_QUERY_TEMPLATE,
         help="Custom DQL query template (must include {source_collection_id} and {outer_batch_size} placeholders)",
     )
+    parser.add_argument(
+        "--csv-file",
+        type=str,
+        default=None,
+        help="Path to CSV file with 'id' column containing agent run IDs to move (alternative to DQL query)",
+    )
 
     args = parser.parse_args()
 
@@ -307,6 +345,15 @@ Examples:
     if not api_key:
         print("ERROR: DOCENT_API_KEY environment variable is not set", file=sys.stderr)
         sys.exit(1)
+
+    # Read IDs from CSV file if provided
+    csv_ids: list[str] | None = None
+    if args.csv_file:
+        if not os.path.exists(args.csv_file):
+            print(f"ERROR: CSV file not found: {args.csv_file}", file=sys.stderr)
+            sys.exit(1)
+        csv_ids = read_ids_from_csv(args.csv_file)
+        print(f"Read {len(csv_ids)} IDs from CSV file: {args.csv_file}")
 
     asyncio.run(
         batch_move_agent_runs(
@@ -318,6 +365,7 @@ Examples:
             inner_batch_size=args.inner_batch_size,
             dry_run=args.dry_run,
             dql_query_template=args.dql_query,
+            csv_ids=csv_ids,
         )
     )
 
