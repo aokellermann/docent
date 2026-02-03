@@ -23,7 +23,7 @@ SOURCE_COLLECTION_ID = "a336b411-a9bb-4355-8c62-14ebc6d7aecb"  # TODO: collectio
 DESTINATION_COLLECTION_ID = "d883900b-d851-4c1f-9092-5cade5722fac"  # TODO: collection to move TO
 
 # Batch size for pagination
-BATCH_SIZE = 10000
+BATCH_SIZE = 1000
 
 # Dry run mode - set to False to actually perform moves
 DRY_RUN = False
@@ -88,7 +88,7 @@ async def move_agent_runs_batch(client: httpx.AsyncClient, agent_run_ids: list[s
             "destination_collection_id": DESTINATION_COLLECTION_ID,
         },
         headers=get_headers(),
-        timeout=120.0,
+        timeout=300.0,
     )
     if response.status_code != 200:
         raise Exception(f"Batch move failed: {response.status_code} - {response.text}")

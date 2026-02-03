@@ -1238,20 +1238,27 @@ async def move_agent_runs(
 
     succeeded_count = 0
     errors: dict[str, str] = {}
+    semaphore = anyio.Semaphore(100)
 
-    for agent_run_id in request.agent_run_ids:
-        try:
-            await mono_svc.move_agent_run(
-                agent_run_id=agent_run_id,
-                source_collection_id=collection_id,
-                destination_collection_id=request.destination_collection_id,
-            )
-            succeeded_count += 1
-        except UserFacingError as e:
-            errors[agent_run_id] = e.user_message
-        except Exception:
-            logger.error(f"Unexpected error moving agent run {agent_run_id}", exc_info=True)
-            errors[agent_run_id] = "An unexpected error occurred"
+    async def move_one(agent_run_id: str) -> None:
+        nonlocal succeeded_count
+        async with semaphore:
+            try:
+                await mono_svc.move_agent_run(
+                    agent_run_id=agent_run_id,
+                    source_collection_id=collection_id,
+                    destination_collection_id=request.destination_collection_id,
+                )
+                succeeded_count += 1
+            except UserFacingError as e:
+                errors[agent_run_id] = e.user_message
+            except Exception:
+                logger.error(f"Unexpected error moving agent run {agent_run_id}", exc_info=True)
+                errors[agent_run_id] = "An unexpected error occurred"
+
+    async with anyio.create_task_group() as tg:
+        for agent_run_id in request.agent_run_ids:
+            tg.start_soon(move_one, agent_run_id)
 
     return MoveAgentRunsResponse(
         succeeded_count=succeeded_count,
