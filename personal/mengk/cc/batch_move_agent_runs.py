@@ -60,7 +60,7 @@ async def execute_dql_query(
             f"{base_url}/rest/dql/{source_collection_id}/execute",
             json={"dql": query},
             headers=get_headers(api_key),
-            timeout=120.0,
+            timeout=300.0,
         )
         if response.status_code != 200:
             print(f"DQL query failed: {response.status_code}")
@@ -136,9 +136,12 @@ async def batch_move_agent_runs(
             )
 
             print(f"\n[Outer Batch {outer_batch_num}] Fetching next batch...")
+            dql_start = time.perf_counter()
             result = await execute_dql_query(
                 base_url, source_collection_id, api_key, query
             )
+            dql_elapsed = time.perf_counter() - dql_start
+            print(f"  DQL query completed in {dql_elapsed:.2f}s")
             rows = result.get("rows", [])
             outer_batch_count = len(rows)
 
