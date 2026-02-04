@@ -8,7 +8,6 @@ from docent_core.docent.server.rest.chat import chat_router
 from docent_core.docent.server.rest.code_samples import code_samples_router
 from docent_core.docent.server.rest.dql import dql_router
 from docent_core.docent.server.rest.label import label_router
-from docent_core.docent.server.rest.qa import qa_router
 from docent_core.docent.server.rest.refinement import refinement_router
 from docent_core.docent.server.rest.result_set import result_set_router
 from docent_core.docent.server.rest.router import public_router, user_router
@@ -66,10 +65,6 @@ REST_ROUTERS: list[RouterSpec] = [
     {
         "router": code_samples_router,
         "prefix": "/rest/code-samples",
-    },
-    {
-        "router": qa_router,
-        "prefix": "/rest/qa",
     },
     {
         "router": onboarding_router,
