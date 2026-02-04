@@ -203,12 +203,21 @@ async def root():
 
 @asgi_app.get("/health")
 async def health():
-    """Health check endpoint that verifies database connectivity."""
-    from docent_core._db_service.db import DocentDB
+    """Health check endpoint that verifies database connectivity.
+
+    This endpoint warms up the full code path used by real requests:
+    1. Initializes MonoService (which initializes DocentDB)
+    2. Runs a query to verify database connectivity
+
+    This ensures that after the healthcheck passes, subsequent requests
+    won't hit cold-start latency from uninitialized singletons.
+    """
+    from docent_core.docent.services.monoservice import MonoService
 
     try:
-        db = await DocentDB.init()
-        async with db.session() as session:
+        # Initialize MonoService (not just DocentDB) to warm up the full path
+        mono_svc = await MonoService.init()
+        async with mono_svc.db.session() as session:
             await session.execute(text("SELECT 1"))
         return {"status": "healthy", "database": "connected"}
     except Exception as e:
