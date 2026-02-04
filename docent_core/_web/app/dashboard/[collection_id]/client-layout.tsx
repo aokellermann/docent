@@ -79,8 +79,8 @@ export default function DocentDashboardClientLayout({
       <LabelSetsProvider collectionId={collectionId}>
         <CitationNavigationProvider>
           <CollectionSidebar />
-          <div className="flex flex-col pr-2 pb-2 h-screen w-full bg-sidebar min-h-0 min-w-[900px]">
-            <div className="items-center flex flex-shrink-0 my-2">
+          <div className="flex flex-col pr-2 pb-2 h-screen w-full bg-sidebar min-h-0 min-w-[900px] overflow-auto">
+            <div className="items-center flex flex-shrink-0 my-2 sticky top-0 z-10 bg-sidebar">
               <Suspense
                 fallback={<div className="h-7">Loading breadcrumbs...</div>}
               >

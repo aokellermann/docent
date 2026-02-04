@@ -97,6 +97,12 @@ interface AgentRunCountResponse {
   count: number;
 }
 
+export interface CollectionCounts {
+  agent_run_count: number | null;
+  rubric_count: number | null;
+  label_set_count: number | null;
+}
+
 export const collectionApi = createApi({
   reducerPath: 'collectionApi',
   baseQuery: fetchBaseQuery({
@@ -129,6 +135,17 @@ export const collectionApi = createApi({
     }),
     getCollections: build.query<Collection[], void>({
       query: () => '/collections',
+      providesTags: ['Collection'],
+    }),
+    getCollectionsCounts: build.query<
+      Record<string, CollectionCounts>,
+      string[]
+    >({
+      query: (collectionIds) => ({
+        url: '/collections/counts',
+        method: 'POST',
+        body: { collection_ids: collectionIds },
+      }),
       providesTags: ['Collection'],
     }),
     createCollection: build.mutation<
@@ -423,6 +440,7 @@ export const collectionApi = createApi({
 export const {
   useGetCollectionNameQuery,
   useGetCollectionsQuery,
+  useGetCollectionsCountsQuery,
   useCreateCollectionMutation,
   useUpdateCollectionMutation,
   useCloneCollectionMutation,
