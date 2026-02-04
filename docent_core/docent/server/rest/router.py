@@ -64,6 +64,7 @@ from docent_core.docent.db.schemas.tables import (
     SQLAAccessControlEntry,
     SQLAFilter,
 )
+from docent_core.docent.exceptions import ForbiddenError, NotFoundError, UserFacingError
 from docent_core.docent.server.dependencies.analytics import use_posthog_user_context
 from docent_core.docent.server.dependencies.database import (
     get_mono_svc,
@@ -1164,14 +1165,7 @@ async def retry_agent_run_ingest_job(
     _: None = Depends(require_collection_permission(Permission.WRITE)),
 ):
     """Retry a canceled agent run ingest job."""
-    try:
-        await mono_svc.retry_agent_run_ingest_job(job_id, collection_id, ctx)
-    except ValueError as exc:
-        detail = str(exc)
-        if "not found" in detail:
-            raise HTTPException(status_code=404, detail=detail) from exc
-        raise HTTPException(status_code=400, detail=detail) from exc
-
+    await mono_svc.retry_agent_run_ingest_job(job_id, collection_id, ctx)
     return {"success": True, "message": f"Job {job_id} has been re-queued for processing"}
 
 
@@ -1198,6 +1192,79 @@ async def delete_agent_runs(
     )
 
     return {"deleted_count": deleted_count, "requested_count": len(request.agent_run_ids)}
+
+
+class MoveAgentRunsRequest(BaseModel):
+    agent_run_ids: list[str]
+    destination_collection_id: str
+
+
+class MoveAgentRunsResponse(BaseModel):
+    succeeded_count: int
+    failed_count: int
+    errors: dict[str, str]
+
+
+@user_router.post("/{collection_id}/move_agent_runs")
+async def move_agent_runs(
+    collection_id: str,
+    request: MoveAgentRunsRequest,
+    user: User = Depends(get_user_anonymous_ok),
+    mono_svc: MonoService = Depends(get_mono_svc),
+    analytics: AnalyticsClient = Depends(use_posthog_user_context),
+    _source_perm: None = Depends(require_collection_permission(Permission.WRITE)),
+):
+    """Move agent runs from this collection to a destination collection.
+
+    Requires WRITE permission on both the source and destination collections.
+    Will fail for individual agent runs that have related data (labels, tags,
+    judge results, etc.) that would become inconsistent after the move.
+    """
+    # Check WRITE permission on destination collection
+    dest_has_permission = await mono_svc.has_permission(
+        user=user,
+        resource_type=ResourceType.COLLECTION,
+        resource_id=request.destination_collection_id,
+        permission=Permission.WRITE,
+    )
+    if not dest_has_permission:
+        raise ForbiddenError(
+            f"You don't have WRITE permission on destination collection {request.destination_collection_id}"
+        )
+
+    # Check destination collection exists
+    if not await mono_svc.collection_exists(request.destination_collection_id):
+        raise NotFoundError(f"Destination collection {request.destination_collection_id} not found")
+
+    succeeded_count = 0
+    errors: dict[str, str] = {}
+    semaphore = anyio.Semaphore(150)
+
+    async def move_one(agent_run_id: str) -> None:
+        nonlocal succeeded_count
+        async with semaphore:
+            try:
+                await mono_svc.move_agent_run(
+                    agent_run_id=agent_run_id,
+                    source_collection_id=collection_id,
+                    destination_collection_id=request.destination_collection_id,
+                )
+                succeeded_count += 1
+            except UserFacingError as e:
+                errors[agent_run_id] = e.user_message
+            except Exception:
+                logger.error(f"Unexpected error moving agent run {agent_run_id}", exc_info=True)
+                errors[agent_run_id] = "An unexpected error occurred"
+
+    async with anyio.create_task_group() as tg:
+        for agent_run_id in request.agent_run_ids:
+            tg.start_soon(move_one, agent_run_id)
+
+    return MoveAgentRunsResponse(
+        succeeded_count=succeeded_count,
+        failed_count=len(errors),
+        errors=errors,
+    )
 
 
 ########

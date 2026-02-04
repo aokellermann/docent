@@ -5,6 +5,7 @@ from typing import Any, Awaitable, Callable
 import anyio
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sentry_sdk.integrations.asgi import SentryAsgiMiddleware  # type: ignore
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -13,6 +14,7 @@ from docent_core._env_util import ENV, get_deployment_id, init_sentry_or_raise
 from docent_core._server._analytics.posthog import AnalyticsClient
 from docent_core._server._auth.session_middleware import SessionAuthMiddleware
 from docent_core._server._rest._all_routers import REST_ROUTERS
+from docent_core.docent.exceptions import UserFacingError
 from docent_core.docent.services.chat import cleanup_old_chat_sessions
 
 logger = get_logger(__name__)
@@ -158,6 +160,15 @@ async def lifespan(app: FastAPI):
 
 # Attach lifespan so background maintenance tasks run
 asgi_app = FastAPI(lifespan=lifespan)
+
+
+@asgi_app.exception_handler(UserFacingError)
+async def user_facing_error_handler(request: Request, exc: UserFacingError):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.user_message},
+    )
+
 
 # Add middlewares in order (they are processed in reverse order when handling responses)
 # 1. Request logging middleware first

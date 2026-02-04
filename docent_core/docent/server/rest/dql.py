@@ -85,6 +85,7 @@ def _extract_output_fields_from_schema(output_schema: dict[str, Any]) -> list[st
 
 class DQLExecuteRequest(BaseModel):
     dql: str
+    max_rows: int = 10_000
 
 
 class DQLColumnReferenceModel(BaseModel):
