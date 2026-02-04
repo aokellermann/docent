@@ -9,6 +9,7 @@ import { Collection } from '@/app/types/collectionTypes';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { TableCell, TableRow } from '@/components/ui/table';
+import { Skeleton } from '@/components/ui/skeleton';
 import UuidPill from '@/components/UuidPill';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -27,10 +28,13 @@ import { useUserContext } from '@/app/contexts/UserContext';
 import {
   useUpdateCollectionMutation,
   useCloneCollectionMutation,
+  CollectionCounts,
 } from '../api/collectionApi';
 
 export interface CollectionRowProps {
   collection: Collection;
+  counts?: CollectionCounts;
+  countsLoading?: boolean;
   hasWritePermission: boolean;
   hasAdminPermission: boolean;
   permissionsLoading: boolean;
@@ -44,6 +48,8 @@ export interface CollectionRowProps {
 
 export default function CollectionRow({
   collection,
+  counts,
+  countsLoading,
   hasWritePermission,
   hasAdminPermission,
   permissionsLoading,
@@ -224,24 +230,36 @@ export default function CollectionRow({
       </TableCell>
 
       {/* Agent Run Count */}
-      <TableCell className="text-xs py-2 text-z">
-        <span className="text-muted-foreground">
-          {collection.agent_run_count?.toLocaleString() ?? '-'}
-        </span>
+      <TableCell className="text-xs py-2">
+        {countsLoading ? (
+          <Skeleton className="h-4 w-8" />
+        ) : (
+          <span className="text-muted-foreground">
+            {counts?.agent_run_count?.toLocaleString() ?? '-'}
+          </span>
+        )}
       </TableCell>
 
       {/* Rubric Count */}
       <TableCell className="text-xs py-2">
-        <span className="text-muted-foreground">
-          {collection.rubric_count?.toLocaleString() ?? '-'}
-        </span>
+        {countsLoading ? (
+          <Skeleton className="h-4 w-8" />
+        ) : (
+          <span className="text-muted-foreground">
+            {counts?.rubric_count?.toLocaleString() ?? '-'}
+          </span>
+        )}
       </TableCell>
 
       {/* Label Set Count */}
       <TableCell className="text-xs py-2">
-        <span className="text-muted-foreground">
-          {collection.label_set_count?.toLocaleString() ?? '-'}
-        </span>
+        {countsLoading ? (
+          <Skeleton className="h-4 w-8" />
+        ) : (
+          <span className="text-muted-foreground">
+            {counts?.label_set_count?.toLocaleString() ?? '-'}
+          </span>
+        )}
       </TableCell>
 
       {/* Created At */}

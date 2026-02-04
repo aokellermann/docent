@@ -24,6 +24,7 @@ import {
 import CollectionRow from './CollectionRow';
 import { useDeleteCollectionMutation } from '../api/collectionApi';
 import { useGetCollectionsPermissionsQuery } from '@/lib/permissions/collabSlice';
+import { useCollectionCounts } from '../hooks/use-collection-counts';
 import { PERMISSION_LEVELS } from '@/lib/permissions/types';
 
 interface CollectionsTableProps {
@@ -51,6 +52,10 @@ export function CollectionsTable({
     useGetCollectionsPermissionsQuery(ids, {
       skip: ids.length === 0,
     });
+
+  // Fetch counts asynchronously in batches
+  const { counts: collectionCounts, isLoading: countsLoading } =
+    useCollectionCounts(ids);
 
   const handleDeleteCollection = () => {
     if (!deletingCollection) return;
@@ -127,6 +132,10 @@ export function CollectionsTable({
               <CollectionRow
                 key={collection.id}
                 collection={collection}
+                counts={collectionCounts[collection.id]}
+                countsLoading={
+                  countsLoading && !collectionCounts[collection.id]
+                }
                 onDelete={openDeleteDialog}
                 hasWritePermission={hasWritePermission}
                 hasAdminPermission={hasAdminPermission}

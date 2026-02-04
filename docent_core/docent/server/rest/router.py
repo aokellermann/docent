@@ -384,13 +384,42 @@ class CollectionRow(BaseModel):
     label_set_count: int | None = None
 
 
+class CollectionCountsRequest(BaseModel):
+    """Request body for batch fetching collection counts."""
+
+    collection_ids: list[str]
+
+
+class CollectionCounts(BaseModel):
+    """Counts for a single collection."""
+
+    agent_run_count: int | None = None
+    rubric_count: int | None = None
+    label_set_count: int | None = None
+
+
 @user_router.get("/collections", response_model=list[CollectionRow])
 async def get_collections(
+    include_counts: bool = False,
     user: User = Depends(get_user_anonymous_ok),
     mono_svc: MonoService = Depends(get_mono_svc),
 ):
     sqla_collections = await mono_svc.get_collections(user)  # Filter to only the user's collections
 
+    # Fast path: return collections without counts
+    if not include_counts:
+        return [
+            CollectionRow(
+                id=obj.id,
+                name=obj.name,
+                description=obj.description,
+                created_by=obj.created_by,
+                created_at=obj.created_at,
+            )
+            for obj in sqla_collections
+        ]
+
+    # Slow path: include counts (for backward compatibility)
     # Extract collection IDs for batch queries
     collection_ids = [obj.id for obj in sqla_collections]
 
@@ -412,6 +441,35 @@ async def get_collections(
         result.append(collection_data)
 
     return result
+
+
+@user_router.post("/collections/counts", response_model=dict[str, CollectionCounts])
+async def get_collections_counts(
+    request: CollectionCountsRequest,
+    user: User = Depends(get_user_anonymous_ok),
+    mono_svc: MonoService = Depends(get_mono_svc),
+):
+    """Get counts for multiple collections in a batch."""
+    # Filter to only collections the user has access to (security check)
+    accessible_collections = await mono_svc.get_collections(user)
+    accessible_ids = {c.id for c in accessible_collections}
+    collection_ids = [cid for cid in request.collection_ids if cid in accessible_ids]
+
+    if not collection_ids:
+        return dict[str, CollectionCounts]()
+
+    agent_run_counts = await mono_svc.batch_count_collection_agent_runs(collection_ids)
+    rubric_counts = await mono_svc.batch_count_collection_rubrics(collection_ids)
+    label_set_counts = await mono_svc.batch_count_collection_label_sets(collection_ids)
+
+    return {
+        cid: CollectionCounts(
+            agent_run_count=agent_run_counts.get(cid),
+            rubric_count=rubric_counts.get(cid),
+            label_set_count=label_set_counts.get(cid),
+        )
+        for cid in collection_ids
+    }
 
 
 @user_router.get("/{collection_id}/collection_details", response_model=CollectionRow | None)
