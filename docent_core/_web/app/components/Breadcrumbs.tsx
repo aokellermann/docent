@@ -12,7 +12,10 @@ import {
   Home,
   FlaskConical,
   ChartColumn,
+  Eye,
+  X,
 } from 'lucide-react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useParams, usePathname, useSearchParams } from 'next/navigation';
 
@@ -84,6 +87,9 @@ const Breadcrumbs: React.FC = () => {
   const isReadOnly =
     !permissionsLoading &&
     (permissionLevel === 'read' || permissionLevel === 'none');
+
+  const [isReadOnlyBannerDismissed, setIsReadOnlyBannerDismissed] =
+    useState(false);
 
   const crumbs: Record<string, Crumb> = {
     dashboard: {
@@ -300,63 +306,94 @@ const Breadcrumbs: React.FC = () => {
   );
 
   return (
-    <div className="text-sm flex items-center justify-between w-full ml-1">
-      <div className="flex items-center gap-x-1">
-        {isSettingsPage && getHomeCrumb()}
-        {segments.map((crumb, index) => getBreadcrumb(crumb, index))}
-      </div>
+    <div className="flex flex-col w-full">
+      {isReadOnly && !isReadOnlyBannerDismissed && (
+        <div className="flex items-center justify-between bg-indigo-bg border border-indigo-border rounded-lg px-4 py-3 mb-3 ml-1 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center size-8 rounded-full bg-indigo-muted">
+              <Eye className="size-4 text-indigo-text" />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-sm font-medium text-primary">
+                Read-Only Collection
+              </span>
+              <span className="text-xs text-muted-foreground">
+                Clone this collection to search, analyze, and make changes
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <CloneCollectionButton
+              variant="default"
+              size="sm"
+              showLabel={true}
+              collectionName={collectionName}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white h-8"
+            />
+            <button
+              onClick={() => setIsReadOnlyBannerDismissed(true)}
+              className="p-1.5 rounded-md hover:bg-indigo-muted text-muted-foreground hover:text-primary transition-colors"
+              aria-label="Dismiss banner"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+        </div>
+      )}
+      <div className="text-sm flex items-center justify-between w-full ml-1">
+        <div className="flex items-center gap-x-1">
+          {isSettingsPage && getHomeCrumb()}
+          {segments.map((crumb, index) => getBreadcrumb(crumb, index))}
+        </div>
 
-      <div className="flex items-center gap-x-2">
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-x-2 h-7 cursor-default px-2"
-        >
-          <Link
-            href="https://docs.transluce.org"
-            target="_blank"
-            className="flex items-center gap-x-2"
-          >
-            <BookText size={14} />
-            Docs
-          </Link>
-        </Button>
-
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-x-2 h-7 cursor-default px-2"
-        >
-          <Link
-            href="https://transluce.org/docent/slack"
-            target="_blank"
-            className="flex items-center gap-x-2"
-          >
-            <MessageCircle size={14} />
-            Slack
-          </Link>
-        </Button>
-
-        {/* Clone collection */}
-        {collectionId && (
-          <CloneCollectionButton
+        <div className="flex items-center gap-x-2">
+          <Button
             variant="outline"
             size="sm"
-            showLabel={true}
-            collectionName={collectionName}
-            className={cn(
-              'gap-x-2 h-7 px-2',
-              isReadOnly &&
-                'bg-blue-500 hover:bg-blue-600 text-white hover:text-white border-blue-500 hover:border-blue-600'
-            )}
-          />
-        )}
+            className="gap-x-2 h-7 cursor-default px-2"
+          >
+            <Link
+              href="https://docs.transluce.org"
+              target="_blank"
+              className="flex items-center gap-x-2"
+            >
+              <BookText size={14} />
+              Docs
+            </Link>
+          </Button>
 
-        {/* Share view */}
-        {collectionId && <ShareViewPopover collectionId={collectionId} />}
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-x-2 h-7 cursor-default px-2"
+          >
+            <Link
+              href="https://transluce.org/docent/slack"
+              target="_blank"
+              className="flex items-center gap-x-2"
+            >
+              <MessageCircle size={14} />
+              Slack
+            </Link>
+          </Button>
 
-        <ModeToggle />
-        <UserProfile />
+          {/* Clone collection */}
+          {collectionId && (
+            <CloneCollectionButton
+              variant="outline"
+              size="sm"
+              showLabel={true}
+              collectionName={collectionName}
+              className="gap-x-2 h-7 px-2"
+            />
+          )}
+
+          {/* Share view */}
+          {collectionId && <ShareViewPopover collectionId={collectionId} />}
+
+          <ModeToggle />
+          <UserProfile />
+        </div>
       </div>
     </div>
   );
