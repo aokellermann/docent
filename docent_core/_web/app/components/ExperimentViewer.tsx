@@ -11,7 +11,6 @@ import React, {
 import { skipToken } from '@reduxjs/toolkit/query';
 
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 
@@ -20,7 +19,6 @@ import UploadRunsButton from './UploadRunsButton';
 import UploadRunsDialog from './UploadRunsDialog';
 
 import { TranscriptFilterControls } from './TranscriptFilterControls';
-import DQLEditor, { DEFAULT_DQL_QUERY } from './DQLEditor';
 
 import {
   setSorting,
@@ -40,16 +38,17 @@ import {
 import { useHasCollectionWritePermission } from '@/lib/permissions/hooks';
 import { compareAgentRunColumnNames } from '@/lib/agentRunColumns';
 import { INTERNAL_BASE_URL } from '@/app/constants';
+import { DEFAULT_DQL_QUERY } from '@/app/utils/dqlDefaults';
 
 import { navToAgentRun } from '@/lib/nav';
 import { useRouter } from 'next/navigation';
 import posthog from 'posthog-js';
-import type { DqlExecuteResponse } from '@/app/types/dqlTypes';
 import {
   type CollectionFilter,
   type ComplexFilter,
   type PrimitiveFilter,
 } from '@/app/types/collectionTypes';
+import { type DqlExecuteResponse } from '@/app/types/dqlTypes';
 import { v4 as uuid4 } from 'uuid';
 
 const processAgentRunMetadata = (
@@ -995,9 +994,6 @@ export default function ExperimentViewer({
       activeAgentRunIdsRequestRef.current = null;
       setExperimentViewerScrollPosition(undefined);
       setScrollPosition(undefined);
-      setDqlQuery(DEFAULT_DQL_QUERY);
-      setDqlResult(null);
-      setDqlErrorMessage(null);
       previousCollectionIdRef.current = collectionId;
       return;
     }
@@ -1021,9 +1017,6 @@ export default function ExperimentViewer({
     activeAgentRunIdsRequestRef.current = null;
     setExperimentViewerScrollPosition(cached?.scrollPosition);
     setScrollPosition(cached?.scrollPosition);
-    setDqlQuery(cached?.dqlQuery ?? DEFAULT_DQL_QUERY);
-    setDqlResult(cached?.dqlResult ?? null);
-    setDqlErrorMessage(cached?.dqlError ?? null);
     previousCollectionIdRef.current = collectionId;
 
     // Sync base filter with server data if available, otherwise reset to undefined.
@@ -1134,18 +1127,8 @@ export default function ExperimentViewer({
     experimentViewerCache.set(collectionId, {
       metadataData,
       scrollPosition: experimentViewerScrollPosition,
-      dqlQuery,
-      dqlResult,
-      dqlError: dqlErrorMessage,
     });
-  }, [
-    collectionId,
-    metadataData,
-    experimentViewerScrollPosition,
-    dqlQuery,
-    dqlResult,
-    dqlErrorMessage,
-  ]);
+  }, [collectionId, metadataData, experimentViewerScrollPosition]);
 
   // Use debouncing to prevent too many updates
   useEffect(() => {
@@ -1629,106 +1612,73 @@ export default function ExperimentViewer({
     );
 
   return (
-    <div className="flex-1 flex flex-col h-full min-w-0">
-      <Tabs
-        value={activeTab}
-        onValueChange={handleTabChange}
-        className="flex-1 flex flex-col space-y-3 min-h-0"
-      >
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-          <div className="flex flex-col">
-            <div className="text-sm font-semibold">
-              {activeTab === 'filters' ? 'Agent Run Table' : 'DQL Explorer'}
-            </div>
+    <div className="flex-1 flex flex-col h-full min-w-0 space-y-3">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+        <div className="flex flex-col">
+          <div className="text-sm font-semibold">
+            {activeRunId
+              ? `${agentRunIds?.length || 0} Runs`
+              : 'Agent Run Table'}
+          </div>
+          {!activeRunId && (
             <div className="text-xs text-muted-foreground">
-              {activeTab === 'filters' ? (
-                isCountFetching && totalAgentRunCount === undefined ? (
-                  <span className="inline-flex items-center gap-1">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Loading...
-                  </span>
-                ) : (
-                  `${totalAgentRunCount ?? agentRunIds?.length ?? 0} matching runs${hasMoreIds && totalAgentRunCount === undefined ? '+' : ''}`
-                )
+              {isCountFetching && totalAgentRunCount === undefined ? (
+                <span className="inline-flex items-center gap-1">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Loading...
+                </span>
               ) : (
-                'Docent Query Language'
+                `${totalAgentRunCount ?? agentRunIds?.length ?? 0} agent runs matching the current view${hasMoreIds && totalAgentRunCount === undefined ? '+' : ''}`
               )}
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <div>
-              <UploadRunsButton
-                onImportSuccess={handleUploadSuccess}
-                disabled={!hasWritePermission}
-              />
-            </div>
-            <TabsList className="grid grid-cols-2 h-8">
-              <TabsTrigger value="filters" className="py-0.5">
-                Filters
-              </TabsTrigger>
-              <TabsTrigger value="dql" className="py-0.5">
-                DQL
-              </TabsTrigger>
-            </TabsList>
-          </div>
+          )}
         </div>
-        <TabsContent
-          value="filters"
-          className="mt-0 flex-1 flex flex-col gap-3 min-h-0 data-[state=active]:flex data-[state=inactive]:hidden"
-        >
-          <TranscriptFilterControls
+        <div className="flex items-center gap-2">
+          <UploadRunsButton
+            onImportSuccess={handleUploadSuccess}
+            disabled={!hasWritePermission}
+          />
+        </div>
+      </div>
+      <div className="flex-1 flex flex-col gap-3 min-h-0">
+        <TranscriptFilterControls
+          metadataData={metadataData}
+          baseFilter={draftBaseFilter}
+          onFiltersChange={applyBaseFilter}
+        />
+        <div className="flex-1 min-w-0 min-h-0 flex">
+          <AgentRunTable
+            agentRunIds={agentRunIds}
+            agentRunIdsOffset={agentRunIdsOffset}
             metadataData={metadataData}
-            baseFilter={draftBaseFilter}
-            onFiltersChange={applyBaseFilter}
+            availableColumns={availableColumns}
+            selectedColumns={selectedColumns}
+            onSelectedColumnsChange={setSelectedColumns}
+            sortableColumns={sortableColumns}
+            sortField={sortField}
+            sortDirection={sortDirection}
+            onSortChange={handleSortingChange}
+            activeRunId={activeRunId}
+            baseFilter={appliedBaseFilter ?? null}
+            requestMetadataForIds={requestMetadataForIds}
+            cancelMetadataRequest={cancelActiveMetadataRequest}
+            cancelLoadMoreIds={cancelLoadMoreIds}
+            dropZoneHandlers={dropZoneHandlers}
+            isDragActive={isDragActive}
+            isOverDropZone={isOverDropZone}
+            scrollContainerRef={setScrollContainer}
+            isLoadingAgentRuns={isLoadingAgentRuns}
+            isFetchingAgentRuns={isFetchingAgentRuns}
+            onRowMouseDown={handleRowMouseDown}
+            onCreateFilterFromCell={handleCreateFilterFromCell}
+            filterableColumns={filterableColumns}
+            emptyState={emptyStateContent}
+            totalCount={totalAgentRunCount}
+            onLoadMoreIds={loadMoreIds}
+            fetchIdsForExport={fetchIdsForExport}
           />
-          <div className="flex-1 min-w-0 min-h-0 flex">
-            <AgentRunTable
-              agentRunIds={agentRunIds}
-              agentRunIdsOffset={agentRunIdsOffset}
-              metadataData={metadataData}
-              availableColumns={availableColumns}
-              selectedColumns={selectedColumns}
-              onSelectedColumnsChange={setSelectedColumns}
-              sortableColumns={sortableColumns}
-              sortField={sortField}
-              sortDirection={sortDirection}
-              onSortChange={handleSortingChange}
-              activeRunId={activeRunId}
-              baseFilter={appliedBaseFilter ?? null}
-              requestMetadataForIds={requestMetadataForIds}
-              cancelMetadataRequest={cancelActiveMetadataRequest}
-              cancelLoadMoreIds={cancelLoadMoreIds}
-              dropZoneHandlers={dropZoneHandlers}
-              isDragActive={isDragActive}
-              isOverDropZone={isOverDropZone}
-              scrollContainerRef={setScrollContainer}
-              isLoadingAgentRuns={isLoadingAgentRuns}
-              isFetchingAgentRuns={isFetchingAgentRuns}
-              onRowMouseDown={handleRowMouseDown}
-              onCreateFilterFromCell={handleCreateFilterFromCell}
-              filterableColumns={filterableColumns}
-              emptyState={emptyStateContent}
-              totalCount={totalAgentRunCount}
-              onLoadMoreIds={loadMoreIds}
-              fetchIdsForExport={fetchIdsForExport}
-            />
-          </div>
-        </TabsContent>
-        <TabsContent
-          value="dql"
-          className="mt-0 flex-1 flex flex-col min-h-0 data-[state=active]:flex data-[state=inactive]:hidden"
-        >
-          <DQLEditor
-            collectionId={collectionId ?? undefined}
-            initialQuery={dqlQuery}
-            onQueryChange={setDqlQuery}
-            initialResult={dqlResult}
-            onResultChange={setDqlResult}
-            initialErrorMessage={dqlErrorMessage}
-            onErrorMessageChange={setDqlErrorMessage}
-          />
-        </TabsContent>
-      </Tabs>
+        </div>
+      </div>
 
       <UploadRunsDialog
         isOpen={uploadDialogOpen}

@@ -29,10 +29,7 @@ from docent_core.docent.db.dql import (
 )
 from docent_core.docent.db.schemas.auth_models import User
 from docent_core.docent.db.schemas.tables import SQLAAgentRun
-from docent_core.docent.services.monoservice import (
-    DEFAULT_DQL_MAX_ROWS,
-    MonoService,
-)
+from docent_core.docent.services.dql import MAX_DQL_RESULT_LIMIT, DQLService
 
 COLLECTION_ID = "test-collection"
 TEST_USER = User(id="user-1", email="user@example.com", organization_ids=[], is_anonymous=False)
@@ -219,12 +216,12 @@ def test_get_selected_columns_includes_alias_metadata() -> None:
         SelectedColumn(
             output_name="run_id",
             expression_sql="ar.id AS run_id",
-            source_columns=(ColumnReference(table="ar", column="id"),),
+            source_columns=(ColumnReference(table="agent_runs", column="id"),),
         ),
         SelectedColumn(
             output_name="created_at",
             expression_sql="ar.created_at",
-            source_columns=(ColumnReference(table="ar", column="created_at"),),
+            source_columns=(ColumnReference(table="agent_runs", column="created_at"),),
         ),
     ]
 
@@ -754,27 +751,30 @@ class _DummyDB:
         yield self._session
 
 
-class _StubMonoService(MonoService):
-    def __init__(self, db: _DummyDB, *, allowed: bool = True) -> None:
-        super().__init__(db)  # type: ignore[arg-type]
-        self._allowed = allowed
-
-    async def has_permission(self, *, user, resource_type, resource_id, permission) -> bool:  # type: ignore[override]
-        return self._allowed
-
-    async def get_json_metadata_fields_map(self, collection_id: str) -> dict[str, Any]:  # type: ignore[override]
-        return {}
-
-
 @pytest.mark.asyncio
 async def test_execute_dql_query_sets_read_only_rls_context() -> None:
-    session = _RecordingSession()
-    service = _StubMonoService(_DummyDB(session))
-    result = await service.execute_dql_query(
-        user=TEST_USER,
-        collection_id=COLLECTION_ID,
-        dql="SELECT id FROM agent_runs",
-    )
+    import docent_core.docent.services.dql as dql_service_module
+
+    # Patch the permission check to allow access for this test
+    # Must patch in the services.dql module where it's imported
+    async def allow_access(mono_service, user, collection_id):  # type: ignore[override]
+        pass
+
+    original_ensure = dql_service_module.ensure_dql_collection_access
+    dql_service_module.ensure_dql_collection_access = allow_access
+
+    try:
+        session = _RecordingSession()
+        db = _DummyDB(session)
+        dql_service = DQLService(db)  # type: ignore[arg-type]
+        result = await dql_service.execute_query(
+            user=TEST_USER,
+            collection_id=COLLECTION_ID,
+            dql="SELECT id FROM agent_runs",
+            json_fields={},
+        )
+    finally:
+        dql_service_module.ensure_dql_collection_access = original_ensure
 
     query_sql, query_params = next(
         (sql, params) for sql, params in session.statements if "FROM agent_runs" in sql
@@ -782,8 +782,8 @@ async def test_execute_dql_query_sets_read_only_rls_context() -> None:
     assert "FROM agent_runs" in query_sql
     assert "collection_id = :__dql_param_" in query_sql
     assert query_params is not None
-    assert DEFAULT_DQL_MAX_ROWS + 1 in query_params.values()
+    assert MAX_DQL_RESULT_LIMIT + 1 in query_params.values()
     assert COLLECTION_ID in query_params.values()
     assert result.columns == ("id",)
     assert result.rows == [("row-1",)]
-    assert result.applied_limit == DEFAULT_DQL_MAX_ROWS
+    assert result.applied_limit == MAX_DQL_RESULT_LIMIT

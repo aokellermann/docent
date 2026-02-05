@@ -35,6 +35,7 @@ function getSectionTitle(
     jobs: 'Jobs',
     chat: 'Chat',
     charts: 'Charts',
+    data_tables: 'Data Tables',
     agent_run: 'Agent Run',
   };
   return sectionMap[subpath] || null;

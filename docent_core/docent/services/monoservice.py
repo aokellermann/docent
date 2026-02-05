@@ -5,13 +5,10 @@ import json
 from collections import Counter
 from contextlib import asynccontextmanager
 from copy import deepcopy
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from time import perf_counter
 from typing import (
     Any,
     AsyncIterator,
-    Final,
     Iterator,
     Literal,
     ParamSpec,
@@ -39,9 +36,10 @@ from sqlalchemy import (
     tuple_,
     update,
 )
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import JSONB, aggregate_order_by
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, noload, selectinload
 from sqlalchemy.sql import FromClause, lateral, text
@@ -66,19 +64,7 @@ from docent_core._server._broker.redis_client import (
 )
 from docent_core._worker.constants import WorkerFunction, get_queue_name_for_job_type
 from docent_core.docent.db.contexts import TelemetryContext, ViewContext
-from docent_core.docent.db.dql import (
-    DQLExecutionError,
-    JsonFieldInfo,
-    QueryExpression,
-    SelectedColumn,
-    apply_limit_cap,
-    build_default_registry,
-    ensure_dql_collection_access,
-    extract_selected_columns,
-    get_query_limit_value,
-    parameterize_expression,
-    parse_dql_query,
-)
+from docent_core.docent.db.dql import JsonFieldInfo
 from docent_core.docent.db.filters import (
     CollectionFilter,
     ComplexFilter,
@@ -101,6 +87,7 @@ from docent_core.docent.db.schemas.auth_models import (
 )
 from docent_core.docent.db.schemas.chart import SQLAChart
 from docent_core.docent.db.schemas.chat import SQLAChatSession
+from docent_core.docent.db.schemas.data_table import SQLADataTable
 from docent_core.docent.db.schemas.label import SQLALabel, SQLALabelSet, SQLATag
 from docent_core.docent.db.schemas.refinement import SQLARefinementAgentSession
 from docent_core.docent.db.schemas.rubric import SQLAJudgeResult, SQLARubric
@@ -132,6 +119,7 @@ from docent_core.docent.db.schemas.tables import (
     SQLAView,
 )
 from docent_core.docent.exceptions import BadRequestError, ConflictError, NotFoundError
+from docent_core.docent.services.data_tables import DEFAULT_DATA_TABLE_DQL, DEFAULT_DATA_TABLE_NAME
 
 logger = get_logger(__name__)
 
@@ -140,8 +128,6 @@ T = TypeVar("T")
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
 EMPTY_TEXT_ARRAY = literal_column("'{}'::text[]")  # type: ignore[reportUnknownVariableType]
-MAX_DQL_RESULT_LIMIT: Final[int] = 100_000
-DEFAULT_DQL_MAX_ROWS: Final[int] = 10_000
 
 
 def _infer_filter_type_from_types(
@@ -234,6 +220,17 @@ def _pick_modal_value(values: Sequence[Any]) -> tuple[Any, int]:
     return representatives[modal_key], modal_count
 
 
+def _log_compiled_query(label: str, query: Any) -> None:
+    try:
+        compiled = query.compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    except Exception as exc:  # pragma: no cover - debug-only
+        logger.info("agent_run_table_sql label=%s error=%s", label, exc)
+        return
+    logger.info("agent_run_table_sql label=%s sql=%s", label, compiled)
+
+
 class _NotGiven:
     """Sentinel class for detecting when a parameter was not provided."""
 
@@ -242,19 +239,6 @@ class _NotGiven:
 
 
 NOT_GIVEN = _NotGiven()
-
-
-@dataclass(slots=True)
-class DQLQueryResult:
-    columns: tuple[str, ...]
-    rows: list[tuple[Any, ...]]
-    selected_columns: list[SelectedColumn]
-    truncated: bool
-    execution_time_ms: float
-    compiled_sql: str
-    requested_limit: int | None
-    applied_limit: int
-    row_count: int
 
 
 class MonoService:
@@ -496,6 +480,16 @@ class MonoService:
             session.add(
                 SQLACollection(
                     id=collection_id, name=name, description=description, created_by=user.id
+                )
+            )
+            session.add(
+                SQLADataTable(
+                    id=str(uuid4()),
+                    collection_id=collection_id,
+                    created_by=user.id,
+                    name=DEFAULT_DATA_TABLE_NAME,
+                    dql=DEFAULT_DATA_TABLE_DQL,
+                    state_json=None,
                 )
             )
 
@@ -799,6 +793,12 @@ class MonoService:
         # Delete charts
         async with self.db.session() as session:
             await session.execute(delete(SQLAChart).where(SQLAChart.collection_id == collection_id))
+
+        # Delete data tables
+        async with self.db.session() as session:
+            await session.execute(
+                delete(SQLADataTable).where(SQLADataTable.collection_id == collection_id)
+            )
 
         # Delete all refinement agent sessions for rubrics in this collection
         async with self.db.session() as session:
@@ -1312,111 +1312,10 @@ class MonoService:
             if limit is not None:
                 query = query.limit(limit)
 
+            _log_compiled_query("agent_run_ids", query)
             result = await session.execute(query)
             agent_run_ids = result.scalars().all()
             return list(agent_run_ids)
-
-    ########
-    # DQL  #
-    ########
-
-    async def execute_dql_query(
-        self,
-        *,
-        user: User,
-        collection_id: str,
-        dql: str,
-        json_fields: dict[str, list[JsonFieldInfo]] | None = None,
-        max_rows: int = DEFAULT_DQL_MAX_ROWS,
-    ) -> DQLQueryResult:
-        if max_rows > MAX_DQL_RESULT_LIMIT:
-            raise BadRequestError(
-                f"max_rows ({max_rows}) exceeds the maximum allowed limit ({MAX_DQL_RESULT_LIMIT})"
-            )
-
-        await ensure_dql_collection_access(
-            mono_service=self,
-            user=user,
-            collection_id=collection_id,
-        )
-
-        json_field_map = json_fields if json_fields is not None else {}
-        registry = build_default_registry(
-            collection_id=collection_id,
-            json_fields=json_field_map,
-        )
-        expression = parse_dql_query(
-            dql,
-            registry=registry,
-            collection_id=collection_id,
-        )
-        selected_columns = extract_selected_columns(expression)
-        query_expression = cast(QueryExpression, expression)
-        requested_limit = get_query_limit_value(query_expression)
-        server_cap = max_rows
-        applied_limit = server_cap if requested_limit is None else min(requested_limit, server_cap)
-
-        if requested_limit is None or requested_limit > server_cap:
-            fetch_limit = server_cap + 1
-        else:
-            fetch_limit = requested_limit + 1
-
-        apply_limit_cap(query_expression, fetch_limit)
-        compiled_sql = expression.sql(dialect="postgres", pretty=False)  # type: ignore[reportUnknownMemberType]
-        parameterized_sql, parameters = parameterize_expression(expression, "postgres")
-        statement = text(parameterized_sql)
-        logger.info(
-            "Executing DQL query for collection_id=%s user_id=%s fetch_limit=%s sql=%s params=%s",
-            collection_id,
-            user.id,
-            fetch_limit,
-            parameterized_sql,
-            parameters,
-        )
-
-        start_time = perf_counter()
-        async with self.db.dql_session(collection_id) as session:
-            try:
-                result = await session.execute(statement, parameters or {})
-            except SQLAlchemyError as exc:
-                message = str(getattr(exc, "orig", exc)).strip()
-                if not message:
-                    message = "Failed to execute query."
-                raise DQLExecutionError(message) from exc
-
-            columns = tuple(result.keys())
-            raw_rows = result.fetchall()
-            result.close()
-        execution_time_ms = (perf_counter() - start_time) * 1000.0
-
-        has_extra = len(raw_rows) == fetch_limit
-        if has_extra:
-            raw_rows = raw_rows[:-1]
-
-        rows = [tuple(row) for row in raw_rows]
-
-        row_count = len(rows)
-        truncated = has_extra
-        logger.debug(
-            "DQL query finished for collection_id=%s user_id=%s row_count=%s truncated=%s execution_time_ms=%.2f",
-            collection_id,
-            user.id,
-            row_count,
-            truncated,
-            execution_time_ms,
-        )
-
-        return DQLQueryResult(
-            columns=tuple(str(column) for column in columns),
-            rows=rows,
-            selected_columns=selected_columns,
-            truncated=truncated,
-            execution_time_ms=execution_time_ms,
-            compiled_sql=compiled_sql,
-            requested_limit=requested_limit,
-            applied_limit=applied_limit,
-            row_count=row_count,
-        )
 
     async def get_agent_runs(
         self,
@@ -1621,6 +1520,8 @@ class MonoService:
             batch_size = 10_000
             for i in range(0, len(agent_run_ids), batch_size):
                 batch_ids = agent_run_ids[i : i + batch_size]
+                batch_index = i // batch_size
+
                 query = select(SQLAAgentRun.id, SQLAAgentRun.metadata_json, SQLAAgentRun.created_at)
                 if apply_base_filter:
                     query = ctx.apply_base_filter(query)
@@ -1629,6 +1530,7 @@ class MonoService:
                 # TODO(mengk): use LIMIT and OFFSET instead of the IDs
                 query = query.where(SQLAAgentRun.id.in_(batch_ids))
 
+                _log_compiled_query(f"agent_run_metadata:{batch_index}", query)
                 result = await session.execute(query)
                 for run_id, metadata, created_at in result.all():
                     # Structure the response with metadata in a separate key
@@ -1658,6 +1560,7 @@ class MonoService:
                         )
                         .group_by(SQLATag.agent_run_id)
                     )
+                    _log_compiled_query(f"agent_run_metadata_tags:{batch_index}", tag_query)
                     tag_result = await session.execute(tag_query)
                     for run_id, tag_values in tag_result.all():
                         if not tag_values:
@@ -1671,6 +1574,10 @@ class MonoService:
                     label_query = select(SQLALabel.agent_run_id, SQLALabel.label_value).where(
                         SQLALabel.label_set_id == label_set_id,
                         SQLALabel.agent_run_id.in_(batch_ids),
+                    )
+                    _log_compiled_query(
+                        f"agent_run_metadata_labels:{label_set_id}:{batch_index}",
+                        label_query,
                     )
                     label_result = await session.execute(label_query)
                     for run_id, label_value in label_result.all():
@@ -1700,6 +1607,7 @@ class MonoService:
                             SQLAJudgeResult.rubric_version,
                         ).in_(rubric_pairs),
                     )
+                    _log_compiled_query(f"agent_run_metadata_rubric:{batch_index}", rubric_query)
                     rubric_result = await session.execute(rubric_query)
                     outputs_by_run: dict[tuple[str, str], list[dict[str, Any]]] = {}
                     for run_id, rubric_id, output in rubric_result.all():
