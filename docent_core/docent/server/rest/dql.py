@@ -16,6 +16,7 @@ from docent_core.docent.db.dql import (
     build_default_registry,
 )
 from docent_core.docent.db.schemas.auth_models import Permission
+from docent_core.docent.exceptions import BadRequestError
 from docent_core.docent.server.dependencies.database import get_mono_svc
 from docent_core.docent.server.dependencies.permissions import require_view_permission
 from docent_core.docent.server.dependencies.services import (
@@ -257,8 +258,15 @@ async def execute_dql_query(
             user=ctx.user,
             collection_id=collection_id,
             dql=request.dql,
+            max_rows=request.max_rows,
         )
-    except (DQLParseError, DQLValidationError, DQLExecutionError, ValueError) as exc:
+    except (
+        DQLParseError,
+        DQLValidationError,
+        DQLExecutionError,
+        BadRequestError,
+        ValueError,
+    ) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     registry = build_default_registry(

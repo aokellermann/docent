@@ -33,7 +33,8 @@ from docent_core.docent.db.schemas.tables import SQLAAgentRun, SQLATranscript
 
 logger = get_logger(__name__)
 
-MAX_DQL_RESULT_LIMIT: Final[int] = 10_000
+MAX_DQL_RESULT_LIMIT: Final[int] = 100_000
+DEFAULT_DQL_MAX_ROWS: Final[int] = 10_000
 
 
 @dataclass(slots=True)
@@ -120,6 +121,7 @@ class DQLService:
         dql: str,
         json_fields: Mapping[str, list[JsonFieldInfo]] | None = None,
         sample_limit: int | None = None,
+        max_rows: int = DEFAULT_DQL_MAX_ROWS,
     ) -> DQLQueryResult:
         """Execute a DQL query and return results.
 
@@ -127,8 +129,16 @@ class DQLService:
             sample_limit: When provided, overrides the normal limit calculation to fetch
                 only this many rows. Useful for type inference or schema sampling where
                 only a small sample is needed.
+            max_rows: Maximum number of rows to return. Defaults to 10,000. Cannot exceed
+                100,000.
         """
+        from docent_core.docent.exceptions import BadRequestError
         from docent_core.docent.services.monoservice import MonoService
+
+        if max_rows > MAX_DQL_RESULT_LIMIT:
+            raise BadRequestError(
+                f"max_rows ({max_rows}) exceeds the maximum allowed limit ({MAX_DQL_RESULT_LIMIT})"
+            )
 
         mono_service = MonoService(self.db)
         await ensure_dql_collection_access(
@@ -150,7 +160,7 @@ class DQLService:
         selected_columns = extract_selected_columns(expression)
         query_expression = cast(QueryExpression, expression)
         requested_limit = get_query_limit_value(query_expression)
-        server_cap = MAX_DQL_RESULT_LIMIT
+        server_cap = max_rows
 
         # When sample_limit is specified, use it directly for efficient sampling
         # Add 1 to maintain the "fetch extra to detect truncation" pattern
