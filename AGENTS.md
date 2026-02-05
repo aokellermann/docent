@@ -1,5 +1,23 @@
 # Docent Development Guidelines
 
+## Running the Development Server
+
+To run docent locally, activate the virtual environment and start the following services:
+
+```bash
+# Activate the virtual environment
+source .venv/bin/activate
+
+# Start the backend server
+docent_core server --port 8888 --reload
+
+# Start the web frontend (in a separate terminal)
+docent_core web --port 3000 --backend-url http://localhost:8888
+
+# Start the background worker (in a separate terminal)
+docent_core worker --workers 2 --queue all
+```
+
 ## Python
 
 If you are Codex, make sure you are running Python with the local `.venv/bin/python` interpreter. Furthermore, any Python-related modules you run must also be in that `bin` folder.
