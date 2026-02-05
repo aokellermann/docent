@@ -37,23 +37,29 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
 
         # Get the user from session_id
         if session_id := request.cookies.get(COOKIE_KEY):
-            # For testing, we override get_mono_svc with a version that uses the test db
-            mono_svc_factory = request.app.dependency_overrides.get(get_mono_svc, get_mono_svc)
-            mono_svc = await mono_svc_factory()
+            try:
+                # For testing, we override get_mono_svc with a version that uses the test db
+                mono_svc_factory = request.app.dependency_overrides.get(get_mono_svc, get_mono_svc)
+                mono_svc = await mono_svc_factory()
 
-            user = await mono_svc.get_user_by_session_id(session_id)
+                user = await mono_svc.get_user_by_session_id(session_id)
 
-            if user:
-                # Attach user information to request state
-                request.state.user = user
-                request.state.user_id = user.id
-                logger.debug(
-                    f"Authenticated user {user.id} ({user.email}) for {request.method} {request.url.path}"
+                if user:
+                    # Attach user information to request state
+                    request.state.user = user
+                    request.state.user_id = user.id
+                    logger.debug(
+                        f"Authenticated user {user.id} ({user.email}) for {request.method} {request.url.path}"
+                    )
+                else:
+                    logger.debug(
+                        f"Invalid or expired session {session_id} for {request.method} {request.url.path}"
+                    )
+            except Exception as e:
+                logger.error(
+                    f"Error authenticating session for {request.method} {request.url.path}: {e}"
                 )
-            else:
-                logger.debug(
-                    f"Invalid or expired session {session_id} for {request.method} {request.url.path}"
-                )
+                raise
 
         # Process request
         response = await call_next(request)

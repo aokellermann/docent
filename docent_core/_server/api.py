@@ -109,14 +109,16 @@ def _get_development_cors_config() -> dict[str, Any]:
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]):
-        # Log request details
+        # Only log /rest/me to reduce noise while debugging
+        if request.url.path != "/rest/me":
+            return await call_next(request)
+
         start_time = time.perf_counter()
         logger.highlight(f"Started {request.method} {request.url.path}")
 
         # Process the request
         response = await call_next(request)
 
-        # Log completion time
         process_time = time.perf_counter() - start_time
         logger.highlight(
             f"Completed {request.method} {request.url.path} in {process_time * 1000:.2f}ms"
@@ -173,7 +175,7 @@ async def user_facing_error_handler(request: Request, exc: UserFacingError):
 
 # Add middlewares in order (they are processed in reverse order when handling responses)
 # 1. Request logging middleware first
-# asgi_app.add_middleware(RequestLoggingMiddleware)
+asgi_app.add_middleware(RequestLoggingMiddleware)
 # 2. Session authentication middleware second (after logging, before CORS)
 asgi_app.add_middleware(SessionAuthMiddleware)  # type: ignore[arg-type]
 
