@@ -1,8 +1,8 @@
 'use client';
 
 import { CopyPlus, Loader2 } from 'lucide-react';
-import { useParams, useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useState, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { useCloneCollectionMutation } from '@/app/api/collectionApi';
 import { COLLECTIONS_DASHBOARD_PATH } from '@/app/constants';
@@ -42,20 +42,46 @@ export function CloneCollectionButton({
 }: CloneCollectionButtonProps) {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useUserContext();
   const collectionId = params.collection_id as string;
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [cloneName, setCloneName] = useState('');
   const [cloneDescription, setCloneDescription] = useState('');
+  const hasHandledCloneAction = useRef(false);
 
   const [cloneCollection, { isLoading }] = useCloneCollectionMutation();
 
+  // Auto-open clone dialog if user just signed up with action=clone
+  useEffect(() => {
+    if (hasHandledCloneAction.current) return;
+
+    const action = searchParams.get('action');
+    if (action === 'clone' && user && !user.is_anonymous) {
+      hasHandledCloneAction.current = true;
+
+      // Remove the action param from URL without triggering navigation
+      const url = new URL(window.location.href);
+      url.searchParams.delete('action');
+      window.history.replaceState({}, '', url.toString());
+
+      // Open the clone dialog
+      const defaultName = collectionName
+        ? `${collectionName} (Copy)`
+        : 'Cloned Collection';
+      setCloneName(defaultName);
+      setCloneDescription('');
+      setIsDialogOpen(true);
+    }
+  }, [searchParams, user, collectionName]);
+
   const handleButtonClick = () => {
-    // If user is not logged in, redirect to signup with return URL
+    // If user is not logged in, redirect to signup with return URL including clone action
     if (!user || user.is_anonymous) {
       const currentPath = window.location.pathname;
-      const signupUrl = `/signup?redirect=${encodeURIComponent(currentPath)}`;
+      const redirectUrl = `${currentPath}?action=clone`;
+      const signupUrl = `/signup?redirect=${encodeURIComponent(redirectUrl)}`;
       router.push(signupUrl);
       return;
     }
