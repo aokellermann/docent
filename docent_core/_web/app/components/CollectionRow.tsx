@@ -215,7 +215,9 @@ export default function CollectionRow({
         ) : (
           <span className="text-primary text-xs">
             {collection.name || (
-              <span className="italic text-secondary">Unnamed Collection</span>
+              <span className="italic text-muted-foreground">
+                Unnamed Collection
+              </span>
             )}
           </span>
         )}
