@@ -28,12 +28,14 @@ from pydantic_core import to_jsonable_python
 from sqlalchemy import select
 from sqlalchemy.inspection import inspect as sqla_inspect
 
+from docent._llm_util.providers.preference_types import ModelOption
 from docent._log_util.logger import get_logger
 from docent.data_models.agent_run import (
     AgentRun,
     AgentRunTree,
     FilterableFieldWithSamples,
 )
+from docent.data_models.chat.message import SystemMessage, UserMessage
 from docent.loaders import load_inspect
 from docent_core._env_util import ENV
 from docent_core._server._analytics.posthog import AnalyticsClient
@@ -74,11 +76,13 @@ from docent_core.docent.server.dependencies.permissions import (
     require_collection_permission,
     require_view_permission,
 )
+from docent_core.docent.server.dependencies.services import get_llm_svc
 from docent_core.docent.server.dependencies.user import (
     get_authenticated_user,
     get_default_view_ctx,
     get_user_anonymous_ok,
 )
+from docent_core.docent.services.llms import LLMService
 from docent_core.docent.services.monoservice import MonoService
 
 logger = get_logger(__name__)
@@ -953,6 +957,17 @@ class AgentRunCountResponse(BaseModel):
     count: int
 
 
+class TranslateMessageRequest(BaseModel):
+    text: str
+    target_language: str = "English"
+    source_language: str | None = None
+
+
+class TranslateMessageResponse(BaseModel):
+    translated_text: str
+    target_language: str
+
+
 @user_router.get("/{collection_id}/agent_run_ids")
 async def get_agent_run_ids(
     sort_field: str | None = None,
@@ -986,6 +1001,63 @@ async def get_agent_run_count(
 ) -> AgentRunCountResponse:
     count = await mono_svc.count_base_agent_runs(ctx)
     return AgentRunCountResponse(count=count)
+
+
+@user_router.post("/{collection_id}/translate_message", response_model=TranslateMessageResponse)
+async def translate_message(
+    request: TranslateMessageRequest,
+    llm_svc: LLMService = Depends(get_llm_svc),
+    ctx: ViewContext = Depends(get_default_view_ctx),
+    _: None = Depends(require_view_permission(Permission.READ)),
+) -> TranslateMessageResponse:
+    try:
+        text = request.text.strip()
+        target_language = request.target_language.strip()
+        if not text:
+            raise ValueError("text must be non-empty")
+        if not target_language:
+            raise ValueError("target_language must be non-empty")
+
+        source_hint = request.source_language.strip() if request.source_language else "auto-detect"
+        system_prompt = (
+            "You are a translation assistant. "
+            "Translate the user-provided text into the requested target language. "
+            "Return only the translated text. Do not add explanations, quotes, or metadata."
+        )
+        user_prompt = (
+            f"Source language: {source_hint}\n"
+            f"Target language: {target_language}\n\n"
+            "Text to translate:\n"
+            f"{text}"
+        )
+
+        outputs = await llm_svc.get_completions(
+            inputs=[[SystemMessage(content=system_prompt), UserMessage(content=user_prompt)]],
+            model_options=[
+                ModelOption(
+                    provider="openai",
+                    model_name="gpt-5-chat-latest",
+                )
+            ],
+            max_new_tokens=8192,
+            temperature=0.0,
+            use_cache=True,
+        )
+
+        result = outputs[0]
+        if result.did_error or result.first is None or not result.first.text:
+            raise ValueError("Translation failed.")
+
+        translated = result.first.text.strip()
+        if not translated:
+            raise ValueError("Translation failed. Empty output.")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return TranslateMessageResponse(
+        translated_text=translated,
+        target_language=target_language,
+    )
 
 
 class AgentRunMetadataRequest(BaseModel):

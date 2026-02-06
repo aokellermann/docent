@@ -31,6 +31,10 @@ class ModelInfo:
 # Note: some providers charge extra for long prompts/outputs. We don't account for this yet.
 _REGISTRY: list[tuple[str, ModelInfo]] = [
     (
+        "gpt-5-chat-latest",
+        ModelInfo(rate={"input": 1.25, "output": 10.0}, context_window=128_000),
+    ),
+    (
         "gpt-5-nano",
         ModelInfo(rate={"input": 0.05, "output": 0.40}, context_window=400_000),
     ),

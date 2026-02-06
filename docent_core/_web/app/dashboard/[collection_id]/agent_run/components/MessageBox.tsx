@@ -1,8 +1,9 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import jsonStringFormatter from 'json-string-formatter';
 import { ChatMessage, Content, ToolCall } from '@/app/types/transcriptTypes';
 import { cn } from '@/lib/utils';
 import { Comment } from '@/app/api/labelApi';
+import { useTranslateMessageMutation } from '@/app/api/collectionApi';
 import {
   CitationTarget,
   CitationTargetTextRange,
@@ -19,7 +20,13 @@ import { SegmentedText } from '@/lib/SegmentedText';
 import { MetadataPopover } from '@/components/metadata/MetadataPopover';
 import { MetadataBlock } from '@/components/metadata/MetadataBlock';
 import { useCitationNavigation } from '@/providers/CitationNavigationProvider';
-import { MessageSquarePlus } from 'lucide-react';
+import { Languages, MessageSquarePlus, X } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { MessageTelemetryDialog } from './MessageTelemetryDialog';
 
 function stringify(x: any): string {
@@ -150,6 +157,23 @@ const getRoleStyle = (role: string, isHighlighted: boolean) => {
   return `${colorClasses} ${transitionClasses}`;
 };
 
+const DEFAULT_TARGET_LANGUAGE = 'English';
+const TRANSLATION_LANGUAGE_OPTIONS = [
+  'English',
+  'Spanish',
+  'French',
+  'German',
+  'Portuguese',
+  'Italian',
+  'Japanese',
+  'Korean',
+  'Chinese (Simplified)',
+  'Chinese (Traditional)',
+  'Arabic',
+  'Hindi',
+  'Russian',
+];
+
 interface MessageBoxProps {
   message: ChatMessage;
   index: number;
@@ -205,6 +229,21 @@ export function MessageBox({
   const highlightedCitationId = selectedConversationCitation
     ? citationTargetToId(selectedConversationCitation)
     : null;
+  const [targetLanguage, setTargetLanguage] = useState(DEFAULT_TARGET_LANGUAGE);
+  const [translatedText, setTranslatedText] = useState<string | null>(null);
+  const [translationError, setTranslationError] = useState<string | null>(null);
+  const [
+    translateMessage,
+    { isLoading: isTranslating, reset: resetTranslation },
+  ] = useTranslateMessageMutation();
+  const translateRequestId = useRef(0);
+
+  const handleDismissTranslation = () => {
+    setTranslatedText(null);
+    setTranslationError(null);
+    resetTranslation();
+    translateRequestId.current++;
+  };
 
   // Helper function to detect and pretty-print JSON
   const prettyPrintJson = (text: string): string => {
@@ -521,6 +560,31 @@ export function MessageBox({
   const collectionId = dataContext.collection_id;
   const transcriptId = dataContext.transcript_id;
   const messageId = message.id;
+  const hasTranslatableText = mainTextContent.trim().length > 0;
+
+  const handleTranslateWithLanguage = async (language: string) => {
+    if (!hasTranslatableText) {
+      return;
+    }
+
+    const requestId = ++translateRequestId.current;
+    setTargetLanguage(language);
+    setTranslatedText(null);
+    setTranslationError(null);
+    try {
+      const result = await translateMessage({
+        collectionId,
+        text: mainTextContent,
+        target_language: language,
+        source_language: null,
+      }).unwrap();
+      if (requestId !== translateRequestId.current) return;
+      setTranslatedText(result.translated_text);
+    } catch {
+      if (requestId !== translateRequestId.current) return;
+      setTranslationError('Translation failed. Please try again.');
+    }
+  };
 
   const canShowTelemetryLink =
     collectionId.length > 0 &&
@@ -566,6 +630,27 @@ export function MessageBox({
             )}
           </span>
           <div className="flex items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-primary transition-colors"
+                  title="Translate message"
+                  disabled={isTranslating || !hasTranslatableText}
+                >
+                  <Languages className="h-3.5 w-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {TRANSLATION_LANGUAGE_OPTIONS.map((language) => (
+                  <DropdownMenuItem
+                    key={language}
+                    onClick={() => handleTranslateWithLanguage(language)}
+                  >
+                    {language}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
             {canShowTelemetryLink && (
               <MessageTelemetryDialog
                 collectionId={collectionId as string}
@@ -615,6 +700,34 @@ export function MessageBox({
           <div className="whitespace-pre-wrap [overflow-wrap:anywhere] max-w-full text-xs overflow-x-auto font-mono custom-scrollbar">
             {renderMainMessageContent()}
           </div>
+          {(isTranslating || translatedText || translationError) && (
+            <div className="mt-2 p-2 rounded border border-indigo-border bg-indigo-bg space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] text-indigo-text">
+                  Translation ({targetLanguage})
+                </div>
+                <button
+                  onClick={handleDismissTranslation}
+                  className="p-0.5 rounded hover:bg-indigo-muted text-indigo-text transition-colors"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+              {isTranslating && (
+                <div className="text-xs text-muted-foreground">
+                  Translating...
+                </div>
+              )}
+              {translationError && (
+                <div className="text-xs text-red-text">{translationError}</div>
+              )}
+              {translatedText && (
+                <div className="whitespace-pre-wrap [overflow-wrap:anywhere] text-xs font-mono text-primary">
+                  {translatedText}
+                </div>
+              )}
+            </div>
+          )}
           {renderToolInfo()}
           {renderToolCalls()}
         </span>

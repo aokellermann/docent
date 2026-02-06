@@ -62,6 +62,18 @@ interface AgentRunMetadataRequest {
   fields?: string[];
 }
 
+interface TranslateMessageRequest {
+  collectionId: string;
+  text: string;
+  target_language?: string;
+  source_language?: string | null;
+}
+
+interface TranslateMessageResponse {
+  translated_text: string;
+  target_language: string;
+}
+
 export interface AgentRunIngestJob {
   job_id: string;
   status: 'pending' | 'running' | 'completed' | 'canceled';
@@ -352,6 +364,16 @@ export const collectionApi = createApi({
         body: { messages, current_query, model },
       }),
     }),
+    translateMessage: build.mutation<
+      TranslateMessageResponse,
+      TranslateMessageRequest
+    >({
+      query: ({ collectionId, ...body }) => ({
+        url: `/${collectionId}/translate_message`,
+        method: 'POST',
+        body,
+      }),
+    }),
     previewImportRunsFromFile: build.mutation<
       {
         status: string;
@@ -459,6 +481,7 @@ export const {
   useGetDqlSchemaQuery,
   useExecuteDqlQueryMutation,
   useGenerateDqlMutation,
+  useTranslateMessageMutation,
   usePreviewImportRunsFromFileMutation,
   useImportRunsFromFileStreamQuery,
   useLazyImportRunsFromFileStreamQuery,
