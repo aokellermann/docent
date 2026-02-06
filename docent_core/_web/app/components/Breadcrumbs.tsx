@@ -307,9 +307,9 @@ const Breadcrumbs: React.FC = () => {
   return (
     <div className="flex flex-col w-full">
       {isReadOnly && !isReadOnlyBannerDismissed && (
-        <div className="flex items-center justify-between bg-indigo-bg border border-indigo-border rounded-lg px-4 py-3 mb-3 ml-1 shadow-sm">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center size-8 rounded-full bg-indigo-muted">
+        <div className="flex items-center justify-between bg-indigo-bg border border-indigo-border rounded-lg px-3 py-2 mb-3 ml-1 shadow-sm">
+          <div className="flex items-center gap-2">
+            <div className="flex items-center justify-center size-6 rounded-full bg-indigo-muted">
               <Eye className="size-4 text-indigo-text" />
             </div>
             <div className="flex flex-col">
@@ -327,11 +327,11 @@ const Breadcrumbs: React.FC = () => {
               size="sm"
               showLabel={true}
               collectionName={collectionName}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white h-8"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white h-7"
             />
             <button
               onClick={() => setIsReadOnlyBannerDismissed(true)}
-              className="p-1.5 rounded-md hover:bg-indigo-muted text-muted-foreground hover:text-primary transition-colors"
+              className="p-1 rounded-md hover:bg-indigo-muted text-muted-foreground hover:text-primary transition-colors"
               aria-label="Dismiss banner"
             >
               <X className="size-4" />
