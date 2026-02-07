@@ -369,6 +369,9 @@ ALLOWED_ANONYMOUS_FUNCTIONS: frozenset[str] = frozenset(
     {
         # JSONB construction
         "jsonb_build_object",
+        # Encoding conversion
+        "convert_to",
+        "convert_from",
     }
 )
 
