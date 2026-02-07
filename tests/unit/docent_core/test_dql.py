@@ -259,6 +259,22 @@ def test_count_without_argument_rewritten_to_literal_one() -> None:
     assert "*" not in clause.text
 
 
+def test_count_star_rewritten_to_literal_one() -> None:
+    """COUNT(*) is rewritten to COUNT(1) so agents can use it without triggering star rejection."""
+    registry = build_default_registry(collection_id=COLLECTION_ID)
+    clause = asyncio.run(
+        build_collection_sqla_query(
+            mono_service=DummyMonoService(True),  # type: ignore[arg-type]
+            user=TEST_USER,
+            collection_id=COLLECTION_ID,
+            dql="SELECT COUNT(*) FROM agent_runs",
+            registry=registry,
+        )
+    )
+    assert "COUNT((:__dql_param_1)::integer)" in clause.text
+    assert "*" not in clause.text
+
+
 def test_order_by_desc_unchanged_by_expression_sugar() -> None:
     registry = build_default_registry(collection_id=COLLECTION_ID)
     clause = asyncio.run(

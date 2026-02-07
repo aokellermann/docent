@@ -15,6 +15,7 @@ import {
 import {
   type DqlAutogenMessage,
   type DqlExecuteResponse,
+  type DqlExplorationResult,
   type DqlGenerateResponse,
 } from '@/app/types/dqlTypes';
 import type {
@@ -68,6 +69,21 @@ const DEFAULT_DQL_MODEL: ModelOption = {
   reasoning_effort: 'medium',
   context_window: 1000000,
   uses_byok: false,
+};
+
+const formatExplorationResults = (results: DqlExplorationResult[]): string => {
+  return results
+    .map((r) => {
+      if (r.error) {
+        return `- Query failed: \`${r.query}\``;
+      }
+      const samplePreview = r.sample_rows
+        .slice(0, 3)
+        .map((row) => row.map((v) => String(v)).join(', '))
+        .join('\n  ');
+      return `- \`${r.query}\`\n  Found: ${samplePreview}`;
+    })
+    .join('\n');
 };
 
 const DQL_MODEL_STORAGE_KEY_PREFIX = 'dql-assistant-model-';
@@ -262,7 +278,38 @@ export const DqlAutoGeneratorPanel = ({
   const createSuccessHandler = useCallback(
     (requestId: string, submittedQuery: string) =>
       (response: DqlGenerateResponse) => {
-        const assistantText = response.assistant_message?.trim() ?? '';
+        // Handle clarification phase - show question, no query update
+        if (
+          response.phase === 'clarification' &&
+          response.clarification_question
+        ) {
+          const assistantMessage: DqlAutogenMessage = {
+            role: 'assistant',
+            content: response.clarification_question,
+            query: '',
+          };
+          addResponse(assistantMessage, requestId);
+          onErrorUpdate(null);
+          return;
+        }
+
+        // Build assistant text, including exploration context if present
+        let assistantText = response.assistant_message?.trim() ?? '';
+        if (
+          response.phase === 'exploration' &&
+          response.exploration_results &&
+          response.exploration_results.length > 0
+        ) {
+          const explorationSummary = formatExplorationResults(
+            response.exploration_results
+          );
+          if (assistantText) {
+            assistantText = `${assistantText}\n\n**Explored data:**\n${explorationSummary}`;
+          } else {
+            assistantText = `Explored the data:\n${explorationSummary}`;
+          }
+        }
+
         const generatedQuery = response.dql?.trim();
 
         if (!generatedQuery) {

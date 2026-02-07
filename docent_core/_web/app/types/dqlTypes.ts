@@ -76,10 +76,24 @@ export interface DqlGenerateRequest {
   model: string | null;
 }
 
+export type DqlPhase = 'clarification' | 'exploration' | 'query';
+
+export interface DqlExplorationResult {
+  query: string;
+  columns: string[];
+  sample_rows: unknown[][];
+  error: string | null;
+}
+
 export interface DqlGenerateResponse {
   dql: string;
   assistant_message: string;
   execution: DqlExecuteResponse | null;
   error: string | null;
   used_tables: string[];
+  // Phase fields
+  phase: DqlPhase;
+  clarification_question?: string | null;
+  exploration_results?: DqlExplorationResult[] | null;
+  requires_user_response: boolean;
 }

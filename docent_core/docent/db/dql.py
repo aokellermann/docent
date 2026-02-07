@@ -37,6 +37,7 @@ from docent_core.docent.db.schemas.result_tables import SQLAResult, SQLAResultSe
 from docent_core.docent.db.schemas.rubric import (
     SQLAJudgeResult,
     SQLAJudgeResultCentroid,
+    SQLARubric,
     SQLARubricCentroid,
 )
 from docent_core.docent.db.schemas.tables import (
@@ -685,6 +686,12 @@ def build_default_registry(
         collection_predicate_factory=_judge_result_collection_predicate,
     )
     registry.register_table(
+        name=SQLARubric.__tablename__,
+        table=SQLARubric.__table__,
+        allowed_columns=_columns_for(SQLARubric.__table__),
+        collection_predicate_factory=_column_equals_collection("collection_id"),
+    )
+    registry.register_table(
         name=SQLALabel.__tablename__,
         table=SQLALabel.__table__,
         allowed_columns=_columns_for(SQLALabel.__table__),
@@ -883,10 +890,16 @@ def _apply_expression_sugar(expression: SqlGlotExpression) -> None:
     for count in expression.find_all(exp.Count):
         this_arg = count.args.get("this")
         expressions_arg = count.args.get("expressions")
+
+        # COUNT(*) is rewritten to COUNT(1) since '*' is forbidden in DQL.
+        if isinstance(this_arg, exp.Star):
+            count.set("this", exp.Literal.number(1))  # type: ignore[reportUnknownMemberType]
+            continue
+
+        # COUNT() with no argument is also rewritten to COUNT(1).
         has_argument = this_arg is not None or bool(expressions_arg)
         if has_argument:
             continue
-        # COUNT() is rewritten to COUNT(1) so users can avoid the '*' DQL forbids.
         count.set("this", exp.Literal.number(1))  # type: ignore[reportUnknownMemberType]
 
 

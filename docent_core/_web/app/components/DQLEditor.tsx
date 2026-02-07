@@ -1109,11 +1109,9 @@ const DQLEditor = ({
                 variant="ghost"
                 size="sm"
                 onClick={() => {
-                  setIsSchemaVisible((prev) => {
-                    const next = !prev;
-                    onSchemaVisibleChange?.(next);
-                    return next;
-                  });
+                  const next = !isSchemaVisible;
+                  setIsSchemaVisible(next);
+                  onSchemaVisibleChange?.(next);
                 }}
               >
                 {isSchemaVisible
@@ -1125,11 +1123,9 @@ const DQLEditor = ({
                 variant="ghost"
                 size="sm"
                 onClick={() => {
-                  setIsChatVisible((prev) => {
-                    const next = !prev;
-                    onChatVisibleChange?.(next);
-                    return next;
-                  });
+                  const next = !isChatVisible;
+                  setIsChatVisible(next);
+                  onChatVisibleChange?.(next);
                 }}
               >
                 <MessageSquare className="h-4 w-4 mr-1" />

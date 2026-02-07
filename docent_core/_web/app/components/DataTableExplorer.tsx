@@ -142,6 +142,9 @@ export default function DataTableExplorer({
     [localNames]
   );
 
+  // Track table ID we're navigating to via push (distinguishes our navigation from back/forward)
+  const navigatingToRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!dataTables.length) {
       setActiveId(null);
@@ -150,15 +153,17 @@ export default function DataTableExplorer({
       setLocalNames({});
       return;
     }
+    // Don't reset activeId if we're in the middle of navigating to a new table
+    // (the table might not be in dataTables yet during refetch)
+    if (navigatingToRef.current === activeId) {
+      return;
+    }
     if (!activeId || !dataTables.some((table) => table.id === activeId)) {
       const fallback = sortedTables[0] ?? dataTables[0];
       setActiveId(fallback.id);
       setEditingTitleId(null);
     }
   }, [activeId, dataTables, sortedTables]);
-
-  // Track table ID we're navigating to via push (distinguishes our navigation from back/forward)
-  const navigatingToRef = useRef<string | null>(null);
   // Use ref for activeId so URL sync effect only runs when urlTableId changes
   const activeIdRef = useRef(activeId);
   activeIdRef.current = activeId;
@@ -252,11 +257,24 @@ export default function DataTableExplorer({
     [activeTable?.state]
   );
 
+  // Use refs to access values in auto-save effect without them being dependencies
+  // This prevents object reference changes from triggering saves
+  const draftStateRef = useRef(draftState);
+  draftStateRef.current = draftState;
+
+  const activeTableRef = useRef(activeTable);
+  activeTableRef.current = activeTable;
+
+  // Track the last saved state signature to compare against instead of server state
+  // This prevents loops when the server merges state with existing fields
+  const lastSavedStateSignatureRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (!activeTable || !collectionId || !canEdit) {
+    const table = activeTableRef.current;
+    if (!table || !collectionId || !canEdit) {
       return;
     }
-    if (draftTableId !== activeTable.id) {
+    if (draftTableId !== table.id) {
       return;
     }
     if (
@@ -269,17 +287,23 @@ export default function DataTableExplorer({
     if (!trimmedDql) {
       return;
     }
-    if (
-      trimmedDql === activeTable.dql &&
-      debouncedStateSignature === activeStateSignature
-    ) {
+    // Skip if nothing changed from what we last saved or from server
+    const matchesLastSave =
+      lastSavedStateSignatureRef.current === debouncedStateSignature;
+    const matchesServer =
+      trimmedDql === table.dql &&
+      debouncedStateSignature === activeStateSignature;
+    if (matchesLastSave || matchesServer) {
       return;
     }
     // Omit chatState to avoid overwriting chat updates from useDqlChat
-    const { chatState: _chatState, ...stateWithoutChat } = draftState;
+    const { chatState: _chatState, ...stateWithoutChat } =
+      draftStateRef.current;
+    // Track what we're saving so we don't re-save the same thing
+    lastSavedStateSignatureRef.current = debouncedStateSignature;
     updateDataTable({
       collectionId,
-      dataTableId: activeTable.id,
+      dataTableId: table.id,
       dql: trimmedDql,
       state: stateWithoutChat,
     })
@@ -287,15 +311,15 @@ export default function DataTableExplorer({
       .catch((error) => {
         console.error('Failed to save data table', error);
         toast.error('Unable to save data table changes.');
+        // Reset on error so we can retry
+        lastSavedStateSignatureRef.current = null;
       });
   }, [
-    activeTable,
     collectionId,
     canEdit,
     debouncedDql,
     debouncedStateSignature,
     activeStateSignature,
-    draftState,
     draftTableId,
     draftDql,
     stateSignature,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -29,6 +30,7 @@ from docent_core.docent.services.dql import DQLQueryResult, DQLService
 from docent_core.docent.services.dql_generator import (
     DQLGeneratorMessage,
     DQLGeneratorService,
+    DQLPhase,
     RubricSchemaInfo,
 )
 from docent_core.docent.services.monoservice import MonoService
@@ -298,6 +300,23 @@ class DQLGenerateRequest(BaseModel):
     model: str | None = None
 
 
+class DQLPhaseEnum(str, Enum):
+    """Phase of the DQL generation workflow."""
+
+    CLARIFICATION = "clarification"
+    EXPLORATION = "exploration"
+    QUERY = "query"
+
+
+class DQLExplorationResultModel(BaseModel):
+    """Result from an exploratory query."""
+
+    query: str
+    columns: list[str]
+    sample_rows: list[list[Any]]
+    error: str | None = None
+
+
 class DQLGenerateResponse(BaseModel):
     """Response from DQL generation."""
 
@@ -306,6 +325,11 @@ class DQLGenerateResponse(BaseModel):
     execution: DQLExecuteResponse | None = None
     error: str | None = None
     used_tables: list[str] = Field(default_factory=list)
+    # Phase fields
+    phase: DQLPhaseEnum = DQLPhaseEnum.QUERY
+    clarification_question: str | None = None
+    exploration_results: list[DQLExplorationResultModel] | None = None
+    requires_user_response: bool = False
 
 
 def _parse_model_option(model_str: str | None) -> ModelOption | None:
@@ -391,10 +415,34 @@ async def generate_dql_query(
         link_hints = _convert_service_link_hints_to_response(service_link_hints)
         execution_response = _build_execute_response(outcome.execution_result, link_hints)
 
+    # Convert exploration results if present
+    exploration_results: list[DQLExplorationResultModel] | None = None
+    if outcome.exploration_results:
+        exploration_results = [
+            DQLExplorationResultModel(
+                query=r.query,
+                columns=list(r.columns),
+                sample_rows=[list(row) for row in r.sample_rows],
+                error=r.error,
+            )
+            for r in outcome.exploration_results
+        ]
+
+    # Map DQLPhase to DQLPhaseEnum
+    phase_map = {
+        DQLPhase.CLARIFICATION: DQLPhaseEnum.CLARIFICATION,
+        DQLPhase.EXPLORATION: DQLPhaseEnum.EXPLORATION,
+        DQLPhase.QUERY: DQLPhaseEnum.QUERY,
+    }
+
     return DQLGenerateResponse(
         dql=outcome.query,
         assistant_message=outcome.assistant_message,
         execution=execution_response,
         error=outcome.execution_error,
         used_tables=outcome.used_tables,
+        phase=phase_map.get(outcome.phase, DQLPhaseEnum.QUERY),
+        clarification_question=outcome.clarification_question,
+        exploration_results=exploration_results,
+        requires_user_response=outcome.requires_user_response,
     )

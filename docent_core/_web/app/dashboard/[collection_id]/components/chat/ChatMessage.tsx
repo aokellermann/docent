@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, Copy, FileCode2 } from 'lucide-react';
+import { Check, Copy, FileCode2, X } from 'lucide-react';
 
 import { cn, copyToClipboard } from '@/lib/utils';
 import Markdown from './Markdown';
@@ -122,6 +122,18 @@ function DiffViewer({
               {tab}
             </Button>
           ))}
+          <Button
+            variant="ghost"
+            size="sm"
+            className={cn(
+              'h-6 w-6 p-0 text-muted-foreground hover:text-foreground',
+              !activeTab && 'invisible'
+            )}
+            onClick={() => setActiveTab(null)}
+            title="Close"
+          >
+            <X className="h-3.5 w-3.5" />
+          </Button>
         </div>
       </div>
 
