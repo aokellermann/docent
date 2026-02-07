@@ -972,6 +972,21 @@ class TranslateMessageResponse(BaseModel):
 async def get_agent_run_ids(
     sort_field: str | None = None,
     sort_direction: Literal["asc", "desc"] = "asc",
+    mono_svc: MonoService = Depends(get_mono_svc),
+    ctx: ViewContext = Depends(get_default_view_ctx),
+    _: None = Depends(require_view_permission(Permission.READ)),
+) -> list[str]:
+    return await mono_svc.get_agent_run_ids(
+        ctx,
+        sort_field=sort_field,
+        sort_direction=sort_direction,
+    )
+
+
+@user_router.get("/{collection_id}/agent_run_ids_paginated")
+async def get_agent_run_ids_paginated(
+    sort_field: str | None = None,
+    sort_direction: Literal["asc", "desc"] = "asc",
     limit: int = Query(default=2000, le=50000),
     offset: int = Query(default=0, ge=0),
     mono_svc: MonoService = Depends(get_mono_svc),

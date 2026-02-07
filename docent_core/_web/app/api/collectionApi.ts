@@ -222,7 +222,7 @@ export const collectionApi = createApi({
         'AgentRunMetadataRange',
       ],
     }),
-    getAgentRunIds: build.query<
+    getAgentRunIdsPaginated: build.query<
       AgentRunIdsResponse,
       {
         collectionId: string;
@@ -244,7 +244,7 @@ export const collectionApi = createApi({
         if (sortDirection) params.append('sort_direction', sortDirection);
         params.append('limit', String(limit));
         params.append('offset', String(offset));
-        return `/${collectionId}/agent_run_ids?${params}`;
+        return `/${collectionId}/agent_run_ids_paginated?${params}`;
       },
       providesTags: ['AgentRunIds'],
     }),
@@ -474,7 +474,7 @@ export const {
   useGetAgentRunSortableFieldsQuery,
   useGetFieldValuesQuery,
   useGetAgentRunMetadataQuery,
-  useGetAgentRunIdsQuery,
+  useGetAgentRunIdsPaginatedQuery,
   useGetAgentRunCountQuery,
   useGetAgentRunIngestJobsQuery,
   useGetAgentRunIngestJobQuery,

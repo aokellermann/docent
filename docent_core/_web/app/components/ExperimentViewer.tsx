@@ -431,7 +431,8 @@ export default function ExperimentViewer({
 
   const [fetchAgentRunMetadata] =
     collectionApi.useLazyGetAgentRunMetadataQuery();
-  const [fetchAgentRunIds] = collectionApi.useLazyGetAgentRunIdsQuery();
+  const [fetchAgentRunIds] =
+    collectionApi.useLazyGetAgentRunIdsPaginatedQuery();
   const [postBaseFilter] = collectionApi.usePostBaseFilterMutation();
   const baseFilterRequestIdRef = useRef(0);
   const activeBaseFilterRequestRef = useRef<{
