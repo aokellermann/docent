@@ -16,11 +16,11 @@ from pathlib import Path
 from docent.data_models.agent_run import AgentRun
 from docent.sdk.client import Docent
 
-COLLECTION_ID = "d6af555c-2d2c-4ff9-a506-941656a77001"
-OUTPUT_PATH = Path("collection_d6af555c_agent_runs_gitignore.json")
+COLLECTION_ID = "1094e0bf-5e7a-4448-9e35-55f60a8d7243"
+OUTPUT_PATH = Path("collection_agent_runs_gitignore.json")
 
 #%%
-client = Docent()
+client = Docent(server_url="http://localhost:8901")
 agent_run_ids = client.list_agent_run_ids(COLLECTION_ID)
 print(f"Found {len(agent_run_ids)} agent runs in collection {COLLECTION_ID}")
 
