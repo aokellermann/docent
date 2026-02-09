@@ -39,11 +39,8 @@ export async function register() {
   }
 }
 
-// Note: onRequestError requires Next.js 15+. This project uses Next.js 14,
-// so this hook will not be called. Server-side error logging is handled via:
-// 1. Sentry's beforeSend hook in sentry.server.config.ts
-// 2. Process-level handlers above for uncaught exceptions
-// 3. withSentryConfig in next.config.mjs for auto-instrumentation
+// onRequestError is called by Next.js when server-side errors occur during
+// rendering, route handling, server actions, or middleware execution.
 export const onRequestError = (
   ...args: Parameters<typeof Sentry.captureRequestError>
 ) => {

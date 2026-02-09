@@ -26,19 +26,32 @@ export async function getUser(): Promise<User | null> {
     return null;
   }
 
-  const response = await fetch(`${INTERNAL_BASE_URL}/rest/me`, {
-    headers: {
-      Cookie: `${COOKIE_KEY}=${sessionCookie.value}`,
-      'Content-Type': 'application/json',
-    },
-    cache: 'no-store', // Always get fresh auth data
-    // Add timeout to prevent hanging requests
-    signal: AbortSignal.timeout(9000), // 9 second timeout
-  });
-  if (!response.ok) {
+  try {
+    const response = await fetch(`${INTERNAL_BASE_URL}/rest/me`, {
+      headers: {
+        Cookie: `${COOKIE_KEY}=${sessionCookie.value}`,
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store', // Always get fresh auth data
+      // Add timeout to prevent hanging requests
+      signal: AbortSignal.timeout(9000), // 9 second timeout
+    });
+    if (!response.ok) {
+      return null;
+    }
+
+    const user = await response.json();
+    return user;
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.error(
+      '[getUser]',
+      JSON.stringify({
+        message: err.message,
+        name: err.name,
+        stack: err.stack,
+      })
+    );
     return null;
   }
-
-  const user = await response.json();
-  return user;
 }

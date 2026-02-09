@@ -14,38 +14,52 @@ export async function middleware(request: NextRequest) {
       /^\/dashboard\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(\/.*)?$/i
     );
     if (isCollectionRoute) {
-      // Create an anonymous session
-      const anonResponse = await fetch(
-        `${INTERNAL_BASE_URL}/rest/anonymous_session`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
+      try {
+        // Create an anonymous session
+        const anonResponse = await fetch(
+          `${INTERNAL_BASE_URL}/rest/anonymous_session`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            signal: AbortSignal.timeout(9000),
+          }
+        );
+        const anonData = await anonResponse.json();
+        user = anonData.user; // Extract user from new response format
+
+        // Get the set-cookie header from the anonymous session response
+        const setCookie = anonResponse.headers.get('set-cookie');
+
+        // Create a new response with the cookie and user data in *request* headers
+        // This is necessary for the server-side auth check in layout.tsx to work
+        const response = NextResponse.next({
+          request: {
+            headers: new Headers({
+              ...request.headers,
+              'x-middleware-user': JSON.stringify(user),
+              'x-middleware-cookies': setCookie || '',
+            }),
           },
-        }
-      );
-      const anonData = await anonResponse.json();
-      user = anonData.user; // Extract user from new response format
+        });
 
-      // Get the set-cookie header from the anonymous session response
-      const setCookie = anonResponse.headers.get('set-cookie');
+        // Also set the *response* headers so the cookie is sent to the client
+        if (setCookie) response.headers.set('set-cookie', setCookie);
 
-      // Create a new response with the cookie and user data in *request* headers
-      // This is necessary for the server-side auth check in layout.tsx to work
-      const response = NextResponse.next({
-        request: {
-          headers: new Headers({
-            ...request.headers,
-            'x-middleware-user': JSON.stringify(user),
-            'x-middleware-cookies': setCookie || '',
-          }),
-        },
-      });
-
-      // Also set the *response* headers so the cookie is sent to the client
-      if (setCookie) response.headers.set('set-cookie', setCookie);
-
-      return response;
+        return response;
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        console.error(
+          '[middleware]',
+          JSON.stringify({
+            message: err.message,
+            name: err.name,
+            path: pathname,
+            stack: err.stack,
+          })
+        );
+      }
     }
   }
 
