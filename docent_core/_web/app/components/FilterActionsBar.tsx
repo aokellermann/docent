@@ -39,8 +39,8 @@ export function FilterActionsBar({
           hasActiveFilter ? 'Save current filters' : 'Add filters to save them'
         }
       >
-        <Save className="h-3.5 w-3.5" />
-        Save
+        <Save className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="text-muted-foreground">Save</span>
       </Button>
 
       {currentFilter && (

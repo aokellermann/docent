@@ -129,9 +129,9 @@ export function SavedFiltersDropdown({
           className="h-7 text-xs gap-1"
           disabled={isLoading}
         >
-          <Bookmark className="h-3.5 w-3.5" />
-          Saved
-          <ChevronDown className="h-3 w-3" />
+          <Bookmark className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-muted-foreground">Saved</span>
+          <ChevronDown className="h-3 w-3 text-muted-foreground" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent

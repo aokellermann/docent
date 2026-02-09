@@ -62,7 +62,7 @@ export function SaveFilterDialog({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey && name.trim()) {
+    if (e.key === 'Enter' && !e.shiftKey && name.trim() && !isLoading) {
       e.preventDefault();
       handleSave();
     }
