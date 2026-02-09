@@ -1,5 +1,5 @@
 #!/bin/bash
-# Syncs the docent plugin from agent-tools to the claude-code-plugins-internal marketplace repository
+# Syncs the docent plugin from agent-tools to both claude-code-plugins repositories
 #
 # The docent plugin contains two skills:
 #   - analysis: Analyzing agent behavior with Docent (SKILL.md lives at agent-tools/SKILL.md)
@@ -16,14 +16,13 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCENT_PLATFORM_ROOT="$(dirname "$SCRIPT_DIR")"
-PLUGINS_REPO="${DOCENT_PLATFORM_ROOT}/../claude-code-plugins-internal"
+PLUGINS_REPO_INTERNAL="${DOCENT_PLATFORM_ROOT}/../claude-code-plugins-internal"
+PLUGINS_REPO_PUBLIC="${DOCENT_PLATFORM_ROOT}/../claude-code-plugins"
 
 SOURCE_PLUGIN="${DOCENT_PLATFORM_ROOT}/agent-tools/docent"
-TARGET_PLUGIN="${PLUGINS_REPO}/plugins/docent"
 
 # The analysis skill SKILL.md lives at the root of agent-tools
 ANALYSIS_SKILL_SOURCE="${DOCENT_PLATFORM_ROOT}/agent-tools/SKILL.md"
-ANALYSIS_SKILL_TARGET="${TARGET_PLUGIN}/skills/analysis/SKILL.md"
 
 # Parse arguments
 DO_COMMIT=false
@@ -47,8 +46,13 @@ if [ ! -d "$SOURCE_PLUGIN" ]; then
     exit 1
 fi
 
-if [ ! -d "$PLUGINS_REPO" ]; then
-    echo "Error: Plugins repository not found at $PLUGINS_REPO"
+if [ ! -d "$PLUGINS_REPO_INTERNAL" ]; then
+    echo "Error: Internal plugins repository not found at $PLUGINS_REPO_INTERNAL"
+    exit 1
+fi
+
+if [ ! -d "$PLUGINS_REPO_PUBLIC" ]; then
+    echo "Error: Public plugins repository not found at $PLUGINS_REPO_PUBLIC"
     exit 1
 fi
 
@@ -57,33 +61,47 @@ if [ ! -f "$ANALYSIS_SKILL_SOURCE" ]; then
     exit 1
 fi
 
-echo "Syncing docent plugin to marketplace..."
-echo "  Source: $SOURCE_PLUGIN"
-echo "  Target: $TARGET_PLUGIN"
+# Function to sync to a target repository
+sync_to_repo() {
+    local plugins_repo="$1"
+    local target_plugin="${plugins_repo}/plugins/docent"
+    local analysis_skill_target="${target_plugin}/skills/analysis/SKILL.md"
 
-# Create target directory structure
-mkdir -p "$TARGET_PLUGIN"
+    echo "Syncing docent plugin to ${plugins_repo}..."
+    echo "  Source: $SOURCE_PLUGIN"
+    echo "  Target: $target_plugin"
 
-# Sync the plugin files using rsync
-# --delete ensures removed files are also removed in target
-rsync -av --delete \
-    --exclude='.DS_Store' \
-    "$SOURCE_PLUGIN/" "$TARGET_PLUGIN/"
+    # Create target directory structure
+    mkdir -p "$target_plugin"
 
-# Copy the analysis skill SKILL.md from agent-tools root
-echo "Copying analysis SKILL.md..."
-mkdir -p "$(dirname "$ANALYSIS_SKILL_TARGET")"
-cp "$ANALYSIS_SKILL_SOURCE" "$ANALYSIS_SKILL_TARGET"
+    # Sync the plugin files using rsync
+    # --delete ensures removed files are also removed in target
+    rsync -av --delete \
+        --exclude='.DS_Store' \
+        "$SOURCE_PLUGIN/" "$target_plugin/"
+
+    # Copy the analysis skill SKILL.md from agent-tools root
+    echo "Copying analysis SKILL.md..."
+    mkdir -p "$(dirname "$analysis_skill_target")"
+    cp "$ANALYSIS_SKILL_SOURCE" "$analysis_skill_target"
+}
+
+# Sync to both repositories
+sync_to_repo "$PLUGINS_REPO_INTERNAL"
+sync_to_repo "$PLUGINS_REPO_PUBLIC"
 
 echo "Sync complete!"
 
-# Git operations
-if [ "$DO_COMMIT" = true ]; then
-    cd "$PLUGINS_REPO"
+# Function to commit changes in a repository
+commit_repo() {
+    local plugins_repo="$1"
+    local repo_name="$2"
+
+    cd "$plugins_repo"
 
     # Check if there are changes
     if git diff --quiet && git diff --cached --quiet; then
-        echo "No changes to commit."
+        echo "No changes to commit in $repo_name."
     else
         git add -A
 
@@ -98,13 +116,19 @@ Skills included:
 
 Source commit: $SOURCE_COMMIT"
 
-        echo "Created commit in plugins repository."
+        echo "Created commit in $repo_name."
 
         if [ "$DO_PUSH" = true ]; then
             git push origin
-            echo "Pushed to origin."
+            echo "Pushed $repo_name to origin."
         fi
     fi
+}
+
+# Git operations
+if [ "$DO_COMMIT" = true ]; then
+    commit_repo "$PLUGINS_REPO_INTERNAL" "claude-code-plugins-internal"
+    commit_repo "$PLUGINS_REPO_PUBLIC" "claude-code-plugins"
 fi
 
 echo "Done!"
