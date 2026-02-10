@@ -55,6 +55,8 @@ OPENAI_API_KEY=... DOCENT_API_KEY=... DOCENT_DOMAIN=docent-bridgewater.transluce
   --cross-entropy-epsilon 1e-2
 ```
 
+If you want to try this on a different collection or rubric, create a new rubric using the same initial description, then swap the `<rubric_id>` in the command above to that new rubric ID (and update `<collection_id>` as needed).
+
 ## Arguments
 
 ### Positional
