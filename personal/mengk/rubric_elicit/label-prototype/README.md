@@ -29,6 +29,7 @@ uv pip install docent-python pydantic rich beaupy
 
 ## Required Environment Variables
 
+- `OPENAI_API_KEY`: Required for model calls used by the label elicitation pipeline.
 - `DOCENT_API_KEY`: API key used by `Docent(...)`
 - `DOCENT_DOMAIN`: Docent domain
 
