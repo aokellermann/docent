@@ -253,6 +253,28 @@ class Docent:
 
             raise requests.HTTPError(f"HTTP {response.status_code}: {detail}", response=response)
 
+    def _post_with_retry(
+        self,
+        url: str,
+        max_retries: int = 3,
+        backoff_factor: float = 1.0,
+        **kwargs: Any,
+    ) -> requests.Response:
+        """POST with retries on 5xx errors."""
+        last_response: requests.Response | None = None
+        for attempt in range(max_retries + 1):
+            last_response = self._session.post(url, **kwargs)
+            if last_response.status_code < 500 or attempt == max_retries:
+                return last_response
+            wait = backoff_factor * (2**attempt)
+            self._logger.warning(
+                f"Server error {last_response.status_code} on POST {url}, "
+                f"retrying in {wait:.1f}s (attempt {attempt + 1}/{max_retries})"
+            )
+            time.sleep(wait)
+        assert last_response is not None
+        return last_response
+
     def _login(self, api_key: str):
         """Login with email/password to establish session."""
         self._session.headers.update({"Authorization": f"Bearer {api_key}"})
@@ -405,7 +427,7 @@ class Docent:
                 else:
                     raise ValueError(f"Unsupported compression '{compression}'")
 
-                response = self._session.post(url, **request_kwargs)
+                response = self._post_with_retry(url, **request_kwargs)
                 self._handle_response_errors(response)
 
                 # Server returns 202 with job_id for async processing
