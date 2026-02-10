@@ -120,6 +120,7 @@ from docent_core.docent.db.schemas.tables import (
 )
 from docent_core.docent.exceptions import BadRequestError, ConflictError, NotFoundError
 from docent_core.docent.services.data_tables import DEFAULT_DATA_TABLE_DQL, DEFAULT_DATA_TABLE_NAME
+from docent_core.docent.services.telemetry_accumulation import deep_merge_dicts
 
 logger = get_logger(__name__)
 
@@ -1043,6 +1044,126 @@ class MonoService:
         )
 
         return deleted_count
+
+    async def update_agent_run_metadata(
+        self,
+        collection_id: str,
+        agent_run_id: str,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Merge the provided metadata into an agent run's existing metadata.
+
+        Uses the same deep-merge strategy as tracing: nested dicts are merged
+        recursively so existing keys are preserved, while non-dict values are
+        overwritten.
+
+        Returns the full merged metadata dict.
+        """
+        async with self.db.session() as session:
+            row = (
+                await session.execute(
+                    select(SQLAAgentRun.metadata_json)
+                    .where(
+                        SQLAAgentRun.id == agent_run_id,
+                        SQLAAgentRun.collection_id == collection_id,
+                    )
+                    .with_for_update()
+                )
+            ).one_or_none()
+
+            if row is None:
+                raise NotFoundError(
+                    f"Agent run {agent_run_id} not found in collection {collection_id}"
+                )
+
+            existing: dict[str, Any] = row[0] or {}
+            deep_merge_dicts(existing, metadata)
+            merged = existing
+
+            await session.execute(
+                update(SQLAAgentRun)
+                .where(
+                    SQLAAgentRun.id == agent_run_id,
+                    SQLAAgentRun.collection_id == collection_id,
+                )
+                .values(metadata_json=merged)
+            )
+            await session.commit()
+
+        logger.info(f"Updated metadata for agent run {agent_run_id} in collection {collection_id}")
+        return merged
+
+    async def delete_agent_run_metadata_keys(
+        self,
+        collection_id: str,
+        agent_run_id: str,
+        keys: list[str],
+    ) -> tuple[dict[str, Any], list[str]]:
+        """Remove keys from an agent run's metadata.
+
+        Supports dot-delimited paths for nested deletion (e.g.
+        ``"experimental_config.baseline_forecast"`` removes just that nested
+        key).  Plain keys delete at the top level.
+
+        Returns a tuple of (metadata after deletion, keys that were not found).
+        """
+        if not keys:
+            raise BadRequestError("keys must not be empty")
+
+        async with self.db.session() as session:
+            row = (
+                await session.execute(
+                    select(SQLAAgentRun.metadata_json)
+                    .where(
+                        SQLAAgentRun.id == agent_run_id,
+                        SQLAAgentRun.collection_id == collection_id,
+                    )
+                    .with_for_update()
+                )
+            ).one_or_none()
+
+            if row is None:
+                raise NotFoundError(
+                    f"Agent run {agent_run_id} not found in collection {collection_id}"
+                )
+
+            existing: dict[str, Any] = row[0] or {}
+            not_found: list[str] = []
+
+            for key in keys:
+                parts = key.split(".")
+                target: dict[str, Any] = existing
+                found = True
+                for part in parts[:-1]:
+                    nested = target.get(part)
+                    if not isinstance(nested, dict):
+                        found = False
+                        break
+                    target = nested
+                else:
+                    if parts[-1] not in target:
+                        found = False
+
+                if found:
+                    target.pop(parts[-1], None)
+                else:
+                    not_found.append(key)
+
+            await session.execute(
+                update(SQLAAgentRun)
+                .where(
+                    SQLAAgentRun.id == agent_run_id,
+                    SQLAAgentRun.collection_id == collection_id,
+                )
+                .values(metadata_json=existing)
+            )
+            await session.commit()
+
+        logger.info(
+            f"Deleted metadata keys {keys} from agent run {agent_run_id} "
+            f"in collection {collection_id} (not found: {not_found})"
+        )
+        return existing, not_found
 
     async def move_agent_run(
         self,

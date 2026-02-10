@@ -1105,6 +1105,71 @@ class Docent:
             # TODO(mengk): kinda hacky
             return AgentRun.model_validate(response.json())
 
+    def update_agent_run_metadata(
+        self,
+        collection_id: str,
+        agent_run_id: str,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Merge metadata into an agent run's existing metadata.
+
+        Uses a deep merge: nested dictionaries are merged recursively so
+        existing keys are preserved, while non-dict values are overwritten.
+        Keys not present in ``metadata`` are left unchanged.
+
+        Requires WRITE permission on the collection.
+
+        Args:
+            collection_id: ID of the Collection containing the agent run.
+            agent_run_id: ID of the agent run to update.
+            metadata: Dictionary of metadata fields to merge.
+
+        Returns:
+            The full merged metadata dictionary after the update.
+
+        Raises:
+            requests.exceptions.HTTPError: If the API request fails (e.g., 404 if the agent run is not found).
+        """
+        url = f"{self._server_url}/{collection_id}/agent_run/{agent_run_id}/metadata"
+        response = self._session.put(url, json={"metadata": metadata})
+        self._handle_response_errors(response)
+        data: dict[str, Any] = response.json()
+        return data
+
+    def delete_agent_run_metadata_keys(
+        self,
+        collection_id: str,
+        agent_run_id: str,
+        keys: list[str],
+    ) -> tuple[dict[str, Any], list[str]]:
+        """Remove keys from an agent run's metadata.
+
+        Supports dot-delimited paths for nested deletion. For example,
+        ``"config.model"`` removes the ``model`` key inside ``config``
+        without affecting other keys in that dict.
+
+        Requires WRITE permission on the collection.
+
+        Args:
+            collection_id: ID of the Collection containing the agent run.
+            agent_run_id: ID of the agent run to modify.
+            keys: Metadata keys to remove. Use dot-delimited paths for nested
+                keys (e.g. ``["top_level_key", "nested.child_key"]``).
+
+        Returns:
+            A tuple of (metadata after deletion, list of keys that were not found).
+
+        Raises:
+            requests.exceptions.HTTPError: If the API request fails (e.g., 404 if the agent run is not found).
+        """
+        url = f"{self._server_url}/{collection_id}/agent_run/{agent_run_id}/metadata/delete"
+        response = self._session.post(url, json={"keys": keys})
+        self._handle_response_errors(response)
+        data: dict[str, Any] = response.json()
+        metadata: dict[str, Any] = data["metadata"]
+        not_found: list[str] = data["not_found"]
+        return metadata, not_found
+
     def get_chat_sessions(self, collection_id: str, agent_run_id: str) -> list[dict[str, Any]]:
         """Get all chat sessions for an agent run, excluding judge result sessions.
 

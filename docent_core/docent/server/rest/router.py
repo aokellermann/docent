@@ -1097,6 +1097,45 @@ async def get_agent_run_metadata(
     return {k: to_jsonable_python(v) for k, v in data.items()}
 
 
+class UpdateAgentRunMetadataRequest(BaseModel):
+    metadata: dict[str, Any]
+
+
+@user_router.put("/{collection_id}/agent_run/{agent_run_id}/metadata")
+async def update_agent_run_metadata(
+    collection_id: str,
+    agent_run_id: str,
+    request: UpdateAgentRunMetadataRequest,
+    mono_svc: MonoService = Depends(get_mono_svc),
+    _: None = Depends(require_collection_permission(Permission.WRITE)),
+):
+    """Merge metadata into an agent run's existing metadata."""
+    merged = await mono_svc.update_agent_run_metadata(collection_id, agent_run_id, request.metadata)
+    return {k: to_jsonable_python(v) for k, v in merged.items()}
+
+
+class DeleteAgentRunMetadataKeysRequest(BaseModel):
+    keys: list[str]
+
+
+@user_router.post("/{collection_id}/agent_run/{agent_run_id}/metadata/delete")
+async def delete_agent_run_metadata_keys(
+    collection_id: str,
+    agent_run_id: str,
+    request: DeleteAgentRunMetadataKeysRequest,
+    mono_svc: MonoService = Depends(get_mono_svc),
+    _: None = Depends(require_collection_permission(Permission.WRITE)),
+):
+    """Remove keys from an agent run's metadata."""
+    metadata, not_found = await mono_svc.delete_agent_run_metadata_keys(
+        collection_id, agent_run_id, request.keys
+    )
+    return {
+        "metadata": {k: to_jsonable_python(v) for k, v in metadata.items()},
+        "not_found": not_found,
+    }
+
+
 class PostAgentRunsRequest(BaseModel):
     agent_runs: list[AgentRun]
 
