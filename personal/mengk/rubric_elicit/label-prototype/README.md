@@ -16,6 +16,8 @@ It runs a two-stage process:
   - `rich`
   - `beaupy`
 
+**Note: Use `docent-python` version at least `0.1.49a`, and use `--upgrade` when installing dependencies.**
+
 Example install:
 
 ```bash
@@ -24,7 +26,7 @@ uv venv
 source .venv/bin/activate
 
 # Install dependencies
-uv pip install docent-python pydantic rich beaupy
+uv pip install --upgrade "docent-python>=0.1.49a" pydantic rich beaupy
 ```
 
 ## Required Environment Variables
