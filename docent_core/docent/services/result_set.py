@@ -10,7 +10,6 @@ from docent._llm_util.providers.preference_types import ModelOption
 from docent._log_util import get_logger
 from docent.sdk.llm_context import AgentRunRef, LLMContextSpec, TranscriptRef
 from docent.sdk.llm_request import ExternalAnalysisResult, LLMRequest
-from docent_core._db_service.batched_writer import BatchedWriter
 from docent_core._server._broker.redis_client import enqueue_job
 from docent_core._worker.constants import WorkerFunction
 from docent_core.docent.db.contexts import ViewContext
@@ -345,20 +344,21 @@ class ResultSetService:
             for spec, _, _ in parsed_requests:
                 self._validate_spec_ownership(spec, actual_collections, effective_collection)
 
-        async with BatchedWriter(self.session_cm_factory) as writer:
-            sqla_results: list[Any] = []
-            for spec, segments, result in parsed_requests:
-                sqla_results.append(
-                    SQLAResult(
-                        id=str(uuid4()),
-                        result_set_id=result_set_id,
-                        llm_context_spec=spec.model_dump(),
-                        prompt_segments=segments,
-                        user_metadata=result.request.metadata,
-                        output=result.output,
-                    )
+        sqla_results: list[Any] = []
+        for spec, segments, result in parsed_requests:
+            sqla_results.append(
+                SQLAResult(
+                    id=str(uuid4()),
+                    result_set_id=result_set_id,
+                    llm_context_spec=spec.model_dump(),
+                    prompt_segments=segments,
+                    user_metadata=result.request.metadata,
+                    output=result.output,
                 )
-            await writer.add_all(sqla_results)
+            )
+
+        self.session.add_all(sqla_results)
+        await self.session.flush()
 
     async def get_results(
         self,
