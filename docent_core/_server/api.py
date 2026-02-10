@@ -1,5 +1,6 @@
 import time
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any, Awaitable, Callable
 
 import anyio
@@ -7,7 +8,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sentry_sdk.integrations.asgi import SentryAsgiMiddleware  # type: ignore
-from sqlalchemy import text
+from sqlalchemy import select
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from docent._log_util import get_logger
@@ -217,10 +218,33 @@ async def health():
     from docent_core.docent.services.monoservice import MonoService
 
     try:
+        from docent_core.docent.db.schemas.tables import (
+            SQLAOrganization,
+            SQLASession,
+            SQLAUser,
+        )
+
         # Initialize MonoService (not just DocentDB) to warm up the full path
         mono_svc = await MonoService.init()
         async with mono_svc.db.session() as session:
-            await session.execute(text("SELECT 1"))
+            # Run the same ORM query patterns as /rest/me to warm up
+            # SQLAlchemy query compilation and PostgreSQL query plans
+            # on cold start. The dummy session ID ensures no rows are
+            # returned, but the queries still compile and execute.
+            stmt = (
+                select(SQLAUser)
+                .join(SQLASession, SQLAUser.id == SQLASession.user_id)
+                .where(
+                    SQLASession.id == "healthcheck",
+                    SQLASession.is_active,
+                    SQLASession.expires_at > datetime.now(UTC).replace(tzinfo=None),
+                )
+            )
+            await session.execute(stmt)
+
+            # The selectin loader for organizations only fires when the
+            # above query returns rows. Warm it up separately.
+            await session.execute(select(SQLAOrganization).limit(0))
         return {"status": "healthy", "database": "connected"}
     except Exception as e:
         logger.error(f"Health check failed: {e}")
