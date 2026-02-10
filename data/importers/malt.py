@@ -4,7 +4,7 @@ import random
 from pathlib import Path
 from typing import Any, List, Tuple
 
-from datasets import load_dataset
+from datasets import load_dataset  # type: ignore
 
 from docent.data_models.agent_run import AgentRun
 from docent.data_models.chat import parse_chat_message
@@ -106,7 +106,7 @@ async def process_malt_dataset() -> Tuple[List[AgentRun], dict[str, Any]]:
     """
     try:
         # Load the MALT dataset (requires HuggingFace authentication)
-        ds = load_dataset("metr-evals/malt-transcripts-public", "default")
+        ds: Any = load_dataset("metr-evals/malt-transcripts-public", "default")
 
         agent_runs: list[AgentRun] = []
         for record in ds["transcripts"]:
@@ -156,7 +156,7 @@ async def dump_malt_sample_to_json(
 
     try:
         # Load the MALT dataset
-        ds = load_dataset("metr-evals/malt-transcripts-public", "default")
+        ds: Any = load_dataset("metr-evals/malt-transcripts-public", "default")
         total_records = len(ds["transcripts"])
 
         # Calculate sample size and randomly sample records

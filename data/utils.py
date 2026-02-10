@@ -6,6 +6,7 @@ Provides common functionality for file display, environment handling, and error 
 
 import os
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from rich.console import Console
@@ -23,7 +24,7 @@ TRUNCATED_COLLECTION_NAME_LENGTH = MAX_COLLECTION_NAME_DISPLAY_LENGTH - len(TRUN
 
 def get_server_host() -> str:
     """Get the Docent server host from environment."""
-    server_host = os.getenv("NEXT_PUBLIC_API_HOST", "http://localhost:8889/")
+    server_host = os.getenv("API_URL", "http://localhost:8889/")
     if server_host.endswith("/"):
         server_host = server_host[:-1]
     return server_host
@@ -41,8 +42,8 @@ def create_aligned_file_display(
     max_filename_len = min(max_filename_len, MAX_FILENAME_DISPLAY_LENGTH)
     max_size_len = max(len(f["file"].size_human) for f in filtered_files)
 
-    display_options = []
-    file_keys = []
+    display_options: List[str] = []
+    file_keys: List[str] = []
 
     for file_info in filtered_files:
         s3_file = file_info["file"]
@@ -75,7 +76,7 @@ def create_aligned_collection_display(collection_details: List[Dict[str, Any]]) 
     max_name_len = min(max_name_len, MAX_COLLECTION_NAME_DISPLAY_LENGTH)
     max_runs_len = max(len(str(details["agent_runs_count"])) for details in collection_details)
 
-    display_options = []
+    display_options: List[str] = []
     for details in collection_details:
         # Format the created_at date if it's available
         created_str = details["created_at"]
@@ -140,11 +141,10 @@ def log_info(message: str) -> None:
     console.print(f"[blue]{message}[/blue]")
 
 
-def count_csv_rows(csv_path: str) -> int:
+def count_csv_rows(csv_path: str | Path) -> int:
     """Count rows in a CSV file, excluding header."""
     import csv
     import sys
-    from pathlib import Path
 
     csv.field_size_limit(sys.maxsize)
 
@@ -154,7 +154,7 @@ def count_csv_rows(csv_path: str) -> int:
 
     with open(path, "r") as f:
         reader = csv.DictReader(f)
-        return sum(1 for row in reader)
+        return sum(1 for _ in reader)
 
 
 @contextmanager

@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import Any, List, Tuple, cast
 
 from docent.data_models.agent_run import AgentRun
 from docent.data_models.util import clone_agent_runs_with_random_ids
@@ -27,7 +27,7 @@ async def import_agent_runs_from_json(file_path: Path) -> Tuple[List[AgentRun], 
         raise ValueError(f"Expected JSON file to contain a list, got {type(data).__name__}")
 
     validated_runs: List[AgentRun] = []
-    for i, agent_run_dict in enumerate(data):
+    for i, agent_run_dict in enumerate(cast(list[Any], data)):
         try:
             # Rely on AgentRun validators to normalize dicts to lists where needed
             agent_run = AgentRun.model_validate(agent_run_dict)

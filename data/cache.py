@@ -86,10 +86,10 @@ class S3File(BaseModel):
         return f"{self.key} ({self.size_human})"
 
 
-def _get_s3_client():
+def _get_s3_client() -> Any:
     """Get S3 client with environment variable authentication."""
     try:
-        return boto3.client("s3", region_name=S3_REGION)
+        return boto3.client("s3", region_name=S3_REGION)  # type: ignore[reportUnknownMemberType]
     except NoCredentialsError:
         log_error(
             "AWS credentials not found. Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables, or sign in with the AWS CLI."
@@ -199,8 +199,8 @@ async def list_s3_files() -> list[S3File]:
     try:
         from .utils import simple_progress
 
-        with simple_progress("Listing S3 files...") as (progress, task):
-            response = s3_client.list_objects_v2(Bucket=S3_BUCKET)
+        with simple_progress("Listing S3 files...") as (_progress, _task):
+            response: dict[str, Any] = s3_client.list_objects_v2(Bucket=S3_BUCKET)
 
             if "Contents" not in response:
                 return []
@@ -291,7 +291,7 @@ async def ensure_file_available(filename: str) -> Path:
     try:
         from .utils import simple_progress
 
-        with simple_progress(f"Downloading {s3_key}...") as (progress, task):
+        with simple_progress(f"Downloading {s3_key}...") as (_progress, _task):
             s3_client.download_file(S3_BUCKET, s3_key, str(cache_path))
 
         console.print(f"[green]Downloaded and cached: {cache_path}[/green]")
@@ -328,7 +328,7 @@ async def upload_to_s3(local_filename: str) -> None:
     try:
         from .utils import simple_progress
 
-        with simple_progress(f"Uploading {local_filename}...") as (progress, task):
+        with simple_progress(f"Uploading {local_filename}...") as (_progress, _task):
             s3_client.upload_file(str(local_path), S3_BUCKET, local_filename)
 
         console.print(f"[green]Uploaded to S3: {local_filename}[/green]")

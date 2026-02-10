@@ -13,6 +13,7 @@ from rich.console import Console
 from rich.prompt import Confirm
 
 from data.ingest import TEST_USER_EMAIL
+from docent.data_models.agent_run import AgentRun
 
 app = typer.Typer(help="Data registry for Docent testing data")
 console = Console()
@@ -194,7 +195,7 @@ async def _generate_async(
         log_info(f"Dry run: Generating {count} agent runs...")
 
         # Generate agent runs without ingesting
-        agent_runs = []
+        agent_runs: list[AgentRun] = []
         for i in range(1, count + 1):
             # Use dummy collection_id for dry run
             agent_run = create_agent_run_with_multiple_groups(i, "dummy-collection-id")
@@ -245,7 +246,7 @@ async def _select_file_from_s3(for_ingest: bool) -> list[str] | None:
                 return None
 
             # Find corresponding file keys for selected displays
-            selected_keys = []
+            selected_keys: list[str] = []
             for selected_display in selected_displays:
                 for i, display_option in enumerate(display_options):
                     if display_option == selected_display:

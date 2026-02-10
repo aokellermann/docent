@@ -30,7 +30,7 @@ AWS_SECRET_ACCESS_KEY=your_secret_key # or sign in with the AWS CLI
 
 # Docent API (for ingestion)
 DOCENT_API_KEY=your_api_key
-NEXT_PUBLIC_API_HOST=http://localhost:8889/
+API_URL=http://localhost:8889/
 ```
 
 ## Usage

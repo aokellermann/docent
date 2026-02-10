@@ -111,6 +111,7 @@ include = [
     "docent_core",
     "docent",
     "tests",
+    "data",
 ]
 typeCheckingMode = "strict"
 reportMissingTypeStubs = false

@@ -8,7 +8,8 @@ import os
 import subprocess
 import textwrap
 from datetime import datetime
-from typing import Optional
+from pathlib import Path
+from typing import Any, Optional, cast
 
 from .cache import CACHE_DIR
 from .constants import CSV_TABLES, DB_RESTORE_EXTENSION
@@ -49,14 +50,14 @@ async def select_collection_from_menu() -> str | None:
             web_url="http://localhost:3000",
         )
 
-        with simple_progress("Loading collections...") as (progress, task):
+        with simple_progress("Loading collections...") as (_progress, _task):
             collections = client.list_collections()
 
         if not collections:
             log_warning("No collections found")
             return None
 
-        collection_details = []
+        collection_details: list[dict[str, Any]] = []
         for collection in collections:
             try:
                 # Get agent run count using direct DB query
@@ -91,7 +92,7 @@ async def select_collection_from_menu() -> str | None:
         # Find the corresponding collection ID
         for i, display_option in enumerate(display_options):
             if display_option == selected_display:
-                return collection_details[i]["id"]
+                return cast(str, collection_details[i]["id"])
 
     except Exception as e:
         log_error("Failed to load collections", e)
@@ -110,7 +111,7 @@ async def dump_collection(collection_id: str, custom_name: Optional[str] = None)
         The filename of the created dump file
     """
     # Get collection info
-    with simple_progress("Getting collection info...") as (progress, task):
+    with simple_progress("Getting collection info...") as (_progress, _task):
         collection_info = await get_collection_info(collection_id)
         alembic_revision = await get_current_alembic_revision()
 
@@ -191,6 +192,7 @@ async def dump_collection(collection_id: str, custom_name: Optional[str] = None)
 
     # Run psql to execute the export and count rows
     csv_files = [f"{safe_name}_{table_name}.csv" for table_name in CSV_TABLES]
+    metadata_path: Path | None = None
 
     try:
         subprocess.run(
@@ -265,7 +267,8 @@ async def dump_collection(collection_id: str, custom_name: Optional[str] = None)
         # Always clean up temporary files, even on failure
         try:
             sql_script_path.unlink(missing_ok=True)
-            metadata_path.unlink(missing_ok=True)
+            if metadata_path is not None:
+                metadata_path.unlink(missing_ok=True)
             for csv_file in csv_files:
                 (CACHE_DIR / csv_file).unlink(missing_ok=True)
             # Clean up partial dump file on failure

@@ -3,7 +3,7 @@ import json
 import os
 import tarfile
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import Any, List, Tuple, cast
 from uuid import uuid4
 
 from docent.data_models.agent_run import AgentRun
@@ -56,7 +56,7 @@ def create_assistant_message(content: str) -> AssistantMessage:
     end_index = content.find(TOOL_CALLS_END)
 
     if start_index == -1 or end_index == -1:
-        return parse_chat_message(dict(role="assistant", content=content))
+        return cast(AssistantMessage, parse_chat_message(dict(role="assistant", content=content)))
 
     tool_call_indices: list[tuple[int, int]] = []
     curr_start = 0
@@ -70,12 +70,15 @@ def create_assistant_message(content: str) -> AssistantMessage:
     for start_idx, end_idx in tool_call_indices:
         tool_calls.append(parse_tool_call(content[start_idx:end_idx]))
 
-    return parse_chat_message(
-        dict(
-            role="assistant",
-            content=content[:start_index],
-            tool_calls=tool_calls,
-        )
+    return cast(
+        AssistantMessage,
+        parse_chat_message(
+            dict(
+                role="assistant",
+                content=content[:start_index],
+                tool_calls=tool_calls,
+            )
+        ),
     )
 
 
