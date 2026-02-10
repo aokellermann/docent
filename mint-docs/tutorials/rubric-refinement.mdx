@@ -1,0 +1,63 @@
+---
+title: "Rubric Refinement"
+description: "Quantifying behaviors that require judgment to detect"
+---
+
+## Overview
+
+The rubric refinement agent helps you turn a high-level behavioral description into a precise rubric that an LLM judge can apply consistently at scale. This helps overcome several challenges when specifying a rubric:
+
+* Behavioral concepts that are easy to recognize ("cheating," "sycophancy”) can be hard to describe precisely
+* LLM judges interpret rubrics literally and inconsistently, often latching onto phrasings in ways you didn't intend
+* Edge cases may be genuinely ambiguous, even from a human's perspective
+* Understanding the target behavior in detail can be difficult before you evaluate specific examples
+
+The refinement agent addresses this through collaborative specification writing: you describe what you want to measure, and it iterates with you until the rubric captures your actual intent.
+
+**Accessing the refinement agent:** When you search using "Direct Search" or "Guided Search," the refinement agent appears automatically.
+<video controls autoplay loop width="100%">
+  <source src="https://transluce-videos.s3.us-east-1.amazonaws.com/refinement+v4.mp4" type="video/mp4" />
+  Your browser does not support the video tag.
+</video>
+
+## When to use refinement
+
+**You want to measure the prevalence of a fuzzy behavior.** You want to measure something like "cheating" or "rambling," but the concept is ambiguous. The refinement agent proposes an initial rubric, asks clarifying questions, and surfaces potential ambiguities for you to review.
+
+**You want to debug an existing rubric.** Your rubric produces wrong results on specific examples. You can recognize the issue, but how to revise the rubric is not obvious. The refinement agent takes your labeled disagreements as feedback and proposes rewrites that address those failure modes.
+
+**You have existing labels.** You have already annotated transcripts with your own taxonomy. The refinement agent extracts patterns from your labels, handles inconsistencies, and proposes rubrics that capture your current intent.
+
+**You want to explore.** You suspect something is wrong with your agent but lack a specific hypothesis. The refinement agent can quickly generate an exploratory rubric informed by a sample of your transcripts, helping surface behaviors worth investigating.
+
+## Accessing refinement
+
+<Steps>
+  <Step title="Navigate to the Rubrics page">
+    Open your collection and click the **Rubrics** icon in the left sidebar.
+  </Step>
+  <Step title="Describe the behavior you want to measure">
+    In the search bar, write a natural-language description of your target behavior — for example, *"Cases where the agent repeatedly calls a missing utility."* You don't need to be precise; the refinement agent will help you sharpen it.
+  </Step>
+  <Step title="Click Guided Search">
+    Click **Guided Search** to start the refinement agent. It will sample transcripts from your collection and propose an initial rubric.
+  </Step>
+</Steps>
+
+<img src="/images/rubric-refinement/start-guided-search.png" alt="Starting a guided search: navigate to Rubrics, describe the behavior, and click Guided Search" />
+
+Once the agent starts, you'll see two panels:
+
+* **Left panel: the generated rubric.** This is a fully operationalized rubric with a decision procedure the LLM judge will follow. You can review it, and the agent will update it as the conversation progresses.
+* **Right panel: the refinement chat.** The agent explains how it interpreted your description, surfaces edge cases, and asks clarifying questions. Reply in natural language to steer the rubric toward your intent.
+
+<img src="/images/rubric-refinement/refinement-chat.png" alt="The refinement view: a generated rubric on the left and a guided chat on the right" />
+
+Keep chatting until the rubric captures your target behavior or the refinement agent indicates it is confident in the specification. When you're satisfied, click **Run rubric...** to apply it across your collection.
+
+To quantify how many runs display your target behavior, add a filter for rubric matches. Click the Filter button. Select `rubric.[your_rubric_id].label` as the field to filter over, and select `match` as the target value. If you created a rubric with a different output schema than the default `match` or `no match`, you may need to filter over a different field.
+
+<img src="/images/rubric-refinement/filter-matches.png" alt="Buttons for filtering by results flagged as a match" />
+
+You can see the number of matches next to the filter button.
+<img src="/images/rubric-refinement/match-results.png" alt="Displayed number of matches" />
