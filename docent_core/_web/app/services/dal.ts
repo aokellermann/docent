@@ -34,7 +34,7 @@ export async function getUser(): Promise<User | null> {
       },
       cache: 'no-store', // Always get fresh auth data
       // Add timeout to prevent hanging requests
-      signal: AbortSignal.timeout(9000), // 9 second timeout
+      signal: AbortSignal.timeout(12000), // 12 second timeout
     });
     if (!response.ok) {
       return null;
