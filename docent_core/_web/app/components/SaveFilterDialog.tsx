@@ -2,12 +2,10 @@
 
 import { useState } from 'react';
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -15,24 +13,23 @@ import { Label } from '@/components/ui/label';
 import { useCreateFilterMutation } from '@/app/api/filterApi';
 import { ComplexFilter } from '@/app/types/collectionTypes';
 import { toast } from 'sonner';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Save } from 'lucide-react';
 import { getRtkQueryErrorMessage } from '@/lib/rtkQueryError';
 
-interface SaveFilterDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+interface SaveFilterPopoverProps {
   collectionId: string;
   currentFilter: ComplexFilter;
+  disabled?: boolean;
   onSaveSuccess?: (filterId: string) => void;
 }
 
-export function SaveFilterDialog({
-  open,
-  onOpenChange,
+export function SaveFilterPopover({
   collectionId,
   currentFilter,
+  disabled,
   onSaveSuccess,
-}: SaveFilterDialogProps) {
+}: SaveFilterPopoverProps) {
+  const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [createFilter, { isLoading }] = useCreateFilterMutation();
@@ -73,16 +70,26 @@ export function SaveFilterDialog({
       setName('');
       setDescription('');
     }
-    onOpenChange(nextOpen);
+    setOpen(nextOpen);
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-[400px]">
-        <DialogHeader>
-          <DialogTitle>Save Filter</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-3 py-2">
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 text-xs gap-1"
+          disabled={disabled}
+          title={disabled ? 'Add filters to save them' : 'Save current filters'}
+        >
+          <Save className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-muted-foreground">Save</span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80 p-3 space-y-3">
+        <p className="text-sm font-medium">Save Filter</p>
+        <div className="space-y-2">
           <div>
             <Label
               htmlFor="filter-name"
@@ -96,7 +103,7 @@ export function SaveFilterDialog({
               onChange={(e) => setName(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="e.g., High-scoring runs"
-              className="text-sm mt-1"
+              className="text-sm mt-1 h-8"
               autoFocus
             />
           </div>
@@ -117,22 +124,22 @@ export function SaveFilterDialog({
             />
           </div>
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => handleOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={handleSave} disabled={isLoading || !name.trim()}>
-            {isLoading ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Saving...
-              </>
-            ) : (
-              'Save'
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        <Button
+          size="sm"
+          className="w-full h-8 text-xs"
+          onClick={handleSave}
+          disabled={isLoading || !name.trim()}
+        >
+          {isLoading ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              Saving...
+            </>
+          ) : (
+            'Save'
+          )}
+        </Button>
+      </PopoverContent>
+    </Popover>
   );
 }
