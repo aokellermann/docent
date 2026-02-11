@@ -890,6 +890,7 @@ async def resync_metadata(
 ):
     """Re-extract all metadata observations for a collection and refresh the materialized view."""
     observations_created = await mono_svc.resync_metadata(collection_id)
+    await mono_svc.schedule_metadata_view_refresh()
     return {
         "collection_id": collection_id,
         "observations_created": observations_created,
@@ -905,6 +906,16 @@ async def backfill_metadata(
 ):
     """Resync metadata for one collection and return the next collection ID to process."""
     return await mono_svc.backfill_metadata(collection_id)
+
+
+# TODO(nickwu): Remove this endpoint after backfill is complete.
+@user_router.post("/refresh_metadata_view")
+async def refresh_metadata_view(
+    mono_svc: MonoService = Depends(get_mono_svc),
+):
+    """Refresh the metadata_value_stats materialized view."""
+    await mono_svc.schedule_metadata_view_refresh()
+    return {"message": "Metadata view refresh completed"}
 
 
 @user_router.get("/{collection_id}/agent_run")

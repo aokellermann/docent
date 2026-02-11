@@ -1934,7 +1934,6 @@ class MonoService:
             f"{len(sq_agent_runs)} agent runs, {len(observations)} observations"
         )
 
-        await self.schedule_metadata_view_refresh()
         return len(observations)
 
     async def backfill_metadata(
