@@ -903,10 +903,11 @@ async def resync_metadata(
 async def backfill_metadata(
     collection_id: str | None = None,
     agent_run_cursor: str | None = None,
+    batch_size: int = 500,
     mono_svc: MonoService = Depends(get_mono_svc),
 ):
     """Backfill metadata observations in batches. Returns cursors for pagination."""
-    return await mono_svc.backfill_metadata(collection_id, agent_run_cursor)
+    return await mono_svc.backfill_metadata(collection_id, agent_run_cursor, batch_size=batch_size)
 
 
 # TODO(nickwu): Remove this endpoint after backfill is complete.
