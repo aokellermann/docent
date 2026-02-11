@@ -173,6 +173,7 @@ const TreeNodeView: React.FC<{
             : 'text-primary/70 hover:bg-muted/40 hover:text-primary'
         )}
         style={{ marginLeft: `${node.level * 12}px` }}
+        title={group?.name ? `${group.name}\n${node.id}` : node.id}
       >
         <button
           onClick={() => onGroupToggle(node.id)}
@@ -297,15 +298,13 @@ const TranscriptListItem: React.FC<{
           : 'bg-secondary border-border text-primary hover:bg-blue-bg/50 hover:border-blue-border/50'
       )}
       style={{ marginLeft: `${level * 12}px` }}
+      title={
+        transcript?.name ? `${transcript.name}\n${transcriptId}` : transcriptId
+      }
     >
       <button
         onClick={() => onTranscriptSelect(transcriptId)}
         className="flex-1 text-left px-2 py-1 text-ellipsis whitespace-nowrap overflow-hidden min-w-0 font-medium"
-        title={
-          transcript?.name
-            ? `${transcript?.name}\n${transcriptId}`
-            : transcriptId
-        }
       >
         {transcript?.name || transcriptId}
       </button>
