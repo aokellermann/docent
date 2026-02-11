@@ -400,18 +400,18 @@ export default function SingleRubricArea({
               </PopoverContent>
             </Popover>
           </div>
-          {runsFilter && (
-            <FilterChips
-              filters={runsFilter}
-              onFiltersChange={handleRunsFilterChange}
-              onRequestEdit={handleRequestEditFilter}
-            />
-          )}
           {hasWritePermission && (
             <FilterActionsBar
               collectionId={collectionId!}
               currentFilter={runsFilter}
               onApplyFilter={handleRunsFilterChange}
+            />
+          )}
+          {runsFilter && (
+            <FilterChips
+              filters={runsFilter}
+              onFiltersChange={handleRunsFilterChange}
+              onRequestEdit={handleRequestEditFilter}
             />
           )}
           {failureCount > 0 && (

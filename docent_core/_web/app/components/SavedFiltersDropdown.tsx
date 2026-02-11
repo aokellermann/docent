@@ -13,7 +13,7 @@ import {
 } from '@/app/api/filterApi';
 import { CollectionFilter, PrimitiveFilter } from '@/app/types/collectionTypes';
 import { FilterListItem } from '@/app/types/filterTypes';
-import { Bookmark, Check, ChevronDown, Trash2, Loader2, X } from 'lucide-react';
+import { Bookmark, Check, ChevronDown, Trash2, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getRtkQueryErrorMessage } from '@/lib/rtkQueryError';
 import { formatFilterFieldLabel } from '../utils/formatMetadataField';
@@ -86,26 +86,18 @@ function FilterPreview({ filter }: { filter: FilterListItem }) {
 interface SavedFiltersDropdownProps {
   collectionId: string;
   activeFilterId: string | null;
-  isDirty?: boolean;
   onSelectFilter: (filter: FilterListItem) => void;
-  onDeselect?: () => void;
   onFilterDeleted?: (filterId: string) => void;
 }
 
 export function SavedFiltersDropdown({
   collectionId,
   activeFilterId,
-  isDirty,
   onSelectFilter,
-  onDeselect,
   onFilterDeleted,
 }: SavedFiltersDropdownProps) {
   const { data: filters, isLoading } = useListFiltersQuery(collectionId);
   const [deleteFilter, { isLoading: isDeleting }] = useDeleteFilterMutation();
-
-  const activeFilterName = activeFilterId
-    ? filters?.find((f) => f.id === activeFilterId)?.name
-    : null;
 
   const handleDeleteFilter = async (
     e: React.MouseEvent,
@@ -131,47 +123,14 @@ export function SavedFiltersDropdown({
         <Button
           variant="outline"
           size="sm"
-          className="h-7 text-xs gap-1 min-w-0 max-w-full"
+          className={`h-7 text-xs gap-1 ${activeFilterId ? 'border-blue-border' : ''}`}
           disabled={isLoading}
         >
           <Bookmark
             className={`h-3.5 w-3.5 flex-shrink-0 ${activeFilterId ? 'text-blue-text' : 'text-muted-foreground'}`}
           />
-          <span
-            className={`max-w-[10rem] truncate ${activeFilterId ? 'text-blue-text' : 'text-muted-foreground'}`}
-          >
-            {activeFilterName || 'Saved'}
-          </span>
-          {isDirty && (
-            <span className="text-orange-text font-normal flex-shrink-0">
-              (edited)
-            </span>
-          )}
-          {activeFilterId ? (
-            <span
-              role="button"
-              tabIndex={0}
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                onDeselect?.();
-              }}
-              onClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  onDeselect?.();
-                }
-              }}
-              className="flex-shrink-0 rounded-sm hover:bg-foreground/10 transition-colors cursor-pointer"
-              title="Deselect saved filter without saving edits"
-            >
-              <X className="h-3 w-3 text-muted-foreground" />
-            </span>
-          ) : (
-            <ChevronDown className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
-          )}
+          <span className="text-muted-foreground">Saved</span>
+          <ChevronDown className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent

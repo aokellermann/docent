@@ -164,15 +164,15 @@ export default function RunRubricDialog({
                 initialFilter={editingFilter}
               />
               <div className="flex flex-wrap items-center gap-1.5">
-                <FilterChips
-                  filters={filter}
-                  onFiltersChange={handleFiltersChange}
-                  onRequestEdit={setEditingFilter}
-                />
                 <FilterActionsBar
                   collectionId={collectionId}
                   currentFilter={filter}
                   onApplyFilter={handleFiltersChange}
+                />
+                <FilterChips
+                  filters={filter}
+                  onFiltersChange={handleFiltersChange}
+                  onRequestEdit={setEditingFilter}
                 />
               </div>
             </div>

@@ -68,6 +68,7 @@ interface FilterControlsProps {
   metadataData?: Record<string, Record<string, unknown>>;
   showStepFilter?: boolean;
   initialFilter?: PrimitiveFilter | null;
+  leadingSlot?: React.ReactNode;
 }
 
 export const FilterControls = ({
@@ -78,6 +79,7 @@ export const FilterControls = ({
   metadataData = {},
   showStepFilter = true,
   initialFilter = null,
+  leadingSlot,
 }: FilterControlsProps) => {
   const [metadataKey, setMetadataKey] = useState('');
   const [metadataValue, setMetadataValue] = useState('');
@@ -388,6 +390,7 @@ export const FilterControls = ({
     <div className="space-y-1.5">
       {/* Input form */}
       <div className="flex flex-wrap items-end gap-1.5">
+        {leadingSlot}
         <div className="min-w-[150px] flex-1">
           <div className="text-xs text-muted-foreground font-mono ml-1 mb-1">
             Filter by

@@ -23,6 +23,8 @@ interface SaveFilterPopoverProps {
   disabled?: boolean;
   mode?: 'save' | 'save-as';
   onSaveSuccess?: (filter: FilterListItem) => void;
+  buttonClassName?: string;
+  buttonLabel?: string;
 }
 
 export function SaveFilterPopover({
@@ -31,6 +33,8 @@ export function SaveFilterPopover({
   disabled,
   mode = 'save',
   onSaveSuccess,
+  buttonClassName,
+  buttonLabel,
 }: SaveFilterPopoverProps) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
@@ -94,7 +98,7 @@ export function SaveFilterPopover({
         <Button
           variant="outline"
           size="sm"
-          className="h-7 text-xs gap-1"
+          className={buttonClassName ?? 'h-7 text-xs gap-1'}
           disabled={disabled}
           title={
             disabled
@@ -105,7 +109,7 @@ export function SaveFilterPopover({
           }
         >
           <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="text-muted-foreground">{label}</span>
+          <span className="text-muted-foreground">{buttonLabel ?? label}</span>
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-80 p-3 space-y-3">

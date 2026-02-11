@@ -619,6 +619,14 @@ export default function ChartSettings({ chart, onChange }: ChartSettingsProps) {
               Filters:
             </span>
 
+            {hasWritePermission && (
+              <FilterActionsBar
+                collectionId={collectionId!}
+                currentFilter={runs_filter}
+                onApplyFilter={handleRunsFilterChange}
+              />
+            )}
+
             {runs_filter && (
               <FilterChips
                 filters={runs_filter}
@@ -660,13 +668,6 @@ export default function ChartSettings({ chart, onChange }: ChartSettingsProps) {
                 />
               </PopoverContent>
             </Popover>
-            {hasWritePermission && (
-              <FilterActionsBar
-                collectionId={collectionId!}
-                currentFilter={runs_filter}
-                onApplyFilter={handleRunsFilterChange}
-              />
-            )}
           </div>
         )}
       </div>
