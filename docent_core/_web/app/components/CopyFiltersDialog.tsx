@@ -77,7 +77,7 @@ export function CopyFiltersDialog({
   const allSelected =
     filters !== undefined &&
     filters.length > 0 &&
-    selectedIds.size === filters.length;
+    filters.every((f) => selectedIds.has(f.id));
 
   const toggleAll = () => {
     if (!filters) return;
@@ -130,6 +130,13 @@ export function CopyFiltersDialog({
       setSelectedIds(new Set());
       setTargetCollectionId(null);
     } else if (succeeded > 0) {
+      // Deselect filters that copied successfully so a retry only re-sends the failures
+      const failedIds = new Set(
+        selected
+          .filter((_, i) => results[i].status === 'rejected')
+          .map((f) => f.id)
+      );
+      setSelectedIds(failedIds);
       toast.warning(
         `Copied ${succeeded} ${succeeded === 1 ? 'filter' : 'filters'}, ${failed.length} failed`
       );
