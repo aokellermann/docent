@@ -33,6 +33,7 @@ interface CreateCollectionRequest {
   collection_id?: string;
   name?: string;
   description?: string;
+  metadata?: Record<string, any>;
 }
 
 interface CreateCollectionResponse {
@@ -43,6 +44,7 @@ interface UpdateCollectionRequest {
   collection_id: string;
   name?: string;
   description?: string;
+  metadata?: Record<string, any>;
 }
 
 interface CloneCollectionRequest {
@@ -123,6 +125,7 @@ export const collectionApi = createApi({
   }),
   tagTypes: [
     'Collection',
+    'CollectionMetadata',
     'AgentRunMetadata',
     'AgentRunMetadataFields',
     'AgentRunMetadataFieldValues',
@@ -177,7 +180,7 @@ export const collectionApi = createApi({
         method: 'PUT',
         body,
       }),
-      invalidatesTags: ['Collection'],
+      invalidatesTags: ['Collection', 'CollectionMetadata'],
     }),
     cloneCollection: build.mutation<
       CloneCollectionResponse,
@@ -201,6 +204,10 @@ export const collectionApi = createApi({
         method: 'DELETE',
       }),
       invalidatesTags: ['Collection'],
+    }),
+    getCollectionMetadata: build.query<Record<string, any>, string>({
+      query: (collectionId) => `/${collectionId}/collection/metadata`,
+      providesTags: ['CollectionMetadata'],
     }),
     getBaseFilter: build.query<ComplexFilter | null, string>({
       query: (collectionId) => `/${collectionId}/base_filter`,
@@ -467,6 +474,7 @@ export const {
   useUpdateCollectionMutation,
   useCloneCollectionMutation,
   useDeleteCollectionMutation,
+  useGetCollectionMetadataQuery,
   useGetBaseFilterQuery,
   usePostBaseFilterMutation,
   useGetAgentRunMetadataFieldsQuery,
