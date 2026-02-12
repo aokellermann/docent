@@ -44,7 +44,6 @@ interface UpdateCollectionRequest {
   collection_id: string;
   name?: string;
   description?: string;
-  metadata?: Record<string, any>;
 }
 
 interface CloneCollectionRequest {
@@ -180,7 +179,7 @@ export const collectionApi = createApi({
         method: 'PUT',
         body,
       }),
-      invalidatesTags: ['Collection', 'CollectionMetadata'],
+      invalidatesTags: ['Collection'],
     }),
     cloneCollection: build.mutation<
       CloneCollectionResponse,

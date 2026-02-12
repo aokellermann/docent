@@ -421,6 +421,9 @@ async def get_collections(
     for obj in sqla_collections:
         collection_data: dict[str, Any] = obj.dict()
 
+        # Map DB column name to API field name
+        collection_data["metadata"] = collection_data.pop("metadata_json", {}) or {}
+
         # Add counts from batch query results
         collection_data["agent_run_count"] = agent_run_counts[obj.id]
         collection_data["rubric_count"] = rubric_counts[obj.id]
@@ -586,7 +589,6 @@ async def clone_collection(
 class UpdateCollectionRequest(BaseModel):
     name: str | None = None
     description: str | None = None
-    metadata: dict[str, Any] | None = None
 
 
 @user_router.put("/{collection_id}/collection")
@@ -598,9 +600,8 @@ async def update_collection(
 ):
     await mono_svc.update_collection(
         collection_id,
-        name=request.name,
-        description=request.description,
-        **({"metadata": request.metadata} if request.metadata is not None else {}),
+        **({"name": request.name} if request.name is not None else {}),
+        **({"description": request.description} if request.description is not None else {}),
     )
 
 

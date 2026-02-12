@@ -649,10 +649,9 @@ class MonoService:
         collection_id: str,
         name: str | None | _NotGiven = NOT_GIVEN,
         description: str | None | _NotGiven = NOT_GIVEN,
-        metadata: dict[str, Any] | None | _NotGiven = NOT_GIVEN,
     ):
         """
-        Update the name, description, and/or metadata of a Collection.
+        Update the name and/or description of a Collection.
         Fields set to `None` will be nulled in the database.
         Fields not provided (i.e., left as NOT_GIVEN) will be unchanged.
         """
@@ -661,8 +660,6 @@ class MonoService:
             values_to_update["name"] = name
         if description is not NOT_GIVEN:
             values_to_update["description"] = description
-        if metadata is not NOT_GIVEN:
-            values_to_update["metadata_json"] = metadata or {}
 
         if not values_to_update:
             logger.info(f"No values provided to update Collection {collection_id}")

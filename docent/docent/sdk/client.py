@@ -427,17 +427,15 @@ class Docent:
         collection_id: str,
         name: str | None = None,
         description: str | None = None,
-        metadata: dict[str, Any] | None = None,
     ) -> None:
-        """Updates a Collection's name, description, and/or metadata.
+        """Updates a Collection's name and/or description.
 
         Requires WRITE permission on the collection.
 
         Args:
             collection_id: ID of the Collection to update.
-            name: New name for the Collection. If None, the name will be cleared.
-            description: New description for the Collection. If None, the description will be cleared.
-            metadata: New metadata for the Collection. Replaces the existing metadata entirely.
+            name: New name for the Collection. If None, the name will be left unchanged.
+            description: New description for the Collection. If None, the description will be left unchanged.
 
         Raises:
             requests.exceptions.HTTPError: If the API request fails.
@@ -448,8 +446,6 @@ class Docent:
             payload["name"] = name
         if description is not None:
             payload["description"] = description
-        if metadata is not None:
-            payload["metadata"] = metadata
 
         response = self._session.put(url, json=payload)
         self._handle_response_errors(response)
