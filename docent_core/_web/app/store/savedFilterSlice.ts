@@ -1,7 +1,7 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
 interface SavedFilterState {
-  // Collection ID → active saved filter ID
+  // surfaceId → active saved filter ID
   activeFilterIds: Record<string, string>;
 }
 
@@ -15,10 +15,9 @@ const savedFilterSlice = createSlice({
   reducers: {
     setActiveFilterId(
       state,
-      action: PayloadAction<{ collectionId: string; filterId: string }>
+      action: PayloadAction<{ surfaceId: string; filterId: string }>
     ) {
-      state.activeFilterIds[action.payload.collectionId] =
-        action.payload.filterId;
+      state.activeFilterIds[action.payload.surfaceId] = action.payload.filterId;
     },
     clearActiveFilterId(state, action: PayloadAction<string>) {
       delete state.activeFilterIds[action.payload];

@@ -195,7 +195,7 @@ export function ChartsArea() {
   // Ensure consistent SSR/CSR output before collectionId is known
   if (!collectionId) {
     return (
-      <div className="flex flex-col resize-y overflow-y-auto min-h-[200px] h-[35%]">
+      <div className="flex flex-col resize-y overflow-y-auto min-h-[200px] flex-1">
         <div className="flex items-center justify-center p-4 text-sm">
           <Loader2 size={16} className="animate-spin text-muted-foreground" />
         </div>
@@ -206,7 +206,7 @@ export function ChartsArea() {
   // Handle loading state
   if (isCollectionLoading || isChartsLoading) {
     return (
-      <div className="flex flex-col resize-y overflow-y-auto min-h-[200px] h-[35%]">
+      <div className="flex flex-col resize-y overflow-y-auto min-h-[200px] flex-1">
         <div className="flex items-center justify-center p-4 text-sm">
           <Loader2 size={16} className="animate-spin text-muted-foreground" />
         </div>
@@ -217,7 +217,7 @@ export function ChartsArea() {
   // Collection data failed to load
   if (collectionData?.agent_run_count == null) {
     return (
-      <div className="flex flex-col resize-y overflow-y-auto min-h-[200px] h-[35%]">
+      <div className="flex flex-col resize-y overflow-y-auto min-h-[200px] flex-1">
         <div className="flex items-center justify-center p-4 text-red-text text-sm">
           Error loading charts
         </div>
@@ -244,7 +244,7 @@ export function ChartsArea() {
 
   if (error) {
     return (
-      <div className="flex flex-col resize-y overflow-y-auto min-h-[200px] h-[35%]">
+      <div className="flex flex-col resize-y overflow-y-auto min-h-[200px] flex-1">
         <div className="flex items-center justify-center p-4 text-red-500 text-sm">
           Error loading charts
         </div>
@@ -256,7 +256,7 @@ export function ChartsArea() {
     <div
       className={cn(
         'flex flex-col overflow-y-auto',
-        activeChart && 'resize-y h-[35%] min-h-[200px]'
+        activeChart && 'resize-y flex-1 min-h-[200px]'
       )}
     >
       {/* Tab Bar */}

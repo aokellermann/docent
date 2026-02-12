@@ -17,18 +17,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
-
 import { useAppSelector } from '../store/hooks';
 import {
   ChartSpec,
   ChartDimension,
   ComplexFilter,
-  PrimitiveFilter,
   DataTableColumn,
 } from '../types/collectionTypes';
 import {
@@ -37,10 +30,7 @@ import {
   useGetDataTableColumnsQuery,
 } from '../api/chartApi';
 import { useListDataTablesQuery } from '../api/dataTableApi';
-import { FilterControls } from './FilterControls';
-import { FilterChips } from './FilterChips';
-import { FilterActionsBar } from './FilterActionsBar';
-import { useFilterFields } from '@/hooks/use-filter-fields';
+import { TranscriptFilterControls } from './TranscriptFilterControls';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -238,14 +228,7 @@ export default function ChartSettings({ chart, onChange }: ChartSettingsProps) {
   const { x_key, y_key, series_key, runs_filter, data_table_id } = chart;
   const collectionId = useAppSelector((state) => state.collection.collectionId);
   const hasWritePermission = useHasCollectionWritePermission();
-  const { fields: agentRunMetadataFields } = useFilterFields({
-    collectionId,
-    context: { mode: 'agent_runs' },
-  });
-  const [filterPopoverOpen, setFilterPopoverOpen] = useState(false);
-  const [editingFilter, setEditingFilter] = useState<PrimitiveFilter | null>(
-    null
-  );
+  const [showFilters, setShowFilters] = useState(false);
 
   const usesDataTable = !!data_table_id;
 
@@ -397,14 +380,7 @@ export default function ChartSettings({ chart, onChange }: ChartSettingsProps) {
 
   function handleRunsFilterChange(runsFilter: ComplexFilter | null) {
     onChange({ ...chart, runs_filter: runsFilter });
-    setEditingFilter(null);
-    setFilterPopoverOpen(false);
   }
-
-  const handleRequestEdit = (filter: PrimitiveFilter) => {
-    setEditingFilter(filter);
-    setFilterPopoverOpen(true);
-  };
 
   const handleDownloadPng = async () => {
     try {
@@ -448,255 +424,225 @@ export default function ChartSettings({ chart, onChange }: ChartSettingsProps) {
 
   const columns = dataTableColumns || [];
 
-  return (
-    <div className="flex flex-row flex-wrap p-2">
-      <div className="flex flex-row flex-1 flex-wrap items-center gap-x-2 gap-y-1">
-        {/* Data Source Selector */}
-        <div className="flex items-center gap-x-1">
-          <span className="text-xs text-muted-foreground whitespace-nowrap">
-            <Database size={12} className="inline mr-1" />
-            Source:
-          </span>
-          <Select
-            value={usesDataTable ? data_table_id! : 'standard'}
-            onValueChange={handleDataSourceChange}
-            disabled={!hasWritePermission}
-          >
-            <SelectTrigger className="h-6 w-28 text-xs border-border bg-transparent hover:bg-secondary px-2 font-normal">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="standard" className="text-xs">
-                Standard
-              </SelectItem>
-              {dataTables && dataTables.length > 0 && (
-                <>
-                  {dataTables.map((table) => (
-                    <SelectItem
-                      key={table.id}
-                      value={table.id}
-                      className="text-xs"
-                    >
-                      {table.name}
-                    </SelectItem>
-                  ))}
-                </>
-              )}
-            </SelectContent>
-          </Select>
-        </div>
+  const filterCount = runs_filter?.filters?.length ?? 0;
 
-        {/* Dimension/Column selectors - show different UI based on mode */}
-        {usesDataTable ? (
-          // Data Table Mode - simple column selectors
+  return (
+    <div className="p-2 space-y-2">
+      <div className="flex flex-row flex-wrap">
+        <div className="flex flex-row flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+          {/* Data Source Selector */}
           <div className="flex items-center gap-x-1">
             <span className="text-xs text-muted-foreground whitespace-nowrap">
-              Series:
+              <Database size={12} className="inline mr-1" />
+              Source:
             </span>
-            <ColumnSelect
-              value={series_key}
-              onChange={(v) => handleDataTableColumnChange('series_key', v)}
-              columns={columns}
+            <Select
+              value={usesDataTable ? data_table_id! : 'standard'}
+              onValueChange={handleDataSourceChange}
               disabled={!hasWritePermission}
-              isLoading={isFetchingColumns}
-            />
+            >
+              <SelectTrigger className="h-6 w-28 text-xs border-border bg-transparent hover:bg-secondary px-2 font-normal">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="standard" className="text-xs">
+                  Standard
+                </SelectItem>
+                {dataTables && dataTables.length > 0 && (
+                  <>
+                    {dataTables.map((table) => (
+                      <SelectItem
+                        key={table.id}
+                        value={table.id}
+                        className="text-xs"
+                      >
+                        {table.name}
+                      </SelectItem>
+                    ))}
+                  </>
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Dimension/Column selectors - show different UI based on mode */}
+          {usesDataTable ? (
+            // Data Table Mode - simple column selectors
+            <div className="flex items-center gap-x-1">
+              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                Series:
+              </span>
+              <ColumnSelect
+                value={series_key}
+                onChange={(v) => handleDataTableColumnChange('series_key', v)}
+                columns={columns}
+                disabled={!hasWritePermission}
+                isLoading={isFetchingColumns}
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 hover:bg-accent transition-all duration-200 text-muted-foreground hover:text-primary flex-shrink-0"
+                onClick={handleSwapDimensions}
+                title="Swap dimensions"
+                disabled={
+                  !showSwapButton || !hasWritePermission || isFetchingColumns
+                }
+              >
+                <ArrowLeftRight size={14} className="stroke-[1.5]" />
+              </Button>
+
+              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                X:
+              </span>
+              <ColumnSelect
+                value={x_key ?? null}
+                onChange={(v) => handleDataTableColumnChange('x_key', v)}
+                columns={columns}
+                allowNone={false}
+                disabled={!hasWritePermission}
+                isLoading={isFetchingColumns}
+              />
+
+              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                Y:
+              </span>
+              <ColumnSelect
+                value={y_key ?? null}
+                onChange={(v) => handleDataTableColumnChange('y_key', v)}
+                columns={columns}
+                allowNone={false}
+                disabled={!hasWritePermission}
+                filterNumeric={true}
+                isLoading={isFetchingColumns}
+              />
+            </div>
+          ) : (
+            // Standard Mode - dimension selectors
+            <div className="flex items-center gap-x-1">
+              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                Series:
+              </span>
+              <DimensionSelect
+                dim={outerDim}
+                onChange={handleOuterDimChange}
+                fields={dimensions}
+                disabled={!hasWritePermission}
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 hover:bg-accent transition-all duration-200 text-muted-foreground hover:text-primary flex-shrink-0"
+                onClick={handleSwapDimensions}
+                title="Swap dimensions"
+                disabled={!showSwapButton || !hasWritePermission}
+              >
+                <ArrowLeftRight size={14} className="stroke-[1.5]" />
+              </Button>
+
+              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                X:
+              </span>
+              <DimensionSelect
+                dim={innerDim}
+                onChange={handleInnerDimChange}
+                fields={dimensions}
+                allowNone={false}
+                disabled={!hasWritePermission}
+              />
+
+              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                Y:
+              </span>
+              <DimensionSelect
+                dim={y_key ?? null}
+                onChange={handleYDimChange}
+                fields={measures}
+                allowNone={false}
+                disabled={!hasWritePermission}
+                widthClass="w-24"
+              />
+            </div>
+          )}
+
+          <div className="flex items-center gap-x-1">
+            <span className="text-xs text-muted-foreground whitespace-nowrap">
+              Type:
+            </span>
+            <Select
+              value={chart.chart_type}
+              onValueChange={handleChartTypeChange}
+              disabled={!hasWritePermission}
+            >
+              <SelectTrigger className="h-6 max-w-24 w-24 text-xs border-border bg-transparent hover:bg-secondary px-2 font-normal">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="bar" className="text-xs">
+                  Bar
+                </SelectItem>
+                <SelectItem value="line" className="text-xs">
+                  Line
+                </SelectItem>
+                <SelectItem value="table" className="text-xs">
+                  Table
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Filter toggle - only shown in standard mode */}
+          {!usesDataTable && (
+            <Button
+              variant={showFilters ? 'secondary' : 'outline'}
+              className="h-6 px-1.5 gap-1 text-muted-foreground hover:text-primary flex-shrink-0"
+              onClick={() => setShowFilters(!showFilters)}
+            >
+              <FunnelPlus size={14} className="stroke-[1.5]" />
+              <span className="text-xs">Filters</span>
+              {filterCount > 0 && (
+                <span className="rounded-full bg-primary text-primary-foreground text-[10px] leading-none px-1.5 py-0.5 font-medium">
+                  {filterCount}
+                </span>
+              )}
+            </Button>
+          )}
+        </div>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
               size="icon"
-              className="h-6 w-6 hover:bg-accent transition-all duration-200 text-muted-foreground hover:text-primary flex-shrink-0"
-              onClick={handleSwapDimensions}
-              title="Swap dimensions"
+              className="h-6 w-6 hover:bg-accent transition-all duration-200 text-muted-foreground hover:text-primary"
+              title="Download"
+            >
+              <Download size={14} />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={handleDownloadPng}>
+              Download PNG
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={handleDownloadCsv}
               disabled={
-                !showSwapButton || !hasWritePermission || isFetchingColumns
+                isFetchingChartData || !chartDataResponse?.result?.binStats
               }
             >
-              <ArrowLeftRight size={14} className="stroke-[1.5]" />
-            </Button>
-
-            <span className="text-xs text-muted-foreground whitespace-nowrap">
-              X:
-            </span>
-            <ColumnSelect
-              value={x_key ?? null}
-              onChange={(v) => handleDataTableColumnChange('x_key', v)}
-              columns={columns}
-              allowNone={false}
-              disabled={!hasWritePermission}
-              isLoading={isFetchingColumns}
-            />
-
-            <span className="text-xs text-muted-foreground whitespace-nowrap">
-              Y:
-            </span>
-            <ColumnSelect
-              value={y_key ?? null}
-              onChange={(v) => handleDataTableColumnChange('y_key', v)}
-              columns={columns}
-              allowNone={false}
-              disabled={!hasWritePermission}
-              filterNumeric={true}
-              isLoading={isFetchingColumns}
-            />
-          </div>
-        ) : (
-          // Standard Mode - dimension selectors
-          <div className="flex items-center gap-x-1">
-            <span className="text-xs text-muted-foreground whitespace-nowrap">
-              Series:
-            </span>
-            <DimensionSelect
-              dim={outerDim}
-              onChange={handleOuterDimChange}
-              fields={dimensions}
-              disabled={!hasWritePermission}
-            />
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 hover:bg-accent transition-all duration-200 text-muted-foreground hover:text-primary flex-shrink-0"
-              onClick={handleSwapDimensions}
-              title="Swap dimensions"
-              disabled={!showSwapButton || !hasWritePermission}
-            >
-              <ArrowLeftRight size={14} className="stroke-[1.5]" />
-            </Button>
-
-            <span className="text-xs text-muted-foreground whitespace-nowrap">
-              X:
-            </span>
-            <DimensionSelect
-              dim={innerDim}
-              onChange={handleInnerDimChange}
-              fields={dimensions}
-              allowNone={false}
-              disabled={!hasWritePermission}
-            />
-
-            <span className="text-xs text-muted-foreground whitespace-nowrap">
-              Y:
-            </span>
-            <DimensionSelect
-              dim={y_key ?? null}
-              onChange={handleYDimChange}
-              fields={measures}
-              allowNone={false}
-              disabled={!hasWritePermission}
-              widthClass="w-24"
-            />
-          </div>
-        )}
-
-        <div className="flex items-center gap-x-1">
-          <span className="text-xs text-muted-foreground whitespace-nowrap">
-            Type:
-          </span>
-          <Select
-            value={chart.chart_type}
-            onValueChange={handleChartTypeChange}
-            disabled={!hasWritePermission}
-          >
-            <SelectTrigger className="h-6 max-w-24 w-24 text-xs border-border bg-transparent hover:bg-secondary px-2 font-normal">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="bar" className="text-xs">
-                Bar
-              </SelectItem>
-              <SelectItem value="line" className="text-xs">
-                Line
-              </SelectItem>
-              <SelectItem value="table" className="text-xs">
-                Table
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Filters - only shown in standard mode */}
-        {!usesDataTable && (
-          <div className="flex flex-wrap items-center gap-x-1">
-            <span className="text-xs text-muted-foreground whitespace-nowrap">
-              Filters:
-            </span>
-
-            {hasWritePermission && (
-              <FilterActionsBar
-                collectionId={collectionId!}
-                currentFilter={runs_filter}
-                onApplyFilter={handleRunsFilterChange}
-              />
-            )}
-
-            {runs_filter && (
-              <FilterChips
-                filters={runs_filter}
-                onFiltersChange={handleRunsFilterChange}
-                onRequestEdit={handleRequestEdit}
-                className="mr-1"
-                readOnly={!hasWritePermission}
-              />
-            )}
-
-            {/* Filter button/popover */}
-            <Popover
-              open={filterPopoverOpen}
-              onOpenChange={setFilterPopoverOpen}
-            >
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  className="h-6 px-1 hover:bg-accent transition-all duration-200 text-muted-foreground hover:text-primary flex-shrink-0"
-                  title="Filter"
-                  disabled={!hasWritePermission}
-                >
-                  <FunnelPlus size={18} className="stroke-[1.5]" />
-                  <span className="text-xs">Filter</span>
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent
-                align="start"
-                sideOffset={4}
-                className="w-[520px] overflow-x-auto space-y-1.5"
-              >
-                <FilterControls
-                  filters={runs_filter}
-                  onFiltersChange={handleRunsFilterChange}
-                  metadataFields={agentRunMetadataFields}
-                  collectionId={collectionId!}
-                  showStepFilter={false}
-                  initialFilter={editingFilter}
-                />
-              </PopoverContent>
-            </Popover>
-          </div>
-        )}
+              Download CSV
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
-
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 hover:bg-accent transition-all duration-200 text-muted-foreground hover:text-primary"
-            title="Download"
-          >
-            <Download size={14} />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={handleDownloadPng}>
-            Download PNG
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={handleDownloadCsv}
-            disabled={
-              isFetchingChartData || !chartDataResponse?.result?.binStats
-            }
-          >
-            Download CSV
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {showFilters && !usesDataTable && (
+        <TranscriptFilterControls
+          collectionId={collectionId!}
+          surfaceId={`chart:${chart.id}`}
+          baseFilter={runs_filter}
+          onFiltersChange={handleRunsFilterChange}
+        />
+      )}
     </div>
   );
 }

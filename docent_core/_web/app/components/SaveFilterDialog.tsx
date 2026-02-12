@@ -25,6 +25,8 @@ interface SaveFilterPopoverProps {
   onSaveSuccess?: (filter: FilterListItem) => void;
   buttonClassName?: string;
   buttonLabel?: string;
+  labelClassName?: string;
+  iconOnly?: boolean;
 }
 
 export function SaveFilterPopover({
@@ -35,6 +37,8 @@ export function SaveFilterPopover({
   onSaveSuccess,
   buttonClassName,
   buttonLabel,
+  labelClassName,
+  iconOnly,
 }: SaveFilterPopoverProps) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
@@ -109,7 +113,11 @@ export function SaveFilterPopover({
           }
         >
           <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="text-muted-foreground">{buttonLabel ?? label}</span>
+          {!iconOnly && (
+            <span className={labelClassName ?? 'text-muted-foreground'}>
+              {buttonLabel ?? label}
+            </span>
+          )}
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-80 p-3 space-y-3">

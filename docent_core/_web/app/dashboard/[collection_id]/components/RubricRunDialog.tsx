@@ -163,17 +163,19 @@ export default function RunRubricDialog({
                 showStepFilter={false}
                 initialFilter={editingFilter}
               />
-              <div className="flex flex-wrap items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5 min-w-0">
                 <FilterActionsBar
                   collectionId={collectionId}
+                  surfaceId={`rubric-run:${rubricId}`}
                   currentFilter={filter}
                   onApplyFilter={handleFiltersChange}
-                />
-                <FilterChips
-                  filters={filter}
-                  onFiltersChange={handleFiltersChange}
-                  onRequestEdit={setEditingFilter}
-                />
+                >
+                  <FilterChips
+                    filters={filter}
+                    onFiltersChange={handleFiltersChange}
+                    onRequestEdit={setEditingFilter}
+                  />
+                </FilterActionsBar>
               </div>
             </div>
           </div>

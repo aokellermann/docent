@@ -8,14 +8,18 @@ import { useSavedFilters } from '@/hooks/use-saved-filters';
 
 interface FilterActionsBarProps {
   collectionId: string;
+  surfaceId: string;
   currentFilter: ComplexFilter | null | undefined;
   onApplyFilter: (filter: ComplexFilter) => void;
+  children?: React.ReactNode;
 }
 
 export function FilterActionsBar({
   collectionId,
+  surfaceId,
   currentFilter,
   onApplyFilter,
+  children,
 }: FilterActionsBarProps) {
   const {
     activeFilterId,
@@ -29,40 +33,51 @@ export function FilterActionsBar({
     handleDeselect,
     handleSaveSuccess,
     handleUpdate,
-  } = useSavedFilters({ collectionId, currentFilter, onApplyFilter });
+    handleDiscard,
+  } = useSavedFilters({
+    collectionId,
+    surfaceId,
+    currentFilter,
+    onApplyFilter,
+  });
 
   return (
     <>
-      {activeFilter && currentFilter && (
+      <SavedFiltersDropdown
+        collectionId={collectionId}
+        activeFilterId={activeFilterId}
+        onSelectFilter={handleSelectFilter}
+        onFilterDeleted={handleFilterDeleted}
+      />
+      {activeFilter && currentFilter ? (
         <ActiveFilterBanner
           activeFilter={activeFilter}
           isDirty={isDirty}
           isUpdating={isUpdating}
           onDeselect={handleDeselect}
+          onDiscard={handleDiscard}
           onUpdate={handleUpdate}
           collectionId={collectionId}
           currentFilter={currentFilter}
           hasActiveConditions={hasActiveConditions}
           onSaveSuccess={handleSaveSuccess}
-        />
+        >
+          {children}
+        </ActiveFilterBanner>
+      ) : (
+        <>
+          {children}
+          {currentFilter && (
+            <SaveFilterPopover
+              collectionId={collectionId}
+              currentFilter={currentFilter}
+              disabled={!hasActiveConditions}
+              mode={saveMode}
+              onSaveSuccess={handleSaveSuccess}
+            />
+          )}
+        </>
       )}
-      <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-        <SavedFiltersDropdown
-          collectionId={collectionId}
-          activeFilterId={activeFilterId}
-          onSelectFilter={handleSelectFilter}
-          onFilterDeleted={handleFilterDeleted}
-        />
-        {(!isDirty || !activeFilter) && currentFilter && (
-          <SaveFilterPopover
-            collectionId={collectionId}
-            currentFilter={currentFilter}
-            disabled={!hasActiveConditions}
-            mode={saveMode}
-            onSaveSuccess={handleSaveSuccess}
-          />
-        )}
-      </div>
     </>
   );
 }

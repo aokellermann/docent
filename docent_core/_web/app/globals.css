@@ -126,7 +126,7 @@
     --indigo-text: 238.7 83.5% 66.7%;
     --indigo-muted: 243.7 54.5% 41.4%;
 
-    --purple: 270 100% 15%;
+    --purple: 270 40% 14%;
     --purple-border: 270.7 91% 65.1%;
     --purple-text: 270.7 91% 65.1%;
     --sidebar-background: 240 5.9% 10%;
@@ -198,6 +198,17 @@
 }
 .toaster [data-sonner-toast][data-type="info"] [data-icon] {
   color: hsl(var(--blue-text));
+}
+
+/* Filter banner: collapse button labels to icon-only when narrow */
+.filter-banner {
+  container-type: inline-size;
+}
+
+@container (max-width: 400px) {
+  .filter-btn-label {
+    display: none;
+  }
 }
 
 /* Pylon chat widget - position on bottom-left, window opens top-right */

@@ -357,77 +357,74 @@ export default function SingleRubricArea({
 
   const ResultsSection = (
     <>
-      <div className="flex flex-wrap items-center gap-2 justify-between">
-        <div className="flex flex-wrap gap-1.5 items-center mr-auto">
-          <div className="inline-flex items-center border border-border rounded-md overflow-hidden">
-            <ViewModeDropdown
-              agentRunResults={agentRunResults}
-              labels={labels ?? []}
-              className="!border-0 rounded-r-none rounded-l-md shadow-none"
-              viewMode={viewMode}
-              setViewMode={setViewMode}
-            />
-            <div className="h-7 w-px bg-border" />
-            <Popover
-              open={filterPopoverOpen}
-              onOpenChange={setFilterPopoverOpen}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+        <div className="inline-flex items-center border border-border rounded-md overflow-hidden">
+          <ViewModeDropdown
+            agentRunResults={agentRunResults}
+            labels={labels ?? []}
+            className="!border-0 rounded-r-none rounded-l-md shadow-none"
+            viewMode={viewMode}
+            setViewMode={setViewMode}
+          />
+          <div className="h-7 w-px bg-border" />
+          <Popover open={filterPopoverOpen} onOpenChange={setFilterPopoverOpen}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <PopoverTrigger asChild>
+                  <Button className="inline-flex items-center h-7 gap-x-1 text-xs bg-background text-muted-foreground hover:text-primary px-1.5 hover:bg-accent transition-all duration-200 rounded-l-none rounded-r-md">
+                    <FunnelPlus size={14} className="stroke-[1.5]" />
+                  </Button>
+                </PopoverTrigger>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Add filter</p>
+              </TooltipContent>
+            </Tooltip>
+            <PopoverContent
+              align="start"
+              sideOffset={4}
+              className="w-[520px] overflow-x-auto space-y-1.5"
             >
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <PopoverTrigger asChild>
-                    <Button className="inline-flex items-center h-7 gap-x-1 text-xs bg-background text-muted-foreground hover:text-primary px-1.5 hover:bg-accent transition-all duration-200 rounded-l-none rounded-r-md">
-                      <FunnelPlus size={14} className="stroke-[1.5]" />
-                    </Button>
-                  </PopoverTrigger>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Add filter</p>
-                </TooltipContent>
-              </Tooltip>
-              <PopoverContent
-                align="start"
-                sideOffset={4}
-                className="w-[520px] overflow-x-auto space-y-1.5"
-              >
-                <FilterControls
-                  filters={runsFilter}
-                  onFiltersChange={handleRunsFilterChange}
-                  metadataFields={agentRunMetadataFields}
-                  collectionId={collectionId!}
-                  showStepFilter={false}
-                  initialFilter={editingFilter}
-                />
-              </PopoverContent>
-            </Popover>
-          </div>
-          {hasWritePermission && (
-            <FilterActionsBar
-              collectionId={collectionId!}
-              currentFilter={runsFilter}
-              onApplyFilter={handleRunsFilterChange}
-            />
-          )}
-          {runsFilter && (
-            <FilterChips
-              filters={runsFilter}
-              onFiltersChange={handleRunsFilterChange}
-              onRequestEdit={handleRequestEditFilter}
-            />
-          )}
-          {failureCount > 0 && (
-            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Switch
-                id="include-failures"
-                checked={showFailures}
-                onCheckedChange={setShowFailures}
-                className="scale-75"
+              <FilterControls
+                filters={runsFilter}
+                onFiltersChange={handleRunsFilterChange}
+                metadataFields={agentRunMetadataFields}
+                collectionId={collectionId!}
+                showStepFilter={false}
+                initialFilter={editingFilter}
               />
-              <label htmlFor="include-failures" className="cursor-pointer">
-                Show <span className="text-red-500">{failureCount} errors</span>
-              </label>
-            </div>
-          )}
+            </PopoverContent>
+          </Popover>
         </div>
+        {hasWritePermission && (
+          <FilterActionsBar
+            collectionId={collectionId!}
+            surfaceId={`rubric-results:${rubricId}`}
+            currentFilter={runsFilter}
+            onApplyFilter={handleRunsFilterChange}
+          />
+        )}
+        {runsFilter && (
+          <FilterChips
+            filters={runsFilter}
+            onFiltersChange={handleRunsFilterChange}
+            onRequestEdit={handleRequestEditFilter}
+            readOnly={!hasWritePermission}
+          />
+        )}
+        {failureCount > 0 && (
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <Switch
+              id="include-failures"
+              checked={showFailures}
+              onCheckedChange={setShowFailures}
+              className="scale-75"
+            />
+            <label htmlFor="include-failures" className="cursor-pointer">
+              Show <span className="text-red-500">{failureCount} errors</span>
+            </label>
+          </div>
+        )}
         <div className="flex items-center gap-1.5 ml-auto">
           {!rubricJobId &&
             hasWritePermission &&

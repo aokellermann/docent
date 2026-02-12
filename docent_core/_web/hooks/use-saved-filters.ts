@@ -23,18 +23,20 @@ function filtersEqual(a: ComplexFilter, b: ComplexFilter): boolean {
 
 interface UseSavedFiltersOptions {
   collectionId: string;
+  surfaceId: string;
   currentFilter: ComplexFilter | null | undefined;
   onApplyFilter: (filter: ComplexFilter) => void;
 }
 
 export function useSavedFilters({
   collectionId,
+  surfaceId,
   currentFilter,
   onApplyFilter,
 }: UseSavedFiltersOptions) {
   const dispatch = useAppDispatch();
   const activeFilterId = useAppSelector(
-    (state) => state.savedFilter.activeFilterIds[collectionId] ?? null
+    (state) => state.savedFilter.activeFilterIds[surfaceId] ?? null
   );
   const { data: filters } = useListFiltersQuery(collectionId);
   const activeFilter = activeFilterId
@@ -47,6 +49,10 @@ export function useSavedFilters({
   // Prevents the clear-on-empty guard from racing with the prop update.
   const pendingApplyRef = useRef(false);
 
+  // Distinguishes "empty because we just navigated here" (restore the saved
+  // filter) from "empty because the user cleared all conditions" (deselect).
+  const everHadConditionsRef = useRef(false);
+
   const hasActiveConditions =
     currentFilter != null &&
     currentFilter.filters != null &&
@@ -55,16 +61,35 @@ export function useSavedFilters({
   if (hasActiveConditions && pendingApplyRef.current) {
     pendingApplyRef.current = false;
   }
+  if (hasActiveConditions) {
+    everHadConditionsRef.current = true;
+  }
 
   useEffect(() => {
     if (
-      !hasActiveConditions &&
-      activeFilterId !== null &&
-      !pendingApplyRef.current
+      hasActiveConditions ||
+      activeFilterId === null ||
+      pendingApplyRef.current
     ) {
-      dispatch(clearActiveFilterId(collectionId));
+      return;
     }
-  }, [hasActiveConditions, activeFilterId, dispatch, collectionId]);
+
+    if (!everHadConditionsRef.current && activeFilter) {
+      // Mounted with a previously-active saved filter — restore its conditions
+      pendingApplyRef.current = true;
+      onApplyFilter(activeFilter.filter);
+    } else if (everHadConditionsRef.current) {
+      // Conditions were manually cleared — deselect the saved filter
+      dispatch(clearActiveFilterId(surfaceId));
+    }
+  }, [
+    hasActiveConditions,
+    activeFilterId,
+    activeFilter,
+    dispatch,
+    surfaceId,
+    onApplyFilter,
+  ]);
 
   const isDirty =
     activeFilter != null &&
@@ -79,31 +104,31 @@ export function useSavedFilters({
         );
         if (!confirmed) return;
       }
-      dispatch(setActiveFilterId({ collectionId, filterId: filter.id }));
+      dispatch(setActiveFilterId({ surfaceId, filterId: filter.id }));
       pendingApplyRef.current = true;
       onApplyFilter(filter.filter);
     },
-    [isDirty, onApplyFilter, dispatch, collectionId]
+    [isDirty, onApplyFilter, dispatch, surfaceId]
   );
 
   const handleFilterDeleted = useCallback(
     (filterId: string) => {
       if (activeFilterId === filterId) {
-        dispatch(clearActiveFilterId(collectionId));
+        dispatch(clearActiveFilterId(surfaceId));
       }
     },
-    [activeFilterId, dispatch, collectionId]
+    [activeFilterId, dispatch, surfaceId]
   );
 
   const handleDeselect = useCallback(() => {
-    dispatch(clearActiveFilterId(collectionId));
-  }, [dispatch, collectionId]);
+    dispatch(clearActiveFilterId(surfaceId));
+  }, [dispatch, surfaceId]);
 
   const handleSaveSuccess = useCallback(
     (filter: FilterListItem) => {
-      dispatch(setActiveFilterId({ collectionId, filterId: filter.id }));
+      dispatch(setActiveFilterId({ surfaceId, filterId: filter.id }));
     },
-    [dispatch, collectionId]
+    [dispatch, surfaceId]
   );
 
   const handleDiscard = useCallback(() => {
