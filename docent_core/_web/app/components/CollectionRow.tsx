@@ -203,7 +203,7 @@ export default function CollectionRow({
       </TableCell>
 
       {/* Name */}
-      <TableCell className="py-2 overflow-hidden max-w-[280px]">
+      <TableCell className="py-2">
         {isEditing ? (
           <Input
             value={name}
@@ -233,7 +233,7 @@ export default function CollectionRow({
       </TableCell>
 
       {/* Description */}
-      <TableCell className="py-2 overflow-hidden">
+      <TableCell className="py-2">
         {isEditing ? (
           <Input
             value={description}
@@ -297,7 +297,7 @@ export default function CollectionRow({
 
       {/* Created At */}
       <TableCell className="text-xs py-2">
-        <div className="text-muted-foreground whitespace-nowrap">
+        <div className="flex items-center text-muted-foreground whitespace-nowrap">
           {formatDateValue(collection.created_at, true)}
         </div>
       </TableCell>
