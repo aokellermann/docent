@@ -89,31 +89,31 @@ export function CollectionsTable({
 
   return (
     <>
-      <Table className="table-fixed w-full">
+      <Table className="w-full">
         <TableHeader className="bg-secondary sticky top-0">
           <TableRow>
-            <TableHead className="w-[10%] py-1 font-medium text-xs text-muted-foreground">
+            <TableHead className="py-1 font-medium text-xs text-muted-foreground min-w-[115px]">
               ID
             </TableHead>
-            <TableHead className="w-[15%] py-1 font-medium text-xs text-muted-foreground">
+            <TableHead className="py-1 font-medium text-xs text-muted-foreground min-w-[100px] max-w-[280px]">
               Name
             </TableHead>
-            <TableHead className="w-[25%] py-1 font-medium text-xs text-muted-foreground">
+            <TableHead className="py-1 font-medium text-xs text-muted-foreground w-full min-w-[120px]">
               Description
             </TableHead>
-            <TableHead className="w-[8%] py-1 font-medium text-xs text-muted-foreground">
+            <TableHead className="py-1 font-medium text-xs text-muted-foreground min-w-[85px] whitespace-nowrap">
               Agent Runs
             </TableHead>
-            <TableHead className="w-[8%] py-1 font-medium text-xs text-muted-foreground">
+            <TableHead className="py-1 font-medium text-xs text-muted-foreground min-w-[85px] whitespace-nowrap">
               Rubrics
             </TableHead>
-            <TableHead className="w-[8%] py-1 font-medium text-xs text-muted-foreground">
+            <TableHead className="py-1 font-medium text-xs text-muted-foreground min-w-[85px] whitespace-nowrap">
               Label Sets
             </TableHead>
-            <TableHead className="w-[12%] py-1 font-medium text-xs text-muted-foreground">
+            <TableHead className="py-1 font-medium text-xs text-muted-foreground whitespace-nowrap">
               Created
             </TableHead>
-            <TableHead className="w-[8%] py-1 font-medium text-xs text-muted-foreground text-right">
+            <TableHead className="py-1 font-medium text-xs text-muted-foreground text-right whitespace-nowrap">
               Actions
             </TableHead>
           </TableRow>
