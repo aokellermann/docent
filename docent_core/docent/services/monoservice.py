@@ -275,6 +275,14 @@ def extract_metadata_observations(
         if not path_parts:
             return
 
+        # Recurse into dicts without storing the intermediate node
+        if isinstance(obj, dict):
+            obj_dict = cast(dict[str, Any], obj)
+            for key, child_value in obj_dict.items():
+                _walk(child_value, path_parts + [key])
+            return
+
+        # Leaf node — store observation
         json_path = "metadata." + ".".join(path_parts)
         value_type = _python_type_to_value_type(obj)
         value_text = _serialize_observation_value(obj)
@@ -298,12 +306,6 @@ def extract_metadata_observations(
                 observed_at=observed_at,
             )
         )
-
-        # Recurse into dicts
-        if isinstance(obj, dict):
-            obj_dict = cast(dict[str, Any], obj)
-            for key, child_value in obj_dict.items():
-                _walk(child_value, path_parts + [key])
 
     metadata_dict = cast(dict[str, Any], metadata)
     for key, value in metadata_dict.items():
@@ -2094,6 +2096,15 @@ class MonoService:
                         "next_agent_run_cursor": None,
                         "next_collection_id": None,
                     }
+
+            # When starting a collection from scratch, clear existing observations first
+            if agent_run_cursor is None:
+                await session.execute(
+                    delete(SQLAMetadataObservation).where(
+                        SQLAMetadataObservation.collection_id == collection_id
+                    )
+                )
+                await session.flush()
 
             # Fetch a batch of agent runs, ordered by ID for stable cursor pagination
             query = (
