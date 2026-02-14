@@ -473,6 +473,17 @@ async def next_backfill_collection(
     return await mono_svc.next_backfill_collection(after)
 
 
+# TODO(nickwu): Remove this endpoint after backfill is complete.
+@user_router.post("/backfill_metadata/clear/{collection_id}")
+async def clear_metadata(
+    collection_id: str,
+    mono_svc: MonoService = Depends(get_mono_svc),
+):
+    """Delete all metadata observations for a collection."""
+    deleted = await mono_svc.clear_metadata(collection_id)
+    return {"collection_id": collection_id, "observations_deleted": deleted}
+
+
 @user_router.get("/{collection_id}/collection_details", response_model=CollectionRow | None)
 async def get_collection_details(
     collection_id: str = Depends(require_collection_exists),
@@ -970,6 +981,7 @@ async def resync_metadata(
 async def backfill_metadata(
     collection_id: str | None = None,
     agent_run_cursor: str | None = None,
+    agent_run_id_gte: str | None = None,
     agent_run_id_lt: str | None = None,
     batch_size: int = 500,
     mono_svc: MonoService = Depends(get_mono_svc),
@@ -978,6 +990,7 @@ async def backfill_metadata(
     return await mono_svc.backfill_metadata(
         collection_id,
         agent_run_cursor,
+        agent_run_id_gte=agent_run_id_gte,
         agent_run_id_lt=agent_run_id_lt,
         batch_size=batch_size,
     )
