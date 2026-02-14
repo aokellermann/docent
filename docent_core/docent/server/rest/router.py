@@ -477,10 +477,11 @@ async def next_backfill_collection(
 @user_router.post("/backfill_metadata/clear/{collection_id}")
 async def clear_metadata(
     collection_id: str,
+    batch_size: int | None = None,
     mono_svc: MonoService = Depends(get_mono_svc),
 ):
-    """Delete all metadata observations for a collection."""
-    deleted = await mono_svc.clear_metadata(collection_id)
+    """Delete metadata observations for a collection, optionally limited by batch_size."""
+    deleted = await mono_svc.clear_metadata(collection_id, batch_size=batch_size)
     return {"collection_id": collection_id, "observations_deleted": deleted}
 
 

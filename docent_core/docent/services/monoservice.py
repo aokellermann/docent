@@ -2081,14 +2081,41 @@ class MonoService:
             collection_id = result.scalar_one_or_none()
         return {"collection_id": collection_id}
 
-    async def clear_metadata(self, collection_id: str) -> int:
-        """Delete all metadata observations for a collection."""
+    async def clear_metadata(self, collection_id: str, batch_size: int | None = None) -> int:
+        """Delete metadata observations for a collection.
+
+        If batch_size is provided, deletes at most that many rows.
+        Otherwise, deletes all rows for the collection.
+        """
         async with self.db.session() as session:
-            result = await session.execute(
-                delete(SQLAMetadataObservation).where(
-                    SQLAMetadataObservation.collection_id == collection_id
+            if batch_size is not None:
+                # Delete a limited batch using ctid subquery
+                subquery = (
+                    select(
+                        SQLAMetadataObservation.agent_run_id,
+                        SQLAMetadataObservation.json_path,
+                        SQLAMetadataObservation.value_hash,
+                        SQLAMetadataObservation.value_type,
+                    )
+                    .where(SQLAMetadataObservation.collection_id == collection_id)
+                    .limit(batch_size)
                 )
-            )
+                result = await session.execute(
+                    delete(SQLAMetadataObservation).where(
+                        tuple_(
+                            SQLAMetadataObservation.agent_run_id,
+                            SQLAMetadataObservation.json_path,
+                            SQLAMetadataObservation.value_hash,
+                            SQLAMetadataObservation.value_type,
+                        ).in_(subquery)
+                    )
+                )
+            else:
+                result = await session.execute(
+                    delete(SQLAMetadataObservation).where(
+                        SQLAMetadataObservation.collection_id == collection_id
+                    )
+                )
             deleted = result.rowcount
         logger.info(f"Deleted {deleted} metadata observations for collection {collection_id}")
         return deleted
