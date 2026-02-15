@@ -1952,33 +1952,26 @@ class MonoService:
         """
         async with self.db.session() as session:
             if batch_size is not None:
-                subquery = (
-                    select(
-                        SQLAMetadataObservation.agent_run_id,
-                        SQLAMetadataObservation.json_path,
-                        SQLAMetadataObservation.value_hash,
-                        SQLAMetadataObservation.value_type,
-                    )
-                    .where(SQLAMetadataObservation.collection_id == collection_id)
-                    .limit(batch_size)
+                conn = await session.connection()
+                raw_result = await conn.execute(
+                    text(
+                        "DELETE FROM metadata_observations "
+                        "WHERE ctid IN ("
+                        "  SELECT ctid FROM metadata_observations "
+                        "  WHERE collection_id = :collection_id "
+                        "  LIMIT :batch_size"
+                        ")"
+                    ),
+                    {"collection_id": collection_id, "batch_size": batch_size},
                 )
-                result = await session.execute(
-                    delete(SQLAMetadataObservation).where(
-                        tuple_(
-                            SQLAMetadataObservation.agent_run_id,
-                            SQLAMetadataObservation.json_path,
-                            SQLAMetadataObservation.value_hash,
-                            SQLAMetadataObservation.value_type,
-                        ).in_(subquery)
-                    )
-                )
+                deleted = raw_result.rowcount
             else:
                 result = await session.execute(
                     delete(SQLAMetadataObservation).where(
                         SQLAMetadataObservation.collection_id == collection_id
                     )
                 )
-            deleted = result.rowcount
+                deleted = result.rowcount
 
         # Find the next collection
         async with self.db.session() as session:
