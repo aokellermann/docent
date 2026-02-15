@@ -7,7 +7,7 @@ public_subnet_count = 2
 nat_gateway_count = 2
 
 rds_instance_class = "db.m5.8xlarge"
-rds_max_allocated_storage = 1000
+rds_max_allocated_storage = 4000
 rds_multi_az = true
 elasticache_node_type = "cache.m6g.large"
 # db_password = ...  # you need to set this in the environment variables
