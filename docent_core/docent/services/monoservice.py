@@ -233,96 +233,6 @@ def _log_compiled_query(label: str, query: Any) -> None:
     logger.info("agent_run_table_sql label=%s sql=%s", label, compiled)
 
 
-def _python_type_to_value_type(value: Any) -> str:
-    if isinstance(value, bool):
-        return "boolean"
-    if isinstance(value, (int, float)):
-        return "number"
-    if isinstance(value, str):
-        return "string"
-    if value is None:
-        return "null"
-    if isinstance(value, dict):
-        return "dict"
-    if isinstance(value, list):
-        return "list"
-    return "string"
-
-
-def _serialize_observation_value(value: Any) -> str:
-    if isinstance(value, str):
-        return value
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, (int, float)):
-        return str(value)
-    if value is None:
-        return "null"
-    return json.dumps(value, sort_keys=True)
-
-
-def extract_metadata_observations(
-    sq_agent_run: SQLAAgentRun, collection_id: str
-) -> list[SQLAMetadataObservation]:
-    metadata = sq_agent_run.metadata_json
-    if not isinstance(metadata, dict):
-        return []
-
-    observed_at = sq_agent_run.created_at or datetime.now(UTC).replace(tzinfo=None)
-    observations: list[SQLAMetadataObservation] = []
-
-    def _walk(obj: Any, path_parts: list[str]) -> None:
-        if not path_parts:
-            return
-
-        # Recurse into dicts without storing the intermediate node
-        if isinstance(obj, dict):
-            obj_dict = cast(dict[str, Any], obj)
-            for key, child_value in obj_dict.items():
-                _walk(child_value, path_parts + [key])
-            return
-
-        # Leaf node — store observation
-        json_path = "metadata." + ".".join(path_parts)
-        value_type = _python_type_to_value_type(obj)
-        value_text = _serialize_observation_value(obj)
-        value_hash = hashlib.md5(value_text.encode()).hexdigest()
-        value_numeric: float | None = None
-        if value_type == "number":
-            try:
-                value_numeric = float(obj)
-            except (TypeError, ValueError):
-                pass
-
-        observations.append(
-            SQLAMetadataObservation(
-                agent_run_id=sq_agent_run.id,
-                collection_id=collection_id,
-                json_path=json_path,
-                value_text=value_text,
-                value_hash=value_hash,
-                value_type=value_type,
-                value_numeric=value_numeric,
-                observed_at=observed_at,
-            )
-        )
-
-    metadata_dict = cast(dict[str, Any], metadata)
-    for key, value in metadata_dict.items():
-        _walk(value, [key])
-
-    return observations
-
-
-def extract_metadata_observations_bulk(
-    sq_agent_runs: Sequence[SQLAAgentRun], collection_id: str
-) -> list[SQLAMetadataObservation]:
-    result: list[SQLAMetadataObservation] = []
-    for sq_agent_run in sq_agent_runs:
-        result.extend(extract_metadata_observations(sq_agent_run, collection_id))
-    return result
-
-
 class _NotGiven:
     """Sentinel class for detecting when a parameter was not provided."""
 
@@ -1118,11 +1028,6 @@ class MonoService:
         # Sort transcript groups so they don't violate foreign key constraints when inserted at once
         transcript_group_data = sort_transcript_groups_by_parent_order(transcript_group_data)
 
-        # Extract metadata observations
-        metadata_observations = extract_metadata_observations_bulk(
-            agent_run_data, ctx.collection_id
-        )
-
         # Insert all rows in a single transaction using add_all
         async with self.db.session() as session:
             session.add_all(agent_run_data)
@@ -1131,11 +1036,10 @@ class MonoService:
                 session.flush()
             )  # (mengk) seems necessary to avoid FK violations, for some strange reason
             session.add_all(transcript_data)
-            session.add_all(metadata_observations)
 
         logger.info(
             f"Added {len(agent_runs)} agent runs, {len(transcript_data)} transcripts, "
-            f"{len(transcript_group_data)} transcript groups, and {len(metadata_observations)} metadata observations"
+            f"and {len(transcript_group_data)} transcript groups"
         )
 
         await self.schedule_metadata_view_refresh()
@@ -1543,12 +1447,6 @@ class MonoService:
             await session.execute(
                 update(SQLATranscriptGroup)
                 .where(SQLATranscriptGroup.agent_run_id == agent_run_id)
-                .values(collection_id=destination_collection_id)
-            )
-
-            await session.execute(
-                update(SQLAMetadataObservation)
-                .where(SQLAMetadataObservation.agent_run_id == agent_run_id)
                 .values(collection_id=destination_collection_id)
             )
 
@@ -2043,53 +1941,17 @@ class MonoService:
 
         return metadata_map
 
-    async def resync_metadata(self, collection_id: str) -> int:
-        """Delete all existing metadata observations for a collection and re-extract from agent runs."""
-        async with self.db.session() as session:
-            # Delete existing observations for this collection
-            await session.execute(
-                delete(SQLAMetadataObservation).where(
-                    SQLAMetadataObservation.collection_id == collection_id
-                )
-            )
-            await session.flush()
-
-            # Fetch all agent runs for this collection
-            result = await session.execute(
-                select(SQLAAgentRun).where(SQLAAgentRun.collection_id == collection_id)
-            )
-            sq_agent_runs = list(result.scalars().all())
-
-            # Re-extract observations
-            observations = extract_metadata_observations_bulk(sq_agent_runs, collection_id)
-            session.add_all(observations)
-
-        logger.info(
-            f"Resynced metadata for collection {collection_id}: "
-            f"{len(sq_agent_runs)} agent runs, {len(observations)} observations"
-        )
-
-        return len(observations)
-
-    async def next_backfill_collection(self, after: str | None = None) -> dict[str, str | None]:
-        """Return the next collection ID to backfill, optionally after a given ID."""
-        async with self.db.session() as session:
-            query = select(SQLACollection.id).order_by(SQLACollection.id.asc()).limit(1)
-            if after is not None:
-                query = query.where(SQLACollection.id > after)
-            result = await session.execute(query)
-            collection_id = result.scalar_one_or_none()
-        return {"collection_id": collection_id}
-
-    async def clear_metadata(self, collection_id: str, batch_size: int | None = None) -> int:
+    async def clear_metadata(
+        self, collection_id: str, batch_size: int | None = None
+    ) -> dict[str, str | int | None]:
         """Delete metadata observations for a collection.
 
         If batch_size is provided, deletes at most that many rows.
         Otherwise, deletes all rows for the collection.
+        Returns the count of deleted rows and the next collection ID.
         """
         async with self.db.session() as session:
             if batch_size is not None:
-                # Delete a limited batch using ctid subquery
                 subquery = (
                     select(
                         SQLAMetadataObservation.agent_run_id,
@@ -2117,111 +1979,21 @@ class MonoService:
                     )
                 )
             deleted = result.rowcount
-        logger.info(f"Deleted {deleted} metadata observations for collection {collection_id}")
-        return deleted
 
-    async def backfill_metadata(
-        self,
-        collection_id: str | None = None,
-        agent_run_cursor: str | None = None,
-        agent_run_id_gte: str | None = None,
-        agent_run_id_lt: str | None = None,
-        batch_size: int = 500,
-    ) -> dict[str, str | int | None]:
-        """Backfill metadata observations for one batch of agent runs.
-
-        Processes up to `batch_size` agent runs within a collection, using
-        INSERT ON CONFLICT DO NOTHING to avoid duplicates. Returns cursors
-        so the caller can paginate through all runs and collections.
-        """
-        # Resolve collection_id first if not provided
-        if collection_id is None:
-            async with self.db.session() as session:
-                result = await session.execute(
-                    select(SQLACollection.id).order_by(SQLACollection.id.asc()).limit(1)
-                )
-                collection_id = result.scalar_one_or_none()
-                if collection_id is None:
-                    return {
-                        "collection_id": None,
-                        "observations_created": 0,
-                        "next_agent_run_cursor": None,
-                        "next_collection_id": None,
-                    }
-
+        # Find the next collection
         async with self.db.session() as session:
-            # Fetch a batch of agent runs, ordered by ID for stable cursor pagination
-            query = (
-                select(SQLAAgentRun)
-                .where(SQLAAgentRun.collection_id == collection_id)
-                .order_by(SQLAAgentRun.id.asc())
-                .limit(batch_size)
+            next_result = await session.execute(
+                select(SQLACollection.id)
+                .where(SQLACollection.id > collection_id)
+                .order_by(SQLACollection.id.asc())
+                .limit(1)
             )
-            if agent_run_cursor is not None:
-                query = query.where(SQLAAgentRun.id > agent_run_cursor)
-            elif agent_run_id_gte is not None:
-                query = query.where(SQLAAgentRun.id >= agent_run_id_gte)
-            if agent_run_id_lt is not None:
-                query = query.where(SQLAAgentRun.id < agent_run_id_lt)
+            next_collection_id = next_result.scalar_one_or_none()
 
-            result = await session.execute(query)
-            sq_agent_runs = list(result.scalars().all())
-
-            # Extract and upsert observations in chunks to stay under asyncpg's
-            # 32767 bind-parameter limit (8 columns per row → ~3500 rows per chunk).
-            observations = extract_metadata_observations_bulk(sq_agent_runs, collection_id)
-            chunk_size = 3500
-            for i in range(0, len(observations), chunk_size):
-                chunk = observations[i : i + chunk_size]
-                stmt = (
-                    pg_insert(SQLAMetadataObservation)
-                    .values(
-                        [
-                            {
-                                "agent_run_id": o.agent_run_id,
-                                "json_path": o.json_path,
-                                "value_hash": o.value_hash,
-                                "value_type": o.value_type,
-                                "collection_id": o.collection_id,
-                                "value_text": o.value_text,
-                                "value_numeric": o.value_numeric,
-                                "observed_at": o.observed_at,
-                            }
-                            for o in chunk
-                        ]
-                    )
-                    .on_conflict_do_nothing()
-                )
-                await session.execute(stmt)
-
-        # Determine next cursor
-        next_agent_run_cursor: str | None = None
-        next_collection_id: str | None = None
-
-        if len(sq_agent_runs) == batch_size:
-            # More runs in this collection
-            next_agent_run_cursor = sq_agent_runs[-1].id
-            next_collection_id = collection_id
-        else:
-            # Done with this collection, find the next one
-            async with self.db.session() as session:
-                result = await session.execute(
-                    select(SQLACollection.id)
-                    .where(SQLACollection.id > collection_id)
-                    .order_by(SQLACollection.id.asc())
-                    .limit(1)
-                )
-                next_collection_id = result.scalar_one_or_none()
-
-        logger.info(
-            f"Backfilled metadata for collection {collection_id}: "
-            f"{len(sq_agent_runs)} agent runs, {len(observations)} observations"
-        )
-
+        logger.info(f"Deleted {deleted} metadata observations for collection {collection_id}")
         return {
             "collection_id": collection_id,
-            "observations_created": len(observations),
-            "next_agent_run_cursor": next_agent_run_cursor,
+            "observations_deleted": deleted,
             "next_collection_id": next_collection_id,
         }
 

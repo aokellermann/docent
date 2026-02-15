@@ -463,26 +463,15 @@ async def get_collections_counts(
     }
 
 
-# TODO(nickwu): Remove this endpoint after backfill is complete.
-@user_router.get("/backfill_metadata/next_collection")
-async def next_backfill_collection(
-    after: str | None = None,
-    mono_svc: MonoService = Depends(get_mono_svc),
-):
-    """Return the next collection ID to backfill, optionally after a given ID."""
-    return await mono_svc.next_backfill_collection(after)
-
-
-# TODO(nickwu): Remove this endpoint after backfill is complete.
-@user_router.post("/backfill_metadata/clear/{collection_id}")
+# TODO(nickwu): Remove this endpoint after cleanup is complete.
+@user_router.post("/clear_metadata/{collection_id}")
 async def clear_metadata(
     collection_id: str,
     batch_size: int | None = None,
     mono_svc: MonoService = Depends(get_mono_svc),
 ):
     """Delete metadata observations for a collection, optionally limited by batch_size."""
-    deleted = await mono_svc.clear_metadata(collection_id, batch_size=batch_size)
-    return {"collection_id": collection_id, "observations_deleted": deleted}
+    return await mono_svc.clear_metadata(collection_id, batch_size=batch_size)
 
 
 @user_router.get("/{collection_id}/collection_details", response_model=CollectionRow | None)
@@ -958,53 +947,6 @@ async def get_metadata_field_range(
         return await mono_svc.get_metadata_field_range(ctx, field_name)
     except ValueError as exc:  # pragma: no cover - defensive guard
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-# TODO(nickwu): Restore permission check: Depends(require_collection_permission(Permission.WRITE))
-# Temporarily removed to allow backfilling metadata for all collections.
-@user_router.post("/{collection_id}/resync_metadata")
-async def resync_metadata(
-    collection_id: str,
-    mono_svc: MonoService = Depends(get_mono_svc),
-):
-    """Re-extract all metadata observations for a collection and refresh the materialized view."""
-    observations_created = await mono_svc.resync_metadata(collection_id)
-    await mono_svc.schedule_metadata_view_refresh()
-    return {
-        "collection_id": collection_id,
-        "observations_created": observations_created,
-        "message": "Metadata registry resynced successfully",
-    }
-
-
-# TODO(nickwu): Remove this endpoint after backfill is complete.
-@user_router.post("/backfill_metadata")
-async def backfill_metadata(
-    collection_id: str | None = None,
-    agent_run_cursor: str | None = None,
-    agent_run_id_gte: str | None = None,
-    agent_run_id_lt: str | None = None,
-    batch_size: int = 500,
-    mono_svc: MonoService = Depends(get_mono_svc),
-):
-    """Backfill metadata observations in batches. Returns cursors for pagination."""
-    return await mono_svc.backfill_metadata(
-        collection_id,
-        agent_run_cursor,
-        agent_run_id_gte=agent_run_id_gte,
-        agent_run_id_lt=agent_run_id_lt,
-        batch_size=batch_size,
-    )
-
-
-# TODO(nickwu): Remove this endpoint after backfill is complete.
-@user_router.post("/refresh_metadata_view")
-async def refresh_metadata_view(
-    mono_svc: MonoService = Depends(get_mono_svc),
-):
-    """Refresh the metadata_value_stats materialized view."""
-    await mono_svc.schedule_metadata_view_refresh()
-    return {"message": "Metadata view refresh completed"}
 
 
 @user_router.get("/{collection_id}/agent_run")

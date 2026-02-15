@@ -54,7 +54,6 @@ from docent_core.docent.db.schemas.auth_models import User
 from docent_core.docent.db.schemas.tables import (
     SQLAAgentRun,
     SQLACollection,
-    SQLAMetadataObservation,
     SQLATelemetryAccumulation,
     SQLATelemetryAgentRunStatus,
     SQLATelemetryLineage,
@@ -66,7 +65,6 @@ from docent_core.docent.db.schemas.tables import (
 )
 from docent_core.docent.services.monoservice import (
     MonoService,
-    extract_metadata_observations_bulk,
     sort_transcript_groups_by_parent_order,
 )
 from docent_core.docent.services.telemetry_accumulation import (
@@ -1680,19 +1678,6 @@ class TelemetryService:
         for sqla_agent_run in agent_run_data:
             # Use merge to handle both insert and update
             await self.session.merge(sqla_agent_run)
-
-        # Update metadata observations: delete existing, then re-extract
-        if agent_run_ids:
-            await self.session.execute(
-                delete(SQLAMetadataObservation).where(
-                    SQLAMetadataObservation.agent_run_id.in_(agent_run_ids)
-                )
-            )
-            await self.session.flush()
-            metadata_observations = extract_metadata_observations_bulk(
-                agent_run_data, ctx.collection_id
-            )
-            self.session.add_all(metadata_observations)
 
         # Validate transcript group parent references before saving transcript groups
         if transcript_group_data:
