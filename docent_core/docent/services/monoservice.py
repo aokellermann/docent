@@ -1945,7 +1945,6 @@ class MonoService:
         self, collection_id: str, batch_size: int | None = None
     ) -> dict[str, str | int | None]:
         """Delete metadata observations for a collection.
-
         If batch_size is provided, deletes at most that many rows.
         Otherwise, deletes all rows for the collection.
         Returns the count of deleted rows and the next collection ID.
