@@ -64,6 +64,6 @@ export const navToAgentRun = (
   if (openInNewTab) {
     window.open(url, '_blank');
   } else {
-    router.push(url);
+    router.push(url, { scroll: false });
   }
 };

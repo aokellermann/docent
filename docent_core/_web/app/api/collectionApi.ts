@@ -236,6 +236,7 @@ export const collectionApi = createApi({
         sortDirection?: 'asc' | 'desc';
         limit?: number;
         offset?: number;
+        baseFilterKey?: string;
       }
     >({
       query: ({

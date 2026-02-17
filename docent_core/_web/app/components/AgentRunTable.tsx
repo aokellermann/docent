@@ -10,11 +10,11 @@ import {
   type DragEvent as ReactDragEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
-  type UIEvent as ReactUIEvent,
 } from 'react';
 import posthog from 'posthog-js';
 import {
   type ColumnDef,
+  type Table as TanstackTable,
   flexRender,
   getCoreRowModel,
   useReactTable,
@@ -25,6 +25,10 @@ import {
   ArrowUp,
   ArrowUpDown,
   Check,
+  ChevronsLeft,
+  ChevronsRight,
+  ChevronLeft,
+  ChevronRight,
   Columns3,
   Copy,
   Loader2,
@@ -49,7 +53,7 @@ import {
 } from '@/components/ui/table';
 import DownloadMenu from '@/app/components/DownloadMenu';
 import { compareAgentRunColumnNames } from '@/lib/agentRunColumns';
-import { cn } from '@/lib/utils';
+import { cn, copyToClipboard } from '@/lib/utils';
 import { useParams } from 'next/navigation';
 import { Skeleton } from '@/components/ui/skeleton';
 import { MultiCombobox, SingleCombobox } from './Combobox';
@@ -71,145 +75,18 @@ import { toast } from 'sonner';
 import { ComplexFilter } from '@/app/types/collectionTypes';
 import { copyDqlToClipboard } from '@/app/utils/copyDql';
 import { formatFilterFieldLabel } from '@/app/utils/formatMetadataField';
-import { copyToClipboard } from '@/lib/utils';
 
 export type AgentRunTableRow = {
   agentRunId: string;
 };
 
 const ROW_HEIGHT_PX = 36;
-const OVERSCAN_COUNT = 50;
-const METADATA_REQUEST_DEBOUNCE_MS = 200;
-const SCROLL_IDLE_DEBOUNCE_MS = 150;
 const MIN_SKELETON_ROW_COUNT = 12;
 export const MAX_SELECTED_COLUMNS = 20;
 export const MAX_EXPORT_ROWS = 50_000;
 
-// Debounces metadata fetches with immediate cancellation on scroll.
-// When the visible range changes, immediately cancels any in-flight request,
-// then waits for the debounce period before starting a new request.
-// This ensures rapid scrolling doesn't queue up stale requests.
-function useDebouncedMetadataRequest(
-  agentRunIds: string[] | undefined,
-  metadataData: Record<string, Record<string, unknown>>,
-  selectedColumns: string[],
-  startIndex: number,
-  endIndex: number,
-  requestMetadataForIds: (
-    ids: string[],
-    options?: { force?: boolean; fields?: string[] }
-  ) => Promise<Record<string, Record<string, unknown>>>,
-  cancelMetadataRequest: (() => void) | undefined,
-  isScrolling: boolean,
-  isFetchingAgentRuns: boolean
-) {
-  const selectedMetadataFields = useMemo(
-    () => selectedColumns.filter((column) => column !== 'agent_run_id'),
-    [selectedColumns]
-  );
-
-  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastRangeKeyRef = useRef<string | null>(null);
-
-  // Compute range key to detect when visible range changes
-  const rangeKey = `${startIndex}-${endIndex}`;
-
-  useEffect(() => {
-    // Clear any pending debounce timer when unmounting
-    return () => {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-        debounceTimerRef.current = null;
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    // When the visible range changes, immediately cancel in-flight requests
-    if (lastRangeKeyRef.current !== rangeKey) {
-      lastRangeKeyRef.current = rangeKey;
-
-      // Cancel any in-flight request immediately on scroll
-      if (cancelMetadataRequest) {
-        cancelMetadataRequest();
-      }
-
-      // Clear any pending debounce timer
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-        debounceTimerRef.current = null;
-      }
-    }
-
-    // Skip metadata requests while scrolling or while IDs are being fetched.
-    // When IDs are being fetched, the visible range is about to change,
-    // so any metadata request would be for stale IDs.
-    if (isScrolling || isFetchingAgentRuns) {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-        debounceTimerRef.current = null;
-      }
-      return;
-    }
-
-    if (
-      !agentRunIds ||
-      !agentRunIds.length ||
-      selectedMetadataFields.length === 0
-    ) {
-      return;
-    }
-
-    const prefetchStart = Math.max(startIndex - OVERSCAN_COUNT, 0);
-    const prefetchEnd = Math.min(endIndex + OVERSCAN_COUNT, agentRunIds.length);
-    const idsToCheck = agentRunIds.slice(prefetchStart, prefetchEnd);
-
-    const needsFields = (runId: string) => {
-      const data = metadataData[runId];
-      if (!data) {
-        return true;
-      }
-      const loadedFields = data._loaded_fields as Set<string> | undefined;
-      if (!loadedFields) {
-        return true;
-      }
-      return selectedMetadataFields.some((column) => !loadedFields.has(column));
-    };
-
-    const missingIds = idsToCheck.filter((id) => needsFields(id));
-
-    if (missingIds.length === 0) {
-      return;
-    }
-
-    // Debounce: wait before making the request
-    // Clear any existing timer to prevent stale requests when dependencies change
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
-    debounceTimerRef.current = setTimeout(() => {
-      debounceTimerRef.current = null;
-      void requestMetadataForIds(missingIds, {
-        fields: selectedMetadataFields,
-      });
-    }, METADATA_REQUEST_DEBOUNCE_MS);
-  }, [
-    agentRunIds,
-    cancelMetadataRequest,
-    endIndex,
-    isFetchingAgentRuns,
-    metadataData,
-    rangeKey,
-    requestMetadataForIds,
-    selectedMetadataFields,
-    startIndex,
-    isScrolling,
-  ]);
-}
-
 export interface AgentRunTableProps {
   agentRunIds?: string[];
-  agentRunIdsOffset?: number;
   metadataData: Record<string, Record<string, unknown>>;
   availableColumns: string[];
   selectedColumns: string[];
@@ -230,7 +107,6 @@ export interface AgentRunTableProps {
     options?: { force?: boolean; fields?: string[] }
   ) => Promise<Record<string, Record<string, unknown>>>;
   cancelMetadataRequest?: () => void;
-  cancelLoadMoreIds?: () => void;
   dropZoneHandlers: {
     onDragOver: (event: ReactDragEvent<HTMLDivElement>) => void;
     onDragLeave: (event: ReactDragEvent<HTMLDivElement>) => void;
@@ -238,8 +114,6 @@ export interface AgentRunTableProps {
   };
   isDragActive: boolean;
   isOverDropZone: boolean;
-  scrollContainerRef?: (node: HTMLDivElement | null) => void;
-  emptyState?: ReactNode;
   isLoadingAgentRuns: boolean;
   isFetchingAgentRuns: boolean;
   onCreateFilterFromCell?: (
@@ -248,8 +122,11 @@ export interface AgentRunTableProps {
     mode: 'append' | 'replace'
   ) => void;
   filterableColumns?: Set<string>;
-  totalCount?: number;
-  onLoadMoreIds?: (anchorIndex?: number) => void;
+  currentPage: number;
+  totalPages: number | null;
+  hasNextPage: boolean;
+  onPageChange: (page: number) => void;
+  pageSize: number;
   fetchIdsForExport?: (
     limit: number
   ) => Promise<{ ids: string[]; truncated: boolean }>;
@@ -453,9 +330,226 @@ const AgentRunTableCell = memo(function AgentRunTableCell({
   );
 });
 
+interface AgentRunTableGridProps {
+  table: TanstackTable<AgentRunTableRow>;
+  data: AgentRunTableRow[];
+  columns: ColumnDef<AgentRunTableRow, unknown>[];
+  dropZoneHandlers: AgentRunTableProps['dropZoneHandlers'];
+  isDragActive: boolean;
+  isOverDropZone: boolean;
+  showSkeletonRows: boolean;
+  skeletonRowCount: number;
+  emptyStateContent: ReactNode | null;
+  activeRunId?: string;
+  onRowMouseDown: AgentRunTableProps['onRowMouseDown'];
+  getCellValue: (runId: string, columnKey: string) => unknown;
+  filterableColumns?: Set<string>;
+  onCellContextMenu?: (
+    e: ReactMouseEvent,
+    rowId: string,
+    columnKey: string,
+    value: unknown
+  ) => void;
+  skipNextRowClickRef: { current: boolean };
+  onScrollRef: (node: HTMLDivElement | null) => void;
+}
+
+const AgentRunTableGrid = memo(function AgentRunTableGrid({
+  table,
+  data,
+  columns,
+  dropZoneHandlers,
+  isDragActive,
+  isOverDropZone,
+  showSkeletonRows,
+  skeletonRowCount,
+  emptyStateContent,
+  activeRunId,
+  onRowMouseDown,
+  getCellValue,
+  filterableColumns,
+  onCellContextMenu,
+  skipNextRowClickRef,
+  onScrollRef,
+}: AgentRunTableGridProps) {
+  const hasRows = data.length > 0;
+  const visibleColumns = table.getVisibleLeafColumns();
+  const columnCount = Math.max(columns.length, 1);
+
+  return (
+    <TableContainer
+      scrollRef={onScrollRef}
+      dropZoneHandlers={dropZoneHandlers}
+      overlay={
+        isDragActive ? (
+          <div
+            className={cn(
+              'absolute inset-0 flex flex-col items-center justify-center z-50 transition-all duration-200 border-2 rounded',
+              isOverDropZone
+                ? 'bg-blue-100 bg-opacity-95 border-blue-text border-solid'
+                : 'bg-blue-100 bg-opacity-80 border-blue-text border-dashed'
+            )}
+            style={{ pointerEvents: 'none' }}
+          >
+            <Upload className="h-8 w-8 text-blue-text" />
+            <div className="mt-2 text-sm font-medium transition-all duration-200 text-blue-text">
+              Drop Inspect logs to upload
+            </div>
+          </div>
+        ) : null
+      }
+    >
+      <Table className="min-w-full">
+        <TableHeader className="sticky top-0 z-20 bg-secondary">
+          {table.getHeaderGroups().map((headerGroup) => (
+            <TableRow key={headerGroup.id}>
+              {headerGroup.headers.map((header, index) => (
+                <TableHead
+                  key={header.id}
+                  className={`text-xs truncate ${index === 0 ? 'sticky left-0 z-10 bg-secondary' : ''}`}
+                  style={{
+                    height: ROW_HEIGHT_PX,
+                    width: header.column.columnDef.size,
+                    maxWidth:
+                      header.column.columnDef.maxSize ||
+                      header.column.columnDef.size,
+                  }}
+                >
+                  {header.isPlaceholder
+                    ? null
+                    : flexRender(
+                        header.column.columnDef.header,
+                        header.getContext()
+                      )}
+                </TableHead>
+              ))}
+            </TableRow>
+          ))}
+        </TableHeader>
+        <TableBody>
+          {showSkeletonRows ? (
+            <>
+              {Array.from({ length: skeletonRowCount }).map((_, index) => (
+                <TableRow
+                  key={`skeleton-${index}`}
+                  className="text-xs select-none"
+                  style={{ height: ROW_HEIGHT_PX }}
+                >
+                  {visibleColumns.map((column, columnIndex) => (
+                    <TableCell
+                      key={`${column.id}-${index}`}
+                      className={`py-1.5 ${
+                        columnIndex === 0
+                          ? 'sticky left-0 z-10 bg-background'
+                          : ''
+                      }`}
+                      style={{
+                        width: column.columnDef.size,
+                        maxWidth:
+                          column.columnDef.maxSize ?? column.columnDef.size,
+                      }}
+                    >
+                      <div>
+                        <Skeleton
+                          className={`h-4 ${columnIndex === 0 ? 'w-16' : 'w-full'}`}
+                        />
+                      </div>
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
+            </>
+          ) : !hasRows ? (
+            <TableRow>
+              <TableCell colSpan={columnCount} className="py-4">
+                <div className="flex flex-col items-center justify-center text-center text-xs text-foreground py-10">
+                  {emptyStateContent}
+                </div>
+              </TableCell>
+            </TableRow>
+          ) : (
+            table.getRowModel().rows.map((row) => {
+              const runId = row.original.agentRunId;
+              const isActive = activeRunId === runId;
+              return (
+                <TableRow
+                  key={row.id}
+                  data-agent-run-id={runId}
+                  data-state={isActive ? 'active' : undefined}
+                  onClick={(event) => {
+                    if (skipNextRowClickRef.current) {
+                      skipNextRowClickRef.current = false;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      return;
+                    }
+                    onRowMouseDown(runId, event);
+                  }}
+                  onAuxClick={(event) => {
+                    if (skipNextRowClickRef.current) {
+                      skipNextRowClickRef.current = false;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      return;
+                    }
+                    onRowMouseDown(runId, event);
+                  }}
+                  className={cn(
+                    'text-xs cursor-pointer select-none transition-colors duration-150 group',
+                    isActive
+                      ? 'bg-indigo-bg/80 hover:bg-indigo-bg'
+                      : 'hover:bg-muted'
+                  )}
+                  style={{ height: ROW_HEIGHT_PX }}
+                  tabIndex={0}
+                >
+                  {row.getVisibleCells().map((cell, index) => {
+                    const columnKey =
+                      (
+                        cell.column.columnDef.meta as
+                          | { key?: string }
+                          | undefined
+                      )?.key ?? cell.column.id;
+                    const cellValue = getCellValue(runId, columnKey);
+                    const isFilterable =
+                      !filterableColumns || filterableColumns.has(columnKey);
+                    const hasFilterValue =
+                      cellValue !== undefined && !Array.isArray(cellValue);
+
+                    return (
+                      <AgentRunTableCell
+                        key={cell.id}
+                        cellId={cell.id}
+                        columnIndex={index}
+                        columnKey={columnKey}
+                        columnSize={cell.column.columnDef.size}
+                        columnMaxSize={cell.column.columnDef.maxSize}
+                        isActive={isActive}
+                        runId={runId}
+                        cellValue={cellValue}
+                        isFilterable={isFilterable}
+                        hasFilterValue={hasFilterValue}
+                        onContextMenu={onCellContextMenu}
+                      >
+                        {flexRender(
+                          cell.column.columnDef.cell,
+                          cell.getContext()
+                        )}
+                      </AgentRunTableCell>
+                    );
+                  })}
+                </TableRow>
+              );
+            })
+          )}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+});
+
 export const AgentRunTable = memo(function AgentRunTable({
   agentRunIds,
-  agentRunIdsOffset,
   metadataData,
   availableColumns,
   selectedColumns,
@@ -470,30 +564,23 @@ export const AgentRunTable = memo(function AgentRunTable({
   onRowMouseDown,
   requestMetadataForIds,
   cancelMetadataRequest,
-  cancelLoadMoreIds,
   dropZoneHandlers,
   isDragActive,
   isOverDropZone,
-  scrollContainerRef,
-  emptyState,
   isLoadingAgentRuns,
   isFetchingAgentRuns,
   onCreateFilterFromCell,
   filterableColumns,
-  totalCount,
-  onLoadMoreIds,
+  currentPage,
+  totalPages,
+  hasNextPage,
+  onPageChange,
+  pageSize,
   fetchIdsForExport,
 }: AgentRunTableProps) {
-  const internalScrollRef = useRef<HTMLDivElement | null>(null);
   // Ref to access metadataData in cell render functions without causing columns useMemo to re-run
   const metadataDataRef = useRef(metadataData);
   metadataDataRef.current = metadataData;
-  const [scrollTop, setScrollTop] = useState(0);
-  const [containerHeight, setContainerHeight] = useState(0);
-  const [isScrolling, setIsScrolling] = useState(false);
-  const isScrollingRef = useRef(false);
-  const scrollIdleTimeoutRef = useRef<number | null>(null);
-  const lastRequestedAnchorRef = useRef<number | null>(null);
   // https://nextjs.org/docs/messages/react-hydration-error#solution-1-using-useeffect-to-run-on-the-client-only
   const [hasMounted, setHasMounted] = useState(false);
   useEffect(() => {
@@ -506,12 +593,6 @@ export const AgentRunTable = memo(function AgentRunTable({
         typeof window !== 'undefined'
       ) {
         window.clearTimeout(copyResetTimeoutRef.current);
-      }
-      if (
-        scrollIdleTimeoutRef.current !== null &&
-        typeof window !== 'undefined'
-      ) {
-        window.clearTimeout(scrollIdleTimeoutRef.current);
       }
     };
   }, []);
@@ -527,10 +608,6 @@ export const AgentRunTable = memo(function AgentRunTable({
       ? params?.collection_id[0]
       : (params as { collection_id?: string } | null | undefined)
           ?.collection_id);
-
-  const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(
-    null
-  );
   const [contextMenuCell, setContextMenuCell] = useState<{
     rowId: string;
     columnKey: string;
@@ -542,10 +619,18 @@ export const AgentRunTable = memo(function AgentRunTable({
     columnKey: string;
     value: unknown;
   } | null>(null);
+  const [isEditingPage, setIsEditingPage] = useState(false);
+  const [pageDraft, setPageDraft] = useState(() => String(currentPage));
   const [isValueCopied, setIsValueCopied] = useState(false);
   const copyResetTimeoutRef = useRef<number | null>(null);
+  const tableScrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const previousPageRef = useRef(currentPage);
+  const skipNextPageBlurCommitRef = useRef(false);
   const skipNextRowClickRef = useRef(false);
   const columnSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const handleTableScrollRef = useCallback((node: HTMLDivElement | null) => {
+    tableScrollContainerRef.current = node;
+  }, []);
   const handleColumnsMenuOpenChange = useCallback((open: boolean) => {
     if (open) {
       // Focus the search input when the menu opens
@@ -554,81 +639,6 @@ export const AgentRunTable = memo(function AgentRunTable({
       });
     }
   }, []);
-
-  const combinedScrollRef = useCallback(
-    (node: HTMLDivElement | null) => {
-      internalScrollRef.current = node;
-      setScrollElement(node);
-      if (scrollContainerRef) {
-        scrollContainerRef(node);
-      }
-    },
-    [scrollContainerRef]
-  );
-
-  useEffect(() => {
-    const node = scrollElement;
-    if (!node) {
-      return;
-    }
-
-    const handleResize = () => {
-      setContainerHeight(node.clientHeight);
-    };
-
-    handleResize();
-
-    let resizeObserver: ResizeObserver | null = null;
-    if (typeof window !== 'undefined') {
-      if ('ResizeObserver' in window) {
-        resizeObserver = new ResizeObserver(handleResize);
-        resizeObserver.observe(node);
-      } else {
-        (window as Window).addEventListener('resize', handleResize);
-      }
-    }
-
-    return () => {
-      if (resizeObserver) {
-        resizeObserver.disconnect();
-      } else {
-        window.removeEventListener('resize', handleResize);
-      }
-    };
-  }, [scrollElement]);
-
-  const handleScroll = useCallback(
-    (event: ReactUIEvent<HTMLDivElement>) => {
-      setScrollTop(event.currentTarget.scrollTop);
-
-      if (cancelMetadataRequest) {
-        cancelMetadataRequest();
-      }
-      if (cancelLoadMoreIds) {
-        cancelLoadMoreIds();
-      }
-      lastRequestedAnchorRef.current = null;
-
-      if (!isScrollingRef.current) {
-        isScrollingRef.current = true;
-        setIsScrolling(true);
-      }
-      if (
-        scrollIdleTimeoutRef.current !== null &&
-        typeof window !== 'undefined'
-      ) {
-        window.clearTimeout(scrollIdleTimeoutRef.current);
-      }
-      if (typeof window !== 'undefined') {
-        scrollIdleTimeoutRef.current = window.setTimeout(() => {
-          isScrollingRef.current = false;
-          setIsScrolling(false);
-          scrollIdleTimeoutRef.current = null;
-        }, SCROLL_IDLE_DEBOUNCE_MS);
-      }
-    },
-    [cancelLoadMoreIds, cancelMetadataRequest]
-  );
 
   const data = useMemo<AgentRunTableRow[]>(() => {
     if (!agentRunIds) {
@@ -878,15 +888,66 @@ export const AgentRunTable = memo(function AgentRunTable({
     sortField,
   ]);
 
-  const skeletonRowCount = useMemo(() => {
-    if (!containerHeight) {
-      return MIN_SKELETON_ROW_COUNT;
+  const selectedMetadataFields = useMemo(
+    () => selectedColumns.filter((column) => column !== 'agent_run_id'),
+    [selectedColumns]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (cancelMetadataRequest) {
+        cancelMetadataRequest();
+      }
+    };
+  }, [cancelMetadataRequest]);
+
+  useEffect(() => {
+    if (previousPageRef.current === currentPage) {
+      return;
     }
-    return Math.max(
-      MIN_SKELETON_ROW_COUNT,
-      Math.ceil(containerHeight / ROW_HEIGHT_PX)
-    );
-  }, [containerHeight]);
+    previousPageRef.current = currentPage;
+    tableScrollContainerRef.current?.scrollTo({ top: 0 });
+  }, [currentPage]);
+
+  useEffect(() => {
+    if (isFetchingAgentRuns || !agentRunIds?.length) {
+      return;
+    }
+    if (selectedMetadataFields.length === 0) {
+      return;
+    }
+
+    const missingIds = agentRunIds.filter((runId) => {
+      const data = metadataData[runId];
+      if (!data) {
+        return true;
+      }
+      const loadedFields = data._loaded_fields as Set<string> | undefined;
+      if (!loadedFields) {
+        return true;
+      }
+      return selectedMetadataFields.some((field) => !loadedFields.has(field));
+    });
+
+    if (!missingIds.length) {
+      return;
+    }
+
+    void requestMetadataForIds(missingIds, {
+      fields: selectedMetadataFields,
+    });
+  }, [
+    agentRunIds,
+    isFetchingAgentRuns,
+    metadataData,
+    requestMetadataForIds,
+    selectedMetadataFields,
+  ]);
+
+  const skeletonRowCount = useMemo(
+    () => Math.max(MIN_SKELETON_ROW_COUNT, Math.min(pageSize, 50)),
+    [pageSize]
+  );
 
   const columns = useMemo<ColumnDef<AgentRunTableRow, unknown>[]>(() => {
     const baseColumn: ColumnDef<AgentRunTableRow> = {
@@ -1045,94 +1106,75 @@ export const AgentRunTable = memo(function AgentRunTable({
     },
   });
 
-  const loadedRows = data.length;
-  const effectiveIdsOffset = agentRunIdsOffset ?? 0;
-  // Use totalCount when available; otherwise keep at least the current window size
-  // to avoid collapsing the scrollbar while scrolling.
-  const totalRows = Math.max(totalCount ?? 0, loadedRows + effectiveIdsOffset);
-  const effectiveContainerHeight = containerHeight || 1;
-  const visibleRowCount =
-    Math.ceil(effectiveContainerHeight / ROW_HEIGHT_PX) + OVERSCAN_COUNT * 2;
-  const scrollIndex = Math.max(Math.floor(scrollTop / ROW_HEIGHT_PX), 0);
-  const rawStartIndex = Math.max(scrollIndex - OVERSCAN_COUNT, 0);
-  const rawEndIndex = Math.min(rawStartIndex + visibleRowCount, totalRows);
-  const localStartIndex = Math.max(rawStartIndex - effectiveIdsOffset, 0);
-  const localEndIndex = Math.min(
-    Math.max(rawEndIndex - effectiveIdsOffset, 0),
-    loadedRows
-  );
-  const startIndex = localStartIndex;
-  const endIndex = localEndIndex;
-
-  // Request a new window of IDs when the scroll anchor leaves the loaded window.
-  useEffect(() => {
-    if (!onLoadMoreIds || isScrolling || isFetchingAgentRuns || !totalRows) {
-      return;
-    }
-
-    const windowStart = effectiveIdsOffset;
-    const windowEnd = effectiveIdsOffset + loadedRows;
-    const needsWindow = scrollIndex < windowStart || scrollIndex >= windowEnd;
-
-    if (!needsWindow) {
-      lastRequestedAnchorRef.current = null;
-      return;
-    }
-
-    if (lastRequestedAnchorRef.current === scrollIndex) {
-      return;
-    }
-
-    lastRequestedAnchorRef.current = scrollIndex;
-    onLoadMoreIds(scrollIndex);
-  }, [
-    effectiveIdsOffset,
-    scrollIndex,
-    loadedRows,
-    isScrolling,
-    isFetchingAgentRuns,
-    onLoadMoreIds,
-    totalRows,
-  ]);
-
-  // Use debounced metadata request hook
-  useDebouncedMetadataRequest(
-    agentRunIds,
-    metadataData,
-    selectedColumns,
-    startIndex,
-    endIndex,
-    requestMetadataForIds,
-    cancelMetadataRequest,
-    isScrolling,
-    isFetchingAgentRuns
-  );
-
-  // When no rows are rendered (startIndex >= endIndex), the padding calculation
-  // must still maintain total height = totalRows * ROW_HEIGHT_PX to prevent
-  // the scrollbar from jumping. Use scroll position as the anchor in this case.
-  const hasRowsToRender = startIndex < endIndex;
-  const firstRenderedIndex = hasRowsToRender
-    ? effectiveIdsOffset + startIndex
-    : Math.min(scrollIndex, totalRows);
-  const lastRenderedIndex = hasRowsToRender
-    ? effectiveIdsOffset + endIndex
-    : firstRenderedIndex;
-
-  const paddingTop = firstRenderedIndex * ROW_HEIGHT_PX;
-  const paddingBottom = Math.max(
-    (totalRows - lastRenderedIndex) * ROW_HEIGHT_PX,
-    0
-  );
-
-  const columnCount = columns.length || 1;
-  const hasRows = totalRows > 0;
+  const hasRows = data.length > 0;
   // Show skeleton rows during SSR/hydration (before mount) to prevent hydration mismatch,
-  // or when actually loading with no data
-  const showSkeletonRows = !hasMounted || (isLoadingAgentRuns && !hasRows);
+  // while loading IDs, or while IDs are still unresolved (undefined).
+  const showSkeletonRows =
+    !hasMounted ||
+    (!hasRows && (isLoadingAgentRuns || agentRunIds === undefined));
   const showFetchOverlay = hasMounted && isFetchingAgentRuns && hasRows;
-  const visibleColumns = table.getVisibleLeafColumns();
+  const emptyStateContent = (
+    <div className="flex flex-col items-center space-y-3">
+      <Upload className="h-12 w-12 text-muted-foreground" />
+      <div className="text-muted-foreground">No agent runs found</div>
+      <Button asChild variant="outline" size="sm">
+        <a
+          href="https://docs.transluce.org/quickstart"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          See quickstart guide
+        </a>
+      </Button>
+    </div>
+  );
   const isAtColumnLimit = selectedColumns.length >= MAX_SELECTED_COLUMNS;
+  const hasKnownTotalPages = totalPages !== null;
+  const normalizedTotalPages = hasKnownTotalPages ? Math.max(totalPages, 1) : 1;
+  const isFirstPage = currentPage <= 1;
+  const canGoNext = hasKnownTotalPages
+    ? currentPage < normalizedTotalPages
+    : hasNextPage;
+  const canGoLast = hasKnownTotalPages
+    ? currentPage < normalizedTotalPages
+    : false;
+  const pageInputWidthCh = Math.max(
+    String(hasKnownTotalPages ? normalizedTotalPages : Math.max(currentPage, 1))
+      .length + 3,
+    5
+  );
+  const shouldShowPagination = hasKnownTotalPages
+    ? normalizedTotalPages > 1
+    : true;
+
+  const handlePageEditStart = useCallback(() => {
+    if (!hasKnownTotalPages) {
+      return;
+    }
+    skipNextPageBlurCommitRef.current = false;
+    setPageDraft(String(currentPage));
+    setIsEditingPage(true);
+  }, [currentPage, hasKnownTotalPages]);
+
+  const handlePageEditCancel = useCallback(() => {
+    skipNextPageBlurCommitRef.current = true;
+    setIsEditingPage(false);
+    setPageDraft(String(currentPage));
+  }, [currentPage]);
+
+  const handlePageEditCommit = useCallback(() => {
+    if (!hasKnownTotalPages) {
+      setIsEditingPage(false);
+      return;
+    }
+    const parsedPage = Number.parseInt(pageDraft, 10);
+    setIsEditingPage(false);
+    if (!Number.isInteger(parsedPage)) {
+      setPageDraft(String(currentPage));
+      return;
+    }
+    onPageChange(parsedPage);
+  }, [currentPage, hasKnownTotalPages, onPageChange, pageDraft]);
 
   const handleSelectAll = useCallback(() => {
     posthog.capture('agent_run_table_columns_select_all', {
@@ -1533,203 +1575,123 @@ export const AgentRunTable = memo(function AgentRunTable({
         </div>
       </div>
 
-      <TableContainer
-        scrollRef={combinedScrollRef}
-        onScroll={handleScroll}
+      <AgentRunTableGrid
+        table={table}
+        data={data}
+        columns={columns}
         dropZoneHandlers={dropZoneHandlers}
-        overlay={
-          isDragActive ? (
-            <div
-              className={cn(
-                'absolute inset-0 flex flex-col items-center justify-center z-50 transition-all duration-200 border-2 rounded',
-                isOverDropZone
-                  ? 'bg-blue-100 bg-opacity-95 border-blue-text border-solid'
-                  : 'bg-blue-100 bg-opacity-80 border-blue-text border-dashed'
-              )}
-              style={{ pointerEvents: 'none' }}
-            >
-              <Upload className="h-8 w-8 text-blue-text" />
-              <div className="mt-2 text-sm font-medium transition-all duration-200 text-blue-text">
-                Drop Inspect logs to upload
-              </div>
-            </div>
-          ) : null
+        isDragActive={isDragActive}
+        isOverDropZone={isOverDropZone}
+        showSkeletonRows={showSkeletonRows}
+        skeletonRowCount={skeletonRowCount}
+        emptyStateContent={hasRows ? null : emptyStateContent}
+        activeRunId={activeRunId}
+        onRowMouseDown={onRowMouseDown}
+        getCellValue={getCellValue}
+        filterableColumns={filterableColumns}
+        onCellContextMenu={
+          onCreateFilterFromCell ? handleCellContextMenu : undefined
         }
-      >
-        <Table className="min-w-full">
-          <TableHeader className="sticky top-0 z-20 bg-secondary">
-            {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map((header, index) => (
-                  <TableHead
-                    key={header.id}
-                    className={`text-xs truncate ${index === 0 ? 'sticky left-0 z-10 bg-secondary' : ''}`}
-                    style={{
-                      height: ROW_HEIGHT_PX,
-                      width: header.column.columnDef.size,
-                      maxWidth:
-                        header.column.columnDef.maxSize ||
-                        header.column.columnDef.size,
-                    }}
-                  >
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(
-                          header.column.columnDef.header,
-                          header.getContext()
-                        )}
-                  </TableHead>
-                ))}
-              </TableRow>
-            ))}
-          </TableHeader>
-          <TableBody>
-            {showSkeletonRows ? (
-              <>
-                {Array.from({ length: skeletonRowCount }).map((_, index) => (
-                  <TableRow
-                    key={`skeleton-${index}`}
-                    className="text-xs select-none"
-                    style={{ height: ROW_HEIGHT_PX }}
-                  >
-                    {visibleColumns.map((column, columnIndex) => (
-                      <TableCell
-                        key={`${column.id}-${index}`}
-                        className={`py-1.5 ${
-                          columnIndex === 0
-                            ? 'sticky left-0 z-10 bg-background'
-                            : ''
-                        }`}
-                        style={{
-                          width: column.columnDef.size,
-                          maxWidth:
-                            column.columnDef.maxSize ?? column.columnDef.size,
-                        }}
-                      >
-                        <div>
-                          <Skeleton
-                            className={`h-4 ${
-                              columnIndex === 0 ? 'w-16' : 'w-full'
-                            }`}
-                          />
-                        </div>
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))}
-              </>
-            ) : !hasRows ? (
-              <TableRow>
-                <TableCell colSpan={columnCount} className="py-4">
-                  <div className="flex flex-col items-center justify-center text-center text-xs text-foreground py-10">
-                    {emptyState}
-                  </div>
-                </TableCell>
-              </TableRow>
-            ) : (
-              <>
-                {paddingTop > 0 && (
-                  <TableRow>
-                    <TableCell
-                      colSpan={columnCount}
-                      style={{ height: paddingTop, padding: 0 }}
-                    />
-                  </TableRow>
-                )}
-                {table
-                  .getRowModel()
-                  .rows.slice(startIndex, endIndex)
-                  .map((row) => {
-                    const runId = row.original.agentRunId;
-                    const isActive = activeRunId === runId;
-                    return (
-                      <TableRow
-                        key={row.id}
-                        data-state={isActive ? 'active' : undefined}
-                        onClick={(event) => {
-                          if (skipNextRowClickRef.current) {
-                            skipNextRowClickRef.current = false;
-                            event.preventDefault();
-                            event.stopPropagation();
-                            return;
-                          }
-                          onRowMouseDown(runId, event);
-                        }}
-                        onAuxClick={(event) => {
-                          if (skipNextRowClickRef.current) {
-                            skipNextRowClickRef.current = false;
-                            event.preventDefault();
-                            event.stopPropagation();
-                            return;
-                          }
-                          onRowMouseDown(runId, event);
-                        }}
-                        className={cn(
-                          'text-xs cursor-pointer select-none transition-colors duration-150 group',
-                          isActive
-                            ? 'bg-indigo-bg/80 hover:bg-indigo-bg'
-                            : 'hover:bg-muted'
-                        )}
-                        style={{ height: ROW_HEIGHT_PX }}
-                        tabIndex={0}
-                      >
-                        {row.getVisibleCells().map((cell, index) => {
-                          const columnKey =
-                            (
-                              cell.column.columnDef.meta as
-                                | { key?: string }
-                                | undefined
-                            )?.key ?? cell.column.id;
-                          const cellValue = getCellValue(runId, columnKey);
-                          const isFilterable =
-                            !filterableColumns ||
-                            filterableColumns.has(columnKey);
-                          const hasFilterValue =
-                            cellValue !== undefined &&
-                            !Array.isArray(cellValue);
+        skipNextRowClickRef={skipNextRowClickRef}
+        onScrollRef={handleTableScrollRef}
+      />
 
-                          return (
-                            <AgentRunTableCell
-                              key={cell.id}
-                              cellId={cell.id}
-                              columnIndex={index}
-                              columnKey={columnKey}
-                              columnSize={cell.column.columnDef.size}
-                              columnMaxSize={cell.column.columnDef.maxSize}
-                              isActive={isActive}
-                              runId={runId}
-                              cellValue={cellValue}
-                              isFilterable={isFilterable}
-                              hasFilterValue={hasFilterValue}
-                              onContextMenu={
-                                onCreateFilterFromCell
-                                  ? handleCellContextMenu
-                                  : undefined
-                              }
-                            >
-                              {flexRender(
-                                cell.column.columnDef.cell,
-                                cell.getContext()
-                              )}
-                            </AgentRunTableCell>
-                          );
-                        })}
-                      </TableRow>
-                    );
-                  })}
-                {paddingBottom > 0 && (
-                  <TableRow>
-                    <TableCell
-                      colSpan={columnCount}
-                      style={{ height: paddingBottom, padding: 0 }}
-                    />
-                  </TableRow>
-                )}
-              </>
-            )}
-          </TableBody>
-        </Table>
-      </TableContainer>
+      {shouldShowPagination && (
+        <div className="flex items-center justify-end">
+          <div className="flex items-center">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5 text-muted-foreground hover:text-foreground"
+              onClick={() => onPageChange(1)}
+              disabled={isFirstPage}
+              aria-label="Go to first page"
+            >
+              <ChevronsLeft className="h-3 w-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5 text-muted-foreground hover:text-foreground"
+              onClick={() => onPageChange(currentPage - 1)}
+              disabled={isFirstPage}
+            >
+              <ChevronLeft className="h-3 w-3" />
+            </Button>
+            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground mx-1">
+              <span>Page</span>
+              {hasKnownTotalPages && isEditingPage ? (
+                <input
+                  autoFocus
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={pageDraft}
+                  onFocus={(event) => {
+                    event.target.select();
+                  }}
+                  onChange={(event) => {
+                    setPageDraft(event.target.value.replace(/[^\d]/g, ''));
+                  }}
+                  onBlur={() => {
+                    if (skipNextPageBlurCommitRef.current) {
+                      skipNextPageBlurCommitRef.current = false;
+                      return;
+                    }
+                    handlePageEditCommit();
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      handlePageEditCommit();
+                      return;
+                    }
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      handlePageEditCancel();
+                    }
+                  }}
+                  className="h-5 rounded-sm border border-border bg-background px-1 text-center text-xs text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  style={{ width: `${pageInputWidthCh}ch` }}
+                  aria-label={`Current page, total pages ${normalizedTotalPages}`}
+                />
+              ) : hasKnownTotalPages ? (
+                <button
+                  type="button"
+                  onClick={handlePageEditStart}
+                  className="rounded-sm px-0.5 text-primary/80 transition-colors hover:bg-muted hover:text-primary"
+                  aria-label="Edit current page"
+                >
+                  {currentPage}
+                </button>
+              ) : (
+                <span className="px-0.5 text-primary/80">{currentPage}</span>
+              )}
+              <span>/</span>
+              <span>{hasKnownTotalPages ? normalizedTotalPages : '?'}</span>
+            </span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5 text-muted-foreground hover:text-foreground"
+              onClick={() => onPageChange(currentPage + 1)}
+              disabled={!canGoNext}
+            >
+              <ChevronRight className="h-3 w-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5 text-muted-foreground hover:text-foreground"
+              onClick={() => onPageChange(normalizedTotalPages)}
+              disabled={!canGoLast}
+              aria-label="Go to last page"
+            >
+              <ChevronsRight className="h-3 w-3" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Single shared context menu - positioned at cursor on right-click */}
       {contextMenuCell && onCreateFilterFromCell && (

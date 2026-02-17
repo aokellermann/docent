@@ -1,6 +1,6 @@
 'use client';
 
-import { Loader2, Upload } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import React, {
   useMemo,
   useState,
@@ -9,8 +9,6 @@ import React, {
   useRef,
 } from 'react';
 import { skipToken } from '@reduxjs/toolkit/query';
-
-import { Button } from '@/components/ui/button';
 
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 
@@ -26,7 +24,6 @@ import {
   selectSortDirection,
 } from '../store/collectionSlice';
 import { setAgentRunLeftSidebarOpen } from '../store/transcriptSlice';
-import { useDebounce } from '@/hooks/use-debounce';
 import { useDragAndDrop } from '@/hooks/use-drag-drop';
 import {
   useGetAgentRunMetadataFieldsQuery,
@@ -123,11 +120,10 @@ const mergeStructuredMetadata = (
 };
 
 const METADATA_FETCH_BATCH_SIZE = 250;
-const AGENT_RUN_IDS_PAGE_SIZE = 2000;
+const AGENT_RUN_IDS_PAGE_SIZE = 100;
 
 type CachedExperimentViewerState = {
   metadataData: Record<string, Record<string, unknown>>;
-  scrollPosition?: number;
   dqlQuery?: string;
   dqlResult?: DqlExecuteResponse | null;
   dqlError?: string | null;
@@ -247,10 +243,6 @@ export default function ExperimentViewer({
       console.warn('Failed to persist DQL editor preferences', error);
     }
   }, [dqlStorageKey, dqlQuery]);
-
-  // Local state for scroll position
-  const [experimentViewerScrollPosition, setExperimentViewerScrollPosition] =
-    useState<number | undefined>(() => cachedState?.scrollPosition);
 
   const sortField = useAppSelector(selectSortField);
   const sortDirection = useAppSelector(selectSortDirection);
@@ -402,9 +394,6 @@ export default function ExperimentViewer({
       );
     }
   }, [collectionId, sortField, sortDirection, hasLoadedSortFromStorage]);
-  const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(
-    null
-  );
 
   const debugAgentRunsRef = useRef(false);
   useEffect(() => {
@@ -439,34 +428,7 @@ export default function ExperimentViewer({
     id: number;
     abort?: () => void;
   } | null>(null);
-  const [agentRunIds, setAgentRunIds] = useState<string[] | undefined>(
-    undefined
-  );
-  const agentRunIdsRef = useRef(agentRunIds);
-  agentRunIdsRef.current = agentRunIds;
-  const [agentRunIdsOffset, setAgentRunIdsOffset] = useState(0);
-  const agentRunIdsOffsetRef = useRef(agentRunIdsOffset);
-  agentRunIdsOffsetRef.current = agentRunIdsOffset;
-  const [hasMoreIds, setHasMoreIds] = useState(false);
-  const hasMoreIdsRef = useRef(hasMoreIds);
-  hasMoreIdsRef.current = hasMoreIds;
-  const [isAgentRunIdsLoading, setIsAgentRunIdsLoading] = useState(false);
-  const [isAgentRunIdsFetching, setIsAgentRunIdsFetching] = useState(false);
-  const isLoadingMoreIdsRef = useRef(false);
-  const loadMoreDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  );
-  const agentRunIdsRequestIdRef = useRef(0);
-  const activeAgentRunIdsRequestRef = useRef<{
-    id: number;
-    key: string;
-    abort?: () => void;
-  } | null>(null);
-  // Track in-flight load-more request for cancellation
-  const activeLoadMoreRequestRef = useRef<{
-    id: number;
-    abort: () => void;
-  } | null>(null);
+  const [currentPage, setCurrentPage] = useState<number>(1);
 
   const { data: metadataFieldsData } = useGetAgentRunMetadataFieldsQuery(
     collectionId!,
@@ -498,6 +460,23 @@ export default function ExperimentViewer({
       skip: !collectionId || appliedBaseFilter === undefined,
     });
   const totalAgentRunCount = agentRunCountData?.count;
+  const resolvedTotalPages = useMemo(() => {
+    if (totalAgentRunCount === undefined) {
+      return null;
+    }
+    if (totalAgentRunCount <= 0) {
+      return 1;
+    }
+    return Math.max(1, Math.ceil(totalAgentRunCount / AGENT_RUN_IDS_PAGE_SIZE));
+  }, [totalAgentRunCount]);
+  const effectiveCurrentPage = useMemo(() => {
+    if (resolvedTotalPages === null) {
+      return currentPage;
+    }
+    return Math.min(currentPage, resolvedTotalPages);
+  }, [currentPage, resolvedTotalPages]);
+  const pageResetCollectionIdRef = useRef<string | null>(null);
+  const hasResolvedBaseFilterForCollectionRef = useRef(false);
 
   const getBaseFilterKey = useCallback((filter: ComplexFilter | null) => {
     return filter ? JSON.stringify(filter) : 'none';
@@ -600,274 +579,57 @@ export default function ExperimentViewer({
     return getBaseFilterKey(appliedBaseFilter);
   }, [appliedBaseFilter, getBaseFilterKey]);
 
-  const agentRunIdsRequestKey = useMemo(() => {
-    if (!collectionId || baseFilterKey === null) {
-      return null;
+  useEffect(() => {
+    if (!collectionId) {
+      pageResetCollectionIdRef.current = null;
+      hasResolvedBaseFilterForCollectionRef.current = false;
+      return;
     }
-    return `${collectionId}:${sortField ?? ''}:${sortDirection}:${baseFilterKey}`;
+
+    if (pageResetCollectionIdRef.current !== collectionId) {
+      pageResetCollectionIdRef.current = collectionId;
+      hasResolvedBaseFilterForCollectionRef.current = false;
+    }
+
+    // Ignore initial base-filter hydration for a collection.
+    if (baseFilterKey === null) {
+      hasResolvedBaseFilterForCollectionRef.current = false;
+      return;
+    }
+
+    if (!hasResolvedBaseFilterForCollectionRef.current) {
+      hasResolvedBaseFilterForCollectionRef.current = true;
+      return;
+    }
+
+    setCurrentPage(1);
   }, [collectionId, sortField, sortDirection, baseFilterKey]);
 
-  useEffect(() => {
-    if (!agentRunIdsRequestKey || !collectionId) {
-      if (activeAgentRunIdsRequestRef.current?.abort) {
-        logAgentRunDebug('agent_run_ids_abort', {
-          requestId: activeAgentRunIdsRequestRef.current.id,
-          key: activeAgentRunIdsRequestRef.current.key,
-        });
-        activeAgentRunIdsRequestRef.current.abort();
-      }
-      activeAgentRunIdsRequestRef.current = null;
-      setAgentRunIds(undefined);
-      setAgentRunIdsOffset(0);
-      setHasMoreIds(false);
-      setIsAgentRunIdsLoading(baseFilterKey === null);
-      setIsAgentRunIdsFetching(false);
-      logAgentRunDebug('agent_run_ids_skip', {
-        collectionId,
-        baseFilterKey,
-      });
-      return;
-    }
+  const agentRunIdsOffset = useMemo(
+    () => Math.max((effectiveCurrentPage - 1) * AGENT_RUN_IDS_PAGE_SIZE, 0),
+    [effectiveCurrentPage]
+  );
 
-    if (activeAgentRunIdsRequestRef.current?.key === agentRunIdsRequestKey) {
-      return;
-    }
-
-    if (activeAgentRunIdsRequestRef.current?.abort) {
-      logAgentRunDebug('agent_run_ids_abort', {
-        requestId: activeAgentRunIdsRequestRef.current.id,
-        key: activeAgentRunIdsRequestRef.current.key,
-      });
-      activeAgentRunIdsRequestRef.current.abort();
-    }
-
-    // Reset pagination when the request key changes (sort/filter changed)
-    setAgentRunIdsOffset(0);
-    setHasMoreIds(false);
-    isLoadingMoreIdsRef.current = false;
-    if (loadMoreDebounceRef.current) {
-      clearTimeout(loadMoreDebounceRef.current);
-      loadMoreDebounceRef.current = null;
-    }
-    if (activeLoadMoreRequestRef.current) {
-      activeLoadMoreRequestRef.current.abort();
-      activeLoadMoreRequestRef.current = null;
-    }
-
-    const requestId = agentRunIdsRequestIdRef.current + 1;
-    agentRunIdsRequestIdRef.current = requestId;
-    const triggerResult = fetchAgentRunIds({
-      collectionId,
-      sortField: sortField || undefined,
-      sortDirection,
-      limit: AGENT_RUN_IDS_PAGE_SIZE,
-      offset: 0,
-    });
-
-    activeAgentRunIdsRequestRef.current = {
-      id: requestId,
-      key: agentRunIdsRequestKey,
-      abort: () => triggerResult.abort(),
-    };
-    logAgentRunDebug('agent_run_ids_request_start', {
-      requestId,
-      key: agentRunIdsRequestKey,
-    });
-    setIsAgentRunIdsFetching(true);
-    if (!agentRunIdsRef.current) {
-      setIsAgentRunIdsLoading(true);
-    }
-
-    triggerResult
-      .unwrap()
-      .then((response) => {
-        if (activeAgentRunIdsRequestRef.current?.id !== requestId) {
-          return;
-        }
-        logAgentRunDebug('agent_run_ids_request_success', {
-          requestId,
-          count: response.ids.length,
-          has_more: response.has_more,
-        });
-        setAgentRunIds(response.ids);
-        setHasMoreIds(response.has_more);
-        setAgentRunIdsOffset(0);
-      })
-      .catch((error) => {
-        if (activeAgentRunIdsRequestRef.current?.id !== requestId) {
-          return;
-        }
-        if (error?.name === 'AbortError') {
-          logAgentRunDebug('agent_run_ids_request_aborted', { requestId });
-          return;
-        }
-        logAgentRunDebug('agent_run_ids_request_error', { requestId });
-        console.error('Failed to fetch agent run ids', error);
-      })
-      .finally(() => {
-        if (activeAgentRunIdsRequestRef.current?.id !== requestId) {
-          return;
-        }
-        logAgentRunDebug('agent_run_ids_request_done', { requestId });
-        setIsAgentRunIdsFetching(false);
-        setIsAgentRunIdsLoading(false);
-        activeAgentRunIdsRequestRef.current = null;
-      });
-  }, [
-    agentRunIdsRequestKey,
-    collectionId,
-    fetchAgentRunIds,
-    sortDirection,
-    sortField,
-    logAgentRunDebug,
-    baseFilterKey,
-  ]);
-  const isLoadingAgentRuns = isAgentRunIdsLoading;
-  const isFetchingAgentRuns = isAgentRunIdsFetching;
-
-  const isAgentRunQueryPending =
-    appliedBaseFilter === undefined ||
-    isLoadingAgentRuns ||
-    isFetchingAgentRuns;
-
-  const cancelLoadMoreIds = useCallback(() => {
-    if (loadMoreDebounceRef.current) {
-      clearTimeout(loadMoreDebounceRef.current);
-      loadMoreDebounceRef.current = null;
-    }
-    const activeRequest = activeLoadMoreRequestRef.current;
-    if (!activeRequest) {
-      return;
-    }
-    logAgentRunDebug('agent_run_ids_load_more_abort', {
-      requestId: activeRequest.id,
-      reason: 'scroll',
-    });
-    activeRequest.abort();
-    activeLoadMoreRequestRef.current = null;
-    isLoadingMoreIdsRef.current = false;
-    if (!activeAgentRunIdsRequestRef.current) {
-      setIsAgentRunIdsFetching(false);
-    }
-  }, [logAgentRunDebug]);
-
-  // Load a window of IDs around the scroll anchor (debounced).
-  // Uses trailing-edge debounce: clears and replaces timer on each call,
-  // so request only fires after user stops scrolling for 150ms.
-  const loadMoreIds = useCallback(
-    (anchorIndex?: number) => {
-      if (!collectionId) {
-        return;
-      }
-
-      // Clear any existing debounce timer (trailing-edge debounce pattern)
-      if (loadMoreDebounceRef.current) {
-        clearTimeout(loadMoreDebounceRef.current);
-        loadMoreDebounceRef.current = null;
-      }
-
-      // Debounce: wait 150ms before making the request
-      loadMoreDebounceRef.current = setTimeout(() => {
-        loadMoreDebounceRef.current = null;
-
-        // Re-check conditions after debounce (they might have changed)
-        if (!collectionId) {
-          return;
-        }
-
-        // If there's an in-flight request, abort it - user has scrolled past
-        if (activeLoadMoreRequestRef.current) {
-          logAgentRunDebug('agent_run_ids_load_more_abort', {
-            requestId: activeLoadMoreRequestRef.current.id,
-          });
-          activeLoadMoreRequestRef.current.abort();
-          activeLoadMoreRequestRef.current = null;
-          isLoadingMoreIdsRef.current = false;
-        }
-
-        const normalizedAnchor = Math.max(
-          anchorIndex ?? agentRunIdsOffsetRef.current,
-          0
-        );
-        const nextOffset = Math.max(
-          Math.floor(normalizedAnchor - AGENT_RUN_IDS_PAGE_SIZE / 2),
-          0
-        );
-        if (
-          nextOffset === agentRunIdsOffsetRef.current &&
-          agentRunIdsRef.current?.length
-        ) {
-          return;
-        }
-        const limit = AGENT_RUN_IDS_PAGE_SIZE;
-        logAgentRunDebug('agent_run_ids_load_more', {
-          offset: nextOffset,
-          hasMore: hasMoreIdsRef.current,
-          limit,
-        });
-
-        // Set ref immediately to prevent duplicate calls
-        isLoadingMoreIdsRef.current = true;
-        setIsAgentRunIdsFetching(true);
-        const requestId = agentRunIdsRequestIdRef.current + 1;
-        agentRunIdsRequestIdRef.current = requestId;
-
-        const triggerResult = fetchAgentRunIds({
+  const {
+    data: agentRunIdsResponse,
+    isLoading: isAgentRunIdsLoading,
+    isFetching: isAgentRunIdsFetching,
+  } = collectionApi.useGetAgentRunIdsPaginatedQuery(
+    !collectionId || baseFilterKey === null
+      ? skipToken
+      : {
           collectionId,
           sortField: sortField || undefined,
           sortDirection,
-          limit,
-          offset: nextOffset,
-        });
-
-        activeLoadMoreRequestRef.current = {
-          id: requestId,
-          abort: () => triggerResult.abort(),
-        };
-
-        triggerResult
-          .unwrap()
-          .then((response) => {
-            if (activeLoadMoreRequestRef.current?.id !== requestId) {
-              return;
-            }
-            logAgentRunDebug('agent_run_ids_load_more_success', {
-              requestId,
-              newCount: response.ids.length,
-              has_more: response.has_more,
-            });
-            setAgentRunIds(response.ids);
-            setHasMoreIds(response.has_more);
-            setAgentRunIdsOffset(nextOffset);
-          })
-          .catch((error) => {
-            if (activeLoadMoreRequestRef.current?.id !== requestId) {
-              return;
-            }
-            if (error?.name === 'AbortError') {
-              logAgentRunDebug('agent_run_ids_load_more_aborted', {
-                requestId,
-              });
-              return;
-            }
-            logAgentRunDebug('agent_run_ids_load_more_error', { requestId });
-            console.error('Failed to load more agent run ids', error);
-          })
-          .finally(() => {
-            if (activeLoadMoreRequestRef.current?.id !== requestId) {
-              return;
-            }
-            activeLoadMoreRequestRef.current = null;
-            isLoadingMoreIdsRef.current = false;
-            // Only clear fetching state if main request is not in-flight
-            if (!activeAgentRunIdsRequestRef.current) {
-              setIsAgentRunIdsFetching(false);
-            }
-          });
-      }, 150);
-    },
-    [collectionId, fetchAgentRunIds, logAgentRunDebug, sortDirection, sortField]
+          limit: AGENT_RUN_IDS_PAGE_SIZE,
+          offset: agentRunIdsOffset,
+          baseFilterKey,
+        }
   );
+  const agentRunIds = agentRunIdsResponse?.ids;
+  const hasMoreAgentRuns = agentRunIdsResponse?.has_more ?? false;
+  const isLoadingAgentRuns = baseFilterKey === null || isAgentRunIdsLoading;
+  const isFetchingAgentRuns = isAgentRunIdsFetching;
 
   const fetchIdsForExport = useCallback(
     async (limit: number): Promise<{ ids: string[]; truncated: boolean }> => {
@@ -961,15 +723,6 @@ export default function ExperimentViewer({
     [agentRunMetadataFields]
   );
 
-  /**
-   * Scrolling
-   */
-  const scrolledOnceRef = useRef(false);
-  const [scrollPosition, setScrollPosition] = useState<number | undefined>(
-    () => cachedState?.scrollPosition
-  );
-  const debouncedScrollPosition = useDebounce(scrollPosition, 100);
-
   useEffect(() => {
     if (collectionId === previousCollectionIdRef.current) {
       return;
@@ -980,21 +733,11 @@ export default function ExperimentViewer({
       setPendingMetadataFieldsById({});
       setAppliedBaseFilter(undefined);
       setDraftBaseFilter(undefined);
-      setAgentRunIds(undefined);
-      setAgentRunIdsOffset(0);
-      setHasMoreIds(false);
-      setIsAgentRunIdsLoading(false);
-      setIsAgentRunIdsFetching(false);
+      setCurrentPage(1);
       if (activeBaseFilterRequestRef.current?.abort) {
         activeBaseFilterRequestRef.current.abort();
       }
       activeBaseFilterRequestRef.current = null;
-      if (activeAgentRunIdsRequestRef.current?.abort) {
-        activeAgentRunIdsRequestRef.current.abort();
-      }
-      activeAgentRunIdsRequestRef.current = null;
-      setExperimentViewerScrollPosition(undefined);
-      setScrollPosition(undefined);
       previousCollectionIdRef.current = collectionId;
       return;
     }
@@ -1003,21 +746,11 @@ export default function ExperimentViewer({
     setMetadataData(cached?.metadataData ?? {});
     // Always reset request tracking on navigation so missing metadata can be refetched.
     setPendingMetadataFieldsById({});
-    setAgentRunIds(undefined);
-    setAgentRunIdsOffset(0);
-    setHasMoreIds(false);
-    setIsAgentRunIdsLoading(false);
-    setIsAgentRunIdsFetching(false);
+    setCurrentPage(1);
     if (activeBaseFilterRequestRef.current?.abort) {
       activeBaseFilterRequestRef.current.abort();
     }
     activeBaseFilterRequestRef.current = null;
-    if (activeAgentRunIdsRequestRef.current?.abort) {
-      activeAgentRunIdsRequestRef.current.abort();
-    }
-    activeAgentRunIdsRequestRef.current = null;
-    setExperimentViewerScrollPosition(cached?.scrollPosition);
-    setScrollPosition(cached?.scrollPosition);
     previousCollectionIdRef.current = collectionId;
 
     // Sync base filter with server data if available, otherwise reset to undefined.
@@ -1127,41 +860,8 @@ export default function ExperimentViewer({
 
     experimentViewerCache.set(collectionId, {
       metadataData,
-      scrollPosition: experimentViewerScrollPosition,
     });
-  }, [collectionId, metadataData, experimentViewerScrollPosition]);
-
-  // Use debouncing to prevent too many updates
-  useEffect(() => {
-    if (debouncedScrollPosition !== undefined) {
-      setExperimentViewerScrollPosition(debouncedScrollPosition);
-    }
-  }, [debouncedScrollPosition]);
-
-  useEffect(() => {
-    const node = scrollContainer;
-    if (!node) {
-      return;
-    }
-
-    if (
-      experimentViewerScrollPosition !== undefined &&
-      !scrolledOnceRef.current
-    ) {
-      node.scrollTop = experimentViewerScrollPosition;
-      scrolledOnceRef.current = true;
-    }
-
-    const handleScroll = () => setScrollPosition(node.scrollTop);
-    node.addEventListener('scroll', handleScroll);
-    return () => {
-      node.removeEventListener('scroll', handleScroll);
-    };
-  }, [
-    experimentViewerScrollPosition,
-    scrollContainer,
-    setExperimentViewerScrollPosition,
-  ]);
+  }, [collectionId, metadataData]);
 
   useEffect(() => {
     if (!collectionId) return;
@@ -1593,24 +1293,24 @@ export default function ExperimentViewer({
     [collectionId, dispatch, router]
   );
 
-  const emptyStateContent =
-    agentRunIds === undefined && isAgentRunQueryPending ? (
-      <Loader2 size={16} className="animate-spin text-muted-foreground" />
-    ) : (
-      <div className="flex flex-col items-center space-y-3">
-        <Upload className="h-12 w-12 text-muted-foreground" />
-        <div className="text-muted-foreground">No agent runs found</div>
-        <Button asChild variant="outline" size="sm">
-          <a
-            href="https://docs.transluce.org/quickstart"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            See quickstart guide
-          </a>
-        </Button>
-      </div>
-    );
+  const handlePageChange = useCallback(
+    (nextPage: number) => {
+      const normalizedNextPage = Math.max(nextPage, 1);
+      const normalized =
+        resolvedTotalPages === null
+          ? normalizedNextPage > effectiveCurrentPage
+            ? hasMoreAgentRuns
+              ? Math.min(normalizedNextPage, effectiveCurrentPage + 1)
+              : effectiveCurrentPage
+            : normalizedNextPage
+          : Math.min(normalizedNextPage, resolvedTotalPages);
+      if (normalized === effectiveCurrentPage) {
+        return;
+      }
+      setCurrentPage(normalized);
+    },
+    [effectiveCurrentPage, hasMoreAgentRuns, resolvedTotalPages]
+  );
 
   return (
     <div className="flex-1 flex flex-col h-full min-w-0 space-y-3">
@@ -1623,14 +1323,20 @@ export default function ExperimentViewer({
           </div>
           {!activeRunId && (
             <div className="text-xs text-muted-foreground">
-              {isCountFetching && totalAgentRunCount === undefined ? (
+              {totalAgentRunCount === undefined ? (
                 <span className="inline-flex items-center gap-1">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Loading...
+                  {isCountFetching || isFetchingAgentRuns ? (
+                    <>
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    </>
+                  ) : (
+                    '?'
+                  )}{' '}
+                  agent runs matching the current view
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1">
-                  {`${totalAgentRunCount ?? agentRunIds?.length ?? 0} agent runs matching the current view${hasMoreIds && totalAgentRunCount === undefined ? '+' : ''}`}
+                  {`${totalAgentRunCount ?? agentRunIds?.length ?? 0} agent runs matching the current view`}
                   {(isCountFetching || isFetchingAgentRuns) && (
                     <Loader2 className="h-3 w-3 animate-spin" />
                   )}
@@ -1655,7 +1361,6 @@ export default function ExperimentViewer({
         <div className="flex-1 min-w-0 min-h-0 flex">
           <AgentRunTable
             agentRunIds={agentRunIds}
-            agentRunIdsOffset={agentRunIdsOffset}
             metadataData={metadataData}
             availableColumns={availableColumns}
             selectedColumns={selectedColumns}
@@ -1668,19 +1373,19 @@ export default function ExperimentViewer({
             baseFilter={appliedBaseFilter ?? null}
             requestMetadataForIds={requestMetadataForIds}
             cancelMetadataRequest={cancelActiveMetadataRequest}
-            cancelLoadMoreIds={cancelLoadMoreIds}
             dropZoneHandlers={dropZoneHandlers}
             isDragActive={isDragActive}
             isOverDropZone={isOverDropZone}
-            scrollContainerRef={setScrollContainer}
             isLoadingAgentRuns={isLoadingAgentRuns}
             isFetchingAgentRuns={isFetchingAgentRuns}
             onRowMouseDown={handleRowMouseDown}
             onCreateFilterFromCell={handleCreateFilterFromCell}
             filterableColumns={filterableColumns}
-            emptyState={emptyStateContent}
-            totalCount={totalAgentRunCount}
-            onLoadMoreIds={loadMoreIds}
+            currentPage={effectiveCurrentPage}
+            totalPages={resolvedTotalPages}
+            hasNextPage={hasMoreAgentRuns}
+            onPageChange={handlePageChange}
+            pageSize={AGENT_RUN_IDS_PAGE_SIZE}
             fetchIdsForExport={fetchIdsForExport}
           />
         </div>
