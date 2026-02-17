@@ -210,7 +210,7 @@ async def _run_llm_result_job(
                     inputs=[messages],
                     model_options=model_options,
                     max_new_tokens=8192,
-                    timeout=120.0,
+                    timeout=600.0,
                     use_cache=True,
                     validation_callback=validation_callback,
                 )
