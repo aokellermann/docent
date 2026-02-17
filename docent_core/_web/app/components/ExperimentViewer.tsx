@@ -1325,7 +1325,7 @@ export default function ExperimentViewer({
             <div className="text-xs text-muted-foreground">
               {totalAgentRunCount === undefined ? (
                 <span className="inline-flex items-center gap-1">
-                  {isCountFetching || isFetchingAgentRuns ? (
+                  {isCountFetching ? (
                     <>
                       <Loader2 className="h-3 w-3 animate-spin" />
                     </>
@@ -1337,7 +1337,7 @@ export default function ExperimentViewer({
               ) : (
                 <span className="inline-flex items-center gap-1">
                   {`${totalAgentRunCount ?? agentRunIds?.length ?? 0} agent runs matching the current view`}
-                  {(isCountFetching || isFetchingAgentRuns) && (
+                  {isCountFetching && (
                     <Loader2 className="h-3 w-3 animate-spin" />
                   )}
                 </span>
