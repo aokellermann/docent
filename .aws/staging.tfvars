@@ -15,7 +15,7 @@ ecs_api_min_size = 1
 ecs_api_max_size = 10
 ecs_api_desired_count = 1
 ecs_api_num_workers = 2
-api_acm_certificate_arn = "arn:aws:acm:us-east-1:010526267928:certificate/701a1c69-1de2-4b6b-a87b-4c38ae0dab44"
+api_acm_certificate_arn = "arn:aws:acm:us-east-1:010526267928:certificate/31244bd4-32a0-474a-ba8a-2a3f81c1b1ec"
 
 ecs_cpu = 2048
 ecs_memory = 6144
