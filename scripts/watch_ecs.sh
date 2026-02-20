@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-WORKERS=("datadog-agent" "telemetry-ingest-worker" "telemetry-processing-worker" "worker")
+WORKERS=("api" "datadog-agent" "telemetry-ingest-worker" "telemetry-processing-worker" "worker")
 
 show_help() {
     cat <<EOF
@@ -17,6 +17,7 @@ Options:
   -s, --since           How far back to start (default: 30m)
 
 Workers:
+  api
   datadog-agent
   telemetry-ingest-worker
   telemetry-processing-worker
