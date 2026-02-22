@@ -15,7 +15,6 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Tooltip,
@@ -84,7 +83,7 @@ export default function HomePage() {
   };
 
   return (
-    <div className="h-screen flex flex-col">
+    <div className="h-screen overflow-y-auto custom-scrollbar min-w-[900px]">
       {/* Header Section - sticky at top */}
       <div className="sticky top-0 z-10 bg-background border-b border-border">
         <div className="container mx-auto py-4 px-3 max-w-screen-xl">
@@ -129,99 +128,97 @@ export default function HomePage() {
       </div>
 
       {/* Scrollable content */}
-      <ScrollArea className="flex-1">
-        <div className="container mx-auto py-4 px-3 max-w-screen-xl space-y-3">
-          {/* Quickstart banner */}
-          <div className="bg-secondary border-border rounded-sm p-3">
-            <div className="flex items-start gap-3">
-              <BookOpenIcon className="h-5 w-5 text-muted-foreground mt-0.5 flex-shrink-0" />
-              <div className="flex-1">
-                <h3 className="font-medium text-sm mb-1 text-primary">
-                  Get Started with Docent
-                </h3>
-                <p className="text-xs text-muted-foreground mb-3">
-                  Learn how to ingest your data and get started with analysis!
-                </p>
-                <Button variant="outline" size="sm" asChild>
-                  <a
-                    href="https://docs.transluce.org/quickstart"
-                    target="_blank"
-                    className="inline-flex items-center gap-1"
-                  >
-                    Read the quickstart guide
-                  </a>
-                </Button>
-                <Button variant="outline" size="sm" asChild>
-                  <a
-                    href="https://docent.transluce.org/sample"
-                    target="_blank"
-                    className="inline-flex items-center gap-1 ml-1"
-                  >
-                    Check out a sample collection
-                  </a>
-                </Button>
-              </div>
+      <div className="container mx-auto py-4 px-3 max-w-screen-xl space-y-3">
+        {/* Quickstart banner */}
+        <div className="bg-secondary border-border rounded-sm p-3">
+          <div className="flex items-start gap-3">
+            <BookOpenIcon className="h-5 w-5 text-muted-foreground mt-0.5 flex-shrink-0" />
+            <div className="flex-1">
+              <h3 className="font-medium text-sm mb-1 text-primary">
+                Get Started with Docent
+              </h3>
+              <p className="text-xs text-muted-foreground mb-3">
+                Learn how to ingest your data and get started with analysis!
+              </p>
+              <Button variant="outline" size="sm" asChild>
+                <a
+                  href="https://docs.transluce.org/quickstart"
+                  target="_blank"
+                  className="inline-flex items-center gap-1"
+                >
+                  Read the quickstart guide
+                </a>
+              </Button>
+              <Button variant="outline" size="sm" asChild>
+                <a
+                  href="https://docent.transluce.org/sample"
+                  target="_blank"
+                  className="inline-flex items-center gap-1 ml-1"
+                >
+                  Check out a sample collection
+                </a>
+              </Button>
             </div>
           </div>
-
-          {/* Table area */}
-          <CollectionsTable
-            collections={collections}
-            isLoading={isLoadingCollections}
-          />
         </div>
 
-        {/* Create New Collection Dialog */}
-        <Dialog
-          open={isNewCollectionDialogOpen}
-          onOpenChange={setIsNewCollectionDialogOpen}
-        >
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Create New Collection</DialogTitle>
-              <DialogDescription>
-                Create a new collection for your benchmark or experiment set.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <Label htmlFor="new-name">Name</Label>
-                <Input
-                  id="new-name"
-                  value={newCollectionName}
-                  onChange={(e) => setNewCollectionName(e.target.value)}
-                  placeholder="Enter a name for this collection"
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="new-description">Description</Label>
-                <Textarea
-                  id="new-description"
-                  value={newCollectionDescription}
-                  onChange={(e) => setNewCollectionDescription(e.target.value)}
-                  placeholder="Enter a description for this collection"
-                  rows={3}
-                />
-              </div>
+        {/* Table area */}
+        <CollectionsTable
+          collections={collections}
+          isLoading={isLoadingCollections}
+        />
+      </div>
+
+      {/* Create New Collection Dialog */}
+      <Dialog
+        open={isNewCollectionDialogOpen}
+        onOpenChange={setIsNewCollectionDialogOpen}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create New Collection</DialogTitle>
+            <DialogDescription>
+              Create a new collection for your benchmark or experiment set.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="new-name">Name</Label>
+              <Input
+                id="new-name"
+                value={newCollectionName}
+                onChange={(e) => setNewCollectionName(e.target.value)}
+                placeholder="Enter a name for this collection"
+              />
             </div>
-            <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => setIsNewCollectionDialogOpen(false)}
-                disabled={isCreatingCollection}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleCreateCollection}
-                disabled={isCreatingCollection}
-              >
-                {isCreatingCollection ? 'Creating...' : 'Create Collection'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </ScrollArea>
+            <div className="grid gap-2">
+              <Label htmlFor="new-description">Description</Label>
+              <Textarea
+                id="new-description"
+                value={newCollectionDescription}
+                onChange={(e) => setNewCollectionDescription(e.target.value)}
+                placeholder="Enter a description for this collection"
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsNewCollectionDialogOpen(false)}
+              disabled={isCreatingCollection}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreateCollection}
+              disabled={isCreatingCollection}
+            >
+              {isCreatingCollection ? 'Creating...' : 'Create Collection'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

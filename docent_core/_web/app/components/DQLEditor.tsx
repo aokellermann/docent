@@ -44,7 +44,6 @@ import { DqlExecuteResponse, DqlLinkHint } from '@/app/types/dqlTypes';
 import { registerDqlCompletionProvider } from '@/app/utils/dqlCompletions';
 import { copyDqlToClipboard } from '@/app/utils/copyDql';
 import { DEFAULT_DQL_QUERY } from '@/app/utils/dqlDefaults';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Dialog,
   DialogContent,
@@ -1417,7 +1416,7 @@ const DQLEditor = ({
               </Button>
             </div>
           </div>
-          <ScrollArea className="flex-1 min-h-0">
+          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
             <div className="space-y-3 pr-2">
               {schemaTables.map((table) => (
                 <div key={table.name} className="space-y-2">
@@ -1497,7 +1496,7 @@ const DQLEditor = ({
                 </>
               )}
             </div>
-          </ScrollArea>
+          </div>
         </div>
       )}
 

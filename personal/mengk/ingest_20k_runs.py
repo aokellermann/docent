@@ -38,7 +38,7 @@ if not DOCENT_DOMAIN or not DOCENT_API_KEY:
 
 # Use HTTP for localhost, HTTPS otherwise
 use_https = "localhost" not in DOCENT_DOMAIN
-dc = Docent(api_key=DOCENT_API_KEY, domain=DOCENT_DOMAIN, server_url="http://localhost:8890")
+dc = Docent(api_key=DOCENT_API_KEY, domain=DOCENT_DOMAIN)
 
 # %%
 

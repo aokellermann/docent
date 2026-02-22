@@ -9,7 +9,6 @@ import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
 
 import { login } from '../services/authService';
@@ -64,7 +63,7 @@ function LoginPageContent() {
   };
 
   return (
-    <ScrollArea className="h-screen">
+    <div className="h-screen overflow-y-auto custom-scrollbar">
       <div className="container mx-auto py-8 px-4 max-w-md">
         <div className="absolute top-4 right-4">
           <ModeToggle />
@@ -142,7 +141,7 @@ function LoginPageContent() {
           </div>
         </div>
       </div>
-    </ScrollArea>
+    </div>
   );
 }
 

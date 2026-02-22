@@ -9,7 +9,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -748,7 +747,7 @@ export function MessageTelemetryDialog({
                       value="details"
                       className="mt-0 flex-1 min-h-0 overflow-hidden"
                     >
-                      <ScrollArea className="h-full">
+                      <div className="h-full overflow-y-auto custom-scrollbar">
                         <div className="space-y-3 pb-6">
                           <DetailsSection
                             title="Span attributes"
@@ -802,14 +801,14 @@ export function MessageTelemetryDialog({
                             />
                           </DetailsSection>
                         </div>
-                      </ScrollArea>
+                      </div>
                     </TabsContent>
 
                     <TabsContent
                       value="events"
                       className="mt-0 flex-1 min-h-0 overflow-hidden"
                     >
-                      <ScrollArea className="h-full">
+                      <div className="h-full overflow-y-auto custom-scrollbar">
                         <div className="space-y-2 pb-6">
                           {(payload.span.events ?? []).length === 0 ? (
                             <div className="text-xs text-muted-foreground">
@@ -871,14 +870,14 @@ export function MessageTelemetryDialog({
                             ))
                           )}
                         </div>
-                      </ScrollArea>
+                      </div>
                     </TabsContent>
 
                     <TabsContent
                       value="links"
                       className="mt-0 flex-1 min-h-0 overflow-hidden"
                     >
-                      <ScrollArea className="h-full">
+                      <div className="h-full overflow-y-auto custom-scrollbar">
                         <div className="space-y-2 pb-6">
                           {(payload.span.links ?? []).length === 0 ? (
                             <div className="text-xs text-muted-foreground">
@@ -910,14 +909,14 @@ export function MessageTelemetryDialog({
                             ))
                           )}
                         </div>
-                      </ScrollArea>
+                      </div>
                     </TabsContent>
 
                     <TabsContent
                       value="raw"
                       className="mt-0 flex-1 min-h-0 overflow-hidden"
                     >
-                      <ScrollArea className="h-full">
+                      <div className="h-full overflow-y-auto custom-scrollbar">
                         <div className="pb-3 flex justify-end">
                           <Button
                             variant="outline"
@@ -950,7 +949,7 @@ export function MessageTelemetryDialog({
                         <pre className="text-xs whitespace-pre-wrap [overflow-wrap:anywhere] font-mono pb-6">
                           {rawJsonText}
                         </pre>
-                      </ScrollArea>
+                      </div>
                     </TabsContent>
                   </div>
                 </Tabs>
