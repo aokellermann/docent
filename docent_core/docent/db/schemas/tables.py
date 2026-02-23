@@ -112,6 +112,7 @@ class SQLAAgentRun(SQLABase):
 
     __table_args__ = (
         Index("idx_agent_runs_metadata_json_gin", "metadata_json", postgresql_using="gin"),
+        Index("idx_agent_runs_collection_created_at", "collection_id", "created_at"),
     )
 
     @classmethod
