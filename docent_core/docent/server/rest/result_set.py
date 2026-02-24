@@ -39,6 +39,7 @@ from docent_core.docent.server.dependencies.user import (
     get_default_view_ctx,
     get_user_anonymous_ok,
 )
+from docent_core.docent.server.rest.response_models import MessageResponse
 from docent_core.docent.services.llms import PROVIDER_PREFERENCES
 from docent_core.docent.services.result_set import DEFAULT_OUTPUT_SCHEMA, ResultSetService
 
@@ -267,10 +268,14 @@ async def cancel_result_set_jobs(
     result_set: SQLAResultSet = Depends(get_result_set_in_collection),
     result_set_svc: ResultSetService = Depends(get_result_set_service),
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
-):
+) -> MessageResponse:
     """Cancel all active jobs for a result set."""
     cancelled_count = await result_set_svc.cancel_all_jobs_for_result_set(result_set.id)
-    return {"message": f"Cancelled {cancelled_count} job(s)"}
+    return MessageResponse(message=f"Cancelled {cancelled_count} job(s)")
+
+
+class DeleteResultSetResponse(BaseModel):
+    deleted: bool
 
 
 @result_set_router.delete("/{collection_id}/result-sets/{result_set_id_or_name:path}")
@@ -279,7 +284,7 @@ async def delete_result_set(
     result_set_id_or_name: str,
     result_set_svc: ResultSetService = Depends(get_result_set_service),
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
-) -> dict[str, bool]:
+) -> DeleteResultSetResponse:
     """Delete a result set and all its results."""
     deleted = await result_set_svc.delete_result_set(result_set_id_or_name, collection_id)
     if not deleted:
@@ -287,7 +292,7 @@ async def delete_result_set(
             status_code=404,
             detail=f"Result set '{result_set_id_or_name}' not found",
         )
-    return {"deleted": True}
+    return DeleteResultSetResponse(deleted=True)
 
 
 ################

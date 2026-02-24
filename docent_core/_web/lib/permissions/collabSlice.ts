@@ -63,7 +63,7 @@ export const collabApi = createApi({
       invalidatesTags: ['Collaborators'],
     }),
     upsertCollaborator: build.mutation<
-      Collaborator,
+      void,
       CollaboratorIdentifier & { permission_level: PermissionLevel }
     >({
       query: ({

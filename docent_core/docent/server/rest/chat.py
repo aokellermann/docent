@@ -41,6 +41,7 @@ from docent_core.docent.server.dependencies.user import (
     get_default_view_ctx,
     get_user_anonymous_ok,
 )
+from docent_core.docent.server.rest.response_models import StatusResponse
 from docent_core.docent.services.chat import ChatService
 from docent_core.docent.services.llms import PROVIDER_PREFERENCES
 from docent_core.docent.services.monoservice import MonoService
@@ -106,6 +107,10 @@ async def require_chat_job_ownership(
 #############
 
 
+class SessionIdResponse(BaseModel):
+    session_id: str
+
+
 @chat_router.post("/{collection_id}/{agent_run_id}/session/get")
 async def create_session(
     agent_run_id: str,
@@ -115,7 +120,7 @@ async def create_session(
     chat_svc: ChatService = Depends(get_chat_service),
     force_create: bool = False,
     _run: None = Depends(require_agent_run_in_collection),
-) -> dict[str, str]:
+) -> SessionIdResponse:
     """Create a new chat session."""
 
     # Quick input validation to avoid DB errors for clearly invalid IDs
@@ -135,7 +140,7 @@ async def create_session(
         if getattr(e.orig, "pgcode", None) == "23503":
             raise HTTPException(status_code=404, detail="Agent run or judge result not found")
         raise
-    return {"session_id": sqla_session.id}
+    return SessionIdResponse(session_id=sqla_session.id)
 
 
 @chat_router.post("/{collection_id}/followup-from-result/{result_id}")
@@ -148,7 +153,7 @@ async def create_followup_from_result(
     result_set_svc: ResultSetService = Depends(get_result_set_service),
     analytics: AnalyticsClient = Depends(use_posthog_user_context),
     _perm: None = Depends(require_collection_permission(Permission.READ)),
-) -> dict[str, str]:
+) -> SessionIdResponse:
     """
     Create a new collection-scoped multi-object conversation derived from a stored analysis result.
 
@@ -200,7 +205,7 @@ async def create_followup_from_result(
         },
     )
 
-    return {"session_id": sqla_chat_session.id}
+    return SessionIdResponse(session_id=sqla_chat_session.id)
 
 
 @chat_router.get("/{collection_id}/{agent_run_id}/job/{job_id}/listen")
@@ -274,15 +279,19 @@ async def get_current_state_endpoint(
     return await chat_svc.get_current_state(view_ctx, sq_chat_session)
 
 
+class ActiveJobResponse(BaseModel):
+    job_id: str | None
+
+
 @chat_router.get("/{collection_id}/{agent_run_id}/session/{session_id}/active-job")
 async def get_active_chat_job_for_session(
     session_id: str,
     chat_svc: ChatService = Depends(get_chat_service),
     _sq_chat_session: SQLAChatSession = Depends(get_chat_session),
-):
+) -> ActiveJobResponse:
     """Return the active job id for this chat session if one exists, else null."""
     active_job = await chat_svc.get_active_job_for_session(session_id)
-    return {"job_id": active_job.id if active_job is not None else None}
+    return ActiveJobResponse(job_id=active_job.id if active_job is not None else None)
 
 
 @chat_router.get("/chat-models")
@@ -334,7 +343,7 @@ async def create_collection_conversation(
     mono_svc: MonoService = Depends(get_mono_svc),
     analytics: AnalyticsClient = Depends(use_posthog_user_context),
     _perm: None = Depends(require_collection_permission(Permission.READ)),
-) -> dict[str, str]:
+) -> SessionIdResponse:
     context_serialized = request.context_serialized or {}
     if context_serialized:
         spec = LLMContextSpec.model_validate(context_serialized)
@@ -360,7 +369,7 @@ async def create_collection_conversation(
         },
     )
 
-    return {"session_id": sqla_session.id}
+    return SessionIdResponse(session_id=sqla_session.id)
 
 
 class CreateConversationRequest(BaseModel):
@@ -376,7 +385,7 @@ async def create_conversation(
     session: AsyncSession = Depends(get_session),
     mono_svc: MonoService = Depends(get_mono_svc),
     analytics: AnalyticsClient = Depends(use_posthog_user_context),
-) -> dict[str, str]:
+) -> SessionIdResponse:
     """Create a new chat session with multiple objects via LLMContext.
 
     This endpoint creates a multi-object chat session for the "chat with anything" feature.
@@ -420,7 +429,7 @@ async def create_conversation(
         },
     )
 
-    return {"session_id": sqla_session.id}
+    return SessionIdResponse(session_id=sqla_session.id)
 
 
 @chat_router.get("/conversation/{session_id}/state")
@@ -545,10 +554,10 @@ async def get_active_conversation_job(
     session_id: str,
     chat_svc: ChatService = Depends(get_chat_service),
     _sq_chat_session: SQLAChatSession = Depends(get_chat_session),
-):
+) -> ActiveJobResponse:
     """Return the active job id for this conversation chat session if one exists, else null."""
     active_job = await chat_svc.get_active_job_for_session(session_id)
-    return {"job_id": active_job.id if active_job is not None else None}
+    return ActiveJobResponse(job_id=active_job.id if active_job is not None else None)
 
 
 @chat_router.get("/conversation/job/{job_id}/listen")
@@ -612,7 +621,7 @@ async def delete_conversation(
     session: AsyncSession = Depends(get_session),
     analytics: AnalyticsClient = Depends(use_posthog_user_context),
     sq_chat_session: SQLAChatSession = Depends(get_chat_session),
-) -> dict[str, str]:
+) -> StatusResponse:
     """Delete a conversation chat session."""
     await chat_svc.delete_session(sq_chat_session)
     await session.commit()
@@ -625,4 +634,4 @@ async def delete_conversation(
         },
     )
 
-    return {"status": "ok"}
+    return StatusResponse(status="ok")

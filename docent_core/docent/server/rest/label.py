@@ -19,6 +19,7 @@ from docent_core.docent.server.dependencies.permissions import (
 )
 from docent_core.docent.server.dependencies.services import get_label_service
 from docent_core.docent.server.dependencies.user import get_user_anonymous_ok
+from docent_core.docent.server.rest.response_models import MessageResponse
 from docent_core.docent.services.label import BulkValidationError, LabelService, LabelSetWithCount
 
 logger = get_logger(__name__)
@@ -161,7 +162,7 @@ async def create_label(
     label_svc: LabelService = Depends(get_label_service),
     session: AsyncSession = Depends(get_session),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
-) -> dict[str, str]:
+) -> MessageResponse:
     """Create a label."""
 
     try:
@@ -181,7 +182,7 @@ async def create_label(
             )
         raise
 
-    return {"message": "Label created successfully"}
+    return MessageResponse(message="Label created successfully")
 
 
 @label_router.post("/{collection_id}/labels")
@@ -191,7 +192,7 @@ async def create_labels(
     label_svc: LabelService = Depends(get_label_service),
     session: AsyncSession = Depends(get_session),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
-) -> dict[str, str]:
+) -> MessageResponse:
     """Create multiple labels."""
     try:
         await label_svc.create_labels(request.labels)
@@ -210,7 +211,7 @@ async def create_labels(
             )
         raise
 
-    return {"message": "Labels created successfully"}
+    return MessageResponse(message="Labels created successfully")
 
 
 @label_router.get("/{collection_id}/label/{label_id}")
@@ -232,10 +233,10 @@ async def update_label(
     label_svc: LabelService = Depends(get_label_service),
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
     _label: Label = Depends(get_label_in_collection),
-) -> dict[str, str]:
+) -> MessageResponse:
     """Update a label."""
     await label_svc.update_label(label_id, request.label_value)
-    return {"message": "Label updated successfully"}
+    return MessageResponse(message="Label updated successfully")
 
 
 @label_router.delete("/{collection_id}/label/{label_id}")
@@ -245,10 +246,10 @@ async def delete_label(
     label_svc: LabelService = Depends(get_label_service),
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
     _label: Label = Depends(get_label_in_collection),
-) -> dict[str, str]:
+) -> MessageResponse:
     """Delete a label."""
     await label_svc.delete_label(label_id)
-    return {"message": "Label deleted successfully"}
+    return MessageResponse(message="Label deleted successfully")
 
 
 @label_router.delete("/{collection_id}/label_set/{label_set_id}/labels")
@@ -258,10 +259,10 @@ async def delete_labels_by_label_set(
     label_svc: LabelService = Depends(get_label_service),
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
     _label_set: None = Depends(require_label_set_in_collection),
-) -> dict[str, str]:
+) -> MessageResponse:
     """Delete all labels in a label set."""
     await label_svc.delete_labels_by_label_set(label_set_id)
-    return {"message": "Labels deleted successfully"}
+    return MessageResponse(message="Labels deleted successfully")
 
 
 ############
@@ -276,7 +277,7 @@ async def create_tag(
     label_svc: LabelService = Depends(get_label_service),
     user: User = Depends(get_user_anonymous_ok),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
-):
+) -> None:
     """Create a tag for an agent run."""
     try:
         await label_svc.create_tag(
@@ -302,7 +303,7 @@ async def delete_tag(
     label_svc: LabelService = Depends(get_label_service),
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
     _tag: None = Depends(require_tag_in_collection),
-):
+) -> None:
     """Delete a tag by ID."""
     if not await label_svc.delete_tag(tag_id):
         raise HTTPException(status_code=404, detail=f"Tag {tag_id} not found")
@@ -314,7 +315,7 @@ async def get_tags_by_value(
     value: str | None = Query(default=None, max_length=255),
     label_svc: LabelService = Depends(get_label_service),
     _: None = Depends(require_collection_permission(Permission.READ)),
-):
+) -> list[dict[str, Any]]:
     """Get all tags in a collection, optionally filtered by value."""
     return [sqla_tag.dict() for sqla_tag in await label_svc.get_tags_by_value(collection_id, value)]
 
@@ -325,7 +326,7 @@ async def get_tags_for_agent_run(
     agent_run_id: str,
     label_svc: LabelService = Depends(get_label_service),
     _perm: None = Depends(require_collection_permission(Permission.READ)),
-):
+) -> list[dict[str, Any]]:
     """Get all tags for a specific agent run in a collection."""
     return [
         sqla_tag.dict()
@@ -399,7 +400,7 @@ async def update_label_set(
     label_svc: LabelService = Depends(get_label_service),
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
     _label_set: None = Depends(require_label_set_in_collection),
-) -> dict[str, str]:
+) -> MessageResponse:
     """Update a label set."""
     try:
         await label_svc.update_label_set(
@@ -409,7 +410,7 @@ async def update_label_set(
         raise HTTPException(status_code=400, detail=f"Invalid label schema: {e.message}")
     except SchemaError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON Schema: {e.message}")
-    return {"message": "Label set updated successfully"}
+    return MessageResponse(message="Label set updated successfully")
 
 
 @label_router.get("/{collection_id}/label_set/{label_set_id}/labels")
@@ -430,10 +431,10 @@ async def delete_label_set(
     label_svc: LabelService = Depends(get_label_service),
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
     _label_set: None = Depends(require_label_set_in_collection),
-) -> dict[str, str]:
+) -> MessageResponse:
     """Delete a label set."""
     await label_svc.delete_label_set(label_set_id)
-    return {"message": "Label set deleted successfully"}
+    return MessageResponse(message="Label set deleted successfully")
 
 
 @label_router.get("/{collection_id}/agent_run/{agent_run_id}/labels")
@@ -479,7 +480,7 @@ async def create_comment(
     user: User = Depends(get_user_anonymous_ok),
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
     _run: None = Depends(require_agent_run_in_collection),
-) -> dict[str, str]:
+) -> MessageResponse:
     """Create a comment."""
     logger.info(f"Creating comment for user {user.email}")
     await label_svc.create_comment(
@@ -489,7 +490,7 @@ async def create_comment(
         citations=request.citations,
         content=request.content,
     )
-    return {"message": "Comment created successfully"}
+    return MessageResponse(message="Comment created successfully")
 
 
 @label_router.put("/{collection_id}/comment/{comment_id}")
@@ -500,10 +501,10 @@ async def update_comment(
     label_svc: LabelService = Depends(get_label_service),
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
     _comment: None = Depends(require_comment_in_collection),
-) -> dict[str, str]:
+) -> MessageResponse:
     """Update a comment."""
     await label_svc.update_comment(comment_id, request.content)
-    return {"message": "Comment updated successfully"}
+    return MessageResponse(message="Comment updated successfully")
 
 
 @label_router.delete("/{collection_id}/comment/{comment_id}")
@@ -512,10 +513,10 @@ async def delete_comment(
     label_svc: LabelService = Depends(get_label_service),
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
     _comment: None = Depends(require_comment_in_collection),
-) -> dict[str, str]:
+) -> MessageResponse:
     """Delete a comment."""
     await label_svc.delete_comment(comment_id)
-    return {"message": "Comment deleted successfully"}
+    return MessageResponse(message="Comment deleted successfully")
 
 
 @label_router.get("/{collection_id}/agent_run/{agent_run_id}/comments")

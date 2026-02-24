@@ -18,6 +18,7 @@ from docent_core.docent.server.dependencies.services import (
 from docent_core.docent.server.dependencies.user import (
     get_default_view_ctx,
 )
+from docent_core.docent.server.rest.response_models import StatusResponse
 from docent_core.docent.services.charts import (
     ChartSpec,
     ChartsService,
@@ -59,6 +60,10 @@ class CreateChartRequest(BaseModel):
     data_table_id: str | None = None
 
 
+class ChartCreateResponse(BaseModel):
+    id: str
+
+
 @chart_router.post("/{collection_id}/create")
 async def create_chart(
     collection_id: str,
@@ -67,7 +72,7 @@ async def create_chart(
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
     analytics: AnalyticsClient = Depends(use_posthog_user_context),
-) -> dict[str, str]:
+) -> ChartCreateResponse:
     try:
         async with mono_svc.db.session() as session:
             chart_service = ChartsService(session, mono_svc.db)
@@ -91,7 +96,7 @@ async def create_chart(
         },
     )
 
-    return {"id": chart_id}
+    return ChartCreateResponse(id=chart_id)
 
 
 class UpdateChartRequest(BaseModel):
@@ -115,7 +120,7 @@ async def update_chart(
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
     _chart: None = Depends(require_chart_in_collection),
     analytics: AnalyticsClient = Depends(use_posthog_user_context),
-):
+) -> StatusResponse:
     # Only include fields that were explicitly set in the request
     update_fields = {
         field: getattr(request, field)
@@ -143,7 +148,7 @@ async def update_chart(
         },
     )
 
-    return {"status": "ok"}
+    return StatusResponse(status="ok")
 
 
 @chart_router.delete("/{collection_id}/{chart_id}")
@@ -154,12 +159,12 @@ async def delete_chart(
     ctx: ViewContext = Depends(get_default_view_ctx),
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
     _chart: None = Depends(require_chart_in_collection),
-):
+) -> StatusResponse:
     async with mono_svc.db.session() as session:
         chart_service = ChartsService(session, mono_svc.db)
         await chart_service.delete_chart(ctx, chart_id)
 
-    return {"status": "ok"}
+    return StatusResponse(status="ok")
 
 
 @chart_router.get("/{collection_id}")

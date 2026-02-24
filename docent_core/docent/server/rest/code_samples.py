@@ -79,14 +79,14 @@ class PythonSampleResponse(BaseModel):
         )
 
 
-@code_samples_router.post("/python", response_model=PythonSampleResponse)
+@code_samples_router.post("/python")
 async def create_python_sample(
     request: PythonSampleRequest,
     http_request: Request,
     user: User = Depends(get_user_anonymous_ok),
     mono_svc: MonoService = Depends(get_mono_svc),
     rubric_svc: RubricService = Depends(get_rubric_service),
-):
+) -> PythonSampleResponse:
     allowed = await mono_svc.has_permission(
         user=user,
         resource_type=ResourceType.COLLECTION,

@@ -4,14 +4,14 @@ import { BASE_URL } from '@/app/constants';
 export interface FreeUsageModelBreakdown {
   model: string;
   total_cents: number;
-  fraction_used?: number;
+  fraction_used?: number | null;
 }
 
 export interface FreeUsageResponse {
   has_cap: boolean;
   total_cents: number;
   models: FreeUsageModelBreakdown[];
-  fraction_used?: number;
+  fraction_used?: number | null;
 }
 
 export interface ByokModelBreakdown {

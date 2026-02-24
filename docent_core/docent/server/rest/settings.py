@@ -12,6 +12,7 @@ from docent_core.docent.server.dependencies.analytics import use_posthog_user_co
 from docent_core.docent.server.dependencies.database import get_mono_svc
 from docent_core.docent.server.dependencies.services import get_usage_svc
 from docent_core.docent.server.dependencies.user import get_authenticated_user
+from docent_core.docent.server.rest.response_models import MessageResponse
 from docent_core.docent.services.monoservice import MonoService
 from docent_core.docent.services.usage import (
     FREE_CAP_CENTS,
@@ -25,39 +26,61 @@ logger = get_logger(__name__)
 settings_router = APIRouter()
 
 
+class FreeUsageSummary(BaseModel):
+    has_cap: bool
+    total_cents: float
+    models: list[dict[str, Any]]
+    fraction_used: float | None = None
+
+
+class ByokUsageSummary(BaseModel):
+    window_seconds: int
+    keys: list[dict[str, Any]]
+
+
+class UsageSummaryResponse(BaseModel):
+    window_seconds: int
+    free: FreeUsageSummary
+    byok: ByokUsageSummary
+
+
 @settings_router.get("/usage/summary")
 async def get_usage_summary(
     user: User = Depends(get_authenticated_user),
     usage_svc: UsageService = Depends(get_usage_svc),
-):
+) -> UsageSummaryResponse:
     window_seconds = RATE_LIMIT_WINDOW_SECONDS
     total_cents, models = await usage_svc.get_free_usage_breakdown(user.id, window_seconds)
+    free_model: FreeUsageSummary
 
     if FREE_CAP_CENTS is None:
-        free: dict[str, Any] = {
-            "has_cap": False,
-            "total_cents": total_cents,
-            "models": models,
-        }
+        free_model = FreeUsageSummary(
+            has_cap=False,
+            total_cents=total_cents,
+            models=models,
+        )
     else:
         cap_cents = FREE_CAP_CENTS
         fraction_used = (total_cents / cap_cents) if cap_cents and cap_cents > 0 else 0.0
-        free = {
-            "has_cap": True,
-            "total_cents": total_cents,
-            "fraction_used": fraction_used,
-            "models": models,
-        }
+        free_model = FreeUsageSummary(
+            has_cap=True,
+            total_cents=total_cents,
+            fraction_used=fraction_used,
+            models=models,
+        )
 
     # BYOK usage
     keys = await usage_svc.get_byok_usage_by_key(user.id, RATE_LIMIT_WINDOW_SECONDS)
-    byok = {"window_seconds": RATE_LIMIT_WINDOW_SECONDS, "keys": keys}
+    byok_model = ByokUsageSummary(
+        window_seconds=RATE_LIMIT_WINDOW_SECONDS,
+        keys=keys,
+    )
 
-    return {
-        "window_seconds": RATE_LIMIT_WINDOW_SECONDS,
-        "free": free,
-        "byok": byok,
-    }
+    return UsageSummaryResponse(
+        window_seconds=RATE_LIMIT_WINDOW_SECONDS,
+        free=free_model,
+        byok=byok_model,
+    )
 
 
 class ModelApiKeyResponse(BaseModel):
@@ -77,11 +100,11 @@ def _mask_api_key(key: str):
     return key[:4] + "••••••••" + key[-4:]
 
 
-@settings_router.get("/model-api-keys", response_model=list[ModelApiKeyResponse])
+@settings_router.get("/model-api-keys")
 async def list_model_api_keys(
     user: User = Depends(get_authenticated_user),
     mono_svc: MonoService = Depends(get_mono_svc),
-):
+) -> list[ModelApiKeyResponse]:
     """List all model API keys for the authenticated user."""
     model_api_keys = await mono_svc.get_model_api_keys(user.id)
     return [
@@ -94,13 +117,13 @@ async def list_model_api_keys(
     ]
 
 
-@settings_router.put("/model-api-keys", response_model=ModelApiKeyResponse)
+@settings_router.put("/model-api-keys")
 async def upsert_model_api_key(
     request: UpsertModelApiKeyRequest,
     user: User = Depends(get_authenticated_user),
     mono_svc: MonoService = Depends(get_mono_svc),
     analytics: AnalyticsClient = Depends(use_posthog_user_context),
-):
+) -> ModelApiKeyResponse:
     """Create or update a model API key for the authenticated user."""
     # Validate provider
     valid_providers = ["openai", "anthropic", "google", "openrouter"]
@@ -133,7 +156,7 @@ async def delete_model_api_key(
     user: User = Depends(get_authenticated_user),
     mono_svc: MonoService = Depends(get_mono_svc),
     analytics: AnalyticsClient = Depends(use_posthog_user_context),
-):
+) -> MessageResponse:
     """Delete a model API key for the authenticated user and provider."""
     success = await mono_svc.delete_model_api_key(user.id, provider)
     if not success:
@@ -145,4 +168,4 @@ async def delete_model_api_key(
             "provider": provider,
         },
     )
-    return {"message": "Model API key deleted successfully"}
+    return MessageResponse(message="Model API key deleted successfully")

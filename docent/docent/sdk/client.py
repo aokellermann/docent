@@ -1428,7 +1428,7 @@ class Docent:
         organization_id: str,
         *,
         permission: Literal["read", "write", "admin"] = "read",
-    ) -> dict[str, Any]:
+    ) -> None:
         """Share a collection with an organization.
 
         Note: The backend requires admin permission on the collection to manage sharing.
@@ -1445,7 +1445,7 @@ class Docent:
         }
         response = self._session.put(url, json=payload)
         self._handle_response_errors(response)
-        return response.json()
+        return None
 
     def unshare_collection_with_organization(
         self, collection_id: str, organization_id: str

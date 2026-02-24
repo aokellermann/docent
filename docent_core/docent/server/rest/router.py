@@ -82,6 +82,7 @@ from docent_core.docent.server.dependencies.user import (
     get_default_view_ctx,
     get_user_anonymous_ok,
 )
+from docent_core.docent.server.rest.response_models import MessageResponse
 from docent_core.docent.services.llms import LLMService
 from docent_core.docent.services.monoservice import MonoService
 
@@ -146,9 +147,14 @@ def sign_message_with_hmac(email: str) -> str | None:
 ####################
 
 
+class PingResponse(BaseModel):
+    status: str
+    message: str
+
+
 @public_router.get("/ping")
-async def ping():
-    return {"status": "ok", "message": "pong"}
+async def ping() -> PingResponse:
+    return PingResponse(status="ok", message="pong")
 
 
 class UserCreateRequest(BaseModel):
@@ -161,12 +167,17 @@ class UserCreateRequest(BaseModel):
         extra = "forbid"
 
 
+class AuthSessionResponse(BaseModel):
+    user: User
+    session_id: str
+
+
 @public_router.post("/signup")
 async def signup(
     request: UserCreateRequest,
     response: Response,
     mono_svc: MonoService = Depends(get_mono_svc),
-):
+) -> AuthSessionResponse:
     """
     User signup endpoint. Creates a new user with the provided email.
     Fails if a user with that email already exists.
@@ -196,7 +207,7 @@ async def signup(
     session_id = await create_user_session(user.id, response, mono_svc)
 
     # Need to return session id in body so that Next.js app can set a cookie for its own domain
-    return {"user": user, "session_id": session_id}
+    return AuthSessionResponse(user=user, session_id=session_id)
 
 
 class LoginRequest(BaseModel):
@@ -214,7 +225,7 @@ class ChangePasswordRequest(BaseModel):
 @public_router.post("/login")
 async def login(
     request: LoginRequest, response: Response, mono_svc: MonoService = Depends(get_mono_svc)
-):
+) -> AuthSessionResponse:
     """
     User login endpoint. Authenticates a user and creates a session.
 
@@ -235,13 +246,13 @@ async def login(
     session_id = await create_user_session(user.id, response, mono_svc)
 
     # Need to return session id in body so that Next.js app can set a cookie for its own domain
-    return {"user": user, "session_id": session_id}
+    return AuthSessionResponse(user=user, session_id=session_id)
 
 
 @public_router.post("/anonymous_session")
 async def create_anonymous_session(
     response: Response, mono_svc: MonoService = Depends(get_mono_svc)
-):
+) -> AuthSessionResponse:
     """
     Create anonymous user endpoint. Creates a temporary anonymous user and session.
 
@@ -259,7 +270,7 @@ async def create_anonymous_session(
     session_id = await create_user_session(anonymous_user.id, response, mono_svc)
 
     # Need to return session id in body so that Next.js app can set a cookie for its own domain
-    return {"user": anonymous_user, "session_id": session_id}
+    return AuthSessionResponse(user=anonymous_user, session_id=session_id)
 
 
 ###########################
@@ -268,7 +279,7 @@ async def create_anonymous_session(
 
 
 @user_router.get("/me")
-async def get_current_user(user: User = Depends(get_user_anonymous_ok)):
+async def get_current_user(user: User = Depends(get_user_anonymous_ok)) -> dict[str, Any]:
     """Get current user endpoint.
 
     Uses the user resolved by get_user_anonymous_ok, which checks
@@ -283,7 +294,7 @@ async def get_current_user(user: User = Depends(get_user_anonymous_ok)):
 @user_router.post("/logout")
 async def logout(
     request: Request, response: Response, mono_svc: MonoService = Depends(get_mono_svc)
-):
+) -> MessageResponse:
     """
     User logout endpoint. Invalidates the current session.
 
@@ -301,7 +312,7 @@ async def logout(
         # Invalidate the session using the auth helper
         await invalidate_user_session(session_id, response, mono_svc)
 
-    return {"message": "Logged out successfully"}
+    return MessageResponse(message="Logged out successfully")
 
 
 @user_router.post("/change_password")
@@ -309,7 +320,7 @@ async def change_password(
     request: ChangePasswordRequest,
     user: User = Depends(get_authenticated_user),
     mono_svc: MonoService = Depends(get_mono_svc),
-):
+) -> MessageResponse:
     """
     Change the authenticated user's password when the current password is provided correctly.
     """
@@ -322,7 +333,7 @@ async def change_password(
     if not updated:
         raise HTTPException(status_code=400, detail="Current password is incorrect")
 
-    return {"message": "Password updated successfully"}
+    return MessageResponse(message="Password updated successfully")
 
 
 ##############
@@ -385,12 +396,12 @@ class CollectionCounts(BaseModel):
     label_set_count: int | None = None
 
 
-@user_router.get("/collections", response_model=list[CollectionRow])
+@user_router.get("/collections")
 async def get_collections(
     include_counts: bool = False,
     user: User = Depends(get_user_anonymous_ok),
     mono_svc: MonoService = Depends(get_mono_svc),
-):
+) -> list[CollectionRow]:
     sqla_collections = await mono_svc.get_collections(user)  # Filter to only the user's collections
 
     # Fast path: return collections without counts
@@ -417,7 +428,7 @@ async def get_collections(
     label_set_counts = await mono_svc.batch_count_collection_label_sets(collection_ids)
 
     # Build response with counts for each collection
-    result: list[dict[str, Any]] = []
+    result: list[CollectionRow] = []
     for obj in sqla_collections:
         collection_data: dict[str, Any] = obj.dict()
 
@@ -429,17 +440,17 @@ async def get_collections(
         collection_data["rubric_count"] = rubric_counts[obj.id]
         collection_data["label_set_count"] = label_set_counts[obj.id]
 
-        result.append(collection_data)
+        result.append(CollectionRow(**collection_data))
 
     return result
 
 
-@user_router.post("/collections/counts", response_model=dict[str, CollectionCounts])
+@user_router.post("/collections/counts")
 async def get_collections_counts(
     request: CollectionCountsRequest,
     user: User = Depends(get_user_anonymous_ok),
     mono_svc: MonoService = Depends(get_mono_svc),
-):
+) -> dict[str, CollectionCounts]:
     """Get counts for multiple collections in a batch."""
     # Filter to only collections the user has access to (security check)
     accessible_collections = await mono_svc.get_collections(user)
@@ -469,17 +480,17 @@ async def clear_metadata(
     collection_id: str,
     batch_size: int | None = None,
     mono_svc: MonoService = Depends(get_mono_svc),
-):
+) -> dict[str, Any]:
     """Delete metadata observations for a collection, optionally limited by batch_size."""
     return await mono_svc.clear_metadata(collection_id, batch_size=batch_size)
 
 
-@user_router.get("/{collection_id}/collection_details", response_model=CollectionRow | None)
+@user_router.get("/{collection_id}/collection_details")
 async def get_collection_details(
     collection_id: str = Depends(require_collection_exists),
     mono_svc: MonoService = Depends(get_mono_svc),
     _: None = Depends(require_collection_permission(Permission.READ)),
-):
+) -> CollectionRow | None:
     """Get full details about a collection including id, name, description, created_at, created_by, and counts."""
     collection = await mono_svc.get_collection(collection_id)
     if collection is None:
@@ -503,7 +514,7 @@ async def get_collection_details(
     collection_data["rubric_count"] = rubric_counts[collection.id]
     collection_data["label_set_count"] = label_set_counts[collection.id]
 
-    return collection_data
+    return CollectionRow(**collection_data)
 
 
 @user_router.get("/{collection_id}/exists")
@@ -522,13 +533,17 @@ class CreateCollectionRequest(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
+class CollectionCreateResponse(BaseModel):
+    collection_id: str
+
+
 @user_router.post("/create")
 async def create_collection(
     request: CreateCollectionRequest = CreateCollectionRequest(),
     user: User = Depends(get_authenticated_user),
     mono_svc: MonoService = Depends(get_mono_svc),
     analytics: AnalyticsClient = Depends(use_posthog_user_context),
-):
+) -> CollectionCreateResponse:
     collection_id = await mono_svc.create_collection(
         user=user,
         collection_id=request.collection_id,
@@ -547,12 +562,18 @@ async def create_collection(
         },
     )
 
-    return {"collection_id": collection_id}
+    return CollectionCreateResponse(collection_id=collection_id)
 
 
 class CloneCollectionRequest(BaseModel):
     name: str | None = None
     description: str | None = None
+
+
+class CloneCollectionResponse(BaseModel):
+    collection_id: str
+    status: str
+    agent_runs_cloned: int
 
 
 @user_router.post("/{collection_id}/clone", status_code=201)
@@ -563,7 +584,7 @@ async def clone_collection(
     mono_svc: MonoService = Depends(get_mono_svc),
     _: None = Depends(require_collection_permission(Permission.READ)),
     analytics: AnalyticsClient = Depends(use_posthog_user_context),
-):
+) -> CloneCollectionResponse:
     """Clone an existing collection with all its agent runs.
 
     Creates a deep copy of the collection, generating new IDs for all entities
@@ -590,11 +611,11 @@ async def clone_collection(
         },
     )
 
-    return {
-        "collection_id": new_collection_id,
-        "status": "completed",
-        "agent_runs_cloned": agent_runs_cloned,
-    }
+    return CloneCollectionResponse(
+        collection_id=new_collection_id,
+        status="completed",
+        agent_runs_cloned=agent_runs_cloned,
+    )
 
 
 class UpdateCollectionRequest(BaseModel):
@@ -608,7 +629,7 @@ async def update_collection(
     request: UpdateCollectionRequest,
     mono_svc: MonoService = Depends(get_mono_svc),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
-):
+) -> None:
     await mono_svc.update_collection(
         collection_id,
         **({"name": request.name} if request.name is not None else {}),
@@ -621,7 +642,7 @@ async def delete_collection(
     collection_id: str,
     mono_svc: MonoService = Depends(get_mono_svc),
     _: None = Depends(require_collection_permission(Permission.ADMIN)),
-):
+) -> None:
     await mono_svc.delete_collection(collection_id)
 
 
@@ -772,7 +793,7 @@ async def import_runs_from_file(
     ctx: ViewContext = Depends(get_default_view_ctx),
     analytics: AnalyticsClient = Depends(use_posthog_user_context),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
-):
+) -> StreamingResponse:
     """
     Import agent runs from an Inspect AI log file and stream progress via SSE.
 
@@ -912,7 +933,7 @@ async def get_field_values(
     mono_svc: MonoService = Depends(get_mono_svc),
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.READ)),
-):
+) -> dict[str, list[Any]]:
     """Get unique values for a specific metadata field, limited to 100 items."""
     filter_obj: CollectionFilter | None = None
     if filter_json:
@@ -942,7 +963,7 @@ async def get_metadata_field_range(
     mono_svc: MonoService = Depends(get_mono_svc),
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.READ)),
-):
+) -> dict[str, Any]:
     try:
         return await mono_svc.get_metadata_field_range(ctx, field_name)
     except ValueError as exc:  # pragma: no cover - defensive guard
@@ -955,7 +976,7 @@ async def get_agent_run(
     mono_svc: MonoService = Depends(get_mono_svc),
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.READ)),
-):
+) -> AgentRun | None:
     """
     Get an agent run by ID.
 
@@ -976,7 +997,7 @@ async def get_agent_run_with_tree(
     mono_svc: MonoService = Depends(get_mono_svc),
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.READ)),
-):
+) -> tuple[AgentRun, dict[str, Any]]:
     agent_run = await mono_svc.get_agent_run(ctx, agent_run_id)
     if not agent_run:
         raise HTTPException(status_code=404, detail=f"Agent run {agent_run_id} not found")
@@ -1068,7 +1089,7 @@ async def get_agent_run_count(
     return AgentRunCountResponse(count=count)
 
 
-@user_router.post("/{collection_id}/translate_message", response_model=TranslateMessageResponse)
+@user_router.post("/{collection_id}/translate_message")
 async def translate_message(
     request: TranslateMessageRequest,
     llm_svc: LLMService = Depends(get_llm_svc),
@@ -1139,7 +1160,7 @@ async def get_agent_run_metadata(
     mono_svc: MonoService = Depends(get_mono_svc),
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.READ)),
-):
+) -> dict[str, Any]:
     # Query metadata directly without loading full agent runs
     data = await mono_svc.get_metadata_for_agent_runs(
         ctx, request.agent_run_ids, fields=request.fields
@@ -1164,7 +1185,7 @@ async def update_agent_run_metadata(
     request: UpdateMetadataRequest,
     mono_svc: MonoService = Depends(get_mono_svc),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
-):
+) -> dict[str, Any]:
     """Merge metadata into an agent run's existing metadata."""
     merged = await mono_svc.update_agent_run_metadata(collection_id, agent_run_id, request.metadata)
     return {k: to_jsonable_python(v) for k, v in merged.items()}
@@ -1177,7 +1198,7 @@ async def delete_agent_run_metadata_keys(
     request: DeleteMetadataKeysRequest,
     mono_svc: MonoService = Depends(get_mono_svc),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
-):
+) -> dict[str, Any]:
     """Remove keys from an agent run's metadata."""
     metadata, not_found = await mono_svc.delete_agent_run_metadata_keys(
         collection_id, agent_run_id, request.keys
@@ -1203,9 +1224,7 @@ class EnqueuedJobResponse(BaseModel):
     message: str
 
 
-@user_router.post(
-    "/{collection_id}/agent_runs", status_code=202, response_model=EnqueuedJobResponse
-)
+@user_router.post("/{collection_id}/agent_runs", status_code=202)
 async def post_agent_runs_compressed(
     collection_id: str,
     request: Request,
@@ -1213,7 +1232,7 @@ async def post_agent_runs_compressed(
     ctx: ViewContext = Depends(get_default_view_ctx),
     analytics: AnalyticsClient = Depends(use_posthog_user_context),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
-):
+) -> EnqueuedJobResponse:
     """
     Enqueue agent runs for background processing.
 
@@ -1294,13 +1313,13 @@ class JobStatusResponse(BaseModel):
     error_message: str | None = None
 
 
-@user_router.get("/{collection_id}/agent_runs/jobs/{job_id}", response_model=JobStatusResponse)
+@user_router.get("/{collection_id}/agent_runs/jobs/{job_id}")
 async def get_agent_run_job_status(
     collection_id: str,
     job_id: str,
     mono_svc: MonoService = Depends(get_mono_svc),
     _perm: None = Depends(require_collection_permission(Permission.READ)),
-):
+) -> JobStatusResponse:
     """
     Get the status of an agent run ingestion job.
 
@@ -1345,15 +1364,26 @@ class BatchJobStatusResponse(BaseModel):
     jobs: list[JobStatusResponse]
 
 
-@user_router.post(
-    "/{collection_id}/agent_runs/jobs/batch_status", response_model=BatchJobStatusResponse
-)
+class AgentRunIngestJobSummary(BaseModel):
+    job_id: str
+    status: str
+    type: str
+    created_at: str
+    collection_id: str
+
+
+class AgentRunIngestJobsResponse(BaseModel):
+    jobs: list[AgentRunIngestJobSummary]
+    count: int
+
+
+@user_router.post("/{collection_id}/agent_runs/jobs/batch_status")
 async def get_agent_run_job_statuses(
     collection_id: str,
     request: BatchJobStatusRequest,
     mono_svc: MonoService = Depends(get_mono_svc),
     _: None = Depends(require_collection_permission(Permission.READ)),
-):
+) -> BatchJobStatusResponse:
     """
     Get the status of multiple agent run ingestion jobs in a single request.
 
@@ -1392,7 +1422,7 @@ async def get_agent_run_ingest_jobs(
     limit: int = 100,
     mono_svc: MonoService = Depends(get_mono_svc),
     _: None = Depends(require_collection_permission(Permission.READ)),
-):
+) -> AgentRunIngestJobsResponse:
     """
     Get agent run ingestion jobs for a collection.
 
@@ -1411,19 +1441,24 @@ async def get_agent_run_ingest_jobs(
 
     jobs = await mono_svc.get_agent_run_ingest_jobs(collection_id, limit)
 
-    return {
-        "jobs": [
-            {
-                "job_id": job.id,
-                "status": job.status.value,
-                "type": job.type,
-                "created_at": job.created_at.isoformat(),
-                "collection_id": collection_id,
-            }
+    return AgentRunIngestJobsResponse(
+        jobs=[
+            AgentRunIngestJobSummary(
+                job_id=job.id,
+                status=job.status.value,
+                type=job.type,
+                created_at=job.created_at.isoformat(),
+                collection_id=collection_id,
+            )
             for job in jobs
         ],
-        "count": len(jobs),
-    }
+        count=len(jobs),
+    )
+
+
+class RetryJobResponse(BaseModel):
+    success: bool
+    message: str
 
 
 @user_router.post("/{collection_id}/agent_runs/jobs/{job_id}/retry")
@@ -1433,10 +1468,18 @@ async def retry_agent_run_ingest_job(
     mono_svc: MonoService = Depends(get_mono_svc),
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
-):
+) -> RetryJobResponse:
     """Retry a canceled agent run ingest job."""
     await mono_svc.retry_agent_run_ingest_job(job_id, collection_id, ctx)
-    return {"success": True, "message": f"Job {job_id} has been re-queued for processing"}
+    return RetryJobResponse(
+        success=True,
+        message=f"Job {job_id} has been re-queued for processing",
+    )
+
+
+class DeleteAgentRunsResponse(BaseModel):
+    deleted_count: int
+    requested_count: int
 
 
 @user_router.delete("/{collection_id}/agent_runs")
@@ -1446,7 +1489,7 @@ async def delete_agent_runs(
     mono_svc: MonoService = Depends(get_mono_svc),
     analytics: AnalyticsClient = Depends(use_posthog_user_context),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
-):
+) -> DeleteAgentRunsResponse:
     """Delete specific agent runs from a collection."""
     async with mono_svc.advisory_lock(collection_id, action_id="mutation"):
         deleted_count = await mono_svc.delete_agent_runs(collection_id, request.agent_run_ids)
@@ -1461,7 +1504,10 @@ async def delete_agent_runs(
         },
     )
 
-    return {"deleted_count": deleted_count, "requested_count": len(request.agent_run_ids)}
+    return DeleteAgentRunsResponse(
+        deleted_count=deleted_count,
+        requested_count=len(request.agent_run_ids),
+    )
 
 
 class MoveAgentRunsRequest(BaseModel):
@@ -1483,7 +1529,7 @@ async def move_agent_runs(
     mono_svc: MonoService = Depends(get_mono_svc),
     analytics: AnalyticsClient = Depends(use_posthog_user_context),
     _source_perm: None = Depends(require_collection_permission(Permission.WRITE)),
-):
+) -> MoveAgentRunsResponse:
     """Move agent runs from this collection to a destination collection.
 
     Requires WRITE permission on both the source and destination collections.
@@ -1548,7 +1594,7 @@ async def join(
     mono_svc: MonoService = Depends(get_mono_svc),
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.READ)),
-):
+) -> dict[str, str]:
     if not await mono_svc.collection_exists(collection_id):
         raise HTTPException(status_code=404, detail=f"Collection with ID {collection_id} not found")
 
@@ -1592,6 +1638,11 @@ class FilterListItemResponse(BaseModel):
     created_by: str
 
 
+class DeleteFilterResponse(BaseModel):
+    status: str
+    filter_id: str
+
+
 def _serialize_stored_filter(filter_row: SQLAFilter) -> StoredFilterResponse:
     filter_dict = cast(dict[str, Any], deepcopy(filter_row.filter_dict or {}))
     filter_model = parse_filter_dict(filter_dict)
@@ -1615,7 +1666,7 @@ async def post_base_filter(
     ctx: ViewContext = Depends(get_default_view_ctx),
     analytics: AnalyticsClient = Depends(use_posthog_user_context),
     _: None = Depends(require_view_permission(Permission.WRITE)),
-):
+) -> CollectionFilter | None:
     async with mono_svc.advisory_lock(collection_id, action_id="mutation"):
         if request.filter is None:
             new_ctx = await mono_svc.clear_view_base_filter(ctx)
@@ -1639,14 +1690,11 @@ async def post_base_filter(
 async def get_base_filter(
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.WRITE)),
-):
+) -> CollectionFilter | None:
     return ctx.base_filter
 
 
-@user_router.get(
-    "/{collection_id}/filters",
-    response_model=list[FilterListItemResponse],
-)
+@user_router.get("/{collection_id}/filters")
 async def list_filters(
     collection_id: str,
     mono_svc: MonoService = Depends(get_mono_svc),
@@ -1667,14 +1715,14 @@ async def list_filters(
     ]
 
 
-@user_router.post("/{collection_id}/filters", response_model=StoredFilterResponse)
+@user_router.post("/{collection_id}/filters")
 async def create_filter(
     collection_id: str,
     request: CreateFilterRequest,
     mono_svc: MonoService = Depends(get_mono_svc),
     user: User = Depends(get_authenticated_user),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
-):
+) -> StoredFilterResponse:
     stored_filter = await mono_svc.create_filter_entry(
         collection_id=collection_id,
         filter_payload=request.filter,
@@ -1687,7 +1735,6 @@ async def create_filter(
 
 @user_router.get(
     "/{collection_id}/filters/{filter_id}",
-    response_model=StoredFilterResponse,
 )
 async def get_filter(
     collection_id: str,
@@ -1695,7 +1742,7 @@ async def get_filter(
     mono_svc: MonoService = Depends(get_mono_svc),
     _perm: None = Depends(require_collection_permission(Permission.READ)),
     _filter: None = Depends(require_filter_in_collection),
-):
+) -> StoredFilterResponse:
     stored_filter = await mono_svc.get_filter_entry(
         collection_id=collection_id, filter_id=filter_id
     )
@@ -1711,16 +1758,15 @@ async def delete_filter(
     mono_svc: MonoService = Depends(get_mono_svc),
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
     _filter: None = Depends(require_filter_in_collection),
-):
+) -> DeleteFilterResponse:
     deleted = await mono_svc.delete_filter_entry(collection_id=collection_id, filter_id=filter_id)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Filter {filter_id} not found")
-    return {"status": "deleted", "filter_id": filter_id}
+    return DeleteFilterResponse(status="deleted", filter_id=filter_id)
 
 
 @user_router.put(
     "/{collection_id}/filters/{filter_id}",
-    response_model=StoredFilterResponse,
 )
 async def update_filter(
     collection_id: str,
@@ -1730,7 +1776,7 @@ async def update_filter(
     _user: User = Depends(get_authenticated_user),
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
     _filter: None = Depends(require_filter_in_collection),
-):
+) -> StoredFilterResponse:
     """Update an existing saved filter."""
     updated_filter = await mono_svc.update_filter_entry(
         collection_id=collection_id,
@@ -1799,7 +1845,9 @@ async def update_filter(
 
 
 @user_router.get("/users/by-email/{email}")
-async def get_user_by_email(email: str, mono_svc: MonoService = Depends(get_mono_svc)):
+async def get_user_by_email(
+    email: str, mono_svc: MonoService = Depends(get_mono_svc)
+) -> User | None:
     """
     Get a user by their email address.
     Args:
@@ -1829,12 +1877,12 @@ class CollectionsPermissionsResponse(BaseModel):
     collection_permissions: dict[str, str | None]
 
 
-@user_router.post("/collections/permissions", response_model=CollectionsPermissionsResponse)
+@user_router.post("/collections/permissions")
 async def get_collections_permissions(
     request: CollectionsPermissionsRequest,
     user: User = Depends(get_user_anonymous_ok),
     mono_svc: MonoService = Depends(get_mono_svc),
-):
+) -> CollectionsPermissionsResponse:
     perms = await mono_svc.get_permissions_for_collections(user, request.collection_ids)
     return CollectionsPermissionsResponse(
         collection_permissions={k: (v.value if v else None) for k, v in perms.items()}
@@ -1864,7 +1912,7 @@ async def get_user_permissions(
     mono_svc: MonoService = Depends(get_mono_svc),
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_collection_permission(Permission.READ)),
-):
+) -> UserPermissionsResponse:
     fg_permission = await mono_svc.get_permission_level(
         user=user,
         resource_type=ResourceType.COLLECTION,
@@ -1888,26 +1936,26 @@ async def get_org_users(
     org_id: str,
     user: User = Depends(get_authenticated_user),
     mono_svc: MonoService = Depends(get_mono_svc),
-):
+) -> list[User]:
     if org_id not in user.organization_ids:
         raise HTTPException(status_code=403, detail="You do not belong to this organization.")
     return await mono_svc.get_users_in_organization(org_id)
 
 
-@user_router.get("/organizations", response_model=list[OrganizationWithRole])
+@user_router.get("/organizations")
 async def get_my_organizations(
     user: User = Depends(get_authenticated_user),
     mono_svc: MonoService = Depends(get_mono_svc),
-):
+) -> list[OrganizationWithRole]:
     return await mono_svc.get_organizations_for_user(user.id)
 
 
-@user_router.get("/organizations/{org_id}/members", response_model=list[OrganizationMember])
+@user_router.get("/organizations/{org_id}/members")
 async def get_organization_members(
     org_id: str,
     user: User = Depends(get_authenticated_user),
     mono_svc: MonoService = Depends(get_mono_svc),
-):
+) -> list[OrganizationMember]:
     if org_id not in user.organization_ids:
         raise HTTPException(status_code=403, detail="You do not belong to this organization.")
     return await mono_svc.get_organization_members(org_id)
@@ -1923,12 +1971,12 @@ class CreateOrganizationRequest(BaseModel):
     description: str | None = None
 
 
-@user_router.post("/organizations", response_model=OrganizationWithRole)
+@user_router.post("/organizations")
 async def create_organization(
     request: CreateOrganizationRequest,
     user: User = Depends(get_authenticated_user),
     mono_svc: MonoService = Depends(get_mono_svc),
-):
+) -> OrganizationWithRole:
     name = request.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Organization name is required.")
@@ -1940,13 +1988,13 @@ async def create_organization(
     return org
 
 
-@user_router.post("/organizations/{org_id}/members", response_model=list[OrganizationMember])
+@user_router.post("/organizations/{org_id}/members")
 async def add_organization_member(
     org_id: str,
     request: AddOrganizationMemberRequest,
     user: User = Depends(get_authenticated_user),
     mono_svc: MonoService = Depends(get_mono_svc),
-):
+) -> list[OrganizationMember]:
     async with mono_svc.advisory_lock(org_id, action_id="org_membership"):
         my_role = await mono_svc.get_organization_role(organization_id=org_id, user_id=user.id)
         if my_role != OrganizationRole.ADMIN:
@@ -1971,16 +2019,14 @@ class UpdateOrganizationMemberRoleRequest(BaseModel):
     role: OrganizationRole
 
 
-@user_router.patch(
-    "/organizations/{org_id}/members/{member_user_id}", response_model=list[OrganizationMember]
-)
+@user_router.patch("/organizations/{org_id}/members/{member_user_id}")
 async def update_organization_member_role(
     org_id: str,
     member_user_id: str,
     request: UpdateOrganizationMemberRoleRequest,
     user: User = Depends(get_authenticated_user),
     mono_svc: MonoService = Depends(get_mono_svc),
-):
+) -> list[OrganizationMember]:
     async with mono_svc.advisory_lock(org_id, action_id="org_membership"):
         my_role = await mono_svc.get_organization_role(organization_id=org_id, user_id=user.id)
         if my_role != OrganizationRole.ADMIN:
@@ -2014,15 +2060,13 @@ async def update_organization_member_role(
         return await mono_svc.get_organization_members(org_id)
 
 
-@user_router.delete(
-    "/organizations/{org_id}/members/{member_user_id}", response_model=list[OrganizationMember]
-)
+@user_router.delete("/organizations/{org_id}/members/{member_user_id}")
 async def remove_organization_member(
     org_id: str,
     member_user_id: str,
     user: User = Depends(get_authenticated_user),
     mono_svc: MonoService = Depends(get_mono_svc),
-):
+) -> list[OrganizationMember]:
     async with mono_svc.advisory_lock(org_id, action_id="org_membership"):
         my_role = await mono_svc.get_organization_role(organization_id=org_id, user_id=user.id)
         if my_role != OrganizationRole.ADMIN:
@@ -2052,7 +2096,7 @@ async def get_collection_collaborators(
     mono_svc: MonoService = Depends(get_mono_svc),
     # You need READ permissions to see other people's permissions
     _: None = Depends(require_collection_permission(Permission.READ)),
-):
+) -> list[CollectionCollaborator]:
     return [
         CollectionCollaborator.from_sqla_acl(acl)
         for acl in await mono_svc.get_acl_entries(
@@ -2084,16 +2128,14 @@ async def upsert_collaborator(
     user: User = Depends(get_user_anonymous_ok),
     mono_svc: MonoService = Depends(get_mono_svc),
     _: None = Depends(require_collection_permission(Permission.ADMIN)),
-):
-    collaborator = await mono_svc.set_acl_permission(
+) -> None:
+    await mono_svc.set_acl_permission(
         subject_type=request.subject_type,
         subject_id=request.subject_id,
         resource_type=ResourceType.COLLECTION,
         resource_id=collection_id,
         permission=request.permission_level,
     )
-
-    return collaborator
 
 
 class RemoveCollaboratorRequest(BaseModel):
@@ -2109,7 +2151,7 @@ async def remove_collaborator(
     mono_svc: MonoService = Depends(get_mono_svc),
     user: User = Depends(get_user_anonymous_ok),
     _: None = Depends(require_collection_permission(Permission.ADMIN)),
-):
+) -> dict[str, str]:
     async with mono_svc.db.session() as session:
         # Build the delete query with the provided filters
         query = select(SQLAAccessControlEntry).where(
@@ -2156,6 +2198,11 @@ class ShareWithEmailRequest(BaseModel):
     email: str
 
 
+class StatusMessageResponse(BaseModel):
+    status: str
+    message: str
+
+
 # @user_router.post("/{collection_id}/share_view")
 # async def share_view(
 #     collection_id: str,
@@ -2180,7 +2227,7 @@ async def make_collection_public(
     user: User = Depends(get_user_anonymous_ok),
     mono_svc: MonoService = Depends(get_mono_svc),
     _: None = Depends(require_collection_permission(Permission.ADMIN)),
-):
+) -> StatusMessageResponse:
     """Make a collection publicly accessible to anyone with the link."""
     await mono_svc.set_acl_permission(
         subject_type=SubjectType.PUBLIC,
@@ -2190,7 +2237,7 @@ async def make_collection_public(
         permission=Permission.READ,
     )
 
-    return {"status": "success", "message": "Collection is now public"}
+    return StatusMessageResponse(status="success", message="Collection is now public")
 
 
 @user_router.post("/{collection_id}/share_with_email")
@@ -2200,7 +2247,7 @@ async def share_collection_with_email(
     user: User = Depends(get_user_anonymous_ok),
     mono_svc: MonoService = Depends(get_mono_svc),
     _: None = Depends(require_collection_permission(Permission.ADMIN)),
-):
+) -> StatusMessageResponse:
     """Share a collection with a specific user by email address."""
     target_user = await mono_svc.get_user_by_email(request.email)
     if target_user is None:
@@ -2214,7 +2261,10 @@ async def share_collection_with_email(
         permission=Permission.READ,
     )
 
-    return {"status": "success", "message": f"Collection shared with {request.email}"}
+    return StatusMessageResponse(
+        status="success",
+        message=f"Collection shared with {request.email}",
+    )
 
 
 ####################
@@ -2242,25 +2292,31 @@ class CreateApiKeyResponse(BaseModel):
     created_at: datetime
 
 
+class ApiKeyTestResponse(BaseModel):
+    message: str
+    user_id: str
+    is_anonymous: bool
+
+
 @user_router.get("/api-keys/test")
-async def test_api_key(user: User = Depends(get_authenticated_user)):
+async def test_api_key(user: User = Depends(get_authenticated_user)) -> ApiKeyTestResponse:
     """
     Test endpoint to verify API key authentication.
     Returns user info if authenticated, 401 if not.
     """
-    return {
-        "message": "API key authentication successful",
-        "user_id": user.id,
-        "is_anonymous": user.is_anonymous,
-    }
+    return ApiKeyTestResponse(
+        message="API key authentication successful",
+        user_id=user.id,
+        is_anonymous=user.is_anonymous,
+    )
 
 
-@user_router.post("/api-keys", response_model=CreateApiKeyResponse)
+@user_router.post("/api-keys")
 async def create_api_key(
     request: CreateApiKeyRequest,
     user: User = Depends(get_authenticated_user),
     mono_svc: MonoService = Depends(get_mono_svc),
-):
+) -> CreateApiKeyResponse:
     """Create a new API key for the authenticated user."""
     api_key_id, raw_api_key = await mono_svc.create_api_key(user.id, request.name)
 
@@ -2275,11 +2331,11 @@ async def create_api_key(
     )
 
 
-@user_router.get("/api-keys", response_model=list[ApiKeyResponse])
+@user_router.get("/api-keys")
 async def list_api_keys(
     user: User = Depends(get_authenticated_user),
     mono_svc: MonoService = Depends(get_mono_svc),
-):
+) -> list[ApiKeyResponse]:
     """List all API keys for the authenticated user."""
     api_keys = await mono_svc.get_user_api_keys(user.id)
     return [
@@ -2300,12 +2356,12 @@ async def disable_api_key(
     api_key_id: str,
     user: User = Depends(get_authenticated_user),
     mono_svc: MonoService = Depends(get_mono_svc),
-):
+) -> MessageResponse:
     """Disable an API key."""
     success = await mono_svc.disable_api_key(api_key_id, user.id)
     if not success:
         raise HTTPException(status_code=404, detail="API key not found")
-    return {"message": "API key disabled successfully"}
+    return MessageResponse(message="API key disabled successfully")
 
 
 @user_router.post("/{collection_id}/compute_embeddings")
@@ -2314,7 +2370,7 @@ async def compute_embeddings(
     mono_svc: MonoService = Depends(get_mono_svc),
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
-):
+) -> None:
     pass
 
 

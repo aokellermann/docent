@@ -1,11 +1,16 @@
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from docent._llm_util.providers.preference_types import merge_models_with_byok
+from docent._llm_util.providers.preference_types import (
+    ModelOptionWithContext,
+    merge_models_with_byok,
+)
 from docent._log_util.logger import get_logger
+from docent.data_models.agent_run import FilterableFieldWithSamples
 from docent.judges import JudgeResultWithCitations, ResultType, Rubric
 from docent_core._server._analytics.posthog import AnalyticsClient
 from docent_core.docent.ai_tools.rubric.reflect import JudgeReflection
@@ -32,6 +37,7 @@ from docent_core.docent.server.dependencies.user import (
     get_default_view_ctx,
     get_user_anonymous_ok,
 )
+from docent_core.docent.server.rest.response_models import MessageResponse
 from docent_core.docent.services import monoservice
 from docent_core.docent.services.job import JobService
 from docent_core.docent.services.llms import PROVIDER_PREFERENCES
@@ -100,7 +106,7 @@ async def create_rubric(
     request: CreateRubricRequest,
     rubric_svc: RubricService = Depends(get_rubric_service),
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
-):
+) -> str:
     return await rubric_svc.create_rubric(collection_id, request.rubric)
 
 
@@ -130,7 +136,7 @@ async def add_rubric_version(
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
     _sq_rubric: SQLARubric = Depends(get_rubric_in_collection),
     analytics: AnalyticsClient = Depends(use_posthog_user_context),
-):
+) -> None:
     """Update an existing rubric."""
     await rubric_svc.add_rubric_version(rubric_id, request.rubric)
     analytics.track_event(
@@ -148,7 +154,7 @@ async def get_rubrics(
     collection_id: str,
     rubric_svc: RubricService = Depends(get_rubric_service),
     _: None = Depends(require_collection_permission(Permission.READ)),
-):
+) -> list[Rubric]:
     """Get all rubrics for a collection."""
     return await rubric_svc.get_all_rubrics(collection_id, latest_only=True)
 
@@ -159,12 +165,16 @@ async def get_latest_rubric_version(
     rubric_svc: RubricService = Depends(get_rubric_service),
     _perm: None = Depends(require_collection_permission(Permission.READ)),
     _sq_rubric: SQLARubric = Depends(get_rubric_in_collection),
-):
+) -> int:
     """Get the latest version number for a specific rubric."""
     latest_version = await rubric_svc.get_latest_rubric_version(rubric_id)
     if latest_version is None:
         raise HTTPException(status_code=404, detail="Rubric not found")
     return latest_version
+
+
+class FilterFieldsResponse(BaseModel):
+    fields: list[FilterableFieldWithSamples]
 
 
 @rubric_router.get("/{collection_id}/result/{result_id}")
@@ -220,21 +230,19 @@ async def get_judge_result_filter_fields(
     ctx: ViewContext = Depends(get_default_view_ctx),
     _perm: None = Depends(require_collection_permission(Permission.READ)),
     _sq_rubric: SQLARubric = Depends(get_rubric_in_collection),
-):
+) -> FilterFieldsResponse:
     """Get filterable fields for a rubric's judge results.
 
     Returns metadata fields, tag, agent_run_id, and rubric output fields
     scoped to the specified rubric and optional version.
     """
-    from docent.data_models.agent_run import FilterableFieldWithSamples
-
     fields: list[FilterableFieldWithSamples] = await mono_svc.get_agent_run_metadata_fields(
         ctx,
         rubric_id=rubric_id,
         rubric_version=version,
         include_judge_result_metadata=False,
     )
-    return {"fields": fields}
+    return FilterFieldsResponse(fields=fields)
 
 
 @rubric_router.get("/{collection_id}/rubric/{rubric_id}/result/{agent_run_id}")
@@ -317,7 +325,7 @@ async def delete_rubric_all_versions(
     rubric_svc: RubricService = Depends(get_rubric_service),
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
     _sq_rubric: SQLARubric = Depends(get_rubric_in_collection),
-):
+) -> None:
     """Delete a rubric from a collection."""
     await rubric_svc.delete_rubric(rubric_id)
 
@@ -332,9 +340,9 @@ async def cancel_job(
     job_svc: JobService = Depends(get_job_service),
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
     _job: None = Depends(require_rubric_job_in_collection),
-):
+) -> MessageResponse:
     await job_svc.cancel_job(job_id)
-    return {"message": "Job cancelled successfully"}
+    return MessageResponse(message="Job cancelled successfully")
 
 
 #####################
@@ -351,7 +359,7 @@ async def delete_future_versions(
     rubric_svc: RubricService = Depends(get_rubric_service),
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
     _sq_rubric: None = Depends(get_rubric_in_collection),
-):
+) -> DeleteFutureVersionsResponse:
     """Delete all versions of a rubric after a specific version."""
     deleted_count = await rubric_svc.delete_rubric_versions_after(rubric_id, after_version)
     return DeleteFutureVersionsResponse(deleted_count=deleted_count)
@@ -438,7 +446,7 @@ async def start_eval_rubric_job(
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
     sq_rubric: SQLARubric = Depends(get_rubric_in_collection),
     analytics: AnalyticsClient = Depends(use_posthog_user_context),
-):
+) -> StartEvalJobResponse:
     """Start or get an existing evaluation job for the specified rubric."""
 
     # Check if user has a custom API key for the judge model's provider
@@ -490,7 +498,14 @@ async def start_eval_rubric_job(
         },
     )
 
-    return {"job_id": job_id}
+    return StartEvalJobResponse(job_id=job_id)
+
+
+class RubricJobDetailsResponse(BaseModel):
+    id: str
+    status: str
+    created_at: datetime
+    total_agent_runs: int | None
 
 
 class GetRubricRunStateRequest(BaseModel):
@@ -601,16 +616,16 @@ async def get_rubric_job_details(
     rubric_svc: RubricService = Depends(get_rubric_service),
     _perm: None = Depends(require_collection_permission(Permission.READ)),
     _sq_rubric: SQLARubric = Depends(get_rubric_in_collection),
-):
+) -> RubricJobDetailsResponse | None:
     """Get the complete job details for a rubric if it exists, otherwise None."""
     job = await rubric_svc.get_active_job_for_rubric(rubric_id)
     if job:
-        return {
-            "id": job.id,
-            "status": job.status.value,
-            "created_at": job.created_at,
-            "total_agent_runs": job.job_json.get("total_agent_runs"),
-        }
+        return RubricJobDetailsResponse(
+            id=job.id,
+            status=job.status.value,
+            created_at=job.created_at,
+            total_agent_runs=job.job_json.get("total_agent_runs"),
+        )
     return None
 
 
@@ -618,7 +633,7 @@ async def get_rubric_job_details(
 async def get_judge_models(
     mono_svc: monoservice.MonoService = Depends(get_mono_svc),
     user: User = Depends(get_user_anonymous_ok),
-):
+) -> list[ModelOptionWithContext]:
     return merge_models_with_byok(
         defaults=PROVIDER_PREFERENCES.default_judge_models,
         byok=PROVIDER_PREFERENCES.byok_judge_models,
@@ -640,7 +655,7 @@ async def start_clustering_job(
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
     analytics: AnalyticsClient = Depends(use_posthog_user_context),
-):
+) -> StartEvalJobResponse:
     """Start or get an existing clustering job for the specified rubric."""
     clustering_feedback = request.clustering_feedback
     recluster = request.recluster
@@ -665,18 +680,16 @@ async def start_clustering_job(
         },
     )
 
-    return {"job_id": job_id}
+    return StartEvalJobResponse(job_id=job_id)
 
 
-@rubric_router.get(
-    "/{collection_id}/{rubric_id}/clustering_job", response_model=ClusteringStateResponse
-)
+@rubric_router.get("/{collection_id}/{rubric_id}/clustering_job")
 async def get_clustering_state(
     collection_id: str,
     sq_rubric: SQLARubric = Depends(get_rubric_in_collection),
     rubric_svc: RubricService = Depends(get_rubric_service),
     _: None = Depends(require_collection_permission(Permission.READ)),
-):
+) -> ClusteringStateResponse:
     """Get the state of the clustering job for a rubric."""
     sq_job = await rubric_svc.get_active_clustering_job(sq_rubric.id)
     sq_centroids = await rubric_svc.get_centroids(sq_rubric.id, sq_rubric.version)
@@ -706,13 +719,17 @@ async def clear_clusters(
     sq_rubric: SQLARubric = Depends(get_rubric_in_collection),
     rubric_svc: RubricService = Depends(get_rubric_service),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
-):
+) -> None:
     """Clear all centroids (and cascaded assignments) for the latest version of a rubric."""
     await rubric_svc.clear_centroids(sq_rubric.id, sq_rubric.version)
 
 
 class CopyRubricRequest(BaseModel):
     target_collection_id: str
+
+
+class CopyRubricResponse(BaseModel):
+    rubric_id: str
 
 
 @rubric_router.post("/{collection_id}/rubric/{rubric_id}/copy")
@@ -725,7 +742,7 @@ async def copy_rubric(
     user: User = Depends(get_user_anonymous_ok),
     _perm: None = Depends(require_collection_permission(Permission.WRITE)),
     _sq_rubric: SQLARubric = Depends(get_rubric_in_collection),
-):
+) -> CopyRubricResponse:
     """Copy a rubric to another collection."""
     has_target_permission = await mono_svc.has_permission(
         user, ResourceType.COLLECTION, request.target_collection_id, Permission.WRITE
@@ -736,4 +753,4 @@ async def copy_rubric(
     new_rubric_id = await rubric_svc.copy_rubric_to_collection(
         rubric_id, request.target_collection_id
     )
-    return {"rubric_id": new_rubric_id}
+    return CopyRubricResponse(rubric_id=new_rubric_id)

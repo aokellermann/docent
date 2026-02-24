@@ -18,6 +18,7 @@ from docent_core.docent.server.dependencies.services import (
     get_rubric_service,
 )
 from docent_core.docent.server.dependencies.user import get_default_view_ctx
+from docent_core.docent.server.rest.response_models import StatusResponse
 from docent_core.docent.services.data_tables import (
     DEFAULT_DATA_TABLE_DQL,
     DataTableSpec,
@@ -287,10 +288,10 @@ async def delete_data_table(
     mono_svc: MonoService = Depends(get_mono_svc),
     _: None = Depends(require_collection_permission(Permission.WRITE)),
     data_table_service: DataTablesService = Depends(get_data_table_service),
-) -> dict[str, str]:
+) -> StatusResponse:
     async with mono_svc.advisory_lock(collection_id, action_id="mutation"):
         await data_table_service.delete_data_table(ctx, data_table_id)
-    return {"status": "ok"}
+    return StatusResponse(status="ok")
 
 
 @data_table_router.post("/{collection_id}/table/{data_table_id}/duplicate")
