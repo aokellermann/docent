@@ -101,7 +101,6 @@ from docent_core.docent.db.schemas.tables import (
     SQLAFilter,
     SQLAIngestionPayload,
     SQLAJob,
-    SQLAMetadataObservation,
     SQLAModelApiKey,
     SQLAOrganization,
     SQLASearchCluster,
@@ -1889,54 +1888,6 @@ class MonoService:
                             }
 
         return metadata_map
-
-    async def clear_metadata(
-        self, collection_id: str, batch_size: int | None = None
-    ) -> dict[str, str | int | None]:
-        """Delete metadata observations for a collection.
-        If batch_size is provided, deletes at most that many rows.
-        Otherwise, deletes all rows for the collection.
-        Returns the count of deleted rows and the next collection ID.
-        """
-        async with self.db.session() as session:
-            if batch_size is not None:
-                conn = await session.connection()
-                raw_result = await conn.execute(
-                    text(
-                        "DELETE FROM metadata_observations "
-                        "WHERE ctid IN ("
-                        "  SELECT ctid FROM metadata_observations "
-                        "  WHERE collection_id = :collection_id "
-                        "  LIMIT :batch_size"
-                        ")"
-                    ),
-                    {"collection_id": collection_id, "batch_size": batch_size},
-                )
-                deleted = raw_result.rowcount
-            else:
-                result = await session.execute(
-                    delete(SQLAMetadataObservation).where(
-                        SQLAMetadataObservation.collection_id == collection_id
-                    )
-                )
-                deleted = result.rowcount
-
-        # Find the next collection
-        async with self.db.session() as session:
-            next_result = await session.execute(
-                select(SQLACollection.id)
-                .where(SQLACollection.id > collection_id)
-                .order_by(SQLACollection.id.asc())
-                .limit(1)
-            )
-            next_collection_id = next_result.scalar_one_or_none()
-
-        logger.info(f"Deleted {deleted} metadata observations for collection {collection_id}")
-        return {
-            "collection_id": collection_id,
-            "observations_deleted": deleted,
-            "next_collection_id": next_collection_id,
-        }
 
     async def get_metadata_field_range(
         self, ctx: ViewContext, field_name: str

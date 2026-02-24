@@ -474,17 +474,6 @@ async def get_collections_counts(
     }
 
 
-# TODO(nickwu): Remove this endpoint after cleanup is complete.
-@user_router.post("/clear_metadata/{collection_id}")
-async def clear_metadata(
-    collection_id: str,
-    batch_size: int | None = None,
-    mono_svc: MonoService = Depends(get_mono_svc),
-) -> dict[str, Any]:
-    """Delete metadata observations for a collection, optionally limited by batch_size."""
-    return await mono_svc.clear_metadata(collection_id, batch_size=batch_size)
-
-
 @user_router.get("/{collection_id}/collection_details")
 async def get_collection_details(
     collection_id: str = Depends(require_collection_exists),
