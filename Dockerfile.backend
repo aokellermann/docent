@@ -19,6 +19,8 @@ COPY docent docent
 COPY pyproject.toml .
 COPY uv.lock .
 RUN uv export --format requirements-txt > requirements.txt
+# Ensure a minimum pip version (needed for dependency resolution fixes)
+RUN uv pip install --system "pip>=25.3"
 # Then install the requirements.txt
 RUN uv pip install --system -r requirements.txt
 
