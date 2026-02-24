@@ -273,3 +273,94 @@ resource "aws_appautoscaling_policy" "ecs_api_cpu" {
     scale_out_cooldown = 60
   }
 }
+
+###############################################################################
+# ALB CloudWatch Alarms (conditional on use_ecs_api)
+###############################################################################
+
+resource "aws_sns_topic" "alb_alerts" {
+  count = var.use_ecs_api ? 1 : 0
+
+  name = "${var.project_name}-${var.deployment}-alb-alerts"
+
+  tags = {
+    Deployment = var.deployment
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "alb_unhealthy_hosts" {
+  count = var.use_ecs_api ? 1 : 0
+
+  alarm_name          = "${var.project_name}-${var.deployment}-alb-unhealthy-hosts"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 2
+  metric_name         = "UnHealthyHostCount"
+  namespace           = "AWS/ApplicationELB"
+  period              = 60
+  statistic           = "Average"
+  threshold           = 1
+  alarm_description   = "ALB target group has unhealthy hosts"
+
+  dimensions = {
+    TargetGroup  = aws_lb_target_group.api[0].arn_suffix
+    LoadBalancer = aws_lb.api[0].arn_suffix
+  }
+
+  alarm_actions = [aws_sns_topic.alb_alerts[0].arn]
+  ok_actions    = [aws_sns_topic.alb_alerts[0].arn]
+
+  tags = {
+    Deployment = var.deployment
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "alb_high_latency" {
+  count = var.use_ecs_api ? 1 : 0
+
+  alarm_name          = "${var.project_name}-${var.deployment}-alb-high-latency"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "TargetResponseTime"
+  namespace           = "AWS/ApplicationELB"
+  period              = 60
+  statistic           = "Average"
+  threshold           = 5
+  alarm_description   = "ALB average response time exceeds 5 seconds"
+
+  dimensions = {
+    LoadBalancer = aws_lb.api[0].arn_suffix
+  }
+
+  alarm_actions = [aws_sns_topic.alb_alerts[0].arn]
+  ok_actions    = [aws_sns_topic.alb_alerts[0].arn]
+
+  tags = {
+    Deployment = var.deployment
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "alb_5xx_errors" {
+  count = var.use_ecs_api ? 1 : 0
+
+  alarm_name          = "${var.project_name}-${var.deployment}-alb-5xx-errors"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "HTTPCode_ELB_5XX_Count"
+  namespace           = "AWS/ApplicationELB"
+  period              = 60
+  statistic           = "Sum"
+  threshold           = 10
+  alarm_description   = "ALB 5xx error count exceeds 10"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    LoadBalancer = aws_lb.api[0].arn_suffix
+  }
+
+  alarm_actions = [aws_sns_topic.alb_alerts[0].arn]
+  ok_actions    = [aws_sns_topic.alb_alerts[0].arn]
+
+  tags = {
+    Deployment = var.deployment
+  }
+}
