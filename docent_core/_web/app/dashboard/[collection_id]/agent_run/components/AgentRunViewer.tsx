@@ -1920,8 +1920,9 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                             Tip
                           </span>
                           <span>
-                            Press <span className="font-mono">J</span> /{' '}
-                            <span className="font-mono">K</span> to move between
+                            When focused on the transcript viewer, press{' '}
+                            <span className="font-mono">J</span> /{' '}
+                            <span className="font-mono">K</span> to navigate
                             messages
                           </span>
                           <button
