@@ -2325,6 +2325,11 @@ class MonoService:
             return ([], 0)
 
     async def count_base_agent_runs(self, ctx: ViewContext) -> int:
+        # Fast path: use the materialized view when there's no base filter
+        if ctx.base_filter is None:
+            counts = await self.batch_count_collection_agent_runs([ctx.collection_id])
+            return counts.get(ctx.collection_id, 0) or 0
+
         async with self.db.session() as session:
             query = select(func.count()).select_from(SQLAAgentRun)
             query = ctx.apply_base_filter(query)
