@@ -24,9 +24,6 @@ RUN uv pip install --system "pip>=25.3"
 # Then install the requirements.txt
 RUN uv pip install --system -r requirements.txt
 
-# Strip bundled frontend artifacts from inspect_ai that aren't needed at runtime
-RUN rm -rf /usr/local/lib/python*/site-packages/inspect_ai/_view/www
-
 #################################
 # Install the core application #
 #################################
@@ -34,6 +31,11 @@ RUN rm -rf /usr/local/lib/python*/site-packages/inspect_ai/_view/www
 # TODO(mengk): ignore the _web folder which has no Python code
 COPY docent_core docent_core
 RUN uv pip install --system -e .
+
+# Strip bundled frontend artifacts from inspect_ai that aren't needed at runtime
+# and clear the uv cache (must be after all installs)
+RUN rm -rf /usr/local/lib/python*/site-packages/inspect_ai/_view/www \
+    && rm -rf /root/.cache/uv
 
 # Copy .env and scripts for startup
 COPY alembic alembic
