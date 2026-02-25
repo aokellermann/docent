@@ -172,6 +172,32 @@ const getCitationsForBlock = (
     : blockCitations;
 };
 
+const JK_TIP_DISMISSED_STORAGE_KEY = 'docent.agentRunViewer.jkTipDismissed';
+
+const readJkTipDismissedFromLocalStorage = (): boolean => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  try {
+    return window.localStorage.getItem(JK_TIP_DISMISSED_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+};
+
+const writeJkTipDismissedToLocalStorage = () => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(JK_TIP_DISMISSED_STORAGE_KEY, 'true');
+  } catch {
+    // Ignore localStorage write failures.
+  }
+};
+
 // Helper function to build transcript path
 const buildTranscriptPath = (
   transcriptId: string,
@@ -420,10 +446,20 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
     // State for sidebar toggle and hover functionality
     const [sidebarVisible, setSidebarVisible] = useState(defaultSidebarVisible);
     const [sidebarHovering, setSidebarHovering] = useState(false);
+    const [showEnhancedJkTip, setShowEnhancedJkTip] = useState(false);
 
     // Helper for sidebar-aware styling
     const getSidebarStyles = (baseClasses: string, sidebarClasses?: string) =>
       cn(baseClasses, sidebarVisible && sidebarClasses);
+
+    useEffect(() => {
+      setShowEnhancedJkTip(!readJkTipDismissedFromLocalStorage());
+    }, []);
+
+    const handleDismissJkTip = useCallback(() => {
+      writeJkTipDismissedToLocalStorage();
+      setShowEnhancedJkTip(false);
+    }, []);
 
     // Initialize expanded groups when transcript groups are available
     useEffect(() => {
@@ -1250,10 +1286,11 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
           return;
         }
 
-        if (e.key === 'j') {
+        const key = e.key.toLowerCase();
+        if (key === 'j') {
           e.preventDefault();
           goToNextBlock();
-        } else if (e.key === 'k') {
+        } else if (key === 'k') {
           e.preventDefault();
           goToPrevBlock();
         }
@@ -1693,7 +1730,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
               {transcript ? (
                 <ResizablePanel
                   defaultSize={75}
-                  className="flex flex-col min-h-0"
+                  className="flex flex-col min-h-0 relative"
                 >
                   {/* Fixed Headers Row */}
                   <div className="flex flex-row border-border flex-shrink-0">
@@ -1861,18 +1898,44 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                   </div>
 
                   {/* Transcript Minimap - above messages */}
-                  <div onKeyDown={handleJKNavigation}>
+                  <div
+                    onKeyDown={handleJKNavigation}
+                    className="flex-shrink-0 px-1 my-2"
+                  >
                     <TranscriptMinimap
                       messages={transcript.messages}
                       currentBlockIndex={currentBlockIndex}
                       blockIdxToCommentsMap={blockIdxToCommentsMap}
                       onBlockClick={handleMinimapBlockClick}
-                      className="flex-shrink-0 px-1 my-2"
+                      className="flex-shrink-0"
                     />
                   </div>
 
                   {/* Relative wrapper for scroll container and fixed buttons */}
                   <div className="relative flex-1 min-h-0">
+                    {showEnhancedJkTip && (
+                      <div className="absolute top-2 left-1/2 -translate-x-1/2 z-50 rounded-md border border-indigo-border bg-background px-3 py-2 shadow-lg">
+                        <div className="flex items-center gap-2 text-xs text-primary whitespace-nowrap">
+                          <span className="rounded border border-indigo-border bg-indigo-bg px-1 py-0.5 text-[10px] font-medium text-indigo-text">
+                            Tip
+                          </span>
+                          <span>
+                            Press <span className="font-mono">J</span> /{' '}
+                            <span className="font-mono">K</span> to move between
+                            messages
+                          </span>
+                          <button
+                            type="button"
+                            onClick={handleDismissJkTip}
+                            className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-primary hover:bg-muted transition-colors"
+                            aria-label="Dismiss keyboard tip"
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Search bar */}
                     <TranscriptSearchBar
                       ref={searchBarRef}
