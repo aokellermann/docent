@@ -31,6 +31,7 @@ function getSectionTitle(
   const subpath = pathname.slice(prefix.length).split('/')[0];
   const sectionMap: Record<string, string> = {
     rubric: 'Rubrics',
+    'rubric-minimal': 'Rubrics',
     labels: 'Label Sets',
     jobs: 'Jobs',
     chat: 'Chat',

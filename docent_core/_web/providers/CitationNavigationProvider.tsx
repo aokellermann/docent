@@ -103,6 +103,7 @@ interface RouteContext {
   collectionId: string;
   currentAgentRunId: string;
   rubricId?: string;
+  rubricRouteBase?: 'rubric' | 'rubric-minimal';
 }
 
 /**
@@ -136,7 +137,7 @@ export function wrapCitationHandlerWithRouting(
 
       // Construct URL based on whether we're in rubric context
       const url = context.rubricId
-        ? `/dashboard/${context.collectionId}/rubric/${context.rubricId}/agent_run/${citedAgentRunId}`
+        ? `/dashboard/${context.collectionId}/${context.rubricRouteBase ?? 'rubric'}/${context.rubricId}/agent_run/${citedAgentRunId}`
         : `/dashboard/${context.collectionId}/agent_run/${citedAgentRunId}`;
 
       // Navigate to the new agent run page

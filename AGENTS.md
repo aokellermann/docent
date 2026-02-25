@@ -165,6 +165,8 @@ def from_pydantic(cls, diff_result: DiffResult, query_id: str) -> "SQLADiffResul
 
 ## TypeScript (docent_core/_web/)
 
+NOTE: `docent_core/_web/app/dashboard/[collection_id]/rubric-minimal/` contains a bunch of temporary throwaway code for a demo, which desires a minimal UI for rubrics. There are components that are very similar to the main implementations. Do not refer to or edit these components, unless the request is specifically about this directory.
+
 ### Linting with ESLint
 
 After making changes to any TypeScript files, you must lint/format with ESLint until there are no more errors.

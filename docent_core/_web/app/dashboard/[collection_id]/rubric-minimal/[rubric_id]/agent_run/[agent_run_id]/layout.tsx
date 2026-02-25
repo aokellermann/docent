@@ -1,18 +1,17 @@
 'use client';
 
 import React, { Suspense, useEffect, useRef } from 'react';
-import { PanelLeft, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { PanelLeft } from 'lucide-react';
 import AgentRunViewer, {
   AgentRunViewerHandle,
 } from '../../../../agent_run/components/AgentRunViewer';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useGetRubricRunStateQuery } from '@/app/api/rubricApi';
 
-import { useAppDispatch, useAppSelector } from '@/app/store/hooks';
+import { useAppDispatch } from '@/app/store/hooks';
 import {
   setRunCitations,
   toggleJudgeLeftSidebar,
-  toggleJudgeRightSidebar,
 } from '@/app/store/transcriptSlice';
 import { Button } from '@/components/ui/button';
 import {
@@ -20,9 +19,8 @@ import {
   wrapCitationHandlerWithRouting,
 } from '@/providers/CitationNavigationProvider';
 import { useRubricVersion } from '@/providers/use-rubric-version';
-import { useLabelSets } from '@/providers/use-label-sets';
 
-export default function JudgeResultPage() {
+export default function MinimalJudgeResultPage() {
   const {
     agent_run_id: agentRunId,
     collection_id: collectionId,
@@ -40,39 +38,26 @@ export default function JudgeResultPage() {
   const searchParams = useSearchParams();
   const initialCommentId = searchParams.get('comment_id');
   const citationNav = useCitationNavigation();
-  const rightSidebarOpen = useAppSelector(
-    (state) => state.transcript.judgeRightSidebarOpen
-  );
   const { version } = useRubricVersion();
-  const { activeLabelSet } = useLabelSets(rubricId);
   const isResultRoute = !!resultId;
 
-  // Get all results from rubric run state
   const { data: rubricRunState } = useGetRubricRunStateQuery(
     {
       collectionId,
       rubricId,
       version: version ?? null,
-      labelSetId: activeLabelSet?.id ?? null,
+      labelSetId: null,
     },
     { skip: !isResultRoute }
   );
 
-  // Find the current result by resultId
   const currentAgentRunGroup = rubricRunState?.results?.find((arr) =>
     arr.results.some((r) => r.id === resultId)
   );
   const result = currentAgentRunGroup?.results.find((r) => r.id === resultId);
-
   const citations = result?.output?.explanation?.citations;
 
   const agentRunViewerRef = useRef<AgentRunViewerHandle>(null);
-  // One-shot auto-scroll gate:
-  // When a judge result loads, we programmatically scroll the AgentRunViewer to
-  // the first citation exactly once. Data arrives in phases (Suspense hydration,
-  // RTK queries, Redux updates), which can re-trigger effects and fight the
-  // user's manual scroll. This ref flips true after the first programmatic
-  // scroll and is reset when the selected result changes.
   const alreadyScrolledRef = useRef(false);
 
   useEffect(() => {
@@ -85,19 +70,13 @@ export default function JudgeResultPage() {
     }
   }, [result, agentRunId, citations, dispatch]);
 
-  // Reset the gate whenever the selected result changes so the next result can
-  // perform its own one-time initial scroll.
   useEffect(() => {
     alreadyScrolledRef.current = false;
   }, [agentRunId, resultId]);
 
-  // Perform the initial one-time scroll to the first citation once both the
-  // agent run and the result are available. Skip if we've already scrolled for
-  // this result, or if there's an annotation/comment ID in the search params
-  // (the comment focus effect in AgentRunViewer takes precedence).
   useEffect(() => {
     if (alreadyScrolledRef.current) return;
-    if (initialCommentId) return; // Let the comment focus effect handle it
+    if (initialCommentId) return;
     if (!agentRunId || !result) return;
 
     const citation = citations && citations.length > 0 ? citations[0] : null;
@@ -107,8 +86,6 @@ export default function JudgeResultPage() {
     alreadyScrolledRef.current = true;
   }, [agentRunId, result, citations, initialCommentId]);
 
-  // Register the handler with the route-scoped provider so other components can invoke it
-  // Only register when agentRun is loaded so AgentRunViewer is ready
   useEffect(() => {
     if (!agentRunId || !collectionId) return;
 
@@ -124,7 +101,7 @@ export default function JudgeResultPage() {
           collectionId,
           currentAgentRunId: agentRunId,
           rubricId,
-          rubricRouteBase: 'rubric',
+          rubricRouteBase: 'rubric-minimal',
         },
         citationNav.setPendingCitation
       );
@@ -138,13 +115,13 @@ export default function JudgeResultPage() {
     };
   }, [citationNav, agentRunId, collectionId, rubricId, router]);
 
-  let agentRunViewerContent = null;
-  if (agentRunId) {
-    agentRunViewerContent = (
+  return (
+    <Suspense>
       <div className="h-full overflow-hidden flex flex-col space-y-2">
         <AgentRunViewer
           ref={agentRunViewerRef}
           agentRunId={agentRunId}
+          defaultSidebarVisible={false}
           headerLeftActions={
             <Button
               variant="ghost"
@@ -155,24 +132,8 @@ export default function JudgeResultPage() {
               <PanelLeft className="h-4 w-4" />
             </Button>
           }
-          headerRightActions={
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 cursor-default"
-              onClick={() => dispatch(toggleJudgeRightSidebar())}
-            >
-              {rightSidebarOpen ? (
-                <PanelRightClose className="h-4 w-4" />
-              ) : (
-                <PanelRightOpen className="h-4 w-4" />
-              )}
-            </Button>
-          }
         />
       </div>
-    );
-  }
-
-  return <Suspense>{agentRunViewerContent}</Suspense>;
+    </Suspense>
+  );
 }

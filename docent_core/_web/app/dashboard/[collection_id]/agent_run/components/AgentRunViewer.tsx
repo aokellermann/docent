@@ -94,6 +94,7 @@ interface AgentRunViewerProps {
   headerLeftActions?: React.ReactNode;
   headerRightActions?: React.ReactNode;
   hideTopRow?: boolean;
+  defaultSidebarVisible?: boolean;
   onRequestOpenRunMetadata?: (args: {
     citedKey?: string;
     textRange?: CitationTargetTextRange;
@@ -282,6 +283,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
       headerLeftActions,
       headerRightActions,
       hideTopRow = false,
+      defaultSidebarVisible = true,
       onRequestOpenRunMetadata,
     },
     ref
@@ -416,7 +418,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
     const searchBarRef = useRef<TranscriptSearchBarHandle>(null);
 
     // State for sidebar toggle and hover functionality
-    const [sidebarVisible, setSidebarVisible] = useState(true);
+    const [sidebarVisible, setSidebarVisible] = useState(defaultSidebarVisible);
     const [sidebarHovering, setSidebarHovering] = useState(false);
 
     // Helper for sidebar-aware styling
@@ -1688,7 +1690,7 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                 </>
               )}
 
-              {transcript && (
+              {transcript ? (
                 <ResizablePanel
                   defaultSize={75}
                   className="flex flex-col min-h-0"
@@ -2097,6 +2099,13 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                       </div>
                     </div>
                   </div>
+                </ResizablePanel>
+              ) : (
+                <ResizablePanel
+                  defaultSize={75}
+                  className="flex flex-col min-h-0"
+                >
+                  <div className="flex-1" />
                 </ResizablePanel>
               )}
             </ResizablePanelGroup>
