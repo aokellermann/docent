@@ -43,6 +43,7 @@ import {
 } from '@/app/api/labelApi';
 import { SchemaDefinition } from '@/app/types/schema';
 import { SchemaValueRenderer } from '@/app/dashboard/[collection_id]/components/SchemaValueRenderer';
+import { getJsonParseErrorMessage } from '@/lib/jsonValidation';
 import { cn } from '@/lib/utils';
 import { useHasCollectionWritePermission } from '@/lib/permissions/hooks';
 import { toast } from 'sonner';
@@ -1069,8 +1070,10 @@ export default function AgentRunLabels({
       let schema: unknown;
       try {
         schema = JSON.parse(jsonText || '{}');
-      } catch {
-        setJsonSyntaxError('Invalid JSON - cannot switch to Visual mode');
+      } catch (error) {
+        setJsonSyntaxError(
+          `Invalid JSON - cannot switch to Visual mode: ${getJsonParseErrorMessage(error)}`
+        );
         return; // Don't switch if JSON is invalid
       }
 
@@ -1094,8 +1097,10 @@ export default function AgentRunLabels({
     try {
       JSON.parse(value || '{}');
       setJsonSyntaxError(null);
-    } catch {
-      setJsonSyntaxError('Invalid JSON syntax');
+    } catch (error) {
+      setJsonSyntaxError(
+        `Invalid JSON syntax: ${getJsonParseErrorMessage(error)}`
+      );
     }
   };
 

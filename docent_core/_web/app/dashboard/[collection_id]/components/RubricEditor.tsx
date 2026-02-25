@@ -28,6 +28,7 @@ import RubricRunDialog from './RubricRunDialog';
 import useJobStatus from '@/app/hooks/use-job-status';
 import { useLabelSets } from '@/providers/use-label-sets';
 import { useHasCollectionWritePermission } from '@/lib/permissions/hooks';
+import { getJsonParseErrorMessage } from '@/lib/jsonValidation';
 import CodeMirror, { EditorView } from '@uiw/react-codemirror';
 import { json as jsonLanguage } from '@codemirror/lang-json';
 import { useTheme } from 'next-themes';
@@ -231,9 +232,7 @@ export default function RubricEditor({
       try {
         parsedSchema = JSON.parse(schemaText);
       } catch (e) {
-        setSchemaError(
-          `Invalid JSON: ${e instanceof Error ? e.message : 'Unknown error'}`
-        );
+        setSchemaError(`Invalid JSON: ${getJsonParseErrorMessage(e)}`);
         return;
       }
 

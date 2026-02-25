@@ -20,11 +20,11 @@ import {
   useDeleteLabelsByLabelSetMutation,
 } from '@/app/api/labelApi';
 import JsonEditor from './JsonEditor';
-import { useParams } from 'next/navigation';
-import { useRouter } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { setAgentRunSidebarTab } from '@/app/store/transcriptSlice';
 import { useAppDispatch } from '@/app/store/hooks';
 import { useLabelSets } from '@/providers/use-label-sets';
+import { getJsonParseErrorMessage } from '@/lib/jsonValidation';
 
 interface LabelSetEditorProps {
   labelSetId: string | null;
@@ -176,7 +176,7 @@ export default function LabelSetEditor({
       setSchemaError(null);
     } catch (e) {
       setSchemaError(
-        `Cannot add field: Invalid JSON - ${e instanceof Error ? e.message : 'Unknown error'}`
+        `Cannot add field: Invalid JSON - ${getJsonParseErrorMessage(e)}`
       );
     }
   };
@@ -199,9 +199,7 @@ export default function LabelSetEditor({
     try {
       parsedSchema = JSON.parse(schemaText);
     } catch (e) {
-      setSchemaError(
-        `Invalid JSON: ${e instanceof Error ? e.message : 'Unknown error'}`
-      );
+      setSchemaError(`Invalid JSON: ${getJsonParseErrorMessage(e)}`);
       return;
     }
 
