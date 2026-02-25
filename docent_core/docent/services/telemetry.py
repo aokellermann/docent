@@ -1936,6 +1936,8 @@ class TelemetryService:
                 f"Added {len(agent_runs)} agent runs, {len(transcript_data)} transcripts, and {len(transcript_group_data)} transcript groups"
             )
 
+        await self.mono_svc.schedule_collection_counts_refresh()
+
     async def _validate_transcript_group_parent_references(
         self, transcript_group_data: List[SQLATranscriptGroup]
     ) -> None:

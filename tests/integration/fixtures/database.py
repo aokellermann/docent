@@ -4,6 +4,7 @@ from typing import AsyncContextManager, AsyncGenerator, Callable
 
 import pytest_asyncio
 import redis.asyncio as redis
+import sqlalchemy
 from arq import ArqRedis
 from sqlalchemy.engine.url import URL
 from sqlalchemy.ext.asyncio import (
@@ -48,8 +49,46 @@ async def db_engine() -> AsyncGenerator[AsyncEngine, None]:
         async with engine.begin() as conn:
             # Clean slate: drop all tables first, then create them
             # This ensures tests start clean even if previous run was interrupted
+            # Drop materialized views before tables (they depend on underlying tables)
+            await conn.execute(
+                sqlalchemy.text("DROP MATERIALIZED VIEW IF EXISTS collection_counts")
+            )
             await conn.run_sync(SQLABase.metadata.drop_all)
             await conn.run_sync(SQLABase.metadata.create_all)
+            # Replace the plain tables that create_all made for view-backed models
+            # with actual materialized views
+            await conn.execute(sqlalchemy.text("DROP TABLE IF EXISTS collection_counts"))
+            await conn.execute(
+                sqlalchemy.text("""
+                    CREATE MATERIALIZED VIEW collection_counts AS
+                    SELECT
+                        c.id AS collection_id,
+                        COALESCE(ar.cnt, 0)::integer AS agent_run_count,
+                        COALESCE(r.cnt, 0)::integer AS rubric_count,
+                        COALESCE(ls.cnt, 0)::integer AS label_set_count
+                    FROM collections c
+                    LEFT JOIN (
+                        SELECT collection_id, COUNT(*) AS cnt
+                        FROM agent_runs
+                        GROUP BY collection_id
+                    ) ar ON ar.collection_id = c.id
+                    LEFT JOIN (
+                        SELECT collection_id, COUNT(DISTINCT id) AS cnt
+                        FROM rubrics
+                        GROUP BY collection_id
+                    ) r ON r.collection_id = c.id
+                    LEFT JOIN (
+                        SELECT collection_id, COUNT(*) AS cnt
+                        FROM label_sets
+                        GROUP BY collection_id
+                    ) ls ON ls.collection_id = c.id
+                """)
+            )
+            await conn.execute(
+                sqlalchemy.text(
+                    "CREATE UNIQUE INDEX ix_collection_counts_id ON collection_counts (collection_id)"
+                )
+            )
         yield engine
     finally:
         try:

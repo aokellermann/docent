@@ -98,6 +98,7 @@ from docent_core.docent.db.schemas.tables import (
     SQLAAnalyticsEvent,
     SQLAApiKey,
     SQLACollection,
+    SQLACollectionCounts,
     SQLAFilter,
     SQLAIngestionPayload,
     SQLAJob,
@@ -250,6 +251,45 @@ class MonoService:
     async def init(cls):
         db = await DocentDB.init()
         return cls(db)
+
+    _collection_counts_refresh_pending = False
+
+    async def schedule_collection_counts_refresh(self) -> None:
+        """Refresh the collection_counts materialized view concurrently.
+
+        Uses a PostgreSQL advisory lock to prevent concurrent refreshes from piling up.
+        If a refresh is already running, marks a pending flag so the holder does one
+        trailing refresh before releasing the lock (avoids permanently stale views).
+        Errors are logged but not raised (best-effort background operation).
+        """
+        ADVISORY_LOCK_ID = 8675310  # arbitrary fixed lock ID
+        MonoService._collection_counts_refresh_pending = True
+        try:
+            async with self.db.engine.connect() as raw_conn:
+                conn = await raw_conn.execution_options(isolation_level="AUTOCOMMIT")
+                lock_result = await conn.execute(
+                    text(f"SELECT pg_try_advisory_lock({ADVISORY_LOCK_ID})")
+                )
+                acquired = lock_result.scalar()
+                if not acquired:
+                    logger.info(
+                        "Collection counts view refresh already in progress — flagged for re-refresh"
+                    )
+                    return
+                try:
+                    while True:
+                        MonoService._collection_counts_refresh_pending = False
+                        await conn.execute(
+                            text("REFRESH MATERIALIZED VIEW CONCURRENTLY collection_counts")
+                        )
+                        logger.info("Successfully refreshed collection_counts materialized view")
+                        if not MonoService._collection_counts_refresh_pending:
+                            break
+                        logger.info("Writes arrived during refresh — performing trailing refresh")
+                finally:
+                    await conn.execute(text(f"SELECT pg_advisory_unlock({ADVISORY_LOCK_ID})"))
+        except Exception:
+            logger.exception("Failed to refresh collection_counts materialized view")
 
     async def _collect_json_field_records(
         self,
@@ -887,55 +927,50 @@ class MonoService:
     async def batch_count_collection_agent_runs(
         self, collection_ids: list[str]
     ) -> dict[str, int | None]:
-        """Count agent runs for multiple collections in a single query."""
+        """Count agent runs for multiple collections using the materialized view."""
         if not collection_ids:
             return {}
 
         async with self.db.session() as session:
-            query = (
-                select(SQLAAgentRun.collection_id, func.count().label("count"))
-                .where(SQLAAgentRun.collection_id.in_(collection_ids))
-                .group_by(SQLAAgentRun.collection_id)
-            )
+            query = select(
+                SQLACollectionCounts.collection_id,
+                SQLACollectionCounts.agent_run_count,
+            ).where(SQLACollectionCounts.collection_id.in_(collection_ids))
             result = await session.execute(query)
-            counts = {row.collection_id: cast(int, row.count) for row in result}
-            return {cid: counts.get(cid) if cid in counts else 0 for cid in collection_ids}
+            counts = {row.collection_id: row.agent_run_count for row in result}
+            return {cid: counts.get(cid, 0) for cid in collection_ids}
 
     async def batch_count_collection_rubrics(
         self, collection_ids: list[str]
     ) -> dict[str, int | None]:
-        """Count rubrics for multiple collections in a single query."""
+        """Count rubrics for multiple collections using the materialized view."""
         if not collection_ids:
             return {}
 
         async with self.db.session() as session:
-            query = (
-                select(SQLARubric.collection_id, func.count(distinct(SQLARubric.id)).label("count"))
-                .where(SQLARubric.collection_id.in_(collection_ids))
-                .group_by(SQLARubric.collection_id)
-            )
+            query = select(
+                SQLACollectionCounts.collection_id,
+                SQLACollectionCounts.rubric_count,
+            ).where(SQLACollectionCounts.collection_id.in_(collection_ids))
             result = await session.execute(query)
-            counts = {row.collection_id: cast(int, row.count) for row in result}
-            # Fill in zero counts for collections with no rubrics
-            return {cid: counts.get(cid) if cid in counts else 0 for cid in collection_ids}
+            counts = {row.collection_id: row.rubric_count for row in result}
+            return {cid: counts.get(cid, 0) for cid in collection_ids}
 
     async def batch_count_collection_label_sets(
         self, collection_ids: list[str]
     ) -> dict[str, int | None]:
-        """Count label sets for multiple collections in a single query."""
+        """Count label sets for multiple collections using the materialized view."""
         if not collection_ids:
             return {}
 
         async with self.db.session() as session:
-            query = (
-                select(SQLALabelSet.collection_id, func.count().label("count"))
-                .where(SQLALabelSet.collection_id.in_(collection_ids))
-                .group_by(SQLALabelSet.collection_id)
-            )
+            query = select(
+                SQLACollectionCounts.collection_id,
+                SQLACollectionCounts.label_set_count,
+            ).where(SQLACollectionCounts.collection_id.in_(collection_ids))
             result = await session.execute(query)
-            counts = {row.collection_id: cast(int, row.count) for row in result}
-            # Fill in zero counts for collections with no label sets
-            return {cid: counts.get(cid) if cid in counts else 0 for cid in collection_ids}
+            counts = {row.collection_id: row.label_set_count for row in result}
+            return {cid: counts.get(cid, 0) for cid in collection_ids}
 
     async def dont_actually_check_space_for_runs(self, ctx: ViewContext, new_runs: int):
         # NOTE(mengk): temporarily disabled to avoid silently "dropping" runs, hence confusing users
@@ -996,6 +1031,8 @@ class MonoService:
             f"and {len(transcript_group_data)} transcript groups"
         )
 
+        await self.schedule_collection_counts_refresh()
+
     async def delete_agent_runs(self, collection_id: str, agent_run_ids: list[str]) -> int:
         """
         Delete specific agent runs from a collection.
@@ -1047,6 +1084,8 @@ class MonoService:
             f"and {accumulation_count} accumulation records from collection {collection_id} "
             f"(transcripts, transcript groups, and metadata observations deleted via CASCADE)"
         )
+
+        await self.schedule_collection_counts_refresh()
 
         return deleted_count
 
@@ -1401,6 +1440,8 @@ class MonoService:
             )
 
             await session.commit()
+
+        await self.schedule_collection_counts_refresh()
 
         logger.info(
             f"Moved agent run {agent_run_id} from collection {source_collection_id} "

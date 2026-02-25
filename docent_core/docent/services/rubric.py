@@ -176,6 +176,7 @@ class RubricService:
 
         sqla_rubric = SQLARubric.from_pydantic(rubric, collection_id)
         self.session.add(sqla_rubric)
+        await self.service.schedule_collection_counts_refresh()
         return sqla_rubric.id
 
     async def get_latest_rubric_version(self, rubric_id: str) -> int | None:
@@ -266,6 +267,7 @@ class RubricService:
         all_rubrics = await self.get_all_rubric_versions(rubric_id)
         for rubric in all_rubrics:
             await self.session.delete(rubric)
+        await self.service.schedule_collection_counts_refresh()
 
     async def delete_rubric_versions_after(self, rubric_id: str, after_version: int) -> int:
         """Delete all versions of a rubric after a specific version (non-inclusive).
@@ -284,6 +286,7 @@ class RubricService:
         for rubric in rubrics_to_delete:
             await self.session.delete(rubric)
 
+        await self.service.schedule_collection_counts_refresh()
         return count
 
     ###############

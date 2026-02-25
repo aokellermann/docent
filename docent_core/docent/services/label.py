@@ -288,6 +288,7 @@ class LabelService:
             label_schema=label_schema,
         )
         self.session.add(sqla_label_set)
+        await self.service.schedule_collection_counts_refresh()
         return label_set_id
 
     async def get_label_set(self, label_set_id: str) -> SQLALabelSet | None:
@@ -372,6 +373,7 @@ class LabelService:
         label_set_to_delete = result.scalar_one_or_none()
         if label_set_to_delete:
             await self.session.delete(label_set_to_delete)
+            await self.service.schedule_collection_counts_refresh()
 
     async def get_label_sets_with_counts(self, collection_id: str) -> list[LabelSetWithCount]:
         """Get all label sets with label counts for a specific collection.
