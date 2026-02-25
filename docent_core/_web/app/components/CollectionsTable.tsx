@@ -103,7 +103,7 @@ export function CollectionsTable({
           placeholder="Search collections..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="pl-9 h-8"
+          className="pl-9 h-7 text-xs"
         />
       </div>
       <Table className="table-fixed w-full">
