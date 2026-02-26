@@ -397,7 +397,7 @@ class MonoService:
     ) -> list[JsonFieldInfo]:
         """Discover JSON paths for a specific table column scoped to a collection."""
 
-        limit_rows = 5000
+        limit_rows = 500
 
         async with self.db.session() as session:
             if join_condition is None:
