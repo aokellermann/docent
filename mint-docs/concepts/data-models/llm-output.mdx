@@ -28,6 +28,7 @@ A single completion from an LLM.
 | `tool_calls` | `list[ToolCall] | None` | List of tool calls made during the completion. |
 | `finish_reason` | `FinishReasonType | None` | Reason why the completion finished. |
 | `top_logprobs` | `list[list[TopLogprob]] | None` | Probability distribution for top token choices. |
+| `reasoning_tokens` | `str | None` | Extended thinking tokens for reasoning models. |
 
 <Accordion title="docent/_llm_util/data_models/llm_output.py" icon="code">
 
@@ -40,6 +41,7 @@ class LLMCompletion(BaseModel):
         tool_calls: List of tool calls made during the completion.
         finish_reason: Reason why the completion finished.
         top_logprobs: Probability distribution for top token choices.
+        reasoning_tokens: Extended thinking tokens (for reasoning models).
     """
 
     text: str | None = None

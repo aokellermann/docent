@@ -45,6 +45,7 @@ from docent.data_models.chat import (
     SystemMessage,
     UserMessage,
     AssistantMessage,
+    ToolMessage,
     ContentText,
     ContentReasoning,
     ToolCall,
@@ -81,7 +82,7 @@ ChatMessage = Annotated[SystemMessage | UserMessage | AssistantMessage | ToolMes
 Type alias for any chat message type, discriminated by the role field.
 
 This is the base message union used in Transcript and AgentRun contexts.
-For chat sessions, use ChatSessionMessage instead.
+For chat sessions, use DocentChatMessage instead.
 
 ### **DocentChatMessage** `module-attribute`
 
@@ -395,7 +396,7 @@ parse_chat_message(message_data: dict[str, Any] | ChatMessage) -> ChatMessage
 Parse a message dictionary or object into the appropriate ChatMessage subclass.
 
 This parses base messages without chat-specific fields. For chat sessions,
-use parse_chat_session_message instead.
+use parse_docent_chat_message instead.
 
 **Parameters:**
 
@@ -422,7 +423,7 @@ def parse_chat_message(message_data: dict[str, Any] | ChatMessage) -> ChatMessag
     """Parse a message dictionary or object into the appropriate ChatMessage subclass.
 
     This parses base messages without chat-specific fields. For chat sessions,
-    use parse_chat_session_message instead.
+    use parse_docent_chat_message instead.
 
     Args:
         message_data: A dictionary or ChatMessage object representing a chat message.
@@ -457,22 +458,22 @@ def parse_chat_message(message_data: dict[str, Any] | ChatMessage) -> ChatMessag
 parse_docent_chat_message(message_data: dict[str, Any] | DocentChatMessage) -> DocentChatMessage
 ```
 
-Parse a message dictionary or object into the appropriate ChatSessionMessage subclass.
+Parse a message dictionary or object into the appropriate DocentChatMessage subclass.
 
-This handles chat session messages which may include ChatAssistantMessage with
+This handles chat session messages which may include DocentAssistantMessage with
 citations and suggested_messages fields.
 
 **Parameters:**
 
 | Name | Type | Description | Default |
 | --- | --- | --- | --- |
-| `message_data` | `dict[str, Any] | DocentChatMessage` | A dictionary or ChatSessionMessage object representing a chat session message. | *required* |
+| `message_data` | `dict[str, Any] | DocentChatMessage` | A dictionary or DocentChatMessage object representing a chat session message. | *required* |
 
 **Returns:**
 
 | Name | Type | Description |
 | --- | --- | --- |
-| `ChatSessionMessage` | `DocentChatMessage` | An instance of a ChatSessionMessage subclass based on the role. |
+| `DocentChatMessage` | `DocentChatMessage` | An instance of a DocentChatMessage subclass based on the role. |
 
 **Raises:**
 
@@ -486,16 +487,16 @@ citations and suggested_messages fields.
 def parse_docent_chat_message(
     message_data: dict[str, Any] | DocentChatMessage,
 ) -> DocentChatMessage:
-    """Parse a message dictionary or object into the appropriate ChatSessionMessage subclass.
+    """Parse a message dictionary or object into the appropriate DocentChatMessage subclass.
 
-    This handles chat session messages which may include ChatAssistantMessage with
+    This handles chat session messages which may include DocentAssistantMessage with
     citations and suggested_messages fields.
 
     Args:
-        message_data: A dictionary or ChatSessionMessage object representing a chat session message.
+        message_data: A dictionary or DocentChatMessage object representing a chat session message.
 
     Returns:
-        ChatSessionMessage: An instance of a ChatSessionMessage subclass based on the role.
+        DocentChatMessage: An instance of a DocentChatMessage subclass based on the role.
 
     Raises:
         ValueError: If the message role is unknown.

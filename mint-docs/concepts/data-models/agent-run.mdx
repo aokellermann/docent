@@ -8,11 +8,13 @@ An `AgentRun` represents a complete agent run. It contains a collection of [Tran
 
 - In single-agent (most common) settings, each `AgentRun` contains a single `Transcript`.
 - In multi-agent settings, an `AgentRun` may contain multiple `Transcript` objects. For example, in a two-agent debate setting, you'll have one `Transcript` per agent in the same `AgentRun`.
-- Docent's LLM search features operate over complete `AgentRun` objects. Runs are passed to LLMs in their `.text` form.
+- Docent's LLM search features operate over complete `AgentRun` objects. Runs are passed to LLMs in their rendered text form (for example, via `AgentRunView.to_text()`).
 
 ### Usage
 
-`AgentRun` objects require a dictionary of [Transcript](/concepts/data-models/transcript) objects, as well as a metadata dictionary whose keys are strings. The metadata should be JSON-serializable.
+`AgentRun` objects require a list of [Transcript](/concepts/data-models/transcript) objects, as well as a metadata dictionary whose keys are strings. The metadata should be JSON-serializable.
+
+Passing `dict[str, Transcript]` is still accepted for backwards compatibility, but is deprecated.
 
 ```python
 from docent.data_models import AgentRun, Transcript
@@ -37,7 +39,13 @@ agent_run = AgentRun(
 
 ### Rendering
 
-To see how your `AgentRun` is being rendered to an LLM, you can `print(agent_run.text)`. This might be useful for validating that your metadata is being included properly.
+To see how your `AgentRun` is being rendered to an LLM, render a view and call `to_text()`:
+
+```python
+from docent.data_models.agent_run import AgentRunView
+
+print(AgentRunView.from_agent_run(agent_run).to_text())
+```
 
 ### **AgentRun**
 
