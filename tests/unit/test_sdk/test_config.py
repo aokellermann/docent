@@ -163,6 +163,18 @@ class TestDocentConfigPrecedence:
         assert client._frontend_url == "https://custom.com"  # type: ignore[reportPrivateUsage]
 
     @pytest.mark.unit
+    def test_public_frontend_and_backend_url_properties(self, tmp_path: Path) -> None:
+        """Test that public frontend_url/backend_url expose resolved service URLs."""
+        config_file = tmp_path / "docent.env"
+        config_file.write_text("DOCENT_API_KEY=key\nDOCENT_DOMAIN=custom.com\n")
+
+        with patch.object(Docent, "_login"):
+            client = Docent(config_file=config_file)
+
+        assert client.frontend_url == "https://custom.com"
+        assert client.backend_url == "https://api.custom.com/rest"
+
+    @pytest.mark.unit
     def test_partial_constructor_url_overrides_warn_and_fallback(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:

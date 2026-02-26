@@ -61,17 +61,19 @@ _USER_DATA_TOP_LEVEL_KEYS = {
 class PerLabelResult(BaseModel):
     agent_run_id: str
     gold_label_value: dict[str, Any]
-    judge_output: dict[str, Any] | None
+    rollout_outputs: list[dict[str, Any] | None]
     scored_keys: list[str]
-    correct_keys: list[str]
-    incorrect_keys: list[str]
-    missing_prediction: bool
+    per_key_accuracy: dict[str, float]
+    missing_prediction_rollouts: int
 
 
 class SplitEvaluation(BaseModel):
     split: str
     total_examples: int
     scored_examples: int
+    num_rollouts_per_run: int
+    total_expected_rollouts: int
+    total_received_rollouts: int
     missing_predictions: int
     total_scored_keys: int
     total_correct_keys: int
@@ -102,6 +104,7 @@ class HoldoutEvaluationReport(BaseModel):
     train_ratio: float
     seed: int
     max_llm_concurrency: int
+    n_rollouts_per_run: int
     train_label_agent_run_ids: list[str]
     test_label_agent_run_ids: list[str]
     num_total_labels: int
@@ -257,9 +260,11 @@ def _render_split_summary(
 
 
 def _render_candidate_summary(candidates: Sequence[CandidateEvaluation]) -> None:
-    table = Table(title="Candidate Accuracy (Per-Key)")
+    n_rollouts = candidates[0].test_evaluation.num_rollouts_per_run if candidates else "N/A"
+    table = Table(title=f"Candidate Accuracy (Per-Key, n={n_rollouts})")
     table.add_column("Rank", justify="right")
     table.add_column("Candidate", justify="right")
+    table.add_column("n", justify="right")
     table.add_column("Test Overall", justify="right")
     table.add_column("Test C/T", justify="right")
     table.add_column("Train Overall", justify="right")
@@ -280,6 +285,7 @@ def _render_candidate_summary(candidates: Sequence[CandidateEvaluation]) -> None
         table.add_row(
             str(rank),
             str(candidate.candidate_index),
+            str(candidate.test_evaluation.num_rollouts_per_run),
             test_overall,
             f"{candidate.test_evaluation.total_correct_keys}/{candidate.test_evaluation.total_scored_keys}",
             train_overall,
@@ -308,6 +314,7 @@ def _render_top_candidate_details(candidates: Sequence[CandidateEvaluation]) -> 
     console.print(
         Panel(
             f"[bold]Top candidate:[/bold] {top.candidate_index}\n"
+            f"[bold]Rollouts per run (n):[/bold] {top.test_evaluation.num_rollouts_per_run}\n"
             f"[bold]Test overall per-key accuracy:[/bold] "
             f"{top.test_evaluation.overall_key_accuracy if top.test_evaluation.overall_key_accuracy is not None else 'N/A'}\n"
             f"[bold]Train overall per-key accuracy:[/bold] "
@@ -364,13 +371,21 @@ def _evaluate_split_per_key_accuracy(
     split_name: str,
     judge_results: Sequence[JudgeResult],
     labels: Sequence[LabeledRun],
+    n_rollouts_per_run: int,
 ) -> SplitEvaluation:
-    result_by_run_id = {result.agent_run_id: result for result in judge_results}
+    if n_rollouts_per_run <= 0:
+        raise ValueError("n_rollouts_per_run must be > 0")
+
+    result_by_run_id: dict[str, list[JudgeResult]] = defaultdict(list)
+    for result in judge_results:
+        result_by_run_id[result.agent_run_id].append(result)
 
     per_key_correct_counts: dict[str, int] = defaultdict(int)
     per_key_total_counts: dict[str, int] = defaultdict(int)
 
     missing_predictions = 0
+    total_expected_rollouts = len(labels) * n_rollouts_per_run
+    total_received_rollouts = 0
     total_scored_keys = 0
     total_correct_keys = 0
     scored_examples = 0
@@ -383,53 +398,56 @@ def _evaluate_split_per_key_accuracy(
                 PerLabelResult(
                     agent_run_id=label.agent_run_id,
                     gold_label_value=label.label_value,
-                    judge_output=None,
+                    rollout_outputs=[],
                     scored_keys=[],
-                    correct_keys=[],
-                    incorrect_keys=[],
-                    missing_prediction=False,
+                    per_key_accuracy={},
+                    missing_prediction_rollouts=0,
                 )
             )
             continue
 
         scored_examples += 1
 
-        judge_result = result_by_run_id.get(label.agent_run_id)
-        if judge_result is None or judge_result.result_type != ResultType.DIRECT_RESULT:
-            missing_prediction = True
-            missing_predictions += 1
-            judge_output: dict[str, Any] | None = None
-        else:
-            missing_prediction = False
-            judge_output = judge_result.output
+        run_results = result_by_run_id.get(label.agent_run_id, [])
+        total_received_rollouts += len(run_results)
+        rollout_outputs: list[dict[str, Any] | None] = []
+        per_key_label_correct_counts: dict[str, int] = defaultdict(int)
+        per_label_missing_rollouts = 0
 
-        correct_keys: list[str] = []
-        incorrect_keys: list[str] = []
-
-        for key in scored_keys:
-            per_key_total_counts[key] += 1
-            total_scored_keys += 1
-
-            if judge_output is None or key not in judge_output:
-                incorrect_keys.append(key)
-                continue
-
-            if judge_output[key] == label.label_value[key]:
-                correct_keys.append(key)
-                per_key_correct_counts[key] += 1
-                total_correct_keys += 1
+        for rollout_idx in range(n_rollouts_per_run):
+            judge_result = run_results[rollout_idx] if rollout_idx < len(run_results) else None
+            if judge_result is None or judge_result.result_type != ResultType.DIRECT_RESULT:
+                missing_predictions += 1
+                per_label_missing_rollouts += 1
+                judge_output: dict[str, Any] | None = None
             else:
-                incorrect_keys.append(key)
+                judge_output = judge_result.output
+
+            rollout_outputs.append(judge_output)
+
+            for key in scored_keys:
+                per_key_total_counts[key] += 1
+                total_scored_keys += 1
+
+                if judge_output is None or key not in judge_output:
+                    continue
+                if judge_output[key] == label.label_value[key]:
+                    per_key_label_correct_counts[key] += 1
+                    per_key_correct_counts[key] += 1
+                    total_correct_keys += 1
+
+        per_label_per_key_accuracy = {
+            key: (per_key_label_correct_counts[key] / n_rollouts_per_run) for key in scored_keys
+        }
 
         per_label_results.append(
             PerLabelResult(
                 agent_run_id=label.agent_run_id,
                 gold_label_value=label.label_value,
-                judge_output=judge_output,
+                rollout_outputs=rollout_outputs,
                 scored_keys=scored_keys,
-                correct_keys=correct_keys,
-                incorrect_keys=incorrect_keys,
-                missing_prediction=missing_prediction,
+                per_key_accuracy=per_label_per_key_accuracy,
+                missing_prediction_rollouts=per_label_missing_rollouts,
             )
         )
 
@@ -446,6 +464,9 @@ def _evaluate_split_per_key_accuracy(
         split=split_name,
         total_examples=len(labels),
         scored_examples=scored_examples,
+        num_rollouts_per_run=n_rollouts_per_run,
+        total_expected_rollouts=total_expected_rollouts,
+        total_received_rollouts=total_received_rollouts,
         missing_predictions=missing_predictions,
         total_scored_keys=total_scored_keys,
         total_correct_keys=total_correct_keys,
@@ -463,39 +484,46 @@ async def _evaluate_candidates(
     test_labels: Sequence[LabeledRun],
     llm_svc: BaseLLMService,
     judge_timeout: float,
+    n_rollouts_per_run: int,
 ) -> list[CandidateEvaluation]:
     evaluations: list[CandidateEvaluation | None] = [None] * len(candidates)
 
     async def _evaluate_one(idx_zero_based: int, candidate: Rubric) -> None:
         # TODO(mengk), FIXME(mengk): remove this!!
-        candidate = candidate.model_copy(update={
-            "judge_model": ModelOption(
-                provider="openrouter",
-                model_name="google/gemini-3-flash-preview",
-                reasoning_effort=None,
-            )
-        })
+        candidate = candidate.model_copy(
+            update={
+                "judge_model": ModelOption(
+                    provider="openrouter",
+                    model_name="google/gemini-3-flash-preview",
+                    reasoning_effort=None,
+                )
+            }
+        )
 
         idx = idx_zero_based + 1
         console.print(f"Running candidate {idx}/{len(candidates)}")
-        console.print(f"- train split: {len(train_agent_runs)} runs")
+        console.print(
+            f"- train split: {len(train_agent_runs)} runs x {n_rollouts_per_run} rollouts"
+        )
         if train_agent_runs:
             train_judge_results = await run_rubric(
                 agent_runs=train_agent_runs,
                 rubric=candidate,
                 llm_svc=llm_svc,
+                n_rollouts_per_input=n_rollouts_per_run,
                 show_progress=True,
                 timeout=judge_timeout,
             )
         else:
             train_judge_results = []
 
-        console.print(f"- test split: {len(test_agent_runs)} runs")
+        console.print(f"- test split: {len(test_agent_runs)} runs x {n_rollouts_per_run} rollouts")
         if test_agent_runs:
             test_judge_results = await run_rubric(
                 agent_runs=test_agent_runs,
                 rubric=candidate,
                 llm_svc=llm_svc,
+                n_rollouts_per_input=n_rollouts_per_run,
                 show_progress=True,
                 timeout=judge_timeout,
             )
@@ -506,11 +534,13 @@ async def _evaluate_candidates(
             split_name="train",
             judge_results=train_judge_results,
             labels=train_labels,
+            n_rollouts_per_run=n_rollouts_per_run,
         )
         test_evaluation = _evaluate_split_per_key_accuracy(
             split_name="test",
             judge_results=test_judge_results,
             labels=test_labels,
+            n_rollouts_per_run=n_rollouts_per_run,
         )
 
         evaluations[idx_zero_based] = CandidateEvaluation(
@@ -556,6 +586,7 @@ async def run_holdout_k_rubrics_evaluation(
     output_json_path: str | None,
     max_llm_concurrency: int,
     judge_timeout: float,
+    n_rollouts_per_run: int,
 ) -> None:
     if k <= 0:
         raise ValueError("k must be > 0")
@@ -563,6 +594,8 @@ async def run_holdout_k_rubrics_evaluation(
         raise ValueError("max_llm_concurrency must be > 0")
     if judge_timeout <= 0:
         raise ValueError("judge_timeout must be > 0")
+    if n_rollouts_per_run <= 0:
+        raise ValueError("n_rollouts_per_run must be > 0")
 
     console.print("[bold]Initializing clients...[/bold]")
     dc = _require_docent_client()
@@ -659,6 +692,7 @@ async def run_holdout_k_rubrics_evaluation(
         test_labels=test_labels,
         llm_svc=llm_svc,
         judge_timeout=judge_timeout,
+        n_rollouts_per_run=n_rollouts_per_run,
     )
     _render_candidate_summary(candidate_evaluations)
     _render_top_candidate_details(candidate_evaluations)
@@ -675,6 +709,7 @@ async def run_holdout_k_rubrics_evaluation(
         train_ratio=train_ratio,
         seed=seed,
         max_llm_concurrency=max_llm_concurrency,
+        n_rollouts_per_run=n_rollouts_per_run,
         train_label_agent_run_ids=[label.agent_run_id for label in train_labels],
         test_label_agent_run_ids=[label.agent_run_id for label in test_labels_all],
         num_total_labels=len(user_data.labels),
@@ -728,6 +763,12 @@ def main() -> None:
         help="Per-judge timeout in seconds (default: 180.0)",
     )
     parser.add_argument(
+        "--n-rollouts-per-run",
+        type=int,
+        default=3,
+        help="Number of judge rollouts per agent run when estimating train/test accuracy (default: 1)",
+    )
+    parser.add_argument(
         "--output-json",
         type=str,
         default=None,
@@ -747,6 +788,7 @@ def main() -> None:
                 output_json_path=args.output_json,
                 max_llm_concurrency=args.max_llm_concurrency,
                 judge_timeout=args.judge_timeout,
+                n_rollouts_per_run=args.n_rollouts_per_run,
             )
         )
     except KeyboardInterrupt:

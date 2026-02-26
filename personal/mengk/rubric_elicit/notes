@@ -1,0 +1,60 @@
+goal: focus
+- labels: yes this matches a high-level behavior rubric (thumbs up or thumbs down in the context of a behavior)
+
+
+candidate proposal:
+- use entropy of a judge with the user model
+- mix with more random policies to prevent "mode collapse"
+- get labels
+
+output artifacts:
+- a set of labels for that behvaior
+- labels -> rubric / judge that can generate more synthetic labels (potentially just use the user model)
+
+
+
+- comments explaining things
+- thumbs up or thumbs down
+- pairwise preferences
+
+
+
+
+
+- success criteria (or at least intermediate)
+- collection closer to what's being worked on
+
+on my side -
+- package this up in a way that's actually usable
+- send some notes about evaluation and knowing whether things are working
+
+
+question or "crux" deduplication within each round so you don't get asked the same thing over and over again
+
+
+
+
+
+
+
+
+
+
+Idea: for each conversation, have the initial LLM pass come up with something like this:
+
+p_u(y | x, user context)    => this is what you're already having it estimate
+
+A list of cruxes c_i which can resolve to c_i = 1 or c_i = 0 (assuming binary, could be more complex)
+For each crux:
+p(c_i = 1 | user context)   => probability you think the user will resolve the crux one way or another
+p_u(y = 1 | x, user context, c_i = 0)    => updated probability that the user would label as 1 given the crux is resolved negatively
+p_u(y = 1 | x, user context, c_i = 1)     => updated probability that the user would label as 1 given the crux is resolved positively
+
+Then based on this, you can cluster cruxes and rank them based on overall information gain
+
+IG(c) = sum_x H[p_u(y | x)] - p(c_i = 1) H[ p_u(y | x, c_i = 1) ] - p(c_i = 0) H[ p_u(y | x, c_i = 0) ]
+
+So this ends up capturing both:
+
+Does this crux come up across a bunch of transcripts
+Would resolving the crux reduce the label uncertainty a lot across those transcripts

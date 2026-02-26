@@ -139,6 +139,16 @@ class _RawDistributionResponse(BaseModel):
     probability: object | None = None
 
 
+def build_agent_run_dashboard_url(
+    frontend_url: str,
+    collection_id: str,
+    agent_run_id: str,
+) -> str:
+    """Build the frontend URL for an agent run dashboard page."""
+    normalized_frontend_url = frontend_url.rstrip("/")
+    return f"{normalized_frontend_url}/dashboard/{collection_id}/agent_run/{agent_run_id}"
+
+
 # === User Model Inference ===
 
 
@@ -799,23 +809,30 @@ Agent run:
 Task:
 Given the user model, what would you anticipate the user says?
 Estimate the distribution using this reasoning procedure:
-1. Follow the rubric and identify the key cruxes that would change the output/outcome.
-2. For each crux, inspect user model z for specific evidence that resolves or partially resolves it.
-3. Holistically synthesize all cruxes and evidence to produce the final probability distribution.
+1. Reason through the rubric as applied to this specific agent run, using user model z as your evidence base.
+2. While reasoning, explicitly track uncertainties that matter for the rubric outcome.
+3. For each uncertainty, assess evidence coverage in z:
+   - If z has relevant direct/indirect/conflicting evidence, treat it as partially informed (less uncertain).
+   - If z does not address it, treat it as unaddressed (more uncertain).
+4. At the end, synthesize uncertainties into a short set of generalized key cruxes (not overfit to this one run), where each crux is written as a concrete, operationalized question that is understandable without reading this specific agent run.
+5. For each key crux question, describe how the output distribution would shift if the crux resolved one way vs the opposite way.
+6. Holistically synthesize all cruxes and evidence to produce the final probability distribution.
 
 Guidance:
-- Anchor your reasoning to rubric-relevant cruxes only.
-- For each crux, look for both supporting and conflicting signals in z.
-- Explicitly note unresolved, sparse, or conflicting evidence and how it affects uncertainty.
-- Situations explicitly covered in user model are generally less uncertain (with exceptions).
-- Situations not explicitly covered are generally uncertain, unless the interpretation is obvious.
+- Anchor reasoning to rubric-relevant factors only.
+- Prefer concrete evidence from z over speculation.
+- Explicitly note unresolved, sparse, missing, or conflicting evidence and how it changes uncertainty.
+- Distinguish clearly between "partially informed" uncertainty vs "unaddressed" uncertainty.
+- Key cruxes should be abstract enough to generalize to similar cases.
+- Each key crux must be phrased as a concrete, operationalized, mostly self-contained question with clearly defined opposite resolutions, such that a reader who has not read this specific agent run can still understand what the question means.
+- Include counterfactual distribution impacts for each crux ("if resolved A vs B, probability mass moves how?").
 - Connect the final distribution to specific user-model signals.
-- If support in z is sparse or conflicting, explicitly state uncertainty and why.
 - Probabilities should sum to 1.
+- Keep the JSON schema exactly as specified.
 
 Return JSON:
 {{
-  "reasoning": "<holistic rationale explaining key cruxes, how z resolves them, and why the final distribution looks this way>",
+  "reasoning": "<rubric-grounded reasoning with uncertainty tracking, ending in generalized key crux questions and their counterfactual distribution impacts>",
   "outcomes": [
     {{
       "output": <json object compliant with schema>,

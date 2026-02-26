@@ -24,6 +24,7 @@ import math
 import random
 import sys
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
@@ -44,9 +45,9 @@ from docent_core.docent.ai_tools.rubric.elicit import (
     OutputDistribution,
     RunDistributionEstimate,
     SchemaSelectableField,
+    build_agent_run_dashboard_url,
     build_user_model_inference_prompt_with_agent_runs,
     estimate_user_distributions_for_agent_runs,
-    format_user_distribution_for_display,
     generate_labeling_requests,
     get_enum_boolean_fields_from_schema,
     infer_user_model_from_user_data,
@@ -56,6 +57,7 @@ from docent_core.docent.ai_tools.rubric.elicit import (
 from docent_core.docent.ai_tools.rubric.user_model import LabelingRequest, UserData
 
 console = Console()
+AGENT_RUN_FETCH_MAX_CONCURRENCY = 25
 
 
 class EntropyLabelMetadata(BaseModel):
@@ -139,19 +141,48 @@ def _load_user_data_agent_runs(
         return {}
 
     console.print(f"Loading {len(run_ids)} user-data agent run(s) for prompt summaries")
-    agent_runs_by_id: dict[str, AgentRun] = {}
-    for run_id in tqdm(run_ids, desc="Fetching user-data runs"):
-        run = dc.get_agent_run(collection_id, run_id)
-        if run is None:
-            console.print(f"[red]Error:[/red] missing user-data agent run {run_id}")
-            continue
-        agent_runs_by_id[run_id] = run
+    agent_runs_by_id = _load_agent_runs_by_ids(
+        dc=dc,
+        collection_id=collection_id,
+        run_ids=run_ids,
+        progress_desc="Fetching user-data runs",
+        missing_run_template="[red]Error:[/red] missing user-data agent run {run_id}",
+    )
 
     missing = len(run_ids) - len(agent_runs_by_id)
     if missing > 0:
         console.print(
             f"[yellow]Skipped {missing} user-data item(s) because their agent run was missing.[/yellow]"
         )
+    return agent_runs_by_id
+
+
+def _load_agent_runs_by_ids(
+    dc: Docent,
+    collection_id: str,
+    run_ids: Sequence[str],
+    progress_desc: str,
+    missing_run_template: str = "[yellow]Warning:[/yellow] missing agent run {run_id}",
+) -> dict[str, AgentRun]:
+    if not run_ids:
+        return {}
+
+    agent_runs_by_id: dict[str, AgentRun] = {}
+    with ThreadPoolExecutor(max_workers=AGENT_RUN_FETCH_MAX_CONCURRENCY) as executor:
+        future_to_run_id = {
+            executor.submit(dc.get_agent_run, collection_id, run_id): run_id for run_id in run_ids
+        }
+        for future in tqdm(
+            as_completed(future_to_run_id),
+            total=len(future_to_run_id),
+            desc=progress_desc,
+        ):
+            run_id = future_to_run_id[future]
+            run = future.result()
+            if run is None:
+                console.print(missing_run_template.format(run_id=run_id))
+                continue
+            agent_runs_by_id[run_id] = run
     return agent_runs_by_id
 
 
@@ -176,15 +207,13 @@ def _sample_agent_runs(
     sample_size = min(num_samples, len(eligible_ids))
     sampled_ids = random.Random(seed).sample(eligible_ids, k=sample_size)
 
-    agent_runs: list[AgentRun] = []
-    for run_id in tqdm(sampled_ids, desc="Fetching sampled runs"):
-        run = dc.get_agent_run(collection_id, run_id)
-        if run is None:
-            console.print(f"[yellow]Warning:[/yellow] missing agent run {run_id}")
-            continue
-        agent_runs.append(run)
-
-    return agent_runs
+    agent_runs_by_id = _load_agent_runs_by_ids(
+        dc=dc,
+        collection_id=collection_id,
+        run_ids=sampled_ids,
+        progress_desc="Fetching sampled runs",
+    )
+    return [agent_runs_by_id[run_id] for run_id in sampled_ids if run_id in agent_runs_by_id]
 
 
 def _render_current_rubric(rubric: Rubric) -> None:
@@ -304,10 +333,28 @@ def _format_projected_distribution(
     return "\n".join(lines)
 
 
+def _run_reference_lines(
+    frontend_url: str,
+    collection_id: str,
+    agent_run_id: str,
+) -> list[str]:
+    run_url = build_agent_run_dashboard_url(
+        frontend_url=frontend_url,
+        collection_id=collection_id,
+        agent_run_id=agent_run_id,
+    )
+    return [
+        f"[bold]Run ID:[/bold] [link={run_url}]{agent_run_id}[/link]",
+        f"[bold]Run URL:[/bold] {run_url}",
+    ]
+
+
 def _render_entropy_rankings(
     ranked: list[tuple[RunDistributionEstimate, float]],
     agreement_keys: list[str],
     top_n: int,
+    collection_id: str,
+    frontend_url: str,
 ) -> None:
     console.print("\n" + "=" * 80)
     console.print("[bold cyan]HIGHEST ENTROPY USER DISTRIBUTIONS[/bold cyan]")
@@ -328,7 +375,11 @@ def _render_entropy_rankings(
         user_distribution = _require_user_distribution(estimate)
         distribution_reasoning = (user_distribution.reasoning or "").strip() or None
         body_lines = [
-            f"[bold]Run ID:[/bold] {estimate.agent_run_id}",
+            *_run_reference_lines(
+                frontend_url=frontend_url,
+                collection_id=collection_id,
+                agent_run_id=estimate.agent_run_id,
+            ),
             f"[bold]Entropy H[p_u]:[/bold] {entropy:.6f} nats",
             "",
             "[bold]p_u projected to agreement keys[/bold]",
@@ -372,6 +423,8 @@ def _render_generated_labeling_requests(
     ranked: list[tuple[RunDistributionEstimate, float]],
     request_results: list[LabelingRequestResult],
     agreement_keys: list[str],
+    collection_id: str,
+    frontend_url: str,
 ) -> None:
     console.print("\n" + "=" * 80)
     console.print("[bold cyan]GENERATED LABELING REQUESTS[/bold cyan]")
@@ -393,14 +446,24 @@ def _render_generated_labeling_requests(
             user_distribution = estimate.user_distribution
 
         if request_result.error is not None or request_result.request is None:
+            run_url = build_agent_run_dashboard_url(
+                frontend_url=frontend_url,
+                collection_id=collection_id,
+                agent_run_id=request_result.agent_run_id,
+            )
             console.print(
-                f"{idx}. {request_result.agent_run_id} [red]ERROR[/red]: {request_result.error}"
+                f"{idx}. {request_result.agent_run_id} ({run_url}) "
+                f"[red]ERROR[/red]: {request_result.error}"
             )
             continue
 
         request = request_result.request
         body_lines = [
-            f"[bold]Run ID:[/bold] {request.agent_run_id}",
+            *_run_reference_lines(
+                frontend_url=frontend_url,
+                collection_id=collection_id,
+                agent_run_id=request.agent_run_id,
+            ),
             f"[bold]Entropy H[p_u]:[/bold] {entropy_text} nats",
             "",
         ]
@@ -499,6 +562,8 @@ def _collect_labels_for_run(
     selectable_fields: dict[str, SchemaSelectableField],
     agreement_keys: set[str],
     labeling_request: LabelingRequest | None,
+    collection_id: str,
+    frontend_url: str,
 ) -> tuple[CollectedEntropyLabel | None, bool]:
     import beaupy
     from rich.prompt import Prompt
@@ -506,7 +571,11 @@ def _collect_labels_for_run(
     user_distribution = _require_user_distribution(estimate)
 
     body_lines = [
-        f"[bold]Run ID:[/bold] {estimate.agent_run_id}",
+        *_run_reference_lines(
+            frontend_url=frontend_url,
+            collection_id=collection_id,
+            agent_run_id=estimate.agent_run_id,
+        ),
         f"[bold]Entropy H[p_u]:[/bold] {entropy:.6f} nats",
     ]
     if labeling_request is not None:
@@ -552,20 +621,24 @@ def _collect_labels_for_run(
             ]
         )
 
+    distribution_reasoning = (user_distribution.reasoning or "").strip() or None
     body_lines.extend(
         [
-            "",
-            "[bold]p_u distribution + reasoning[/bold]",
-            format_user_distribution_for_display(
-                user_distribution,
-                max_outcomes=5,
-                max_reasoning_chars=1_200,
-            ),
             "",
             "[bold]p_u projected to agreement keys[/bold]",
             _format_projected_distribution(user_distribution, agreement_keys),
         ]
     )
+    if distribution_reasoning:
+        reasoning_text, reasoning_footnotes = render_text_with_citation_footnotes(
+            text=distribution_reasoning,
+            citations=user_distribution.reasoning_citations,
+        )
+        body_lines.extend(["", "[bold]p_u reasoning[/bold]", reasoning_text])
+        if reasoning_footnotes:
+            body_lines.append("[dim]Citations:[/dim]")
+            for footnote in reasoning_footnotes:
+                body_lines.append(f"  [dim]{footnote}[/dim]")
     console.print()
     console.print(
         Panel(
@@ -663,6 +736,8 @@ def _collect_entropy_labels(
     output_schema: dict[str, Any],
     agreement_keys: list[str],
     labeling_requests_by_run_id: dict[str, LabelingRequest],
+    collection_id: str,
+    frontend_url: str,
 ) -> tuple[list[CollectedEntropyLabel], bool, int]:
     import beaupy
 
@@ -705,6 +780,8 @@ def _collect_entropy_labels(
             selectable_fields=selectable_fields,
             agreement_keys=agreement_key_set,
             labeling_request=labeling_requests_by_run_id.get(estimate.agent_run_id),
+            collection_id=collection_id,
+            frontend_url=frontend_url,
         )
         if collected_label is not None:
             collected_labels.append(collected_label)
@@ -799,6 +876,26 @@ async def run_entropy_elicitation(
         llm_svc=llm_svc,
     )
 
+    # # TODO(mengk): remove this temporary p_u reasoning JSON dump once debugging is done.
+    # sampled_p_u_reasoning_blocks = [
+    #     (estimate.user_distribution.reasoning or "").strip()
+    #     for estimate in estimates
+    #     if estimate.user_distribution is not None
+    # ]
+    # p_u_reasoning_dump_path = (
+    #     Path("outputs")
+    #     / f"p_u_reasoning_blocks_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_gitignore.json"
+    # )
+    # p_u_reasoning_dump_path.parent.mkdir(parents=True, exist_ok=True)
+    # p_u_reasoning_dump_path.write_text(
+    #     json.dumps(sampled_p_u_reasoning_blocks, indent=2) + "\n",
+    #     encoding="utf-8",
+    # )
+    # console.print(
+    #     f"Wrote temporary p_u reasoning JSON dump to: [bold]{p_u_reasoning_dump_path}[/bold]"
+    # )
+    # raise
+
     agreement_keys = _get_entropy_agreement_keys(rubric.output_schema)
 
     ranked: list[tuple[RunDistributionEstimate, float]] = []
@@ -818,7 +915,14 @@ async def run_entropy_elicitation(
             "[yellow]Some runs failed p_u estimation and were excluded from ranking.[/yellow]"
         )
 
-    _render_entropy_rankings(ranked, agreement_keys=agreement_keys, top_n=top_n)
+    frontend_url = dc.frontend_url
+    _render_entropy_rankings(
+        ranked,
+        agreement_keys=agreement_keys,
+        top_n=top_n,
+        collection_id=collection_id,
+        frontend_url=frontend_url,
+    )
 
     top_ranked = ranked[:top_n]
     top_estimates = [estimate for estimate, _ in top_ranked]
@@ -847,6 +951,8 @@ async def run_entropy_elicitation(
         ranked=top_ranked,
         request_results=request_results,
         agreement_keys=agreement_keys,
+        collection_id=collection_id,
+        frontend_url=frontend_url,
     )
     labeling_requests_by_run_id = {
         result.agent_run_id: result.request
@@ -859,6 +965,8 @@ async def run_entropy_elicitation(
         output_schema=rubric.output_schema,
         agreement_keys=agreement_keys,
         labeling_requests_by_run_id=labeling_requests_by_run_id,
+        collection_id=collection_id,
+        frontend_url=frontend_url,
     )
     for collected_label in collected_labels:
         user_data.add_label(

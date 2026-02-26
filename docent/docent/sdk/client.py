@@ -324,6 +324,16 @@ class Docent:
 
         self._login(api_key)
 
+    @property
+    def frontend_url(self) -> str:
+        """Resolved Docent frontend base URL."""
+        return self._frontend_url
+
+    @property
+    def backend_url(self) -> str:
+        """Resolved Docent backend/API base URL."""
+        return self._api_url
+
     def _handle_response_errors(self, response: requests.Response):
         """Handle API response and raise informative errors."""
         status_code = cast(int | None, response.status_code)
