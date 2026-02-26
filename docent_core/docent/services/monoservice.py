@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from collections import Counter
@@ -452,52 +453,47 @@ class MonoService:
             )
             return deduped
 
+        # Run all field discovery queries in parallel
+        (
+            agent_run_infos,
+            transcript_group_infos,
+            judge_output_infos,
+            judge_metadata_infos,
+        ) = await asyncio.gather(
+            self.get_json_metadata_fields_for_column(
+                collection_id,
+                table=SQLAAgentRun.__table__,
+                json_column=cast(ColumnElement[Any], SQLAAgentRun.metadata_json),
+                column_name="metadata_json",
+            ),
+            self.get_json_metadata_fields_for_column(
+                collection_id,
+                table=SQLATranscriptGroup.__table__,
+                json_column=cast(ColumnElement[Any], SQLATranscriptGroup.metadata_json),
+                column_name="metadata_json",
+                join_condition=SQLATranscriptGroup.agent_run_id == SQLAAgentRun.id,
+            ),
+            self.get_json_metadata_fields_for_column(
+                collection_id,
+                table=SQLAJudgeResult.__table__,
+                json_column=cast(ColumnElement[Any], SQLAJudgeResult.output),
+                column_name="output",
+                join_condition=SQLAJudgeResult.agent_run_id == SQLAAgentRun.id,
+                group_specs=(("rubric_id", cast(ColumnElement[Any], SQLAJudgeResult.rubric_id)),),
+            ),
+            self.get_json_metadata_fields_for_column(
+                collection_id,
+                table=SQLAJudgeResult.__table__,
+                json_column=cast(ColumnElement[Any], SQLAJudgeResult.result_metadata),
+                column_name="result_metadata",
+                join_condition=SQLAJudgeResult.agent_run_id == SQLAAgentRun.id,
+                group_specs=(("rubric_id", cast(ColumnElement[Any], SQLAJudgeResult.rubric_id)),),
+            ),
+        )
+
         field_map: dict[str, list[JsonFieldInfo]] = {}
-
-        agent_run_infos = await self.get_json_metadata_fields_for_column(
-            collection_id,
-            table=SQLAAgentRun.__table__,
-            json_column=cast(ColumnElement[Any], SQLAAgentRun.metadata_json),
-            column_name="metadata_json",
-        )
         field_map[SQLAAgentRun.__tablename__] = _dedupe(agent_run_infos)
-
-        # transcript_infos = await self.get_json_metadata_fields_for_column(
-        #     collection_id,
-        #     table=SQLATranscript.__table__,
-        #     json_column=cast(ColumnElement[Any], SQLATranscript.metadata_json),
-        #     column_name="metadata_json",
-        #     join_condition=SQLATranscript.agent_run_id == SQLAAgentRun.id,
-        # )
-        # field_map[SQLATranscript.__tablename__] = _dedupe(transcript_infos)
-
-        transcript_group_infos = await self.get_json_metadata_fields_for_column(
-            collection_id,
-            table=SQLATranscriptGroup.__table__,
-            json_column=cast(ColumnElement[Any], SQLATranscriptGroup.metadata_json),
-            column_name="metadata_json",
-            join_condition=SQLATranscriptGroup.agent_run_id == SQLAAgentRun.id,
-        )
         field_map[SQLATranscriptGroup.__tablename__] = _dedupe(transcript_group_infos)
-
-        judge_output_infos = await self.get_json_metadata_fields_for_column(
-            collection_id,
-            table=SQLAJudgeResult.__table__,
-            json_column=cast(ColumnElement[Any], SQLAJudgeResult.output),
-            column_name="output",
-            join_condition=SQLAJudgeResult.agent_run_id == SQLAAgentRun.id,
-            group_specs=(("rubric_id", cast(ColumnElement[Any], SQLAJudgeResult.rubric_id)),),
-        )
-
-        judge_metadata_infos = await self.get_json_metadata_fields_for_column(
-            collection_id,
-            table=SQLAJudgeResult.__table__,
-            json_column=cast(ColumnElement[Any], SQLAJudgeResult.result_metadata),
-            column_name="result_metadata",
-            join_condition=SQLAJudgeResult.agent_run_id == SQLAAgentRun.id,
-            group_specs=(("rubric_id", cast(ColumnElement[Any], SQLAJudgeResult.rubric_id)),),
-        )
-
         field_map[SQLAJudgeResult.__tablename__] = _dedupe(
             judge_output_infos + judge_metadata_infos
         )
@@ -4093,83 +4089,58 @@ class MonoService:
             include_judge_result_metadata: If False, skip discovering result_metadata fields
         """
 
-        all_fields: dict[str, FilterableFieldWithSamples] = {}
-
-        agent_run_infos = await self.get_json_metadata_fields_for_column(
-            ctx.collection_id,
-            table=SQLAAgentRun.__table__,
-            json_column=cast(ColumnElement[Any], SQLAAgentRun.metadata_json),
-            column_name="metadata_json",
-        )
-        for info in agent_run_infos:
-            if info.value_type is None or not info.path:
-                continue
-            field_name = "metadata." + ".".join(info.path)
-            all_fields[field_name] = FilterableFieldWithSamples(
-                name=field_name, type=info.value_type
-            )
-
-        async with self.db.session() as session:
-            if rubric_id is not None:
-                if rubric_version is not None:
-                    rubric_query = select(SQLARubric).where(
-                        SQLARubric.collection_id == ctx.collection_id,
-                        SQLARubric.id == rubric_id,
-                        SQLARubric.version == rubric_version,
-                    )
-                else:
-                    rubric_query = (
-                        select(SQLARubric)
-                        .where(
+        # Define helper coroutines for cheap DB lookups
+        async def _fetch_rubrics() -> list[SQLARubric]:
+            async with self.db.session() as session:
+                if rubric_id is not None:
+                    if rubric_version is not None:
+                        rubric_query = select(SQLARubric).where(
                             SQLARubric.collection_id == ctx.collection_id,
                             SQLARubric.id == rubric_id,
+                            SQLARubric.version == rubric_version,
                         )
-                        .order_by(SQLARubric.version.desc())
-                        .limit(1)
+                    else:
+                        rubric_query = (
+                            select(SQLARubric)
+                            .where(
+                                SQLARubric.collection_id == ctx.collection_id,
+                                SQLARubric.id == rubric_id,
+                            )
+                            .order_by(SQLARubric.version.desc())
+                            .limit(1)
+                        )
+                    result = await session.execute(rubric_query)
+                    return list(result.scalars().all())
+                else:
+                    result = await session.execute(
+                        select(SQLARubric).where(SQLARubric.collection_id == ctx.collection_id)
                     )
-                result = await session.execute(rubric_query)
-                rubrics = list(result.scalars().all())
-            else:
-                result = await session.execute(
-                    select(SQLARubric).where(SQLARubric.collection_id == ctx.collection_id)
+                    all_rubrics = list(result.scalars().all())
+                    latest_by_id: dict[str, SQLARubric] = {}
+                    for r in all_rubrics:
+                        existing = latest_by_id.get(r.id)
+                        if existing is None or r.version > existing.version:
+                            latest_by_id[r.id] = r
+                    return list(latest_by_id.values())
+
+        async def _fetch_label_sets() -> list[SQLALabelSet]:
+            async with self.db.session() as session:
+                label_set_result = await session.execute(
+                    select(SQLALabelSet).where(SQLALabelSet.collection_id == ctx.collection_id)
                 )
-                all_rubrics = list(result.scalars().all())
-                latest_by_id: dict[str, SQLARubric] = {}
-                for r in all_rubrics:
-                    existing = latest_by_id.get(r.id)
-                    if existing is None or r.version > existing.version:
-                        latest_by_id[r.id] = r
-                rubrics = list(latest_by_id.values())
+                return list(label_set_result.scalars().all())
 
-        for rubric in rubrics:
-            for path, field_type in _extract_schema_fields(rubric.output_schema):
-                field_name = f"rubric.{rubric.id}.{path}"
-                all_fields[field_name] = FilterableFieldWithSamples(
-                    name=field_name, type=field_type
-                )
-
-        # Query label sets for the collection and extract fields from their schemas
-        async with self.db.session() as session:
-            label_set_result = await session.execute(
-                select(SQLALabelSet).where(SQLALabelSet.collection_id == ctx.collection_id)
-            )
-            label_sets = list(label_set_result.scalars().all())
-
-        for label_set in label_sets:
-            for path, field_type in _extract_schema_fields(label_set.label_schema):
-                field_name = f"label.{label_set.id}.{path}"
-                all_fields[field_name] = FilterableFieldWithSamples(
-                    name=field_name, type=field_type
-                )
-
+        # Build judge_where from function params (no dependencies on other queries)
         judge_where: ColumnElement[bool] | None = None
         if rubric_id is not None:
             judge_where = SQLAJudgeResult.rubric_id == rubric_id
             if rubric_version is not None:
                 judge_where = and_(judge_where, SQLAJudgeResult.rubric_version == rubric_version)
 
-        if include_judge_result_metadata:
-            judge_metadata_infos = await self.get_json_metadata_fields_for_column(
+        async def _fetch_judge_metadata() -> list[JsonFieldInfo]:
+            if not include_judge_result_metadata:
+                return []
+            return await self.get_json_metadata_fields_for_column(
                 ctx.collection_id,
                 table=SQLAJudgeResult.__table__,
                 json_column=cast(ColumnElement[Any], SQLAJudgeResult.result_metadata),
@@ -4178,29 +4149,74 @@ class MonoService:
                 group_specs=(("rubric_id", cast(ColumnElement[Any], SQLAJudgeResult.rubric_id)),),
                 additional_where=judge_where,
             )
-            for info in judge_metadata_infos:
-                info_rubric_id = info.labels.get("rubric_id")
-                if not info_rubric_id or info.value_type is None or not info.path:
-                    continue
-                field_name = f"rubric.{info_rubric_id}." + ".".join(info.path)
+
+        # Run expensive JSONB discovery + cheap schema lookups in parallel
+        agent_run_infos, rubrics, label_sets, judge_metadata_infos = await asyncio.gather(
+            self.get_json_metadata_fields_for_column(
+                ctx.collection_id,
+                table=SQLAAgentRun.__table__,
+                json_column=cast(ColumnElement[Any], SQLAAgentRun.metadata_json),
+                column_name="metadata_json",
+            ),
+            _fetch_rubrics(),
+            _fetch_label_sets(),
+            _fetch_judge_metadata(),
+        )
+
+        # Assemble all_fields from the parallel results
+        all_fields: dict[str, FilterableFieldWithSamples] = {}
+
+        for info in agent_run_infos:
+            if info.value_type is None or not info.path:
+                continue
+            field_name = "metadata." + ".".join(info.path)
+            all_fields[field_name] = FilterableFieldWithSamples(
+                name=field_name, type=info.value_type
+            )
+
+        for rubric in rubrics:
+            for path, field_type in _extract_schema_fields(rubric.output_schema):
+                field_name = f"rubric.{rubric.id}.{path}"
                 all_fields[field_name] = FilterableFieldWithSamples(
-                    name=field_name, type=info.value_type
+                    name=field_name, type=field_type
                 )
+
+        for label_set in label_sets:
+            for path, field_type in _extract_schema_fields(label_set.label_schema):
+                field_name = f"label.{label_set.id}.{path}"
+                all_fields[field_name] = FilterableFieldWithSamples(
+                    name=field_name, type=field_type
+                )
+
+        for info in judge_metadata_infos:
+            info_rubric_id = info.labels.get("rubric_id")
+            if not info_rubric_id or info.value_type is None or not info.path:
+                continue
+            field_name = f"rubric.{info_rubric_id}." + ".".join(info.path)
+            all_fields[field_name] = FilterableFieldWithSamples(
+                name=field_name, type=info.value_type
+            )
 
         all_fields["agent_run_id"] = FilterableFieldWithSamples(name="agent_run_id", type="str")
         all_fields["tag"] = FilterableFieldWithSamples(name="tag", type="str")
 
         fields = sorted(all_fields.values(), key=lambda f: f["name"])
+
+        # Fetch sample values in parallel
         if include_sample_values:
-            for field in fields:
-                if field["type"] != "str":
-                    continue
-                name = field["name"]
-                if not (name.startswith("metadata.") or name == "tag"):
-                    continue
-                samples, total_unique_values = await self.get_field_value_samples(
-                    ctx, name, sample_limit=sample_limit
+            sample_fields = [
+                field
+                for field in fields
+                if field["type"] == "str"
+                and (field["name"].startswith("metadata.") or field["name"] == "tag")
+            ]
+            sample_results = await asyncio.gather(
+                *(
+                    self.get_field_value_samples(ctx, field["name"], sample_limit=sample_limit)
+                    for field in sample_fields
                 )
+            )
+            for field, (samples, total_unique_values) in zip(sample_fields, sample_results):
                 if total_unique_values <= 0:
                     continue
                 field["sample_values"] = samples
