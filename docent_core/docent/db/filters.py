@@ -328,11 +328,16 @@ def build_json_filter_clause(
     """Build a WHERE clause for filtering on a JSONB column.
 
     When use_gin_prefilter is True and the filter is an equality check,
-    adds a JSONB containment (@>) pre-filter to leverage the GIN index,
-    combined with the legacy type-coerced comparison to preserve existing
-    matching behavior. The pre-filter ORs across all JSONB types that the
-    legacy text coercion could match, so it never produces false negatives.
+    uses a JSONB containment (@>) clause that leverages the GIN index.
+    The containment check ORs across all JSONB types that the legacy text
+    coercion could match (e.g. string "42" vs number 42), so it is
+    equivalent to the legacy path for equality.
     """
+    # GIN-only fast path for equality: @> is sufficient and avoids the
+    # expensive ->> text extraction that can't use the GIN index.
+    if use_gin_prefilter and op == "==":
+        return _build_gin_prefilter(json_column, json_keys, value)
+
     sqla_value = json_column
     for key in json_keys:
         sqla_value = sqla_value[key]
@@ -352,13 +357,7 @@ def build_json_filter_clause(
     else:
         raise ValueError(f"Unsupported value type: {type(value)}")
 
-    legacy_clause = apply_comparison(sqla_value, value, op)
-
-    if use_gin_prefilter and op == "==":
-        gin_clause = _build_gin_prefilter(json_column, json_keys, value)
-        return and_(gin_clause, legacy_clause)
-
-    return legacy_clause
+    return apply_comparison(sqla_value, value, op)
 
 
 class BaseCollectionFilter(BaseModel):
@@ -463,14 +462,14 @@ class PrimitiveFilter(BaseCollectionFilter):
 
         legacy_clause = apply_comparison(sqla_value, self.value, self.op)
 
-        # Add GIN-indexed containment pre-filter for metadata equality
+        # GIN-only fast path for metadata equality: @> alone is sufficient
+        # and avoids the expensive ->> text extraction.
         if mode == "metadata" and self.op == "==" and json_keys:
-            gin_clause = _build_gin_prefilter(
+            return _build_gin_prefilter(
                 table.metadata_json,
                 json_keys,
                 self.value,  # type: ignore
             )
-            return and_(gin_clause, legacy_clause)
 
         return legacy_clause
 
