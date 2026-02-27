@@ -39,14 +39,20 @@ class ContentReasoning(BaseContent):
     Attributes:
         type: Fixed as "reasoning" to identify this content type.
         reasoning: The actual reasoning text.
+        summary: Optional human-readable reasoning summary.
         signature: Optional signature associated with the reasoning.
         redacted: Flag indicating if the reasoning has been redacted.
     """
 
     type: Literal["reasoning"] = "reasoning"  # type: ignore
     reasoning: str
+    summary: str | None = None
     signature: str | None = None
     redacted: bool = False
+
+    @property
+    def display_reasoning(self) -> str:
+        return self.summary if self.redacted and self.summary else self.reasoning
 
 
 # Content type discriminated union

@@ -52,18 +52,40 @@ export const getToolCallDisplayContent = (tool: ToolCall) =>
     ? tool.view.content
     : `${tool.function}(${formatToolCallData(tool)})`;
 
-export function getReasoningContent(
+type ReasoningDisplayInfo = {
+  text: string;
+  isSummary: boolean;
+};
+
+function getReasoningDisplayInfo(
   content: string | Content[]
-): string | null {
+): ReasoningDisplayInfo | null {
   if (typeof content === 'string') {
     return null;
   }
-  // Find the first reasoning content item
+
   const reasoningItem = content.find(
-    (item): item is Content & { reasoning: string } =>
+    (item): item is Content & { reasoning: string; summary?: string | null } =>
       item.type === 'reasoning' && typeof item.reasoning === 'string'
   );
-  return reasoningItem ? reasoningItem.reasoning : null;
+  if (!reasoningItem) {
+    return null;
+  }
+
+  const hasSummary =
+    typeof reasoningItem.summary === 'string' &&
+    reasoningItem.summary.length > 0;
+  if (reasoningItem.redacted && hasSummary) {
+    return { text: reasoningItem.summary as string, isSummary: true };
+  }
+
+  return { text: reasoningItem.reasoning, isSummary: false };
+}
+
+export function getReasoningContent(
+  content: string | Content[]
+): string | null {
+  return getReasoningDisplayInfo(content)?.text ?? null;
 }
 
 type ContentIndices = {
@@ -272,10 +294,12 @@ export function MessageBox({
 
   // Extract content texts
   const mainTextContent = useMemo(() => getMainTextContent(message), [message]);
-  const reasoningContent = useMemo(
-    () => getReasoningContent(message.content),
+  const reasoningDisplay = useMemo(
+    () => getReasoningDisplayInfo(message.content),
     [message.content]
   );
+  const reasoningContent = reasoningDisplay?.text ?? null;
+  const showingReasoningSummary = reasoningDisplay?.isSummary ?? false;
 
   // Compute the content indices for citation context
   const contentIndices = useMemo(
@@ -533,6 +557,9 @@ export function MessageBox({
         data-citation-context={JSON.stringify(reasoningContext)}
         className="mb-2 px-2 py-2 bg-muted border-l-2 border-border text-xs text-primary italic whitespace-pre-wrap [overflow-wrap:anywhere] max-w-full overflow-x-auto font-mono rounded custom-scrollbar"
       >
+        <div className="mb-0.5 text-[10px] not-italic text-muted-foreground">
+          {showingReasoningSummary ? 'Reasoning summary' : 'Reasoning'}
+        </div>
         <SegmentedText
           text={reasoningContent}
           intervals={intervals}

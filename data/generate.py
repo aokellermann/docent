@@ -216,6 +216,22 @@ def create_short_conversation_transcript(
         )
         messages.append(assistant_msg3)
 
+        assistant_msg4 = AssistantMessage(
+            content=[
+                ContentReasoning(
+                    reasoning="3f52e6d0-8ab2-4f9a-92e7-df5f3f7b7a08-redacted-chunk",
+                    summary=f"I first identify the key parts of {topic}, then provide a concise practical framing.",
+                    redacted=True,
+                    signature=str(uuid4()),
+                ),
+                ContentText(
+                    text=f"I focused on the core concepts of {topic} and summarized a practical path."
+                ),
+            ],
+            metadata=metadata_patterns[0],
+        )
+        messages.append(assistant_msg4)
+
     return Transcript(
         id=transcript_id,
         name=name,

@@ -13,6 +13,7 @@ export interface Content {
   type: 'text' | 'image' | 'reasoning';
   text?: string;
   reasoning?: string;
+  summary?: string | null;
   signature?: string | null;
   redacted?: boolean;
   refusal?: string | null;

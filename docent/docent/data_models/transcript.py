@@ -179,7 +179,7 @@ def format_chat_message(
     if isinstance(message, AssistantMessage) and message.content:
         for content in message.content:
             if isinstance(content, ContentReasoning):
-                cur_content = f"<reasoning>\n{content.reasoning}\n</reasoning>\n"
+                cur_content = f"<reasoning>\n{content.display_reasoning}\n</reasoning>\n"
 
     # Main content text
     cur_content += message.text
