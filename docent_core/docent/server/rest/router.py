@@ -1015,6 +1015,7 @@ class AgentRunIdsResponse(BaseModel):
 
 class AgentRunCountResponse(BaseModel):
     count: int
+    capped: bool = False
 
 
 class TranslateMessageRequest(BaseModel):
@@ -1074,8 +1075,8 @@ async def get_agent_run_count(
     ctx: ViewContext = Depends(get_default_view_ctx),
     _: None = Depends(require_view_permission(Permission.READ)),
 ) -> AgentRunCountResponse:
-    count = await mono_svc.count_base_agent_runs(ctx)
-    return AgentRunCountResponse(count=count)
+    count, capped = await mono_svc.count_base_agent_runs(ctx)
+    return AgentRunCountResponse(count=count, capped=capped)
 
 
 @user_router.post("/{collection_id}/translate_message")

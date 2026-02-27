@@ -108,6 +108,7 @@ interface AgentRunIdsResponse {
 
 interface AgentRunCountResponse {
   count: number;
+  capped: boolean;
 }
 
 export interface CollectionCounts {

@@ -2320,19 +2320,26 @@ class MonoService:
 
             return ([], 0)
 
-    async def count_base_agent_runs(self, ctx: ViewContext) -> int:
+    async def count_base_agent_runs(self, ctx: ViewContext) -> tuple[int, bool]:
+        """Returns (count, capped) where capped=True means the real total may be higher."""
         # Fast path: use the materialized view when there's no base filter
         if ctx.base_filter is None:
             counts = await self.batch_count_collection_agent_runs([ctx.collection_id])
-            return counts.get(ctx.collection_id, 0) or 0
+            return (counts.get(ctx.collection_id, 0) or 0, False)
 
+        # Cap the scan to avoid slow count(*) over large filtered sets.
+        # This is only used for pagination, so a capped count is fine.
+        COUNT_CAP = 1_000
         async with self.db.session() as session:
-            query = select(func.count()).select_from(SQLAAgentRun)
-            query = ctx.apply_base_filter(query)
+            subq = select(literal(1).label("x")).select_from(SQLAAgentRun)
+            subq = ctx.apply_base_filter(subq)
+            subq = subq.limit(COUNT_CAP + 1).subquery()
 
-            result = await session.execute(query)
-            count = result.scalar_one()
-            return count
+            result = await session.execute(select(func.count()).select_from(subq))
+            raw_count = result.scalar_one()
+            if raw_count > COUNT_CAP:
+                return (COUNT_CAP, True)
+            return (raw_count, False)
 
     #########
     # Views #

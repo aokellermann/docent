@@ -460,6 +460,7 @@ export default function ExperimentViewer({
       skip: !collectionId || appliedBaseFilter === undefined,
     });
   const totalAgentRunCount = agentRunCountData?.count;
+  const isCountCapped = agentRunCountData?.capped ?? false;
   const resolvedTotalPages = useMemo(() => {
     if (totalAgentRunCount === undefined) {
       return null;
@@ -1336,7 +1337,7 @@ export default function ExperimentViewer({
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1">
-                  {`${totalAgentRunCount ?? agentRunIds?.length ?? 0} agent runs matching the current view`}
+                  {`${isCountCapped ? `${totalAgentRunCount}+` : (totalAgentRunCount ?? agentRunIds?.length ?? 0)} agent runs matching the current view`}
                   {isCountFetching && (
                     <Loader2 className="h-3 w-3 animate-spin" />
                   )}
