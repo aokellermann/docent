@@ -146,6 +146,14 @@ resource "aws_instance" "bastion" {
     Deployment = var.deployment
     Role       = "bastion"
   }
+
+  # The launch template references data.aws_ami with most_recent=true,
+  # so a new AMI release changes the template and would force instance
+  # replacement on every apply. Ignore that drift — update the bastion
+  # manually (terminate + apply) when a new AMI is actually desired.
+  lifecycle {
+    ignore_changes = [launch_template]
+  }
 }
 
 # The bastion isn't part of the application, so it wouldn't get overloaded by high traffic the way the db/API/worker would.
