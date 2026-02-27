@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
 
-import { type Rubric } from '@/app/store/rubricSlice';
+import { type Rubric } from '@/app/types/rubricTypes';
 import {
   useGetRubricQuery,
   useGetLatestRubricVersionQuery,

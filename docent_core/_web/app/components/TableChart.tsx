@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { useAppSelector } from '../store/hooks';
 import { cn } from '@/lib/utils';
 import { ChartData, getScoreAt } from '../utils/chartDataUtils';
 import ChartContainer from './ChartContainer';
@@ -49,8 +48,13 @@ const getFilterTitle = (
   return `Filter to ${rowName}: ${rowValue}`;
 };
 
-export default function TableChart({ chartData }: { chartData: ChartData }) {
-  const { collectionId } = useAppSelector((state) => state.collection);
+export default function TableChart({
+  chartData,
+  collectionId,
+}: {
+  chartData: ChartData;
+  collectionId: string;
+}) {
   const { handleCellClick, handleDimensionClick } =
     useChartFilters(collectionId);
 

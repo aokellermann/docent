@@ -1,7 +1,7 @@
 'use client';
 
 import { AlertTriangle } from 'lucide-react';
-import { JudgeResultWithCitations } from '@/app/store/rubricSlice';
+import { JudgeResultWithCitations } from '@/app/types/rubricTypes';
 
 type FailureError = {
   type?: string;

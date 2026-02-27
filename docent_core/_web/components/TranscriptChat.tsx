@@ -7,7 +7,7 @@ import {
   SuggestedMessage,
 } from '@/app/dashboard/[collection_id]/components/chat/ChatArea';
 import { ChatHeader } from '@/app/dashboard/[collection_id]/components/chat/ChatHeader';
-import { ModelOption } from '@/app/store/rubricSlice';
+import { ModelOption } from '@/app/types/rubricTypes';
 import { AgentRunJudgeResults } from '@/app/api/rubricApi';
 import { useTranscriptChat } from '@/app/hooks/use-transcript-chat';
 import { useGetChatModelsQuery } from '@/app/api/chatApi';

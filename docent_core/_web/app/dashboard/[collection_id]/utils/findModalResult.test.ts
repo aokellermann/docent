@@ -3,7 +3,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { SchemaDefinition } from '@/app/types/schema';
 import type { AgentRunJudgeResults } from '@/app/api/rubricApi';
-import type { JudgeResultWithCitations } from '@/app/store/rubricSlice';
+import type { JudgeResultWithCitations } from '@/app/types/rubricTypes';
 import { findModalResult } from './findModalResult';
 
 const createResult = (

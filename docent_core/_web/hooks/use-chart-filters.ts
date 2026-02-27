@@ -1,12 +1,15 @@
 import { useCallback } from 'react';
 import { v4 as uuid4 } from 'uuid';
-import { PrimitiveFilter } from '../app/types/collectionTypes';
-import { replaceFilters } from '../app/store/collectionSlice';
-import { useGetChartMetadataQuery } from '../app/api/chartApi';
-import { useAppDispatch } from '../app/store/hooks';
+import {
+  type CollectionFilter,
+  type ComplexFilter,
+  type PrimitiveFilter,
+} from '@/app/types/collectionTypes';
+import { useGetChartMetadataQuery } from '@/app/api/chartApi';
+import { usePostBaseFilterMutation } from '@/app/api/collectionApi';
 
 export function useChartFilters(collectionId: string | null | undefined) {
-  const dispatch = useAppDispatch();
+  const [postBaseFilter] = usePostBaseFilterMutation();
 
   const { data: chartMetadata } = useGetChartMetadataQuery(
     { collectionId: collectionId! },
@@ -43,6 +46,55 @@ export function useChartFilters(collectionId: string | null | undefined) {
     [chartMetadata?.dimensions, chartMetadata?.measures]
   );
 
+  const dedupePrimitiveFilters = useCallback(
+    (filters: CollectionFilter[]): CollectionFilter[] => {
+      const seenFilterKeys = new Set<string>();
+      return filters.reduceRight<CollectionFilter[]>((acc, filter) => {
+        if (filter.type !== 'primitive') {
+          return [filter, ...acc];
+        }
+
+        const keyPath = filter.key_path?.join('.') || '';
+        const filterKey = `${keyPath}:${filter.value}:${filter.op}`;
+        if (seenFilterKeys.has(filterKey)) {
+          return acc;
+        }
+
+        seenFilterKeys.add(filterKey);
+        return [filter, ...acc];
+      }, []);
+    },
+    []
+  );
+
+  const applyFilters = useCallback(
+    async (filters: PrimitiveFilter[]) => {
+      if (!collectionId || filters.length === 0) {
+        return;
+      }
+
+      const dedupedFilters = dedupePrimitiveFilters(filters);
+      const nextFilter: ComplexFilter = {
+        id: uuid4(),
+        name: null,
+        type: 'complex',
+        op: 'and',
+        supports_sql: true,
+        filters: dedupedFilters,
+      };
+
+      try {
+        await postBaseFilter({
+          collection_id: collectionId,
+          filter: nextFilter,
+        }).unwrap();
+      } catch (error) {
+        console.error('Failed to apply chart filter', error);
+      }
+    },
+    [collectionId, dedupePrimitiveFilters, postBaseFilter]
+  );
+
   const handleCellClick = useCallback(
     (
       xKey: string,
@@ -58,27 +110,27 @@ export function useChartFilters(collectionId: string | null | undefined) {
           (f): f is PrimitiveFilter => f !== undefined
         );
         if (validFilters.length > 0) {
-          dispatch(replaceFilters(validFilters));
+          void applyFilters(validFilters);
         }
       } else {
         // 1D case: add single filter
         const filter = createFilter(xKey, xValue);
         if (filter) {
-          dispatch(replaceFilters([filter]));
+          void applyFilters([filter]);
         }
       }
     },
-    [createFilter]
+    [applyFilters, createFilter]
   );
 
   const handleDimensionClick = useCallback(
     (dimKey: string, dimValue: string) => {
       const filter = createFilter(dimKey, dimValue);
       if (filter) {
-        dispatch(replaceFilters([filter]));
+        void applyFilters([filter]);
       }
     },
-    [createFilter]
+    [applyFilters, createFilter]
   );
 
   return {

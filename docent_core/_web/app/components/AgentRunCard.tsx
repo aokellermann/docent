@@ -1,7 +1,7 @@
 'use client';
 import { navToAgentRun } from '@/lib/nav';
-import { useRouter } from 'next/navigation';
-import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { useParams, useRouter } from 'next/navigation';
+import { useAppDispatch } from '../store/hooks';
 import { setAgentRunLeftSidebarOpen } from '../store/transcriptSlice';
 import { AgentRunMetadata } from './AgentRunMetadata';
 import { cn } from '@/lib/utils';
@@ -20,9 +20,11 @@ export default function AgentRunCard({
   isActive,
 }: AgentRunCardProps) {
   const router = useRouter();
+  const params = useParams<{ collection_id?: string | string[] }>();
   const dispatch = useAppDispatch();
-  // Collection slice
-  const collectionId = useAppSelector((state) => state.collection.collectionId);
+  const collectionId = Array.isArray(params?.collection_id)
+    ? params.collection_id[0]
+    : params?.collection_id;
   const shortUuid = agentRunId.split('-')[0];
   return (
     <div

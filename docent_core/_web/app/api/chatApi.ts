@@ -3,7 +3,7 @@ import { BASE_URL } from '@/app/constants';
 import sseService from '../services/sseService';
 import { ChatMessage } from '@/app/types/transcriptTypes';
 
-import { ModelOption } from '@/app/store/rubricSlice';
+import { ModelOption } from '@/app/types/rubricTypes';
 
 export type LLMContextSpec = {
   version: string;
@@ -143,7 +143,7 @@ export const chatApi = createApi({
       keepUnusedDataFor: 30, // Keep cache for 30 seconds to allow state updates
       async onCacheEntryAdded(
         { collectionId, runId, jobId },
-        { dispatch, updateCachedData, cacheEntryRemoved }
+        { updateCachedData, cacheEntryRemoved }
       ) {
         const url = `/rest/chat/${collectionId}/${runId}/job/${jobId}/listen`;
 
@@ -161,8 +161,7 @@ export const chatApi = createApi({
             updateCachedData((draft) => {
               draft.isSSEConnected = false;
             });
-          },
-          dispatch
+          }
         );
 
         await cacheEntryRemoved;
@@ -274,7 +273,7 @@ export const chatApi = createApi({
       keepUnusedDataFor: 30,
       async onCacheEntryAdded(
         { jobId },
-        { dispatch, updateCachedData, cacheEntryRemoved }
+        { updateCachedData, cacheEntryRemoved }
       ) {
         const url = `/rest/chat/conversation/job/${jobId}/listen`;
 
@@ -292,8 +291,7 @@ export const chatApi = createApi({
             updateCachedData((draft) => {
               draft.isSSEConnected = false;
             });
-          },
-          dispatch
+          }
         );
 
         await cacheEntryRemoved;

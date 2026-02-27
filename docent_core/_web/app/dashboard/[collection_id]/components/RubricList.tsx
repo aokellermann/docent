@@ -8,8 +8,7 @@ import {
   Loader2,
   ClipboardCopyIcon,
 } from 'lucide-react';
-import { useAppSelector } from '@/app/store/hooks';
-import { type Rubric } from '@/app/store/rubricSlice';
+import { type Rubric } from '@/app/types/rubricTypes';
 import { useParams, useRouter } from 'next/navigation';
 import { useCreateOrGetRefinementSessionMutation } from '@/app/api/refinementApi';
 import {
@@ -315,10 +314,10 @@ function RubricCard({
 }
 
 export default function RubricList() {
-  const params = useParams();
-  const collectionId = useAppSelector((state) => state.collection.collectionId);
-  const effectiveCollectionId =
-    collectionId || (params?.collection_id as string | undefined);
+  const params = useParams<{ collection_id?: string | string[] }>();
+  const effectiveCollectionId = Array.isArray(params?.collection_id)
+    ? params.collection_id[0]
+    : params?.collection_id;
 
   // Check write permissions
   const hasWritePermission = useHasCollectionWritePermission();

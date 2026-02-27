@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useAppSelector, useAppDispatch } from '../store/hooks';
+import { useAppDispatch } from '../store/hooks';
 import dynamic from 'next/dynamic';
+import { useParams } from 'next/navigation';
 
 const Chart = dynamic(() => import('./Chart'), {
   ssr: false,
@@ -39,7 +40,10 @@ import { useGetCollectionNameQuery } from '../api/collectionApi';
 const MAX_AGENT_RUNS_FOR_CHARTS = 10_000;
 
 export function ChartsArea() {
-  const collectionId = useAppSelector((state) => state.collection.collectionId);
+  const params = useParams<{ collection_id?: string | string[] }>();
+  const collectionId = Array.isArray(params?.collection_id)
+    ? params.collection_id[0]
+    : params?.collection_id;
   const hasWritePermission = useHasCollectionWritePermission();
   const { data: collectionData, isLoading: isCollectionLoading } =
     useGetCollectionNameQuery(collectionId ?? skipToken);
@@ -348,6 +352,7 @@ export function ChartsArea() {
       {activeChart && (
         <div className="flex flex-col flex-1 bg-background border border-border rounded-b-md rounded-tr-md min-h-0">
           <ChartSettings
+            collectionId={collectionId}
             chart={activeChart}
             onChange={async (chart: ChartSpec) => {
               if (collectionId) {
@@ -363,7 +368,7 @@ export function ChartsArea() {
             id={getChartExportElementId(activeChart.id)}
             className="flex flex-col min-h-0 flex-1"
           >
-            <Chart chart={activeChart} />
+            <Chart chart={activeChart} collectionId={collectionId} />
           </div>
         </div>
       )}

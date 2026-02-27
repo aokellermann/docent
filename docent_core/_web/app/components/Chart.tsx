@@ -6,7 +6,6 @@ import { useMemo, useCallback } from 'react';
 import TableChart from './TableChart';
 import ChartContainer from './ChartContainer';
 import { ChartSpec } from '../types/collectionTypes';
-import { useAppSelector } from '../store/hooks';
 import { ChartData, getScoreAt, parseChartData } from '../utils/chartDataUtils';
 import { useGetChartDataQuery } from '../api/chartApi';
 import { useChartFilters } from '../../hooks/use-chart-filters';
@@ -19,8 +18,13 @@ export interface GraphDatum {
   [key: string]: GraphValue;
 }
 
-export default function Chart({ chart }: { chart: ChartSpec }) {
-  const collectionId = useAppSelector((state) => state.collection.collectionId);
+export default function Chart({
+  chart,
+  collectionId,
+}: {
+  chart: ChartSpec;
+  collectionId: string;
+}) {
   const { handleCellClick } = useChartFilters(collectionId);
 
   const {
@@ -86,7 +90,9 @@ export default function Chart({ chart }: { chart: ChartSpec }) {
       <LineChart chartData={chartData} handleCellClick={handleCellClick} />
     );
   } else if (chart.chart_type === 'table') {
-    chartContent = <TableChart chartData={chartData} />;
+    chartContent = (
+      <TableChart chartData={chartData} collectionId={collectionId} />
+    );
   }
 
   if (!chartContent) {

@@ -26,7 +26,6 @@ import { toast } from 'sonner';
 
 import { CollectionsTable } from '../components/CollectionsTable';
 import { UserProfile } from '../components/auth/UserProfile';
-import { resetCollectionSlice } from '../store/collectionSlice';
 import { useAppDispatch } from '../store/hooks';
 import { resetTranscriptSlice } from '../store/transcriptSlice';
 import { useRequireUserContext } from '../contexts/UserContext';
@@ -57,8 +56,7 @@ export default function HomePage() {
    * TODO(mengk): get rid of this!!!
    */
   useEffect(() => {
-    // Clear out old state
-    dispatch(resetCollectionSlice());
+    // Clear out old transcript state
     dispatch(resetTranscriptSlice());
     // TODO(mengk): call thunks to cancel the transcript requests too
   }, [dispatch]);

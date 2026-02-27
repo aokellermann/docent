@@ -1,8 +1,11 @@
 // const useHasCollectionPermission = (collectionId: string, required)
 
+'use client';
+
+import { useParams } from 'next/navigation';
+
 import { PERMISSION_LEVELS, PermissionLevel } from '@/lib/permissions/types';
 import { useGetCollectionPermissionsQuery } from './collabSlice';
-import { useAppSelector } from '@/app/store/hooks';
 import { UserPermissions } from '@/app/services/permissionsService';
 
 const hasCollectionPermission = (
@@ -19,9 +22,11 @@ export const useHasCollectionPermission = (
   permission: PermissionLevel,
   collectionIdParam?: string
 ) => {
-  const collectionId =
-    useAppSelector((state) => state.collection.collectionId) ||
-    collectionIdParam;
+  const params = useParams<{ collection_id?: string | string[] }>();
+  const routeCollectionId = Array.isArray(params?.collection_id)
+    ? params.collection_id[0]
+    : params?.collection_id;
+  const collectionId = collectionIdParam ?? routeCollectionId;
   const { data: permissions } = useGetCollectionPermissionsQuery(
     collectionId || '',
     { skip: !collectionId }
@@ -30,12 +35,12 @@ export const useHasCollectionPermission = (
   return hasCollectionPermission(permissions, collectionId, permission);
 };
 
-export const useHasCollectionWritePermission = () => {
-  return useHasCollectionPermission('write');
+export const useHasCollectionWritePermission = (collectionIdParam?: string) => {
+  return useHasCollectionPermission('write', collectionIdParam);
 };
 
-export const useHasCollectionAdminPermission = () => {
-  return useHasCollectionPermission('admin');
+export const useHasCollectionAdminPermission = (collectionIdParam?: string) => {
+  return useHasCollectionPermission('admin', collectionIdParam);
 };
 
 export const useHasCollectionAdminPermissionForCollection = (

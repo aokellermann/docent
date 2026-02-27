@@ -2,16 +2,12 @@
 
 import { configureStore } from '@reduxjs/toolkit';
 
-import collectionReducer from './collectionSlice';
-import toastReducer from './toastSlice';
 import transcriptReducer from './transcriptSlice';
-import embedReducer from './embedSlice';
 import dqlChatReducer from './dqlChatSlice';
 import { collabApi } from '@/lib/permissions/collabSlice';
 import { chartApi } from '../api/chartApi';
 import { dataTableApi } from '../api/dataTableApi';
 import { rubricApi } from '../api/rubricApi';
-import rubricReducer from './rubricSlice';
 import { collectionApi } from '../api/collectionApi';
 import { refinementApi } from '../api/refinementApi';
 import { chatApi } from '../api/chatApi';
@@ -21,17 +17,11 @@ import { orgApi } from '../api/orgApi';
 import { statusApi } from '@/components/MaintenanceBanner';
 import { resultSetApi } from '../api/resultSetApi';
 import { filterApi } from '../api/filterApi';
-import refinementReducer from './refinementSlice';
 import savedFilterReducer from './savedFilterSlice';
 
 const store = configureStore({
   reducer: {
-    rubric: rubricReducer,
-    embed: embedReducer,
-    collection: collectionReducer,
     transcript: transcriptReducer,
-    toast: toastReducer,
-    refinement: refinementReducer,
     savedFilter: savedFilterReducer,
     dqlChat: dqlChatReducer,
     [collabApi.reducerPath]: collabApi.reducer,

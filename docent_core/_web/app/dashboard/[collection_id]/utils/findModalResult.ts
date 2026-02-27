@@ -1,5 +1,5 @@
 import type { AgentRunJudgeResults } from '@/app/api/rubricApi';
-import type { JudgeResultWithCitations } from '@/app/store/rubricSlice';
+import type { JudgeResultWithCitations } from '@/app/types/rubricTypes';
 import type { SchemaDefinition } from '@/app/types/schema';
 
 export function findModalResult(

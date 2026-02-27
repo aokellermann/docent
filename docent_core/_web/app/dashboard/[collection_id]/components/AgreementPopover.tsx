@@ -8,7 +8,7 @@ import {
 } from '@/components/ui/popover';
 import { Label } from '@/app/api/labelApi';
 import { cn } from '@/lib/utils';
-import { JudgeResultWithCitations } from '@/app/store/rubricSlice';
+import { JudgeResultWithCitations } from '@/app/types/rubricTypes';
 import { useLabelSets } from '@/providers/use-label-sets';
 import { SchemaDefinition } from '@/app/types/schema';
 import { AgentRunJudgeResults } from '@/app/api/rubricApi';

@@ -1,8 +1,8 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import { BASE_URL } from '@/app/constants';
 import sseService from '../services/sseService';
-import { RefinementAgentSession } from '@/app/store/refinementSlice';
-import { Rubric } from '@/app/store/rubricSlice';
+import { RefinementAgentSession } from '@/app/types/refinementTypes';
+import { Rubric } from '@/app/types/rubricTypes';
 import { collectionApi } from './collectionApi';
 
 export const refinementApi = createApi({
@@ -88,7 +88,7 @@ export const refinementApi = createApi({
       keepUnusedDataFor: 0,
       async onCacheEntryAdded(
         { collectionId, jobId },
-        { dispatch, updateCachedData, cacheEntryRemoved }
+        { updateCachedData, cacheEntryRemoved }
       ) {
         const url = `/rest/refinement/${collectionId}/refinement-job/${jobId}/listen`;
 
@@ -104,8 +104,7 @@ export const refinementApi = createApi({
             updateCachedData((draft) => {
               draft.isSSEConnected = false;
             });
-          },
-          dispatch
+          }
         );
 
         await cacheEntryRemoved;

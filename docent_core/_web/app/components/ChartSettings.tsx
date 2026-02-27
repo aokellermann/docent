@@ -17,7 +17,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useAppSelector } from '../store/hooks';
 import {
   ChartSpec,
   ChartDimension,
@@ -48,6 +47,7 @@ import { useHasCollectionWritePermission } from '@/lib/permissions/hooks';
 import { exportChartToPng, exportChartToCsv } from '../utils/exportChart';
 
 interface ChartSettingsProps {
+  collectionId: string;
   chart: ChartSpec;
   onChange: (chart: ChartSpec) => void;
 }
@@ -224,10 +224,13 @@ function DimensionSelect({
   );
 }
 
-export default function ChartSettings({ chart, onChange }: ChartSettingsProps) {
+export default function ChartSettings({
+  collectionId,
+  chart,
+  onChange,
+}: ChartSettingsProps) {
   const { x_key, y_key, series_key, runs_filter, data_table_id } = chart;
-  const collectionId = useAppSelector((state) => state.collection.collectionId);
-  const hasWritePermission = useHasCollectionWritePermission();
+  const hasWritePermission = useHasCollectionWritePermission(collectionId);
   const [showFilters, setShowFilters] = useState(false);
 
   const usesDataTable = !!data_table_id;

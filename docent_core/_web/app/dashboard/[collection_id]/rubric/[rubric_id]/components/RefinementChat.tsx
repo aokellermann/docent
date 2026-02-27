@@ -14,7 +14,7 @@ import {
   useStartRefinementSessionMutation,
 } from '@/app/api/refinementApi';
 import { useRefinementTab } from '@/providers/use-refinement-tab';
-import { RefinementAgentSession } from '@/app/store/refinementSlice';
+import { RefinementAgentSession } from '@/app/types/refinementTypes';
 import { skipToken } from '@reduxjs/toolkit/query';
 import { useRubricVersion } from '@/providers/use-rubric-version';
 import { useParams, useSearchParams } from 'next/navigation';

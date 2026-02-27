@@ -7,12 +7,10 @@ import {
   useRouter,
   useSearchParams,
 } from 'next/navigation';
-import React, { useEffect, Suspense } from 'react';
+import React, { Suspense } from 'react';
 import { SidebarProvider } from '@/components/ui/sidebar';
 
 import CollectionBreadcrumbs from '../../components/Breadcrumbs';
-import { setCollectionId } from '../../store/collectionSlice';
-import { useAppDispatch } from '../../store/hooks';
 import { useGetCollectionNameQuery } from '../../api/collectionApi';
 import { PageTitle } from '@/components/PageTitle';
 import { Button } from '@/components/ui/button';
@@ -47,7 +45,6 @@ export default function DocentDashboardClientLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const dispatch = useAppDispatch();
   const params = useParams();
   const collectionId = params.collection_id as string;
 
@@ -66,13 +63,6 @@ export default function DocentDashboardClientLayout({
   const pageTitle = sectionTitle
     ? `${collectionName} | ${sectionTitle}`
     : `${collectionName} | Docent`;
-
-  // Set the collection ID in the store
-  useEffect(() => {
-    if (collectionId) {
-      dispatch(setCollectionId(collectionId));
-    }
-  }, [collectionId, dispatch]);
 
   return (
     <SidebarProvider defaultOpen={false}>

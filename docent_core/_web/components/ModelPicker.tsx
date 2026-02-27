@@ -5,7 +5,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { ModelOption } from '@/app/store/rubricSlice';
+import { ModelOption } from '@/app/types/rubricTypes';
 import { cn } from '@/lib/utils';
 import { useMemo } from 'react';
 import { SingleCombobox, type ComboboxOption } from '@/app/components/Combobox';

@@ -10,7 +10,7 @@ import React, {
 } from 'react';
 import { skipToken } from '@reduxjs/toolkit/query';
 
-import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { useAppDispatch } from '../store/hooks';
 
 import { AgentRunTable, MAX_SELECTED_COLUMNS } from './AgentRunTable';
 import UploadRunsButton from './UploadRunsButton';
@@ -18,11 +18,6 @@ import UploadRunsDialog from './UploadRunsDialog';
 
 import { TranscriptFilterControls } from './TranscriptFilterControls';
 
-import {
-  setSorting,
-  selectSortField,
-  selectSortDirection,
-} from '../store/collectionSlice';
 import { setAgentRunLeftSidebarOpen } from '../store/transcriptSlice';
 import { useDragAndDrop } from '@/hooks/use-drag-drop';
 import {
@@ -38,7 +33,7 @@ import { INTERNAL_BASE_URL } from '@/app/constants';
 import { DEFAULT_DQL_QUERY } from '@/app/utils/dqlDefaults';
 
 import { navToAgentRun } from '@/lib/nav';
-import { useRouter } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import posthog from 'posthog-js';
 import {
   type CollectionFilter,
@@ -139,9 +134,11 @@ export default function ExperimentViewer({
   activeRunId?: string;
 }) {
   const dispatch = useAppDispatch();
+  const params = useParams<{ collection_id?: string | string[] }>();
+  const collectionId = Array.isArray(params?.collection_id)
+    ? params.collection_id[0]
+    : params?.collection_id;
 
-  // Get all state at the top level
-  const collectionId = useAppSelector((state) => state.collection.collectionId);
   const hasWritePermission = useHasCollectionWritePermission();
 
   const cachedState = useMemo(() => {
@@ -244,8 +241,8 @@ export default function ExperimentViewer({
     }
   }, [dqlStorageKey, dqlQuery]);
 
-  const sortField = useAppSelector(selectSortField);
-  const sortDirection = useAppSelector(selectSortDirection);
+  const [sortField, setSortField] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
   const router = useRouter();
 
@@ -338,6 +335,8 @@ export default function ExperimentViewer({
 
   useEffect(() => {
     setHasLoadedSortFromStorage(false);
+    setSortField(null);
+    setSortDirection('asc');
 
     if (!collectionId) {
       setHasLoadedSortFromStorage(true);
@@ -360,9 +359,8 @@ export default function ExperimentViewer({
             .sortDirection;
           const parsedField = typeof rawField === 'string' ? rawField : null;
           const parsedDirection = rawDirection === 'desc' ? 'desc' : 'asc';
-          dispatch(
-            setSorting({ field: parsedField, direction: parsedDirection })
-          );
+          setSortField(parsedField);
+          setSortDirection(parsedDirection);
         }
       }
     } catch (error) {
@@ -373,7 +371,7 @@ export default function ExperimentViewer({
     } finally {
       setHasLoadedSortFromStorage(true);
     }
-  }, [collectionId, dispatch]);
+  }, [collectionId]);
 
   useEffect(() => {
     if (!hasLoadedSortFromStorage || !collectionId) {
@@ -1153,9 +1151,10 @@ export default function ExperimentViewer({
 
   const handleSortingChange = useCallback(
     (field: string | null, direction: 'asc' | 'desc') => {
-      dispatch(setSorting({ field, direction }));
+      setSortField(field);
+      setSortDirection(direction);
     },
-    [dispatch]
+    []
   );
 
   const normalizeFilterValue = useCallback((value: unknown) => {

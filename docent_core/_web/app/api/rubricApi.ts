@@ -4,7 +4,7 @@ import {
   Rubric,
   JudgeResultWithCitations,
   ModelOption,
-} from '@/app/store/rubricSlice';
+} from '@/app/types/rubricTypes';
 import { ComplexFilter, CollectionFilter } from '@/app/types/collectionTypes';
 import { collectionApi } from './collectionApi';
 import { TranscriptMetadataField } from '../types/experimentViewerTypes';

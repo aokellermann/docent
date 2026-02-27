@@ -5,7 +5,6 @@
 
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import { Comment } from '../api/labelApi';
-import { AgentRun, SolutionSummary } from '../types/transcriptTypes';
 import { CitationTarget, InlineCitation } from '../types/citationTypes';
 import { TextSelectionItem } from '../../providers/use-text-selection';
 
@@ -15,16 +14,6 @@ export const getTaSessionStorageKey = (agentRunId: string) =>
   `ta-session-${agentRunId}`;
 
 export interface TranscriptState {
-  // Cur
-  curAgentRun?: AgentRun;
-  // Dashboard agent run view
-  dashboardHasRunPreview?: boolean;
-  dashboardScrollToBlockIdx?: number;
-  dashboardScrollToTranscriptIdx?: number;
-  // Solution summary
-  solutionSummary?: SolutionSummary;
-  loadingSolutionSummaryForTranscriptId?: string;
-  solutionSummaryTaskId?: string;
   // All citations
   allCitations: Record<string, InlineCitation[]>;
   hoveredCommentId: string | null;
@@ -62,48 +51,6 @@ export const transcriptSlice = createSlice({
   name: 'transcript',
   initialState,
   reducers: {
-    setCurAgentRun: (state, action: PayloadAction<AgentRun | undefined>) => {
-      state.curAgentRun = action.payload;
-    },
-    setSolutionSummary: (
-      state,
-      action: PayloadAction<SolutionSummary | undefined>
-    ) => {
-      state.solutionSummary = action.payload;
-    },
-    setLoadingSolutionSummaryForTranscriptId: (
-      state,
-      action: PayloadAction<string | undefined>
-    ) => {
-      state.loadingSolutionSummaryForTranscriptId = action.payload;
-    },
-    setSolutionSummaryTaskId: (
-      state,
-      action: PayloadAction<string | undefined>
-    ) => {
-      state.solutionSummaryTaskId = action.payload;
-    },
-    onFinishLoadingSolutionSummary: (state) => {
-      state.loadingSolutionSummaryForTranscriptId = undefined;
-      state.solutionSummaryTaskId = undefined;
-    },
-    setDashboardAgentRunView: (
-      state,
-      action: PayloadAction<{
-        dashboardHasRunPreview: boolean;
-        blockIdx?: number;
-        transcriptIdx?: number;
-      }>
-    ) => {
-      state.dashboardHasRunPreview = action.payload.dashboardHasRunPreview;
-      state.dashboardScrollToBlockIdx = action.payload.blockIdx;
-      state.dashboardScrollToTranscriptIdx = action.payload.transcriptIdx;
-    },
-    clearDashboardAgentRunView: (state) => {
-      state.dashboardHasRunPreview = false;
-      state.dashboardScrollToBlockIdx = undefined;
-      state.dashboardScrollToTranscriptIdx = undefined;
-    },
     setRunCitations: (
       state,
       action: PayloadAction<Record<string, InlineCitation[]>>
@@ -168,11 +115,6 @@ export const transcriptSlice = createSlice({
         created_at: '',
       };
     },
-    updateDraftContent: (state, action: PayloadAction<string>) => {
-      if (state.draftComment) {
-        state.draftComment.content = action.payload;
-      }
-    },
     clearDraftComment: (state) => {
       state.draftComment = null;
     },
@@ -186,13 +128,6 @@ export const transcriptSlice = createSlice({
 });
 
 export const {
-  setCurAgentRun,
-  setSolutionSummary,
-  setLoadingSolutionSummaryForTranscriptId,
-  setSolutionSummaryTaskId,
-  onFinishLoadingSolutionSummary,
-  setDashboardAgentRunView,
-  clearDashboardAgentRunView,
   resetTranscriptSlice,
   setRunCitations,
   setAgentRunSidebarTab,
@@ -211,7 +146,6 @@ export const {
   // Text selections
   setTextSelections,
   addCitationToDraft,
-  updateDraftContent,
   clearDraftComment,
   setCommentSidebarCollapsed,
 } = transcriptSlice.actions;

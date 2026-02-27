@@ -9,7 +9,7 @@ import {
 import { ConversationContextSection } from '@/components/conversation/ConversationContextSection';
 import { ChatArea } from '@/app/dashboard/[collection_id]/components/chat/ChatArea';
 import { useGetChatModelsQuery } from '@/app/api/chatApi';
-import { ModelOption } from '@/app/store/rubricSlice';
+import { ModelOption } from '@/app/types/rubricTypes';
 import ModelPicker from '@/components/ModelPicker';
 import {
   ResizableHandle,

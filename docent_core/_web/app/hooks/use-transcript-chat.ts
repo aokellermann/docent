@@ -14,7 +14,7 @@ import {
 } from '@/app/api/chatApi';
 import { useAppDispatch } from '@/app/store/hooks';
 import { setRunCitations } from '@/app/store/transcriptSlice';
-import { JudgeResultWithCitations, ModelOption } from '@/app/store/rubricSlice';
+import { JudgeResultWithCitations, ModelOption } from '@/app/types/rubricTypes';
 import { ChatMessage } from '../types/transcriptTypes';
 import { InlineCitation } from '../types/citationTypes';
 

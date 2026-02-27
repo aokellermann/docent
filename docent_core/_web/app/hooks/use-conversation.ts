@@ -6,7 +6,7 @@ import {
   useListenToConversationJobQuery,
   usePostConversationMessageMutation,
 } from '@/app/api/chatApi';
-import { ModelOption } from '@/app/store/rubricSlice';
+import { ModelOption } from '@/app/types/rubricTypes';
 import { ChatMessage } from '@/app/types/transcriptTypes';
 
 export interface UseConversationOptions {

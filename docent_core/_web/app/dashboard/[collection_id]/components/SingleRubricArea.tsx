@@ -4,7 +4,7 @@ import { useCallback, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useHasCollectionWritePermission } from '@/lib/permissions/hooks';
 
-import { Rubric } from '../../../store/rubricSlice';
+import { Rubric } from '@/app/types/rubricTypes';
 
 import {
   Loader2,

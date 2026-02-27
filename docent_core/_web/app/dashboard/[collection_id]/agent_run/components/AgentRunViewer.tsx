@@ -64,7 +64,7 @@ import {
 } from './TranscriptSearchBar';
 import { useGetAgentRunWithTreeQuery } from '@/app/api/collectionApi';
 import { skipToken } from '@reduxjs/toolkit/query';
-import { useSearchParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { Comment, useGetCommentsForAgentRunQuery } from '@/app/api/labelApi';
 import {
   CommentSidebarHeader,
@@ -316,18 +316,18 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
     ref
   ) => {
     const dispatch = useAppDispatch();
+    const params = useParams<{ collection_id?: string | string[] }>();
+    const routeCollectionId = Array.isArray(params?.collection_id)
+      ? params.collection_id[0]
+      : params?.collection_id;
 
-    const collectionIdFromRedux = useAppSelector(
-      (state) => state.collection?.collectionId
-    );
-
-    // Use prop if provided, otherwise fall back to Redux
-    const collectionId = collectionIdProp ?? collectionIdFromRedux;
+    // Use prop if provided, otherwise fall back to URL params.
+    const collectionId = collectionIdProp ?? routeCollectionId;
 
     const searchParams = useSearchParams();
     const initialCommentId = searchParams.get('comment_id');
 
-    const hasWritePermission = useHasCollectionWritePermission();
+    const hasWritePermission = useHasCollectionWritePermission(collectionId);
 
     // Full tree toggle (default off)
     const [fullTree, setFullTree] = useState(false);

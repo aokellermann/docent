@@ -23,7 +23,7 @@ import type {
   QueryHistoryEntry,
 } from '@/app/types/dataTableTypes';
 import ModelPicker from '@/components/ModelPicker';
-import { ModelOption } from '@/app/store/rubricSlice';
+import { ModelOption } from '@/app/types/rubricTypes';
 import { type ChatMessage } from '@/app/types/transcriptTypes';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';

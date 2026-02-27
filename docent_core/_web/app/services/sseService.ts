@@ -1,6 +1,6 @@
 import { BASE_URL } from '../constants';
 import { v4 as uuidv4 } from 'uuid';
-import { setToastNotification } from '../store/toastSlice';
+import { toast } from 'sonner';
 
 // Map to store active EventSource instances
 const eventSourcesMap: Record<string, EventSource> = {};
@@ -17,14 +17,12 @@ const generateTaskId = (): string => {
  * @param url The URL to connect to (must start with a leading slash)
  * @param onMessage Function to handle incoming messages
  * @param onFinish Function called when the connection is closed
- * @param dispatch Redux dispatch function for error handling
  * @returns An object containing the EventSource and a function to cancel the connection
  */
 const createEventSource = (
   url: string,
   onMessage: (data: any) => void,
-  onFinish: () => void,
-  dispatch: (action: any) => void // Add dispatch parameter
+  onFinish: () => void
 ): { eventSource: EventSource; onCancel: () => void } => {
   // Generate a unique task ID
   const taskId = generateTaskId();
@@ -49,27 +47,13 @@ const createEventSource = (
       onMessage(data);
     } catch (error) {
       console.error('Error parsing SSE data:', error);
-      dispatch(
-        setToastNotification({
-          title: 'Error parsing data',
-          description: 'Failed to parse server-sent event data',
-          variant: 'destructive',
-        })
-      );
+      toast.error('Failed to parse server-sent event data');
     }
   };
 
   // Define the error handler
   eventSource.onerror = (error) => {
     console.error('EventSource error:', error);
-    // dispatch(
-    //   setToastNotification({
-    //     title: 'Connection error',
-    //     description: 'Server-sent event connection failed',
-    //     variant: 'destructive',
-    //   })
-    // );
-    // closeConnection();
   };
 
   // Function to close the connection and clean up
@@ -96,8 +80,7 @@ function postEventStream(
   url: string,
   body: FormData,
   onMessage: (data: any) => void,
-  onFinish: () => void,
-  dispatch: (action: any) => void
+  onFinish: () => void
 ): { onCancel: () => void } {
   const taskId = generateTaskId();
 
@@ -158,13 +141,7 @@ function postEventStream(
               onMessage(data);
             } catch (error) {
               console.error('Error parsing SSE POST data:', error);
-              dispatch(
-                setToastNotification({
-                  title: 'Error parsing data',
-                  description: 'Failed to parse server-sent event data',
-                  variant: 'destructive',
-                })
-              );
+              toast.error('Failed to parse server-sent event data');
             }
           }
         }
@@ -172,13 +149,7 @@ function postEventStream(
     } catch (error) {
       if (!cancelled) {
         console.error('POST event stream error:', error);
-        dispatch(
-          setToastNotification({
-            title: 'Connection error',
-            description: 'Server-sent event connection failed',
-            variant: 'destructive',
-          })
-        );
+        toast.error('Server-sent event connection failed');
       }
     } finally {
       closeConnection();

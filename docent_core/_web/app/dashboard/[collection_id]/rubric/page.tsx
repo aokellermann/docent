@@ -15,7 +15,7 @@ import ModelPicker from '@/components/ModelPicker';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import type { ModelOption } from '@/app/store/rubricSlice';
+import type { ModelOption } from '@/app/types/rubricTypes';
 
 export default function RubricsPage() {
   const router = useRouter();
