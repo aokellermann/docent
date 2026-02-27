@@ -38,8 +38,8 @@ import PermissionDropdown from './PermissionDropdown';
 import { toast } from 'sonner';
 import { useRequireUserContext } from '@/app/contexts/UserContext';
 import {
+  useHasCollectionPermission,
   useHasCollectionAdminPermissionForCollection,
-  useHasCollectionWritePermissionForCollection,
 } from './hooks';
 
 const AddCollaborator = ({ collectionId }: { collectionId: string }) => {
@@ -290,8 +290,7 @@ const ShareViewPopover = ({ collectionId }: { collectionId: string }) => {
 
   const hasAdminPermission =
     useHasCollectionAdminPermissionForCollection(collectionId);
-  const hasWritePermission =
-    useHasCollectionWritePermissionForCollection(collectionId);
+  const hasWritePermission = useHasCollectionPermission('write', collectionId);
   const accessButtonLabel = hasWritePermission ? 'Read-write' : 'Read-only';
   const handleCopyCollectionLink = useCallback(async () => {
     try {
