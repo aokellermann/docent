@@ -54,12 +54,12 @@ private_api_cpu         = 4096
 private_api_memory      = 8192
 private_api_num_workers = 2
 privatelink_allowed_principals = [
-  # TODO: Replace with Bridgewater's AWS account ARN
-  # "arn:aws:iam::BRIDGEWATER_ACCOUNT_ID:root"
+  "arn:aws:iam::442167551954:root",
 ]
 api_gateway_allowed_cidrs = [
-  # TODO: Add Vercel egress IPs (https://vercel.com/docs/security/deployment-protection/ip-allowlisting)
-  # TODO: Add Transluce team IPs
+  "13.216.33.94/32",  # Vercel static egress (us-east-1)
+  "54.86.150.171/32", # Vercel static egress (us-east-1)
+  "162.227.164.33/32", # Testing only — remove after PrivateLink verification
 ]
 
 rds_alarm_sns_topic_arn = "arn:aws:sns:us-east-1:010526267928:RDS-CPU-Alarms"

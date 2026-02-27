@@ -30,6 +30,11 @@ on:
         required: false
         type: boolean
         default: false
+      use_private_api:
+        description: "Deploy API privately via NLB + PrivateLink"
+        required: false
+        type: boolean
+        default: false
 
 env:
   PROJECT_NAME: docent
@@ -173,6 +178,9 @@ jobs:
           SUFFIXES="worker telemetry-processing-worker telemetry-ingest-worker datadog-agent"
           if [ "${{ inputs.use_ecs_api }}" = "true" ]; then
             SUFFIXES="$SUFFIXES api"
+          fi
+          if [ "${{ inputs.use_private_api }}" = "true" ]; then
+            SUFFIXES="$SUFFIXES private-api"
           fi
           for suffix in $SUFFIXES; do
             service_name="${{ env.PROJECT_NAME }}-${{ inputs.deployment_id }}-$suffix"
