@@ -462,14 +462,14 @@ export default function ExperimentViewer({
   const totalAgentRunCount = agentRunCountData?.count;
   const isCountCapped = agentRunCountData?.capped ?? false;
   const resolvedTotalPages = useMemo(() => {
-    if (totalAgentRunCount === undefined) {
+    if (totalAgentRunCount === undefined || isCountCapped) {
       return null;
     }
     if (totalAgentRunCount <= 0) {
       return 1;
     }
     return Math.max(1, Math.ceil(totalAgentRunCount / AGENT_RUN_IDS_PAGE_SIZE));
-  }, [totalAgentRunCount]);
+  }, [totalAgentRunCount, isCountCapped]);
   const effectiveCurrentPage = useMemo(() => {
     if (resolvedTotalPages === null) {
       return currentPage;
