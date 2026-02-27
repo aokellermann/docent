@@ -1955,16 +1955,22 @@ class MonoService:
             numeric_clause = func.jsonb_typeof(json_expr) == "number"
             numeric_expr: ColumnElement[Any] = cast(ColumnElement[Any], text_expr.cast(Numeric))
 
-            query = (
-                select(
-                    func.min(numeric_expr).label("min_value"),
-                    func.max(numeric_expr).label("max_value"),
-                )
+            # Sample a subset of rows to avoid a full-table scan for min/max.
+            RANGE_SAMPLE_CAP = 1_000
+            sampled = (
+                select(numeric_expr.label("val"))
                 .select_from(SQLAAgentRun)
                 .where(
                     SQLAAgentRun.collection_id == ctx.collection_id,
                     numeric_clause,
                 )
+                .limit(RANGE_SAMPLE_CAP)
+                .subquery()
+            )
+
+            query = select(
+                func.min(sampled.c.val).label("min_value"),
+                func.max(sampled.c.val).label("max_value"),
             )
 
             result = await session.execute(query)
