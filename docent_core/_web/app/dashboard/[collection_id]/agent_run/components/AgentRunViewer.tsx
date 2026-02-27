@@ -6,6 +6,7 @@ import {
   ChevronRight,
   AlertCircle,
   MessageSquarePlus,
+  MessageSquare,
 } from 'lucide-react';
 import {
   forwardRef,
@@ -1567,6 +1568,123 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
 
     // Determine if we should show comments area
     const hasComments = comments.length > 0 || draftComment !== null;
+    const showInlineCommentPane =
+      !commentSidebarCollapsed && activeCommentTab === 'inline';
+    const showListCommentPane =
+      !commentSidebarCollapsed && activeCommentTab === 'list';
+
+    const messageBoxes = transcript?.messages.map((message, index) => {
+      const blockId = `t-${transcriptIdx}_b-${index}`;
+      const messageId = (message as any)?.id as string | undefined;
+      const hasTelemetry =
+        typeof messageId === 'string' &&
+        messageId.length > 0 &&
+        telemetryMessageIds.has(messageId);
+      const isMsgIntent =
+        metadataIntent?.type === 'message' &&
+        metadataIntent.transcriptId === selectedTranscriptId &&
+        metadataIntent.blockIdx === index;
+      const msgCitedKey = isMsgIntent ? metadataIntent?.citedKey : undefined;
+      const msgCitedRange = isMsgIntent ? metadataIntent?.textRange : undefined;
+
+      const citedTargets = getCitationsForBlock(
+        allCitations,
+        selectedCitation,
+        index,
+        selectedTranscriptId!
+      );
+
+      if (!selectedTranscriptId || !collectionId || !agentRunId) return null;
+
+      const blockComments = blockIdxToCommentsMap[index] ?? [];
+
+      const transcriptBlockContentItem: TranscriptBlockContentItem = {
+        item_type: 'block_content',
+        agent_run_id: agentRunId,
+        collection_id: collectionId,
+        transcript_id: selectedTranscriptId,
+        block_idx: index,
+      };
+
+      // Get search matches for this block (with content type info)
+      const blockSearchMatches = searchMatches.matchesByBlock.get(index) ?? [];
+
+      // Determine which match in this block is the current one (as index into blockSearchMatches)
+      const currentSearchMatchIndex = (() => {
+        if (
+          searchMatches.flatMatches.length === 0 ||
+          blockSearchMatches.length === 0
+        )
+          return null;
+        const currentMatch =
+          searchMatches.flatMatches[clampedCurrentMatchIndex];
+        if (currentMatch?.blockIdx !== index) return null;
+        // Find index in blockSearchMatches by comparing properties
+        return blockSearchMatches.findIndex(
+          (m) =>
+            m.start === currentMatch.start &&
+            m.contentType === currentMatch.contentType &&
+            m.localIndex === currentMatch.localIndex &&
+            m.toolCallIndex === currentMatch.toolCallIndex
+        );
+      })();
+
+      return (
+        <MessageBox
+          key={index}
+          message={message}
+          index={index}
+          blockId={blockId}
+          isHighlighted={highlightedBlock === blockId}
+          comments={blockComments}
+          citedTargets={citedTargets}
+          prettyPrintJsonMessages={prettyPrintJsonMessages}
+          setPrettyPrintJsonMessages={setPrettyPrintJsonMessages}
+          hasTelemetry={hasTelemetry}
+          metadataDialogControl={{
+            open: Boolean(isMsgIntent),
+            onOpenChange: (open) => {
+              setMetadataIntent(
+                open && selectedTranscriptId
+                  ? {
+                      type: 'message',
+                      transcriptId: selectedTranscriptId,
+                      blockIdx: index,
+                    }
+                  : null
+              );
+            },
+            citedKey: msgCitedKey,
+            citedTextRange: msgCitedRange,
+          }}
+          dataContext={transcriptBlockContentItem}
+          searchMatches={blockSearchMatches}
+          currentSearchMatchIndex={currentSearchMatchIndex}
+          onAddMetadataComment={
+            hasWritePermission
+              ? (key) =>
+                  handleAddComment({
+                    type: 'block_metadata',
+                    blockIdx: index,
+                    metadataKey: key,
+                  })
+              : undefined
+          }
+          onAddBlockComment={
+            hasWritePermission
+              ? () =>
+                  handleAddComment({
+                    type: 'block_content',
+                    blockIdx: index,
+                  })
+              : undefined
+          }
+          onBlockClick={() =>
+            hasComments ? handleBlockClick(index) : undefined
+          }
+        />
+      );
+    });
 
     return (
       <div className="h-full flex flex-col min-h-0 space-y-2">
@@ -1732,169 +1850,138 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                   defaultSize={75}
                   className="flex flex-col min-h-0 relative"
                 >
-                  {/* Fixed Headers Row */}
-                  <div className="flex flex-row border-border flex-shrink-0">
-                    {/* Transcript header */}
-                    <div
-                      className={cn(
-                        'flex-1 min-w-0 space-y-1',
-                        hasComments &&
-                          !commentSidebarCollapsed &&
-                          'border-r border-border'
-                      )}
-                    >
-                      <div className="flex items-center justify-between min-w-0">
-                        {selectedTranscriptId && (
-                          <div className="flex items-center space-x-1 min-w-0 overflow-hidden">
-                            {/* Only show toggle button if there are multiple transcripts and sidebar is hidden */}
-                            {shouldShowTranscriptNavigator &&
-                              !sidebarVisible && (
-                                <div
-                                  onMouseEnter={() => setSidebarHovering(true)}
-                                  onMouseLeave={() => setSidebarHovering(false)}
-                                  className="relative z-20"
-                                >
-                                  <button
-                                    onClick={() =>
-                                      setSidebarVisible(!sidebarVisible)
-                                    }
-                                    className="p-1 rounded text-muted-foreground hover:text-primary hover:bg-muted transition-colors"
-                                    aria-label="Show transcript hierarchy"
-                                  >
-                                    <FolderTree className="h-4 w-4" />
-                                  </button>
-                                </div>
-                              )}
-                            <span className="font-semibold text-sm">
-                              Transcript
-                            </span>
-                            <UuidPill uuid={selectedTranscriptId} />
-                            {(() => {
-                              const isTranscriptIntent =
-                                metadataIntent?.type === 'transcript' &&
-                                metadataIntent.transcriptId ===
-                                  selectedTranscriptId;
-                              const citedKey = isTranscriptIntent
-                                ? metadataIntent?.citedKey
-                                : undefined;
-                              const textRange = isTranscriptIntent
-                                ? metadataIntent?.textRange
-                                : undefined;
-                              return (
-                                <MetadataPopover.Root
-                                  open={Boolean(isTranscriptIntent)}
-                                  onOpenChange={(open) => {
-                                    setMetadataIntent(
-                                      open && selectedTranscriptId
-                                        ? {
-                                            type: 'transcript',
-                                            transcriptId: selectedTranscriptId,
-                                          }
-                                        : null
-                                    );
-                                  }}
-                                >
-                                  <MetadataPopover.DefaultTrigger />
-                                  <MetadataPopover.Content
-                                    title={`Transcript Metadata`}
-                                  >
-                                    <MetadataPopover.Body
-                                      metadata={
-                                        (selectedTranscriptId
-                                          ? transcriptsById[
-                                              selectedTranscriptId
-                                            ]
-                                          : undefined
-                                        )?.metadata || {}
-                                      }
-                                    >
-                                      {(md) => (
-                                        <MetadataBlock
-                                          metadata={md}
-                                          showSearchControls={true}
-                                          citedKey={citedKey}
-                                          textRange={textRange}
-                                          onAddComment={
-                                            hasWritePermission
-                                              ? (key) =>
-                                                  handleAddComment({
-                                                    type: 'transcript',
-                                                    metadataKey: key,
-                                                  })
-                                              : undefined
-                                          }
-                                        />
-                                      )}
-                                    </MetadataPopover.Body>
-                                  </MetadataPopover.Content>
-                                </MetadataPopover.Root>
-                              );
-                            })()}
-                          </div>
-                        )}
-                      </div>
+                  {/* Transcript header */}
+                  <div className="flex flex-col flex-shrink-0 space-y-1">
+                    <div className="flex items-center justify-between min-w-0">
                       {selectedTranscriptId && (
-                        <div className="text-xs text-muted-foreground flex items-center overflow-hidden truncate">
+                        <div className="flex items-center space-x-1 min-w-0 overflow-hidden">
+                          {/* Only show toggle button if there are multiple transcripts and sidebar is hidden */}
+                          {shouldShowTranscriptNavigator && !sidebarVisible && (
+                            <div
+                              onMouseEnter={() => setSidebarHovering(true)}
+                              onMouseLeave={() => setSidebarHovering(false)}
+                              className="relative z-20"
+                            >
+                              <button
+                                onClick={() =>
+                                  setSidebarVisible(!sidebarVisible)
+                                }
+                                className="p-1 rounded text-muted-foreground hover:text-primary hover:bg-muted transition-colors"
+                                aria-label="Show transcript hierarchy"
+                              >
+                                <FolderTree className="h-4 w-4" />
+                              </button>
+                            </div>
+                          )}
+                          <span className="font-semibold text-sm">
+                            Transcript
+                          </span>
+                          <UuidPill uuid={selectedTranscriptId} />
                           {(() => {
-                            const transcriptMetadata =
-                              transcriptsById[selectedTranscriptId]?.metadata ||
-                              {};
-                            const metadataKeys =
-                              Object.keys(transcriptMetadata);
-                            return metadataKeys.length > 0 ? (
-                              <>
-                                {Object.entries(transcriptMetadata).map(
-                                  ([key, value]) => (
-                                    <span key={key} className="mr-3">
-                                      <span className="font-medium text-muted-foreground">
-                                        {key}:
-                                      </span>{' '}
-                                      {formatMetadataValue(value)}
-                                    </span>
-                                  )
-                                )}
-                                ...
-                              </>
-                            ) : (
-                              <span className="text-muted-foreground/50">
-                                No transcript metadata
-                              </span>
+                            const isTranscriptIntent =
+                              metadataIntent?.type === 'transcript' &&
+                              metadataIntent.transcriptId ===
+                                selectedTranscriptId;
+                            const citedKey = isTranscriptIntent
+                              ? metadataIntent?.citedKey
+                              : undefined;
+                            const textRange = isTranscriptIntent
+                              ? metadataIntent?.textRange
+                              : undefined;
+                            return (
+                              <MetadataPopover.Root
+                                open={Boolean(isTranscriptIntent)}
+                                onOpenChange={(open) => {
+                                  setMetadataIntent(
+                                    open && selectedTranscriptId
+                                      ? {
+                                          type: 'transcript',
+                                          transcriptId: selectedTranscriptId,
+                                        }
+                                      : null
+                                  );
+                                }}
+                              >
+                                <MetadataPopover.DefaultTrigger />
+                                <MetadataPopover.Content
+                                  title={`Transcript Metadata`}
+                                >
+                                  <MetadataPopover.Body
+                                    metadata={
+                                      (selectedTranscriptId
+                                        ? transcriptsById[selectedTranscriptId]
+                                        : undefined
+                                      )?.metadata || {}
+                                    }
+                                  >
+                                    {(md) => (
+                                      <MetadataBlock
+                                        metadata={md}
+                                        showSearchControls={true}
+                                        citedKey={citedKey}
+                                        textRange={textRange}
+                                        onAddComment={
+                                          hasWritePermission
+                                            ? (key) =>
+                                                handleAddComment({
+                                                  type: 'transcript',
+                                                  metadataKey: key,
+                                                })
+                                            : undefined
+                                        }
+                                      />
+                                    )}
+                                  </MetadataPopover.Body>
+                                </MetadataPopover.Content>
+                              </MetadataPopover.Root>
                             );
                           })()}
                         </div>
                       )}
-                      {selectedTranscriptId &&
-                        (selectedTranscriptId
-                          ? transcriptsById[selectedTranscriptId]
-                          : undefined
-                        )?.transcript_group_id && (
-                          <TranscriptPath
-                            className={getSidebarStyles('')}
-                            path={buildTranscriptPath(
-                              selectedTranscriptId,
-                              transcriptsById,
-                              transcriptGroupsById
-                            )}
-                          />
-                        )}
                     </div>
-
-                    {/* Comment header (conditionally rendered) */}
-                    <div className="w-80">
-                      <CommentSidebarHeader
-                        isCollapsed={commentSidebarCollapsed}
-                        onToggleCollapsed={() =>
-                          dispatch(
-                            setCommentSidebarCollapsed(!commentSidebarCollapsed)
-                          )
-                        }
-                        activeTab={activeCommentTab}
-                        onTabChange={setActiveCommentTab}
-                        showAllTranscripts={showAllTranscripts}
-                        onSetShowAllTranscripts={setShowAllTranscripts}
-                        commentCount={filteredComments.length}
-                      />
-                    </div>
+                    {selectedTranscriptId && (
+                      <div className="text-xs text-muted-foreground flex items-center overflow-hidden truncate">
+                        {(() => {
+                          const transcriptMetadata =
+                            transcriptsById[selectedTranscriptId]?.metadata ||
+                            {};
+                          const metadataKeys = Object.keys(transcriptMetadata);
+                          return metadataKeys.length > 0 ? (
+                            <>
+                              {Object.entries(transcriptMetadata).map(
+                                ([key, value]) => (
+                                  <span key={key} className="mr-3">
+                                    <span className="font-medium text-muted-foreground">
+                                      {key}:
+                                    </span>{' '}
+                                    {formatMetadataValue(value)}
+                                  </span>
+                                )
+                              )}
+                              ...
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground/50">
+                              No transcript metadata
+                            </span>
+                          );
+                        })()}
+                      </div>
+                    )}
+                    {selectedTranscriptId &&
+                      (selectedTranscriptId
+                        ? transcriptsById[selectedTranscriptId]
+                        : undefined
+                      )?.transcript_group_id && (
+                        <TranscriptPath
+                          className={getSidebarStyles('')}
+                          path={buildTranscriptPath(
+                            selectedTranscriptId,
+                            transcriptsById,
+                            transcriptGroupsById
+                          )}
+                        />
+                      )}
                   </div>
 
                   {/* Transcript Minimap - above messages */}
@@ -1913,6 +2000,29 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
 
                   {/* Relative wrapper for scroll container and fixed buttons */}
                   <div className="relative flex-1 min-h-0">
+                    {!commentSidebarCollapsed && (
+                      <div
+                        className={cn(
+                          'absolute inset-x-0 z-40 flex justify-end px-2 pointer-events-none',
+                          isSearchOpen ? 'top-12' : 'top-2'
+                        )}
+                      >
+                        <div className="pointer-events-auto">
+                          <CommentSidebarHeader
+                            isCollapsed={false}
+                            onToggleCollapsed={() =>
+                              dispatch(setCommentSidebarCollapsed(true))
+                            }
+                            activeTab={activeCommentTab}
+                            onTabChange={setActiveCommentTab}
+                            showAllTranscripts={showAllTranscripts}
+                            onSetShowAllTranscripts={setShowAllTranscripts}
+                            commentCount={filteredComments.length}
+                          />
+                        </div>
+                      </div>
+                    )}
+
                     {showEnhancedJkTip && (
                       <div className="absolute top-2 left-1/2 -translate-x-1/2 z-50 rounded-md border border-indigo-border bg-background px-3 py-2 shadow-lg">
                         <div className="flex items-center gap-2 text-xs text-primary whitespace-nowrap">
@@ -1952,175 +2062,55 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                       onCaseSensitiveChange={setCaseSensitive}
                     />
 
-                    {/* Shared Scroll Container */}
-                    <div
-                      ref={scrollContainerRef}
-                      className="absolute inset-0 overflow-y-auto custom-scrollbar"
-                      // Disable browser scroll anchoring, which was causing the viewport to jump when creating a new draft comment
-                      style={{ overflowAnchor: 'none' }}
-                    >
-                      <div className="flex flex-row items-stretch">
-                        {/* Messages column */}
-                        <div
-                          className={cn(
-                            'flex-1 space-y-2',
-                            hasComments &&
-                              !commentSidebarCollapsed &&
-                              'pr-1 border-r border-border'
-                          )}
-                          onKeyDown={handleJKNavigation}
-                        >
-                          {transcript.messages.map((message, index) => {
-                            const blockId = `t-${transcriptIdx}_b-${index}`;
-                            const messageId = (message as any)?.id as
-                              | string
-                              | undefined;
-                            const hasTelemetry =
-                              typeof messageId === 'string' &&
-                              messageId.length > 0 &&
-                              telemetryMessageIds.has(messageId);
-                            const isMsgIntent =
-                              metadataIntent?.type === 'message' &&
-                              metadataIntent.transcriptId ===
-                                selectedTranscriptId &&
-                              metadataIntent.blockIdx === index;
-                            const msgCitedKey = isMsgIntent
-                              ? metadataIntent?.citedKey
-                              : undefined;
-                            const msgCitedRange = isMsgIntent
-                              ? metadataIntent?.textRange
-                              : undefined;
-
-                            const citedTargets = getCitationsForBlock(
-                              allCitations,
-                              selectedCitation,
-                              index,
-                              selectedTranscriptId!
-                            );
-
-                            if (
-                              !selectedTranscriptId ||
-                              !collectionId ||
-                              !agentRunId
-                            )
-                              return null;
-
-                            const blockComments =
-                              blockIdxToCommentsMap[index] ?? [];
-
-                            const transcriptBlockContentItem: TranscriptBlockContentItem =
-                              {
-                                item_type: 'block_content',
-                                agent_run_id: agentRunId,
-                                collection_id: collectionId,
-                                transcript_id: selectedTranscriptId,
-                                block_idx: index,
-                              };
-
-                            // Get search matches for this block (with content type info)
-                            const blockSearchMatches =
-                              searchMatches.matchesByBlock.get(index) ?? [];
-
-                            // Determine which match in this block is the current one (as index into blockSearchMatches)
-                            const currentSearchMatchIndex = (() => {
-                              if (
-                                searchMatches.flatMatches.length === 0 ||
-                                blockSearchMatches.length === 0
-                              )
-                                return null;
-                              const currentMatch =
-                                searchMatches.flatMatches[
-                                  clampedCurrentMatchIndex
-                                ];
-                              if (currentMatch?.blockIdx !== index) return null;
-                              // Find index in blockSearchMatches by comparing properties
-                              return blockSearchMatches.findIndex(
-                                (m) =>
-                                  m.start === currentMatch.start &&
-                                  m.contentType === currentMatch.contentType &&
-                                  m.localIndex === currentMatch.localIndex &&
-                                  m.toolCallIndex === currentMatch.toolCallIndex
-                              );
-                            })();
-
-                            return (
-                              <MessageBox
-                                key={index}
-                                message={message}
-                                index={index}
-                                blockId={blockId}
-                                isHighlighted={highlightedBlock === blockId}
-                                comments={blockComments}
-                                citedTargets={citedTargets}
-                                prettyPrintJsonMessages={
-                                  prettyPrintJsonMessages
-                                }
-                                setPrettyPrintJsonMessages={
-                                  setPrettyPrintJsonMessages
-                                }
-                                hasTelemetry={hasTelemetry}
-                                metadataDialogControl={{
-                                  open: Boolean(isMsgIntent),
-                                  onOpenChange: (open) => {
-                                    setMetadataIntent(
-                                      open && selectedTranscriptId
-                                        ? {
-                                            type: 'message',
-                                            transcriptId: selectedTranscriptId,
-                                            blockIdx: index,
-                                          }
-                                        : null
-                                    );
-                                  },
-                                  citedKey: msgCitedKey,
-                                  citedTextRange: msgCitedRange,
-                                }}
-                                dataContext={transcriptBlockContentItem}
-                                searchMatches={blockSearchMatches}
-                                currentSearchMatchIndex={
-                                  currentSearchMatchIndex
-                                }
-                                onAddMetadataComment={
-                                  hasWritePermission
-                                    ? (key) =>
-                                        handleAddComment({
-                                          type: 'block_metadata',
-                                          blockIdx: index,
-                                          metadataKey: key,
-                                        })
-                                    : undefined
-                                }
-                                onAddBlockComment={
-                                  hasWritePermission
-                                    ? () =>
-                                        handleAddComment({
-                                          type: 'block_content',
-                                          blockIdx: index,
-                                        })
-                                    : undefined
-                                }
-                                onBlockClick={() =>
-                                  hasComments
-                                    ? handleBlockClick(index)
-                                    : undefined
-                                }
-                              />
-                            );
-                          })}
-                          {/* Text selection menu for creating comments */}
-                          {hasWritePermission && menuElement}
-                        </div>
-
-                        {/* Comments column */}
-                        {!commentSidebarCollapsed && (
+                    {showInlineCommentPane ? (
+                      <div
+                        ref={scrollContainerRef}
+                        className="absolute inset-0 overflow-y-auto custom-scrollbar"
+                        // Disable browser scroll anchoring, which was causing the viewport to jump when creating a new draft comment
+                        style={{ overflowAnchor: 'none' }}
+                      >
+                        <div className="flex flex-row items-stretch">
                           <div
-                            className={cn(
-                              'w-80 bg-muted/50',
-                              activeCommentTab === 'list'
-                                ? 'sticky top-0 self-start h-[calc(100vh-8rem)] overflow-y-auto  custom-scrollbar'
-                                : 'self-stretch'
-                            )}
+                            className="flex-1 space-y-2 pr-1 border-r border-border"
+                            onKeyDown={handleJKNavigation}
                           >
+                            {messageBoxes}
+                            {hasWritePermission && menuElement}
+                          </div>
+                          <div className="w-80 bg-muted/50 self-stretch">
+                            <CommentSidebarContent
+                              commentsForTranscript={filteredComments}
+                              listModeComments={filteredComments}
+                              scrollContainer={scrollNode}
+                              scrollToCitation={focusCitationTarget}
+                              activeTab={activeCommentTab}
+                              collectionId={collectionId}
+                              agentRunId={agentRunId}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="absolute inset-0 flex min-h-0">
+                        <div
+                          ref={scrollContainerRef}
+                          className={cn(
+                            'relative flex-1 min-w-0 overflow-y-auto custom-scrollbar',
+                            showListCommentPane && 'pr-1 border-r border-border'
+                          )}
+                          // Disable browser scroll anchoring, which was causing the viewport to jump when creating a new draft comment
+                          style={{ overflowAnchor: 'none' }}
+                        >
+                          <div
+                            className="space-y-2"
+                            onKeyDown={handleJKNavigation}
+                          >
+                            {messageBoxes}
+                            {hasWritePermission && menuElement}
+                          </div>
+                        </div>
+                        {showListCommentPane && (
+                          <div className="w-80 bg-muted/50 overflow-y-auto custom-scrollbar">
                             <CommentSidebarContent
                               commentsForTranscript={filteredComments}
                               listModeComments={filteredComments}
@@ -2133,18 +2123,34 @@ const AgentRunViewer = forwardRef<AgentRunViewerHandle, AgentRunViewerProps>(
                           </div>
                         )}
                       </div>
-                    </div>
+                    )}
 
                     {/* Navigation buttons - fixed relative to wrapper */}
                     <div
-                      className="absolute bottom-3 flex flex-col gap-1 pointer-events-none"
+                      className="absolute bottom-3 flex flex-col items-end gap-1 pointer-events-none"
                       style={{
                         right: !commentSidebarCollapsed
                           ? 'calc(320px + 12px)'
                           : '12px',
                       }}
                     >
-                      <div className="bg-muted border border-border rounded-md shadow-sm flex flex-col pointer-events-auto">
+                      {commentSidebarCollapsed && (
+                        <button
+                          onClick={() =>
+                            dispatch(setCommentSidebarCollapsed(false))
+                          }
+                          className="relative size-8 flex items-center justify-center border border-border rounded-md bg-background hover:bg-accent transition-colors text-muted-foreground pointer-events-auto"
+                          aria-label="Expand comments"
+                        >
+                          <MessageSquare className="h-4 w-4" />
+                          {filteredComments.length > 0 && (
+                            <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 bg-muted border border-border rounded-full text-[10px] leading-4 text-primary text-center font-medium">
+                              {filteredComments.length}
+                            </span>
+                          )}
+                        </button>
+                      )}
+                      <div className="w-fit bg-muted border border-border rounded-md shadow-sm flex flex-col pointer-events-auto">
                         <button
                           onClick={goToPrevBlock}
                           className="p-1.5 hover:bg-accent transition-colors rounded-t-md"

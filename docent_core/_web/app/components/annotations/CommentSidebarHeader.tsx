@@ -35,16 +35,16 @@ export const CommentSidebarHeader = ({
   return (
     <div
       className={cn(
-        'flex h-full bg-background p-3 pb-0 pr-0',
-        !isCollapsed ? 'border-b justify-between' : 'justify-end'
+        'inline-flex items-center rounded-md border border-border bg-background p-1',
+        !isCollapsed ? 'gap-1.5' : 'justify-end'
       )}
     >
       {!isCollapsed && (
-        <div className="flex items-end gap-4 flex-1">
+        <div className="flex items-center gap-2">
           <button
             onClick={() => onTabChange('inline')}
             className={cn(
-              'text-sm font-medium pb-1 border-b-2 transition-colors',
+              'text-[11px] font-medium px-0.5 pb-0.5 border-b-2 transition-colors leading-none',
               activeTab === 'inline'
                 ? 'border-primary text-foreground'
                 : 'border-transparent text-muted-foreground hover:text-foreground'
@@ -55,7 +55,7 @@ export const CommentSidebarHeader = ({
           <button
             onClick={() => onTabChange('list')}
             className={cn(
-              'text-sm font-medium pb-1 border-b-2 transition-colors',
+              'text-[11px] font-medium px-0.5 pb-0.5 border-b-2 transition-colors leading-none',
               activeTab === 'list'
                 ? 'border-primary text-foreground'
                 : 'border-transparent text-muted-foreground hover:text-foreground'
@@ -65,7 +65,7 @@ export const CommentSidebarHeader = ({
           </button>
         </div>
       )}
-      <div className="flex pb-1 items-center gap-2">
+      <div className="flex items-center gap-0.5 shrink-0">
         {!isCollapsed && activeTab === 'list' && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -74,7 +74,7 @@ export const CommentSidebarHeader = ({
                 size="icon"
                 className="size-6 flex items-center justify-center"
               >
-                <ListFilter className="h-4 w-4" />
+                <ListFilter className="h-3.5 w-3.5" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -101,17 +101,17 @@ export const CommentSidebarHeader = ({
             className="size-6 flex items-center justify-center rounded hover:bg-accent transition-colors text-muted-foreground"
             aria-label={isCollapsed ? 'Expand comments' : 'Collapse comments'}
           >
-            <X className="h-4 w-4" />
+            <X className="h-3.5 w-3.5" />
           </button>
         ) : (
           <button
             onClick={onToggleCollapsed}
-            className="px-2 py-1 flex items-center gap-2  text-xs border border-border  rounded-md hover:bg-accent transition-colors text-muted-foreground"
+            className="px-1.5 py-0.5 flex items-center gap-1.5 text-[11px] border border-border rounded-md hover:bg-accent transition-colors text-muted-foreground leading-none"
             aria-label={isCollapsed ? 'Expand comments' : 'Collapse comments'}
           >
-            <MessageSquare className="h-4 w-4" /> Comments
+            <MessageSquare className="h-3.5 w-3.5" /> Comments
             {commentCount > 0 && (
-              <span className="bg-muted px-1.5 py-0.5 rounded-full text-xs font-medium">
+              <span className="bg-muted px-1 py-0.5 rounded-full text-[10px] font-medium leading-none">
                 {commentCount}
               </span>
             )}

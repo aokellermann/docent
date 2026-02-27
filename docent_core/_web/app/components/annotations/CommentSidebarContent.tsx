@@ -84,7 +84,7 @@ export const CommentSidebarContent = ({
   // Render List mode - show all comments in a flat list
   if (activeTab === 'list') {
     return (
-      <div className="flex flex-col p-3 pb-16">
+      <div className="flex flex-col p-3 pb-3">
         {listModeComments.map((comment) => {
           if (!comment.id) return null;
 
