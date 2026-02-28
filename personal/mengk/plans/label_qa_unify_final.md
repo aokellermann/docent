@@ -1,7 +1,12 @@
 # Run-Centric QA+Label Unification Using `UserData.agent_run_feedback`
 
 ## Summary
-Unify the two drafts by migrating to a single run-centric feedback schema, updating labeling request generation and CLI collection flow, and refactoring `rubric_bon.py` to split over all run-feedback units with hard train/test isolation at the unit level. This plan is implementation-ready with all key behavior decisions locked.
+Implement a run-centric feedback model and CLI flow where each labeling run collects:
+1. Explicit answers to review-focus questions (with LLM-generated sample answers).
+2. Optional final label plus explanation.
+3. End-of-run review/edit before persistence.
+
+This replaces flat `UserData.qa_pairs` and `UserData.labels` with grouped per-run feedback, and keeps `rubric_bon.py` compatible with the new schema.
 
 ## Public APIs / Interfaces / Types
 1. In `user_model.py`, change `LabelingRequestFocusItem` from `text` to `question`, `citations`, and `sample_answers`.
