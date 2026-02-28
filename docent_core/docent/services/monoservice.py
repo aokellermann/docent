@@ -25,6 +25,7 @@ from sqlalchemy import (
     Select,
     Text,
     and_,
+    case,
     column,
     delete,
     distinct,
@@ -1952,25 +1953,31 @@ class MonoService:
                 else:
                     text_expr = cast(ColumnElement[Any], text_expr.op("->")(part))
 
-            numeric_clause = func.jsonb_typeof(json_expr) == "number"
-            numeric_expr: ColumnElement[Any] = cast(ColumnElement[Any], text_expr.cast(Numeric))
-
-            # Sample a subset of rows to avoid a full-table scan for min/max.
+            # Sample rows from the collection first (uses collection_id
+            # index, fast), then filter for numeric in the outer query.
+            # Putting jsonb_typeof in the inner WHERE forces a per-row eval
+            # that can't use an index, making even LIMIT slow.
             RANGE_SAMPLE_CAP = 1_000
             sampled = (
-                select(numeric_expr.label("val"))
-                .select_from(SQLAAgentRun)
-                .where(
-                    SQLAAgentRun.collection_id == ctx.collection_id,
-                    numeric_clause,
+                select(
+                    json_expr.label("json_val"),
+                    text_expr.label("text_val"),
                 )
+                .select_from(SQLAAgentRun)
+                .where(SQLAAgentRun.collection_id == ctx.collection_id)
                 .limit(RANGE_SAMPLE_CAP)
                 .subquery()
             )
 
+            # Use CASE to safely cast only numeric values, avoiding errors
+            # on rows where the field is a string or other non-numeric type.
+            numeric_cast = cast(ColumnElement[Any], sampled.c.text_val.cast(Numeric))
+            safe_numeric: ColumnElement[Any] = case(
+                (func.jsonb_typeof(sampled.c.json_val) == "number", numeric_cast),
+            )
             query = select(
-                func.min(sampled.c.val).label("min_value"),
-                func.max(sampled.c.val).label("max_value"),
+                func.min(safe_numeric).label("min_value"),
+                func.max(safe_numeric).label("max_value"),
             )
 
             result = await session.execute(query)
