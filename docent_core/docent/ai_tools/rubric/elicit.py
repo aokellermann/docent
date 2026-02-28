@@ -23,7 +23,12 @@ from docent_core.docent.ai_tools.rubric.user_model import (
 )
 
 if TYPE_CHECKING:
-    from docent_core.docent.ai_tools.rubric.user_model import LabeledRun, QAPair, UserData
+    from docent_core.docent.ai_tools.rubric.user_model import (
+        AgentRunFeedback,
+        LabeledRun,
+        QAPair,
+        UserData,
+    )
 
 logger = get_logger(__name__)
 
@@ -161,12 +166,19 @@ class _UserDataSummaryTask:
 
 def _create_qa_item_summary_prompt(
     qa_pair: "QAPair",
+    run_feedback: "AgentRunFeedback",
     agent_run_text: str,
 ) -> str:
     qa_payload = {
-        "question_context": qa_pair.question_context,
+        "run_title": run_feedback.title,
+        "review_context": run_feedback.review_context,
+        "priority_rationale": run_feedback.priority_rationale,
         "question": qa_pair.question,
+        "sample_answers": qa_pair.sample_answers,
+        "selected_sample_index": qa_pair.selected_sample_index,
         "answer": qa_pair.answer,
+        "explanation": qa_pair.explanation,
+        "status": qa_pair.status,
         "is_custom_response": qa_pair.is_custom_response,
         "timestamp": qa_pair.timestamp.isoformat(),
     }
@@ -181,7 +193,7 @@ QA ENTRY:
 
 Write a concrete, rich summary (4-7 sentences) that captures:
 - the relevant run context (what happened and why this case matters),
-- how the user answered the question,
+- how the user answered the question (including extra context if provided),
 - what the answer suggests about this user's rubric reasoning in this case.
 
 Stay grounded in specific details from this run and this QA entry. Do not write abstract principles.
@@ -295,21 +307,43 @@ def _format_label_evidence_block(labeled_run: "LabeledRun") -> str:
     return f"User label evidence (selected JSON fields):\n{label_payload_json}"
 
 
-def _format_user_data_qa_block(idx: int, user_data: "UserData") -> str:
-    qa = user_data.qa_pairs[idx]
-    return (
-        f"--- Example {idx + 1} (run: {qa.agent_run_id or 'unknown'}) ---\n"
-        f"Situation: {qa.question_context or 'N/A'}\n"
-        f"Question asked: {qa.question}\n"
-        f"User's answer: {qa.answer}\n"
-        f"Custom response: {'Yes' if qa.is_custom_response else 'No'}"
-    )
+def _get_answered_qa_entries(
+    user_data: "UserData",
+) -> list[tuple["AgentRunFeedback", "QAPair"]]:
+    return list(user_data.iter_answered_qa_entries())
 
 
-def _format_user_data_label_line(idx: int, user_data: "UserData") -> str:
-    label = user_data.labels[idx]
+def _get_labeled_entries(
+    user_data: "UserData",
+) -> list[tuple["AgentRunFeedback", "LabeledRun"]]:
+    return list(user_data.iter_labeled_entries())
+
+
+def _format_user_data_qa_block(
+    idx: int,
+    run_feedback: "AgentRunFeedback",
+    qa_pair: "QAPair",
+) -> str:
+    lines = [
+        f"--- Example {idx + 1} (run: {run_feedback.agent_run_id}) ---",
+        f"Title: {run_feedback.title or 'N/A'}",
+        f"Situation: {run_feedback.review_context or 'N/A'}",
+        f"Question asked: {qa_pair.question}",
+        f"User's answer: {qa_pair.answer}",
+        f"Custom response: {'Yes' if qa_pair.is_custom_response else 'No'}",
+    ]
+    if qa_pair.explanation:
+        lines.append(f"Extra context: {qa_pair.explanation}")
+    return "\n".join(lines)
+
+
+def _format_user_data_label_line(
+    idx: int,
+    run_feedback: "AgentRunFeedback",
+    label: "LabeledRun",
+) -> str:
     return (
-        f"--- Label {idx + 1} (run: {label.agent_run_id}) ---\n"
+        f"--- Label {idx + 1} (run: {run_feedback.agent_run_id}) ---\n"
         f"{_format_label_evidence_block(label)}"
     )
 
@@ -341,15 +375,21 @@ def summarize_user_data_for_prompt(
     if max_tokens <= 0:
         raise ValueError("max_tokens must be > 0")
 
-    total_qa_pairs = len(user_data.qa_pairs)
-    total_labels = len(user_data.labels)
+    answered_qa_entries = _get_answered_qa_entries(user_data)
+    labeled_entries = _get_labeled_entries(user_data)
+    total_qa_pairs = len(answered_qa_entries)
+    total_labels = len(labeled_entries)
 
     qa_blocks: list[str] = []
     label_lines: list[str] = []
 
     omitted_qa_pairs = 0
-    for qa_idx in range(total_qa_pairs):
-        candidate_block = _format_user_data_qa_block(qa_idx, user_data)
+    for qa_idx, (run_feedback, qa_pair) in enumerate(answered_qa_entries):
+        candidate_block = _format_user_data_qa_block(
+            idx=qa_idx,
+            run_feedback=run_feedback,
+            qa_pair=qa_pair,
+        )
         candidate_summary = _build_user_data_summary_text(
             qa_blocks=qa_blocks + [candidate_block],
             label_lines=label_lines,
@@ -364,8 +404,12 @@ def summarize_user_data_for_prompt(
         break
 
     omitted_labels = 0
-    for label_idx in range(total_labels):
-        candidate_line = _format_user_data_label_line(label_idx, user_data)
+    for label_idx, (run_feedback, label) in enumerate(labeled_entries):
+        candidate_line = _format_user_data_label_line(
+            idx=label_idx,
+            run_feedback=run_feedback,
+            label=label,
+        )
         candidate_summary = _build_user_data_summary_text(
             qa_blocks=qa_blocks,
             label_lines=label_lines + [candidate_line],
@@ -488,19 +532,21 @@ async def summarize_user_data_for_prompt_with_agent_runs(
     if max_tokens <= 0:
         raise ValueError("max_tokens must be > 0")
 
-    total_qa_pairs = len(user_data.qa_pairs)
-    total_labels = len(user_data.labels)
+    answered_qa_entries = _get_answered_qa_entries(user_data)
+    labeled_entries = _get_labeled_entries(user_data)
+    total_qa_pairs = len(answered_qa_entries)
+    total_labels = len(labeled_entries)
 
     inputs: list[list[dict[str, str]]] = []
     summary_tasks: list[_UserDataSummaryTask] = []
 
-    for qa_idx, qa_pair in enumerate(user_data.qa_pairs):
-        agent_run = agent_runs_by_id.get(qa_pair.agent_run_id)
+    for qa_idx, (run_feedback, qa_pair) in enumerate(answered_qa_entries):
+        agent_run = agent_runs_by_id.get(run_feedback.agent_run_id)
         if agent_run is None:
             logger.error(
                 "Skipping QA pair %d for user-data summary; missing agent run %s",
                 qa_idx + 1,
-                qa_pair.agent_run_id,
+                run_feedback.agent_run_id,
             )
             continue
 
@@ -510,6 +556,7 @@ async def summarize_user_data_for_prompt_with_agent_runs(
         )
         prompt = _create_qa_item_summary_prompt(
             qa_pair=qa_pair,
+            run_feedback=run_feedback,
             agent_run_text=agent_run_text,
         )
         inputs.append([{"role": "user", "content": prompt}])
@@ -517,17 +564,17 @@ async def summarize_user_data_for_prompt_with_agent_runs(
             _UserDataSummaryTask(
                 item_type="qa",
                 item_index=qa_idx,
-                agent_run_id=qa_pair.agent_run_id,
+                agent_run_id=run_feedback.agent_run_id,
             )
         )
 
-    for label_idx, labeled_run in enumerate(user_data.labels):
-        agent_run = agent_runs_by_id.get(labeled_run.agent_run_id)
+    for label_idx, (run_feedback, labeled_run) in enumerate(labeled_entries):
+        agent_run = agent_runs_by_id.get(run_feedback.agent_run_id)
         if agent_run is None:
             logger.error(
                 "Skipping label %d for user-data summary; missing agent run %s",
                 label_idx + 1,
-                labeled_run.agent_run_id,
+                run_feedback.agent_run_id,
             )
             continue
 
@@ -544,7 +591,7 @@ async def summarize_user_data_for_prompt_with_agent_runs(
             _UserDataSummaryTask(
                 item_type="label",
                 item_index=label_idx,
-                agent_run_id=labeled_run.agent_run_id,
+                agent_run_id=run_feedback.agent_run_id,
             )
         )
 
@@ -590,9 +637,8 @@ async def summarize_user_data_for_prompt_with_agent_runs(
                     )
                 )
             else:
-                label_evidence_entry = _format_label_evidence_block(
-                    user_data.labels[summary_task.item_index]
-                )
+                _, labeled_run = labeled_entries[summary_task.item_index]
+                label_evidence_entry = _format_label_evidence_block(labeled_run)
                 label_blocks.append(
                     (
                         f"--- Label Summary {summary_task.item_index + 1} "
@@ -665,7 +711,7 @@ Then, for each meaningful piece of feedback, produce an entry:
 ### Example N: [short descriptive title]
 **Situation:** [Rich description of the context — what the agent did, what the task was, what happened. Preserve concrete details.]
 **Question:** [The question that was asked]
-**User's judgment:** [The user's full answer]
+**User's judgment:** [The user's full answer, including any extra context they provided]
 **What this reveals:** [1-2 concrete sentences about what this specific case tells us about the user's preferences. Stay grounded in this example — do NOT generalize into abstract principles.]
 
 After all examples, include ONE brief section:
@@ -729,7 +775,7 @@ async def build_user_model_inference_prompt_with_agent_runs(
 
 
 def create_user_model_inference_prompt(user_data: "UserData") -> str:
-    """Create prompt for inferring textual user model z from U=(QA, labels, initial rubric)."""
+    """Create prompt for inferring textual user model z from run-centric user feedback."""
     _, prompt = build_user_model_inference_prompt(
         user_data=user_data,
         max_tokens=USER_DATA_PROMPT_TOKEN_LIMIT,
@@ -744,7 +790,9 @@ async def infer_user_model_from_user_data(
     user_data_summary: str | None = None,
 ) -> str:
     """Infer textual user model z from U. Falls back to initial rubric on failure."""
-    if not user_data.qa_pairs and not user_data.labels:
+    has_answered_qa = any(True for _ in user_data.iter_answered_qa_entries())
+    has_labels = any(True for _ in user_data.iter_labeled_entries())
+    if not has_answered_qa and not has_labels:
         return user_data.initial_rubric
 
     if user_data_summary is None:
@@ -1202,6 +1250,26 @@ def render_text_with_citation_footnotes(
     return rendered_text, footnotes
 
 
+def normalize_sample_answers(raw_sample_answers: object, max_items: int = 3) -> list[str]:
+    """Normalize sample answer choices to unique, non-empty strings."""
+    if not isinstance(raw_sample_answers, list):
+        return []
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_item in cast(list[object], raw_sample_answers):
+        if not isinstance(raw_item, str):
+            continue
+        stripped = raw_item.strip()
+        if not stripped or stripped in seen:
+            continue
+        normalized.append(stripped)
+        seen.add(stripped)
+        if len(normalized) >= max_items:
+            break
+    return normalized
+
+
 def create_labeling_request_prompt(
     agent_run_text: str,
     citation_instructions: str,
@@ -1250,8 +1318,12 @@ Craft a labeling request that helps the user quickly adjudicate this run.
 
 Other fields:
 - title: concise and scannable.
+- priority_rationale: why this run is high-priority for user feedback, with citation(s).
 - review_context: brief context and key events with citations.
-- review_focus: a checklist of specific rubric-related things to inspect; this field can be more detailed than review_context, and each item must include a citation.
+- review_focus: a checklist of specific rubric-related questions to inspect; this field can be more detailed than review_context.
+  Each review_focus item must include:
+  - question: one focused rubric-related question with citation(s)
+  - sample_answers: 1-3 plausible answer options the user can pick from
 
 Scope requirement:
 - Stay anchored to rubric r and its output schema.
@@ -1261,13 +1333,80 @@ Scope requirement:
 Return JSON:
 {{
   "title": "<short title>",
+  "priority_rationale": "<why this run is prioritized, with citations>",
   "review_context": "<succinct context and key events with citations>",
   "review_focus": [
-    "<specific rubric-related thing to inspect with citation>",
-    "<another rubric-related thing to inspect with citation>"
+    {{
+      "question": "<specific rubric-related question with citation>",
+      "sample_answers": [
+        "<plausible answer option 1>",
+        "<plausible answer option 2>",
+        "<plausible answer option 3>"
+      ]
+    }}
   ]
 }}
 """
+
+
+def parse_labeling_request_payload(
+    parsed: dict[str, Any],
+    agent_run_id: str,
+    context: LLMContext,
+) -> LabelingRequest:
+    """Parse one labeling-request payload into a structured LabelingRequest."""
+    raw_title = parsed.get("title")
+    raw_priority_rationale = parsed.get("priority_rationale")
+    raw_review_context = parsed.get("review_context")
+
+    title = raw_title if isinstance(raw_title, str) else "Label this run"
+    priority_rationale_text = (
+        raw_priority_rationale if isinstance(raw_priority_rationale, str) else ""
+    )
+    review_context_text = raw_review_context if isinstance(raw_review_context, str) else ""
+
+    priority_rationale, priority_rationale_citations = resolve_citations_with_context(
+        priority_rationale_text, context, validate_text_ranges=True
+    )
+    review_context, review_context_citations = resolve_citations_with_context(
+        review_context_text, context, validate_text_ranges=True
+    )
+
+    review_focus_items: list[LabelingRequestFocusItem] = []
+    raw_focus_raw = parsed.get("review_focus")
+    raw_focus: list[object] = []
+    if isinstance(raw_focus_raw, list):
+        for focus_item in cast(list[object], raw_focus_raw):
+            raw_focus.append(focus_item)
+
+    for focus_item_raw in raw_focus:
+        focus_item = _coerce_string_keyed_dict(focus_item_raw)
+        if focus_item is None:
+            continue
+        question_raw = focus_item.get("question")
+        if not isinstance(question_raw, str):
+            continue
+        question_text, question_citations = resolve_citations_with_context(
+            question_raw, context, validate_text_ranges=True
+        )
+        sample_answers = normalize_sample_answers(focus_item.get("sample_answers"))
+        review_focus_items.append(
+            LabelingRequestFocusItem(
+                question=question_text,
+                citations=question_citations,
+                sample_answers=sample_answers,
+            )
+        )
+
+    return LabelingRequest(
+        agent_run_id=agent_run_id,
+        title=title,
+        priority_rationale=priority_rationale,
+        priority_rationale_citations=priority_rationale_citations,
+        review_context=review_context,
+        review_context_citations=review_context_citations,
+        review_focus=review_focus_items,
+    )
 
 
 async def generate_labeling_requests(
@@ -1367,7 +1506,7 @@ async def generate_labeling_requests(
         response_text = output.completions[0].text or ""
         parsed = parse_llm_json_response(
             response_text,
-            keys=("title", "review_context", "review_focus"),
+            keys=("title", "priority_rationale", "review_context", "review_focus"),
         )
         if parsed is None:
             results.append(
@@ -1379,41 +1518,10 @@ async def generate_labeling_requests(
             )
             continue
 
-        raw_title = parsed.get("title")
-        raw_review_context = parsed.get("review_context")
-
-        title = raw_title if isinstance(raw_title, str) else "Label this run"
-        review_context_text = raw_review_context if isinstance(raw_review_context, str) else ""
-
-        review_context, review_context_citations = resolve_citations_with_context(
-            review_context_text, context, validate_text_ranges=True
-        )
-
-        review_focus_items: list[LabelingRequestFocusItem] = []
-        raw_focus_raw = parsed.get("review_focus")
-        raw_focus: list[object] = []
-        if isinstance(raw_focus_raw, list):
-            for focus_item in cast(list[object], raw_focus_raw):
-                raw_focus.append(focus_item)
-
-        for focus_item_raw in raw_focus:
-            if not isinstance(focus_item_raw, str):
-                continue
-            focus_text, focus_citations = resolve_citations_with_context(
-                focus_item_raw, context, validate_text_ranges=True
-            )
-            review_focus_items.append(
-                LabelingRequestFocusItem(text=focus_text, citations=focus_citations)
-            )
-
-        request = LabelingRequest(
+        request = parse_labeling_request_payload(
+            parsed=parsed,
             agent_run_id=agent_run_id,
-            title=title,
-            priority_rationale="",
-            priority_rationale_citations=[],
-            review_context=review_context,
-            review_context_citations=review_context_citations,
-            review_focus=review_focus_items,
+            context=context,
         )
         results.append(
             LabelingRequestResult(agent_run_id=agent_run_id, request=request, error=None)

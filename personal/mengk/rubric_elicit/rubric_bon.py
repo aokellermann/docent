@@ -5,10 +5,10 @@ Generate k rubric variants from user data, evaluate on a holdout split, and repo
 Pipeline:
 1. Load base rubric from collection/rubric IDs.
 2. Load user data JSON.
-3. Split user labels into train/test by ratio.
-4. Infer user model from train split (labels + qa_pairs).
+3. Split run feedback units into train/test by ratio.
+4. Infer user model from train split feedback only.
 5. Generate k independent rubric rewrites from the base rubric.
-6. Run each rubric as a judge on holdout runs.
+6. Run each rubric as a judge on holdout labeled subsets.
 7. Report and persist per-key accuracy metrics.
 """
 
@@ -45,14 +45,13 @@ from docent_core.docent.ai_tools.rubric.elicit import (
     infer_user_model_from_user_data,
 )
 from docent_core.docent.ai_tools.rubric.rewrite import rewrite_rubric
-from docent_core.docent.ai_tools.rubric.user_model import LabeledRun, UserData
+from docent_core.docent.ai_tools.rubric.user_model import AgentRunFeedback, LabeledRun, UserData
 
 console = Console()
 
 _USER_DATA_TOP_LEVEL_KEYS = {
     "initial_rubric",
-    "qa_pairs",
-    "labels",
+    "agent_run_feedback",
     "created_at",
     "last_updated",
 }
@@ -105,15 +104,20 @@ class HoldoutEvaluationReport(BaseModel):
     seed: int
     max_llm_concurrency: int
     n_rollouts_per_run: int
-    train_label_agent_run_ids: list[str]
-    test_label_agent_run_ids: list[str]
-    num_total_labels: int
-    num_train_labels: int
-    num_test_labels: int
-    num_train_labels_used: int
-    num_train_labels_skipped_missing_run: int
-    num_test_labels_used: int
-    num_test_labels_skipped_missing_run: int
+    train_feedback_agent_run_ids: list[str]
+    test_feedback_agent_run_ids: list[str]
+    train_labeled_agent_run_ids: list[str]
+    test_labeled_agent_run_ids: list[str]
+    num_total_feedback_units: int
+    num_train_feedback_units: int
+    num_test_feedback_units: int
+    num_total_labeled_units: int
+    num_train_labeled_units: int
+    num_test_labeled_units: int
+    num_train_labeled_units_used: int
+    num_train_labeled_units_skipped_missing_run: int
+    num_test_labeled_units_used: int
+    num_test_labeled_units_skipped_missing_run: int
     user_data_summary: str
     user_model_text: str
     rewrite_instructions: str
@@ -169,41 +173,51 @@ def _load_user_data(initial_rubric: str, user_data_json_path: str) -> UserData:
     return user_data
 
 
-def _split_labels(
-    labels: Sequence[LabeledRun],
+def _split_feedback_units(
+    feedback_units: Sequence[AgentRunFeedback],
     train_ratio: float,
     seed: int,
-) -> tuple[list[LabeledRun], list[LabeledRun]]:
+) -> tuple[list[AgentRunFeedback], list[AgentRunFeedback]]:
     if not (0.0 < train_ratio):
         raise ValueError("train_ratio must satisfy 0 < train_ratio")
-    if not labels:
-        raise ValueError("UserData must contain at least 1 label for holdout evaluation")
+    if not feedback_units:
+        raise ValueError("UserData must contain at least 1 feedback unit for holdout evaluation")
 
-    shuffled = list(labels)
+    shuffled = list(feedback_units)
     random.Random(seed).shuffle(shuffled)
 
     train_size = int(len(shuffled) * train_ratio)
     train_size = max(1, min(train_size, len(shuffled)))
-    train_labels = shuffled[:train_size]
-    test_labels = shuffled[train_size:]
-    return train_labels, test_labels
+    train_units = shuffled[:train_size]
+    test_units = shuffled[train_size:]
+    return train_units, test_units
+
+
+def _extract_labeled_runs(feedback_units: Sequence[AgentRunFeedback]) -> list[LabeledRun]:
+    labeled_runs: list[LabeledRun] = []
+    for feedback in feedback_units:
+        if feedback.label is None:
+            continue
+        if feedback.label.agent_run_id == feedback.agent_run_id:
+            labeled_runs.append(feedback.label)
+            continue
+        labeled_runs.append(feedback.label.model_copy(update={"agent_run_id": feedback.agent_run_id}))
+    return labeled_runs
 
 
 def _build_train_user_data(
     user_data: UserData,
-    train_labels: list[LabeledRun],
+    train_feedback_units: list[AgentRunFeedback],
     initial_rubric: str,
 ) -> UserData:
     train_user_data = user_data.model_copy(deep=True)
     train_user_data.initial_rubric = initial_rubric
-    train_user_data.labels = train_labels
+    train_user_data.agent_run_feedback = train_feedback_units
     return train_user_data
 
 
 def _get_user_data_agent_run_ids(user_data: UserData) -> list[str]:
-    run_ids = {qa_pair.agent_run_id for qa_pair in user_data.qa_pairs}
-    run_ids.update(label.agent_run_id for label in user_data.labels)
-    return sorted(run_ids)
+    return sorted({feedback.agent_run_id for feedback in user_data.agent_run_feedback})
 
 
 def _load_agent_runs_by_ids(
@@ -250,12 +264,17 @@ def _find_rank_accuracy_value(candidate: CandidateEvaluation) -> float:
 
 
 def _render_split_summary(
-    total_labels: int,
-    train_labels: list[LabeledRun],
-    test_labels: list[LabeledRun],
+    total_feedback_units: int,
+    train_feedback_units: list[AgentRunFeedback],
+    test_feedback_units: list[AgentRunFeedback],
+    train_labeled_runs: list[LabeledRun],
+    test_labeled_runs: list[LabeledRun],
 ) -> None:
     console.print(
-        f"Loaded {total_labels} labels; split into {len(train_labels)} train and {len(test_labels)} test"
+        "Loaded "
+        f"{total_feedback_units} feedback unit(s); split into "
+        f"{len(train_feedback_units)} train / {len(test_feedback_units)} test units. "
+        f"Labeled subsets: {len(train_labeled_runs)} train / {len(test_labeled_runs)} test."
     )
 
 
@@ -609,14 +628,30 @@ async def run_holdout_k_rubrics_evaluation(
         initial_rubric=base_rubric.rubric_text,
         user_data_json_path=user_data_json_path,
     )
-    train_labels, test_labels_all = _split_labels(
-        user_data.labels, train_ratio=train_ratio, seed=seed
+    train_feedback_units, test_feedback_units = _split_feedback_units(
+        user_data.agent_run_feedback, train_ratio=train_ratio, seed=seed
     )
-    _render_split_summary(len(user_data.labels), train_labels, test_labels_all)
+    train_labels = _extract_labeled_runs(train_feedback_units)
+    test_labels_all = _extract_labeled_runs(test_feedback_units)
+    _render_split_summary(
+        total_feedback_units=len(user_data.agent_run_feedback),
+        train_feedback_units=train_feedback_units,
+        test_feedback_units=test_feedback_units,
+        train_labeled_runs=train_labels,
+        test_labeled_runs=test_labels_all,
+    )
+    if not train_labels:
+        console.print(
+            "[yellow]Warning:[/yellow] no labeled train units available; train accuracy will be N/A."
+        )
+    if not test_labels_all:
+        console.print(
+            "[yellow]Warning:[/yellow] no labeled test units available; test accuracy will be N/A."
+        )
 
     train_user_data = _build_train_user_data(
         user_data=user_data,
-        train_labels=train_labels,
+        train_feedback_units=train_feedback_units,
         initial_rubric=base_rubric.rubric_text,
     )
     train_run_ids = _get_user_data_agent_run_ids(train_user_data)
@@ -656,7 +691,11 @@ async def run_holdout_k_rubrics_evaluation(
     if skipped_missing_train_runs > 0:
         console.print(
             "[yellow]Warning:[/yellow] "
-            f"skipping {skipped_missing_train_runs} train label(s) with missing runs"
+            f"skipping {skipped_missing_train_runs} train labeled unit(s) with missing runs"
+        )
+    if not train_labels_for_eval:
+        console.print(
+            "[yellow]Warning:[/yellow] no train labeled units available; train scoring will be N/A"
         )
     ordered_train_run_ids = sorted({label.agent_run_id for label in train_labels_for_eval})
     train_agent_runs = [train_agent_runs_by_id[run_id] for run_id in ordered_train_run_ids]
@@ -676,10 +715,12 @@ async def run_holdout_k_rubrics_evaluation(
     if skipped_missing_test_runs > 0:
         console.print(
             "[yellow]Warning:[/yellow] "
-            f"skipping {skipped_missing_test_runs} test label(s) with missing runs"
+            f"skipping {skipped_missing_test_runs} test labeled unit(s) with missing runs"
         )
     if not test_labels:
-        console.print("[yellow]Warning:[/yellow] no test labels available; skipping test scoring")
+        console.print(
+            "[yellow]Warning:[/yellow] no test labeled units available; test scoring will be N/A"
+        )
 
     ordered_test_run_ids = sorted({label.agent_run_id for label in test_labels})
     test_agent_runs = [test_agent_runs_by_id[run_id] for run_id in ordered_test_run_ids]
@@ -710,15 +751,20 @@ async def run_holdout_k_rubrics_evaluation(
         seed=seed,
         max_llm_concurrency=max_llm_concurrency,
         n_rollouts_per_run=n_rollouts_per_run,
-        train_label_agent_run_ids=[label.agent_run_id for label in train_labels],
-        test_label_agent_run_ids=[label.agent_run_id for label in test_labels_all],
-        num_total_labels=len(user_data.labels),
-        num_train_labels=len(train_labels),
-        num_test_labels=len(test_labels_all),
-        num_train_labels_used=len(train_labels_for_eval),
-        num_train_labels_skipped_missing_run=skipped_missing_train_runs,
-        num_test_labels_used=len(test_labels),
-        num_test_labels_skipped_missing_run=skipped_missing_test_runs,
+        train_feedback_agent_run_ids=[unit.agent_run_id for unit in train_feedback_units],
+        test_feedback_agent_run_ids=[unit.agent_run_id for unit in test_feedback_units],
+        train_labeled_agent_run_ids=[label.agent_run_id for label in train_labels],
+        test_labeled_agent_run_ids=[label.agent_run_id for label in test_labels_all],
+        num_total_feedback_units=len(user_data.agent_run_feedback),
+        num_train_feedback_units=len(train_feedback_units),
+        num_test_feedback_units=len(test_feedback_units),
+        num_total_labeled_units=len(train_labels) + len(test_labels_all),
+        num_train_labeled_units=len(train_labels),
+        num_test_labeled_units=len(test_labels_all),
+        num_train_labeled_units_used=len(train_labels_for_eval),
+        num_train_labeled_units_skipped_missing_run=skipped_missing_train_runs,
+        num_test_labeled_units_used=len(test_labels),
+        num_test_labeled_units_skipped_missing_run=skipped_missing_test_runs,
         user_data_summary=user_data_summary,
         user_model_text=user_model_text,
         rewrite_instructions=rewrite_instructions,
@@ -747,7 +793,7 @@ def main() -> None:
         "--train-ratio",
         type=float,
         required=True,
-        help="Train ratio over labels (0 < train_ratio)",
+        help="Train ratio over feedback units (0 < train_ratio)",
     )
     parser.add_argument("--seed", type=int, default=0, help="Random seed (default: 0)")
     parser.add_argument(

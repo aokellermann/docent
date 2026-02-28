@@ -1,38 +1,34 @@
-"""
-Data structures for User Data (U) and User Model (z) in feedback elicitation.
+"""Data structures for run-centric feedback elicitation user data and user models."""
 
-User Data (U) represents historical observations that inform the user model:
-- QA pairs from interactive elicitation sessions
-- Human labels on agent runs
-
-User Model (z) represents a markdown representation of user intent,
-derived from aggregating user data.
-"""
-
+from collections.abc import Iterator
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 from docent.data_models.citation import InlineCitation
 
 
-class QAPair(BaseModel):
-    """A single QA pair: (agent_run_id, question, answer)"""
-
-    agent_run_id: str
-    question: str
-    answer: str
-    timestamp: datetime = Field(default_factory=datetime.now)
-    question_context: str | None = None
-    is_custom_response: bool = False
-
-
 class LabelingRequestFocusItem(BaseModel):
-    """Specific thing the human labeler should inspect."""
+    """Specific rubric-related question the human labeler should inspect."""
 
-    text: str
+    question: str
     citations: list[InlineCitation] = Field(default_factory=list[InlineCitation])
+    sample_answers: list[str] = Field(default_factory=list[str])
+
+
+class QAPair(BaseModel):
+    """A single review-focus answer captured for one run."""
+
+    question: str
+    question_citations: list[InlineCitation] = Field(default_factory=list[InlineCitation])
+    sample_answers: list[str] = Field(default_factory=list[str])
+    selected_sample_index: int | None = None
+    answer: str
+    explanation: str | None = None
+    status: Literal["answered", "skipped"]
+    is_custom_response: bool = False
+    timestamp: datetime = Field(default_factory=datetime.now)
 
 
 class LabelingRequest(BaseModel):
@@ -50,7 +46,7 @@ class LabelingRequest(BaseModel):
 
 
 class LabeledRun(BaseModel):
-    """A human label: (agent_run_id, label_value)"""
+    """A human label for one agent run."""
 
     agent_run_id: str
     label_value: dict[str, Any]  # Matches Label.label_value pattern
@@ -60,52 +56,75 @@ class LabeledRun(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now)
 
 
-class UserData(BaseModel):
-    """User Data (U) - Historical observations that inform the user model"""
+class AgentRunFeedback(BaseModel):
+    """All feedback collected for a single agent run."""
 
-    initial_rubric: str
-    qa_pairs: list[QAPair] = Field(default_factory=lambda: list[QAPair]())
-    labels: list[LabeledRun] = Field(default_factory=lambda: list[LabeledRun]())
+    agent_run_id: str
+    title: str
+    review_context: str
+    review_context_citations: list[InlineCitation] = Field(default_factory=list[InlineCitation])
+    priority_rationale: str
+    priority_rationale_citations: list[InlineCitation] = Field(default_factory=list[InlineCitation])
+    qa_pairs: list[QAPair] = Field(default_factory=list[QAPair])
+    label: LabeledRun | None = None
     created_at: datetime = Field(default_factory=datetime.now)
     last_updated: datetime = Field(default_factory=datetime.now)
 
-    def add_qa_pair(
-        self,
-        agent_run_id: str,
-        question: str,
-        answer: str,
-        question_context: str | None = None,
-        is_custom_response: bool = False,
-    ) -> None:
-        """Add a QA pair to the user data."""
-        qa_pair = QAPair(
-            agent_run_id=agent_run_id,
-            question=question,
-            answer=answer,
-            question_context=question_context,
-            is_custom_response=is_custom_response,
-        )
-        self.qa_pairs.append(qa_pair)
-        self.last_updated = datetime.now()
 
-    def add_label(
-        self,
-        agent_run_id: str,
-        label_value: dict[str, Any],
-        explanation: str | None = None,
-        labeling_request: LabelingRequest | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> None:
-        """Add a label to the user data."""
-        labeled_run = LabeledRun(
-            agent_run_id=agent_run_id,
-            label_value=label_value,
-            explanation=explanation,
-            labeling_request=labeling_request,
-            metadata=metadata,
-        )
-        self.labels.append(labeled_run)
-        self.last_updated = datetime.now()
+class UserData(BaseModel):
+    """User Data (U) for user-model inference and downstream evaluation."""
+
+    initial_rubric: str
+    agent_run_feedback: list[AgentRunFeedback] = Field(
+        default_factory=lambda: list[AgentRunFeedback]()
+    )
+    created_at: datetime = Field(default_factory=datetime.now)
+    last_updated: datetime = Field(default_factory=datetime.now)
+
+    def upsert_run_feedback(self, agent_run_feedback: AgentRunFeedback) -> None:
+        """Insert or replace feedback for an agent run ID, updating timestamps."""
+        now = datetime.now()
+        normalized_feedback = agent_run_feedback.model_copy(deep=True)
+        if (
+            normalized_feedback.label is not None
+            and normalized_feedback.label.agent_run_id != normalized_feedback.agent_run_id
+        ):
+            normalized_feedback.label = normalized_feedback.label.model_copy(
+                update={"agent_run_id": normalized_feedback.agent_run_id}
+            )
+        normalized_feedback.last_updated = now
+
+        for idx, existing in enumerate(self.agent_run_feedback):
+            if existing.agent_run_id != normalized_feedback.agent_run_id:
+                continue
+            normalized_feedback.created_at = existing.created_at
+            self.agent_run_feedback[idx] = normalized_feedback
+            self.last_updated = now
+            return
+
+        self.agent_run_feedback.append(normalized_feedback)
+        self.last_updated = now
+
+    def iter_answered_qa_entries(self) -> Iterator[tuple[AgentRunFeedback, QAPair]]:
+        """Iterate answered QA pairs with their parent run feedback."""
+        for feedback in self.agent_run_feedback:
+            for qa_pair in feedback.qa_pairs:
+                if qa_pair.status == "answered":
+                    yield feedback, qa_pair
+
+    def iter_skipped_qa_entries(self) -> Iterator[tuple[AgentRunFeedback, QAPair]]:
+        """Iterate skipped QA pairs with their parent run feedback."""
+        for feedback in self.agent_run_feedback:
+            for qa_pair in feedback.qa_pairs:
+                if qa_pair.status == "skipped":
+                    yield feedback, qa_pair
+
+    def iter_labeled_entries(self) -> Iterator[tuple[AgentRunFeedback, LabeledRun]]:
+        """Iterate labeled run entries with their parent run feedback."""
+        for feedback in self.agent_run_feedback:
+            if feedback.label is None:
+                continue
+            yield feedback, feedback.label
 
 
 class UserModel(BaseModel):

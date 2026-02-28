@@ -54,7 +54,14 @@ from docent_core.docent.ai_tools.rubric.elicit import (
     normalize_output_distribution,
     render_text_with_citation_footnotes,
 )
-from docent_core.docent.ai_tools.rubric.user_model import LabelingRequest, UserData
+from docent_core.docent.ai_tools.rubric.user_model import (
+    AgentRunFeedback,
+    LabeledRun,
+    LabelingRequest,
+    LabelingRequestFocusItem,
+    QAPair,
+    UserData,
+)
 
 console = Console()
 AGENT_RUN_FETCH_MAX_CONCURRENCY = 25
@@ -65,12 +72,8 @@ class EntropyLabelMetadata(BaseModel):
     entropy_nats: float
 
 
-class CollectedEntropyLabel(BaseModel):
-    agent_run_id: str
-    label_value: dict[str, Any]
-    explanation: str | None = None
-    metadata: EntropyLabelMetadata
-    labeling_request: LabelingRequest | None = None
+class CollectedRunFeedback(BaseModel):
+    run_feedback: AgentRunFeedback
 
 
 def _coerce_string_keyed_dict(value: object) -> dict[str, Any] | None:
@@ -118,17 +121,21 @@ def _load_user_data(initial_rubric: str, user_data_json_path: str | None) -> Use
             "overriding with current rubric text.[/yellow]"
         )
     user_data.initial_rubric = initial_rubric
+    answered_qa_count = sum(1 for _ in user_data.iter_answered_qa_entries())
+    skipped_qa_count = sum(1 for _ in user_data.iter_skipped_qa_entries())
+    labeled_entries = list(user_data.iter_labeled_entries())
+    labeled_run_count = len(labeled_entries)
+    labeled_key_count = sum(len(label.label_value) for _, label in labeled_entries)
     console.print(
-        f"Loaded user data JSON with {len(user_data.labels)} label(s) "
-        f"and {len(user_data.qa_pairs)} QA pair(s): {path}"
+        f"Loaded user data JSON with {len(user_data.agent_run_feedback)} feedback unit(s), "
+        f"{answered_qa_count} answered QA, {skipped_qa_count} skipped QA, "
+        f"{labeled_run_count} labeled run(s), and {labeled_key_count} labeled key(s): {path}"
     )
     return user_data
 
 
 def _get_user_data_agent_run_ids(user_data: UserData) -> list[str]:
-    run_ids = {qa_pair.agent_run_id for qa_pair in user_data.qa_pairs}
-    run_ids.update(label.agent_run_id for label in user_data.labels)
-    return sorted(run_ids)
+    return sorted({feedback.agent_run_id for feedback in user_data.agent_run_feedback})
 
 
 def _load_user_data_agent_runs(
@@ -473,11 +480,17 @@ def _render_generated_labeling_requests(
             text=request.review_context,
             citations=request.review_context_citations,
         )
+        _append_section_with_citations(
+            body_lines=body_lines,
+            title="Priority Rationale",
+            text=request.priority_rationale,
+            citations=request.priority_rationale_citations,
+        )
         body_lines.extend(["", "[bold]Review Focus:[/bold]"])
         if request.review_focus:
             for focus in request.review_focus:
                 focus_text, focus_footnotes = render_text_with_citation_footnotes(
-                    text=focus.text,
+                    text=focus.question,
                     citations=focus.citations,
                 )
                 body_lines.append(f"- {focus_text}")
@@ -485,6 +498,10 @@ def _render_generated_labeling_requests(
                     body_lines.append("  [dim]Citations:[/dim]")
                     for footnote in focus_footnotes:
                         body_lines.append(f"    [dim]{footnote}[/dim]")
+                if focus.sample_answers:
+                    body_lines.append("  [dim]Sample answers:[/dim]")
+                    for sample_idx, sample_answer in enumerate(focus.sample_answers, 1):
+                        body_lines.append(f"    [dim]{sample_idx}. {sample_answer}[/dim]")
         else:
             body_lines.append("- (No focus items returned)")
 
@@ -547,7 +564,227 @@ def _build_label_explanation(explicit_explanation: str) -> str | None:
     return None
 
 
-def _collect_labels_for_run(
+def _collect_focus_answers(
+    review_focus: Sequence[LabelingRequestFocusItem],
+) -> list[QAPair]:
+    import beaupy
+    from rich.prompt import Prompt
+
+    qa_pairs: list[QAPair] = []
+    for focus_idx, focus in enumerate(review_focus, 1):
+        console.print(f"\n[bold]Focus Question {focus_idx}[/bold]")
+        focus_text, focus_footnotes = render_text_with_citation_footnotes(
+            text=focus.question,
+            citations=focus.citations,
+        )
+        console.print(focus_text)
+        if focus_footnotes:
+            console.print("[dim]Citations:[/dim]")
+            for footnote in focus_footnotes:
+                console.print(f"  [dim]{footnote}[/dim]")
+
+        sample_option_labels = [f"[Sample] {sample}" for sample in focus.sample_answers]
+        custom_option = "[Custom response]"
+        skip_option = "[Skip this question]"
+        choice_options = [*sample_option_labels, custom_option, skip_option]
+        selected_option = beaupy.select(
+            choice_options,
+            cursor="> ",
+            cursor_style="cyan",
+        )  # pyright: ignore[reportArgumentType]
+
+        selected_label = str(selected_option) if selected_option is not None else skip_option
+        selected_sample_index: int | None = None
+        is_custom_response = False
+        selected_answer = ""
+
+        if selected_label == skip_option:
+            qa_pairs.append(
+                QAPair(
+                    question=focus.question,
+                    question_citations=list(focus.citations),
+                    sample_answers=list(focus.sample_answers),
+                    selected_sample_index=None,
+                    answer="",
+                    explanation=None,
+                    status="skipped",
+                    is_custom_response=False,
+                )
+            )
+            continue
+
+        if selected_label == custom_option:
+            selected_answer = Prompt.ask(
+                "[bold]Custom answer[/bold] [dim](press Enter to skip this question)[/dim]",
+                default="",
+            ).strip()
+            is_custom_response = True
+        else:
+            selected_sample_index = choice_options.index(selected_label)
+            selected_answer = focus.sample_answers[selected_sample_index]
+
+        if not selected_answer:
+            qa_pairs.append(
+                QAPair(
+                    question=focus.question,
+                    question_citations=list(focus.citations),
+                    sample_answers=list(focus.sample_answers),
+                    selected_sample_index=None,
+                    answer="",
+                    explanation=None,
+                    status="skipped",
+                    is_custom_response=False,
+                )
+            )
+            continue
+
+        explicit_explanation = Prompt.ask(
+            "[bold]Extra context[/bold] [dim](optional; press Enter to skip)[/dim]",
+            default="",
+        ).strip()
+        qa_explanation = explicit_explanation or None
+
+        qa_pairs.append(
+            QAPair(
+                question=focus.question,
+                question_citations=list(focus.citations),
+                sample_answers=list(focus.sample_answers),
+                selected_sample_index=selected_sample_index,
+                answer=selected_answer,
+                explanation=qa_explanation,
+                status="answered",
+                is_custom_response=is_custom_response,
+            )
+        )
+
+    return qa_pairs
+
+
+def _collect_label_keys_for_run(
+    all_schema_keys: list[str],
+    selectable_fields: dict[str, SchemaSelectableField],
+) -> dict[str, Any]:
+    import beaupy
+
+    label_value: dict[str, Any] = {}
+    for key in all_schema_keys:
+        field_info = selectable_fields.get(key)
+        if field_info is None:
+            continue
+        raw_options = field_info.options
+        if not raw_options:
+            continue
+
+        console.print(f"\n[bold]Select value for key:[/bold] {key}")
+        option_display = [_format_option_value(option) for option in raw_options]
+        skip_key_option = "[Skip this key]"
+        option_display.append(skip_key_option)
+
+        selected_option = beaupy.select(
+            option_display,
+            cursor="> ",
+            cursor_style="cyan",
+        )  # pyright: ignore[reportArgumentType]
+        if selected_option is None or str(selected_option) == skip_key_option:
+            continue
+
+        selected_idx = option_display.index(str(selected_option))
+        label_value[key] = raw_options[selected_idx]
+    return label_value
+
+
+def _build_run_feedback_preview(
+    qa_pairs: Sequence[QAPair],
+    label_value: dict[str, Any],
+    label_explanation: str | None,
+) -> str:
+    answered_qa = [qa for qa in qa_pairs if qa.status == "answered"]
+    skipped_qa = [qa for qa in qa_pairs if qa.status == "skipped"]
+    lines = [
+        f"[bold]Answered QA:[/bold] {len(answered_qa)}",
+        f"[bold]Skipped QA:[/bold] {len(skipped_qa)}",
+        f"[bold]Labeled keys:[/bold] {len(label_value)}",
+    ]
+    if answered_qa:
+        lines.append("[bold]Focus answers:[/bold]")
+        for idx, qa_pair in enumerate(answered_qa, 1):
+            answer_line = f"- Q{idx}: {qa_pair.answer}"
+            if qa_pair.explanation:
+                answer_line += f" [dim](extra context: {qa_pair.explanation})[/dim]"
+            lines.append(answer_line)
+    if label_value:
+        lines.append("[bold]Label value:[/bold]")
+        lines.append(json.dumps(label_value, sort_keys=True))
+    if label_explanation:
+        lines.append(f"[bold]Explanation:[/bold] {label_explanation}")
+    return "\n".join(lines)
+
+
+def _build_run_feedback_candidate(
+    estimate: RunDistributionEstimate,
+    entropy: float,
+    labeling_request: LabelingRequest | None,
+    qa_pairs: list[QAPair],
+    label_value: dict[str, Any],
+    label_explanation: str | None,
+) -> AgentRunFeedback:
+    label: LabeledRun | None = None
+    if label_value:
+        metadata = _build_label_metadata(
+            estimate=estimate,
+            entropy=entropy,
+        )
+        label = LabeledRun(
+            agent_run_id=estimate.agent_run_id,
+            label_value=label_value,
+            explanation=label_explanation,
+            metadata=metadata.model_dump(mode="json"),
+            labeling_request=labeling_request,
+        )
+
+    title = labeling_request.title if labeling_request is not None else "Label this run"
+    review_context = labeling_request.review_context if labeling_request is not None else ""
+    review_context_citations = (
+        list(labeling_request.review_context_citations) if labeling_request is not None else []
+    )
+    priority_rationale = labeling_request.priority_rationale if labeling_request is not None else ""
+    priority_rationale_citations = (
+        list(labeling_request.priority_rationale_citations) if labeling_request is not None else []
+    )
+    return AgentRunFeedback(
+        agent_run_id=estimate.agent_run_id,
+        title=title,
+        review_context=review_context,
+        review_context_citations=review_context_citations,
+        priority_rationale=priority_rationale,
+        priority_rationale_citations=priority_rationale_citations,
+        qa_pairs=list(qa_pairs),
+        label=label,
+    )
+
+
+def persist_run_feedback_with_overwrite_gate(
+    user_data: UserData,
+    run_feedback: AgentRunFeedback,
+    overwrite_confirmed: bool,
+) -> bool:
+    """Persist one run feedback entry unless overwrite confirmation is missing."""
+    has_existing = any(
+        feedback.agent_run_id == run_feedback.agent_run_id
+        for feedback in user_data.agent_run_feedback
+    )
+    if has_existing and not overwrite_confirmed:
+        return False
+    user_data.upsert_run_feedback(run_feedback)
+    return True
+
+
+def get_excluded_agent_run_ids(user_data: UserData) -> set[str]:
+    """Return run IDs that should be excluded from future sampling."""
+    return {feedback.agent_run_id for feedback in user_data.agent_run_feedback}
+
+
+def _collect_run_feedback_for_run(
     rank_idx: int,
     estimate: RunDistributionEstimate,
     entropy: float,
@@ -555,9 +792,10 @@ def _collect_labels_for_run(
     selectable_fields: dict[str, SchemaSelectableField],
     agreement_keys: set[str],
     labeling_request: LabelingRequest | None,
+    has_existing_feedback: bool,
     collection_id: str,
     frontend_url: str,
-) -> tuple[CollectedEntropyLabel | None, bool]:
+) -> tuple[CollectedRunFeedback | None, bool]:
     import beaupy
     from rich.prompt import Prompt
 
@@ -585,11 +823,17 @@ def _collect_labels_for_run(
             text=labeling_request.review_context,
             citations=labeling_request.review_context_citations,
         )
+        _append_section_with_citations(
+            body_lines=body_lines,
+            title="Priority Rationale",
+            text=labeling_request.priority_rationale,
+            citations=labeling_request.priority_rationale_citations,
+        )
         body_lines.extend(["", "[bold]Review Focus:[/bold]"])
         if labeling_request.review_focus:
             for focus in labeling_request.review_focus:
                 focus_text, focus_footnotes = render_text_with_citation_footnotes(
-                    text=focus.text,
+                    text=focus.question,
                     citations=focus.citations,
                 )
                 body_lines.append(f"- {focus_text}")
@@ -597,6 +841,10 @@ def _collect_labels_for_run(
                     body_lines.append("  [dim]Citations:[/dim]")
                     for footnote in focus_footnotes:
                         body_lines.append(f"    [dim]{footnote}[/dim]")
+                if focus.sample_answers:
+                    body_lines.append("  [dim]Sample answers:[/dim]")
+                    for sample_idx, sample_answer in enumerate(focus.sample_answers, 1):
+                        body_lines.append(f"    [dim]{sample_idx}. {sample_answer}[/dim]")
         else:
             body_lines.append("- (No focus items returned)")
     else:
@@ -636,7 +884,6 @@ def _collect_labels_for_run(
 
     skip_run_option = "[Skip this run]"
     skip_future_runs_option = "[Skip this and all future runs]"
-    restart_run_option = "[Restart this run]"
     run_selection = beaupy.select(
         ["[Label this run]", skip_run_option, skip_future_runs_option],
         cursor="> ",
@@ -648,83 +895,116 @@ def _collect_labels_for_run(
     if str(run_selection) == skip_future_runs_option:
         return None, True
 
-    restart_reasoning_commands = {"/restart", "/undo", "/refresh"}
+    qa_pairs = (
+        _collect_focus_answers(labeling_request.review_focus)
+        if labeling_request is not None and labeling_request.review_focus
+        else []
+    )
+    label_value = _collect_label_keys_for_run(
+        all_schema_keys=all_schema_keys,
+        selectable_fields=selectable_fields,
+    )
+    explicit_explanation = (
+        Prompt.ask(
+            "[bold]Overall explanation for this run[/bold] "
+            "[dim](optional; press Enter to skip)[/dim]",
+            default="",
+        ).strip()
+        if label_value
+        else ""
+    )
+    label_explanation = _build_label_explanation(explicit_explanation=explicit_explanation)
 
     while True:
-        label_value: dict[str, Any] = {}
-        should_restart_run = False
-        for key in all_schema_keys:
-            field_info = selectable_fields.get(key)
-            if field_info is None:
+        preview_text = _build_run_feedback_preview(
+            qa_pairs=qa_pairs,
+            label_value=label_value,
+            label_explanation=label_explanation,
+        )
+        console.print(
+            Panel(
+                preview_text,
+                title="[bold]Run Feedback Review[/bold]",
+                expand=False,
+            )
+        )
+        review_menu = [
+            "[Save run feedback]",
+            "[Edit focus answer(s)]",
+            "[Edit label keys]",
+            "[Edit explanation]",
+            "[Discard this run]",
+        ]
+        review_selection = beaupy.select(
+            review_menu,
+            cursor="> ",
+            cursor_style="cyan",
+        )  # pyright: ignore[reportArgumentType]
+        selected_review = str(review_selection) if review_selection is not None else review_menu[0]
+
+        if selected_review == "[Edit focus answer(s)]":
+            if labeling_request is None or not labeling_request.review_focus:
+                console.print("[yellow]No focus questions are available for this run.[/yellow]")
                 continue
+            qa_pairs = _collect_focus_answers(labeling_request.review_focus)
+            continue
 
-            raw_options = field_info.options
-            if not raw_options:
-                continue
+        if selected_review == "[Edit label keys]":
+            label_value = _collect_label_keys_for_run(
+                all_schema_keys=all_schema_keys,
+                selectable_fields=selectable_fields,
+            )
+            if not label_value:
+                label_explanation = None
+            continue
 
-            console.print(f"\n[bold]Select value for key:[/bold] {key}")
-            option_display = [_format_option_value(option) for option in raw_options]
-            skip_key_option = "[Skip this key]"
-            option_display.append(skip_key_option)
-            option_display.append(restart_run_option)
+        if selected_review == "[Edit explanation]":
+            explicit_explanation = Prompt.ask(
+                "[bold]Overall explanation for this run[/bold] "
+                "[dim](optional; press Enter to clear)[/dim]",
+                default=label_explanation or "",
+            ).strip()
+            label_explanation = _build_label_explanation(explicit_explanation=explicit_explanation)
+            continue
 
-            selected_option = beaupy.select(
-                option_display,
+        if selected_review == "[Discard this run]":
+            return None, False
+
+        run_feedback_candidate = _build_run_feedback_candidate(
+            estimate=estimate,
+            entropy=entropy,
+            labeling_request=labeling_request,
+            qa_pairs=qa_pairs,
+            label_value=label_value,
+            label_explanation=label_explanation,
+        )
+        if has_existing_feedback:
+            overwrite_choice = beaupy.select(
+                [
+                    "[Overwrite existing run feedback]",
+                    "[Cancel save and keep editing]",
+                ],
                 cursor="> ",
                 cursor_style="cyan",
             )  # pyright: ignore[reportArgumentType]
-
-            if str(selected_option) == restart_run_option:
-                should_restart_run = True
-                break
-
-            if selected_option is None or str(selected_option) == skip_key_option:
+            if (
+                overwrite_choice is None
+                or str(overwrite_choice) != "[Overwrite existing run feedback]"
+            ):
+                console.print("[yellow]Save canceled; returning to review menu.[/yellow]")
                 continue
-
-            selected_idx = option_display.index(str(selected_option))
-            label_value[key] = raw_options[selected_idx]
-
-        if should_restart_run:
-            console.print("[yellow]Restarting this run from the first key.[/yellow]")
-            continue
-
-        if not label_value:
-            return None, False
-
-        explicit_explanation = Prompt.ask(
-            "[bold]Overall explanation for this run[/bold] "
-            "[dim](optional; press Enter to skip, or /restart to redo this run)[/dim]",
-            default="",
-        ).strip()
-        if explicit_explanation.lower() in restart_reasoning_commands:
-            console.print("[yellow]Restarting this run from the first key.[/yellow]")
-            continue
-
-        label_explanation = _build_label_explanation(explicit_explanation=explicit_explanation)
-        metadata = _build_label_metadata(
-            estimate=estimate,
-            entropy=entropy,
-        )
-        return (
-            CollectedEntropyLabel(
-                agent_run_id=estimate.agent_run_id,
-                label_value=label_value,
-                explanation=label_explanation,
-                metadata=metadata,
-                labeling_request=labeling_request,
-            ),
-            False,
-        )
+        return CollectedRunFeedback(run_feedback=run_feedback_candidate), False
 
 
-def _collect_entropy_labels(
+def _collect_entropy_feedback(
     ranked: list[tuple[RunDistributionEstimate, float]],
     output_schema: dict[str, Any],
     agreement_keys: list[str],
     labeling_requests_by_run_id: dict[str, LabelingRequest],
+    existing_feedback_run_ids: set[str],
     collection_id: str,
     frontend_url: str,
-) -> tuple[list[CollectedEntropyLabel], bool, int]:
+) -> tuple[list[CollectedRunFeedback], bool, int]:
     import beaupy
 
     if not ranked:
@@ -753,12 +1033,12 @@ def _collect_entropy_labels(
         console.print("[yellow]Labeling phase skipped.[/yellow]")
         return [], True, 0
 
-    collected_labels: list[CollectedEntropyLabel] = []
+    collected_feedback: list[CollectedRunFeedback] = []
     displayed_runs = 0
     agreement_key_set = set(agreement_keys)
     for rank_idx, (estimate, entropy) in enumerate(ranked, 1):
         displayed_runs += 1
-        collected_label, should_skip_future_runs = _collect_labels_for_run(
+        collected_run_feedback, should_skip_future_runs = _collect_run_feedback_for_run(
             rank_idx=rank_idx,
             estimate=estimate,
             entropy=entropy,
@@ -766,16 +1046,17 @@ def _collect_entropy_labels(
             selectable_fields=selectable_fields,
             agreement_keys=agreement_key_set,
             labeling_request=labeling_requests_by_run_id.get(estimate.agent_run_id),
+            has_existing_feedback=estimate.agent_run_id in existing_feedback_run_ids,
             collection_id=collection_id,
             frontend_url=frontend_url,
         )
-        if collected_label is not None:
-            collected_labels.append(collected_label)
+        if collected_run_feedback is not None:
+            collected_feedback.append(collected_run_feedback)
         if should_skip_future_runs:
             console.print("[yellow]Skipping all remaining runs.[/yellow]")
             break
 
-    return collected_labels, False, displayed_runs
+    return collected_feedback, False, displayed_runs
 
 
 def _default_output_json_path() -> str:
@@ -837,11 +1118,11 @@ async def run_entropy_elicitation(
     )
     _render_user_model(user_model_text)
 
-    excluded_ids = {label.agent_run_id for label in user_data.labels}
+    excluded_ids = get_excluded_agent_run_ids(user_data)
 
     console.print(
         f"\n[bold]Entropy stage:[/bold] sampling up to {label_num_samples} run(s); "
-        f"excluding {len(excluded_ids)} labeled run(s)"
+        f"excluding {len(excluded_ids)} run(s) with existing feedback"
     )
     agent_runs = _sample_agent_runs(
         dc,
@@ -946,34 +1227,42 @@ async def run_entropy_elicitation(
         if result.request is not None
     }
 
-    collected_labels, stage_skipped, displayed_runs = _collect_entropy_labels(
+    collected_feedback, stage_skipped, displayed_runs = _collect_entropy_feedback(
         ranked=top_ranked,
         output_schema=rubric.output_schema,
         agreement_keys=agreement_keys,
         labeling_requests_by_run_id=labeling_requests_by_run_id,
+        existing_feedback_run_ids=excluded_ids,
         collection_id=collection_id,
         frontend_url=frontend_url,
     )
-    for collected_label in collected_labels:
-        user_data.add_label(
-            collected_label.agent_run_id,
-            collected_label.label_value,
-            explanation=collected_label.explanation,
-            labeling_request=collected_label.labeling_request,
-            metadata=collected_label.metadata.model_dump(mode="json"),
+    for collected in collected_feedback:
+        persisted = persist_run_feedback_with_overwrite_gate(
+            user_data=user_data,
+            run_feedback=collected.run_feedback,
+            overwrite_confirmed=True,
         )
+        if not persisted:
+            console.print(
+                "[yellow]Warning:[/yellow] skipped persisting run feedback due to overwrite gate."
+            )
     output_path = write_user_data_json(user_data, output_json_path)
 
-    labeled_run_count = len(collected_labels)
-    answered_key_count = sum(
-        len(collected_label.label_value) for collected_label in collected_labels
-    )
+    answered_qa_count = sum(1 for _ in user_data.iter_answered_qa_entries())
+    skipped_qa_count = sum(1 for _ in user_data.iter_skipped_qa_entries())
+    labeled_entries = list(user_data.iter_labeled_entries())
+    labeled_run_count = len(labeled_entries)
+    labeled_key_count = sum(len(label.label_value) for _, label in labeled_entries)
     console.print(f"\nWrote user data JSON to: [bold]{output_path}[/bold]")
     if stage_skipped:
         console.print("Labeling phase was skipped; persisted the current user data state.")
     console.print(
-        f"Collected labels for {labeled_run_count}/{displayed_runs} displayed run(s); "
-        f"recorded {answered_key_count} key answer(s)."
+        f"Collected feedback for {len(collected_feedback)}/{displayed_runs} displayed run(s)."
+    )
+    console.print(
+        f"Current totals: {len(user_data.agent_run_feedback)} feedback unit(s), "
+        f"{answered_qa_count} answered QA, {skipped_qa_count} skipped QA, "
+        f"{labeled_run_count} labeled run(s), {labeled_key_count} labeled key(s)."
     )
 
     console.print("\n" + "=" * 80)
