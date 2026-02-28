@@ -159,71 +159,58 @@ def build_agent_run_dashboard_url(
 
 @dataclass
 class _UserDataSummaryTask:
-    item_type: str  # "qa" or "label"
-    item_index: int
+    run_index: int
     agent_run_id: str
 
 
-def _create_qa_item_summary_prompt(
-    qa_pair: "QAPair",
+def _create_agent_run_feedback_summary_prompt(
     run_feedback: "AgentRunFeedback",
     agent_run_text: str,
 ) -> str:
-    qa_payload = {
+    qa_pairs_payload = [
+        {
+            "question": qa_pair.question,
+            "sample_answers": qa_pair.sample_answers,
+            "selected_sample_index": qa_pair.selected_sample_index,
+            "answer": qa_pair.answer,
+            "explanation": qa_pair.explanation,
+            "status": qa_pair.status,
+            "is_custom_response": qa_pair.is_custom_response,
+            "timestamp": qa_pair.timestamp.isoformat(),
+        }
+        for qa_pair in run_feedback.qa_pairs
+    ]
+    label_payload = (
+        _build_selected_label_payload(run_feedback.label).model_dump(mode="json")
+        if run_feedback.label is not None
+        else None
+    )
+    run_feedback_payload = {
         "run_title": run_feedback.title,
         "review_context": run_feedback.review_context,
         "priority_rationale": run_feedback.priority_rationale,
-        "question": qa_pair.question,
-        "sample_answers": qa_pair.sample_answers,
-        "selected_sample_index": qa_pair.selected_sample_index,
-        "answer": qa_pair.answer,
-        "explanation": qa_pair.explanation,
-        "status": qa_pair.status,
-        "is_custom_response": qa_pair.is_custom_response,
-        "timestamp": qa_pair.timestamp.isoformat(),
+        "qa_pairs": qa_pairs_payload,
+        # Keep label at the end so the model sees it as the final source-of-truth decision.
+        "label": label_payload,
     }
-    qa_payload_json = json.dumps(qa_payload, indent=2, sort_keys=True)
-    return f"""You are summarizing one piece of human feedback for user-model inference.
+    run_feedback_payload_json = json.dumps(run_feedback_payload, indent=2)
+    return f"""You are summarizing all human feedback for one agent run for user-model inference.
 
 AGENT RUN CONTEXT:
 {agent_run_text}
 
-QA ENTRY:
-{qa_payload_json}
+RUN FEEDBACK ENTRY:
+{run_feedback_payload_json}
 
-Write a concrete, rich summary (4-7 sentences) that captures:
+Write a concrete, rich summary (6-10 sentences) that captures:
 - the relevant run context (what happened and why this case matters),
-- how the user answered the question (including extra context if provided),
-- what the answer suggests about this user's rubric reasoning in this case.
+- how the user responded across the QA pairs (including extra context if provided),
+- the user's final label decision for this run (place this near the end of your summary; include
+  label values and explanation/metadata if provided),
+- what this combined feedback suggests about this user's rubric reasoning in this case.
 
-Stay grounded in specific details from this run and this QA entry. Do not write abstract principles.
-
-Return only:
-<summary>
-[your summary]
-</summary>
-"""
-
-
-def _create_label_item_summary_prompt(
-    labeled_run: "LabeledRun",
-    agent_run_text: str,
-) -> str:
-    label_entry = _format_label_evidence_block(labeled_run)
-    return f"""You are summarizing one human labeling action for user-model inference.
-
-AGENT RUN CONTEXT:
-{agent_run_text}
-
-LABEL ENTRY:
-{label_entry}
-
-Write a concrete, rich summary (4-7 sentences) that captures:
-- the relevant run context (what happened and what behavior was evaluated),
-- how the user labeled the run (including label values and explanation/metadata if provided),
-- what this labeling behavior suggests about this user's rubric reasoning in this case.
-
-Stay grounded in specific details from this run and this label entry. Do not write abstract principles.
+Stay grounded in specific details from this run and this feedback entry. Do not write abstract
+principles.
 
 Return only:
 <summary>
@@ -348,6 +335,24 @@ def _format_user_data_label_line(
     )
 
 
+def _format_run_feedback_qa_evidence_block(run_feedback: "AgentRunFeedback") -> str:
+    if not run_feedback.qa_pairs:
+        return "Raw QA evidence:\nNo QA pairs recorded for this run."
+
+    lines = ["Raw QA evidence:"]
+    for qa_idx, qa_pair in enumerate(run_feedback.qa_pairs):
+        lines.extend(
+            [
+                f"QA {qa_idx + 1}:",
+                f"- status: {qa_pair.status}",
+                f"- question: {qa_pair.question}",
+                f"- answer: {qa_pair.answer}",
+                f"- human_explanation: {qa_pair.explanation or 'N/A'}",
+            ]
+        )
+    return "\n".join(lines)
+
+
 def _build_user_data_summary_text(
     qa_blocks: list[str],
     label_lines: list[str],
@@ -459,67 +464,52 @@ def summarize_user_data_for_prompt(
 
 
 def _build_generated_user_data_summary_text(
-    qa_blocks: list[str],
-    label_blocks: list[str],
-    total_qa_pairs: int,
+    run_blocks: list[str],
+    total_feedback_units: int,
+    total_source_qa_pairs: int,
     total_labels: int,
 ) -> str:
-    qa_section = "\n\n".join(qa_blocks) if qa_blocks else "No QA summaries."
-    if label_blocks:
-        label_section = f"{_get_user_label_evidence_fields_description()}\n\n" + "\n\n".join(
-            label_blocks
-        )
+    run_section = "\n\n".join(run_blocks) if run_blocks else "No run summaries."
+    if total_labels > 0:
+        label_evidence_section = _get_user_label_evidence_fields_description()
     else:
-        label_section = "No label summaries."
+        label_evidence_section = "No labels in source user data."
     return (
-        f"QA Summaries ({len(qa_blocks)}/{total_qa_pairs} shown):\n{qa_section}\n\n"
-        f"Label Summaries ({len(label_blocks)}/{total_labels} shown):\n{label_section}"
+        f"Run Summaries ({len(run_blocks)}/{total_feedback_units} shown):\n{run_section}\n\n"
+        f"Source feedback totals: {total_source_qa_pairs} QA pair(s), {total_labels} label(s).\n\n"
+        f"{label_evidence_section}"
     )
 
 
 def _fit_generated_user_data_summary_to_token_limit(
-    qa_blocks: list[str],
-    label_blocks: list[str],
-    total_qa_pairs: int,
+    run_blocks: list[str],
+    total_feedback_units: int,
+    total_source_qa_pairs: int,
     total_labels: int,
     max_tokens: int,
-) -> tuple[str, int, int]:
-    included_qa: list[str] = []
-    included_labels: list[str] = []
+) -> tuple[str, int]:
+    included_runs: list[str] = []
 
-    for qa_block in qa_blocks:
+    for run_block in run_blocks:
         candidate = _build_generated_user_data_summary_text(
-            qa_blocks=included_qa + [qa_block],
-            label_blocks=included_labels,
-            total_qa_pairs=total_qa_pairs,
+            run_blocks=included_runs + [run_block],
+            total_feedback_units=total_feedback_units,
+            total_source_qa_pairs=total_source_qa_pairs,
             total_labels=total_labels,
         )
         if get_token_count(candidate) <= max_tokens:
-            included_qa.append(qa_block)
-            continue
-        break
-
-    for label_block in label_blocks:
-        candidate = _build_generated_user_data_summary_text(
-            qa_blocks=included_qa,
-            label_blocks=included_labels + [label_block],
-            total_qa_pairs=total_qa_pairs,
-            total_labels=total_labels,
-        )
-        if get_token_count(candidate) <= max_tokens:
-            included_labels.append(label_block)
+            included_runs.append(run_block)
             continue
         break
 
     summary = _build_generated_user_data_summary_text(
-        qa_blocks=included_qa,
-        label_blocks=included_labels,
-        total_qa_pairs=total_qa_pairs,
+        run_blocks=included_runs,
+        total_feedback_units=total_feedback_units,
+        total_source_qa_pairs=total_source_qa_pairs,
         total_labels=total_labels,
     )
-    omitted_qa_pairs = total_qa_pairs - len(included_qa)
-    omitted_labels = total_labels - len(included_labels)
-    return summary, omitted_qa_pairs, omitted_labels
+    omitted_feedback_units = total_feedback_units - len(included_runs)
+    return summary, omitted_feedback_units
 
 
 async def summarize_user_data_for_prompt_with_agent_runs(
@@ -532,20 +522,20 @@ async def summarize_user_data_for_prompt_with_agent_runs(
     if max_tokens <= 0:
         raise ValueError("max_tokens must be > 0")
 
-    answered_qa_entries = _get_answered_qa_entries(user_data)
-    labeled_entries = _get_labeled_entries(user_data)
-    total_qa_pairs = len(answered_qa_entries)
-    total_labels = len(labeled_entries)
+    feedback_units = user_data.agent_run_feedback
+    total_feedback_units = len(feedback_units)
+    total_source_qa_pairs = sum(len(feedback.qa_pairs) for feedback in feedback_units)
+    total_labels = sum(1 for feedback in feedback_units if feedback.label is not None)
 
     inputs: list[list[dict[str, str]]] = []
     summary_tasks: list[_UserDataSummaryTask] = []
 
-    for qa_idx, (run_feedback, qa_pair) in enumerate(answered_qa_entries):
+    for run_idx, run_feedback in enumerate(feedback_units):
         agent_run = agent_runs_by_id.get(run_feedback.agent_run_id)
         if agent_run is None:
             logger.error(
-                "Skipping QA pair %d for user-data summary; missing agent run %s",
-                qa_idx + 1,
+                "Skipping feedback unit %d for user-data summary; missing agent run %s",
+                run_idx + 1,
                 run_feedback.agent_run_id,
             )
             continue
@@ -554,49 +544,19 @@ async def summarize_user_data_for_prompt_with_agent_runs(
         agent_run_text, _, _ = truncate_to_token_limit(
             agent_run_text, max_tokens=USER_DATA_SUMMARY_AGENT_RUN_TOK_LIMIT
         )
-        prompt = _create_qa_item_summary_prompt(
-            qa_pair=qa_pair,
+        prompt = _create_agent_run_feedback_summary_prompt(
             run_feedback=run_feedback,
             agent_run_text=agent_run_text,
         )
         inputs.append([{"role": "user", "content": prompt}])
         summary_tasks.append(
             _UserDataSummaryTask(
-                item_type="qa",
-                item_index=qa_idx,
+                run_index=run_idx,
                 agent_run_id=run_feedback.agent_run_id,
             )
         )
 
-    for label_idx, (run_feedback, labeled_run) in enumerate(labeled_entries):
-        agent_run = agent_runs_by_id.get(run_feedback.agent_run_id)
-        if agent_run is None:
-            logger.error(
-                "Skipping label %d for user-data summary; missing agent run %s",
-                label_idx + 1,
-                run_feedback.agent_run_id,
-            )
-            continue
-
-        agent_run_text = LLMContext(items=[agent_run]).to_str()
-        agent_run_text, _, _ = truncate_to_token_limit(
-            agent_run_text, max_tokens=USER_DATA_SUMMARY_AGENT_RUN_TOK_LIMIT
-        )
-        prompt = _create_label_item_summary_prompt(
-            labeled_run=labeled_run,
-            agent_run_text=agent_run_text,
-        )
-        inputs.append([{"role": "user", "content": prompt}])
-        summary_tasks.append(
-            _UserDataSummaryTask(
-                item_type="label",
-                item_index=label_idx,
-                agent_run_id=run_feedback.agent_run_id,
-            )
-        )
-
-    qa_blocks: list[str] = []
-    label_blocks: list[str] = []
+    run_blocks: list[str] = []
 
     if inputs:
         outputs = await llm_svc.get_completions(
@@ -610,9 +570,8 @@ async def summarize_user_data_for_prompt_with_agent_runs(
         for summary_task, output in zip(summary_tasks, outputs):
             if output.did_error:
                 logger.error(
-                    "Failed to summarize user-data %s %d for run %s: %s",
-                    summary_task.item_type,
-                    summary_task.item_index + 1,
+                    "Failed to summarize user-data feedback unit %d for run %s: %s",
+                    summary_task.run_index + 1,
                     summary_task.agent_run_id,
                     output.errors,
                 )
@@ -622,36 +581,34 @@ async def summarize_user_data_for_prompt_with_agent_runs(
             summary_text = _extract_summary_text(response_text or "")
             if not summary_text:
                 logger.error(
-                    "Failed to summarize user-data %s %d for run %s: empty summary",
-                    summary_task.item_type,
-                    summary_task.item_index + 1,
+                    "Failed to summarize user-data feedback unit %d for run %s: empty summary",
+                    summary_task.run_index + 1,
                     summary_task.agent_run_id,
                 )
                 continue
 
-            if summary_task.item_type == "qa":
-                qa_blocks.append(
-                    (
-                        f"--- QA Summary {summary_task.item_index + 1} "
-                        f"(run: {summary_task.agent_run_id}) ---\n{summary_text}"
-                    )
+            run_feedback = feedback_units[summary_task.run_index]
+            qa_evidence_entry = _format_run_feedback_qa_evidence_block(run_feedback)
+            label_evidence_entry = (
+                _format_label_evidence_block(run_feedback.label)
+                if run_feedback.label is not None
+                else "No user label evidence recorded for this run."
+            )
+            run_blocks.append(
+                (
+                    f"--- Run Summary {summary_task.run_index + 1} "
+                    f"(run: {summary_task.agent_run_id}) ---\n"
+                    f"QA pairs in this feedback unit: {len(run_feedback.qa_pairs)}\n"
+                    f"{qa_evidence_entry}\n\n"
+                    f"{label_evidence_entry}\n\n"
+                    f"Generated contextual summary:\n{summary_text}"
                 )
-            else:
-                _, labeled_run = labeled_entries[summary_task.item_index]
-                label_evidence_entry = _format_label_evidence_block(labeled_run)
-                label_blocks.append(
-                    (
-                        f"--- Label Summary {summary_task.item_index + 1} "
-                        f"(run: {summary_task.agent_run_id}) ---\n"
-                        f"{label_evidence_entry}\n\n"
-                        f"Generated contextual summary:\n{summary_text}"
-                    )
-                )
+            )
 
-    summary, omitted_qa_pairs, omitted_labels = _fit_generated_user_data_summary_to_token_limit(
-        qa_blocks=qa_blocks,
-        label_blocks=label_blocks,
-        total_qa_pairs=total_qa_pairs,
+    summary, omitted_feedback_units = _fit_generated_user_data_summary_to_token_limit(
+        run_blocks=run_blocks,
+        total_feedback_units=total_feedback_units,
+        total_source_qa_pairs=total_source_qa_pairs,
         total_labels=total_labels,
         max_tokens=max_tokens,
     )
@@ -660,26 +617,25 @@ async def summarize_user_data_for_prompt_with_agent_runs(
     logger.info(
         (
             "Built agent-run user-data summary for prompt: %d/%d tokens, "
-            "%d/%d QA summaries included, %d/%d label summaries included"
+            "%d/%d run summaries included, source totals %d QA pair(s), %d label(s)"
         ),
         used_tokens,
         max_tokens,
-        total_qa_pairs - omitted_qa_pairs,
-        total_qa_pairs,
-        total_labels - omitted_labels,
+        total_feedback_units - omitted_feedback_units,
+        total_feedback_units,
+        total_source_qa_pairs,
         total_labels,
     )
 
-    if log_truncation_warning and (omitted_qa_pairs > 0 or omitted_labels > 0):
+    if log_truncation_warning and omitted_feedback_units > 0:
         logger.warning(
             (
                 "Agent-run user-data summary hit token or availability limits (%d/%d). "
-                "Omitted %d QA pair(s) and %d label(s) from prompt context."
+                "Omitted %d feedback unit(s) from prompt context."
             ),
             used_tokens,
             max_tokens,
-            omitted_qa_pairs,
-            omitted_labels,
+            omitted_feedback_units,
         )
 
     return summary
