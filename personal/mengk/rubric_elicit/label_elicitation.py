@@ -3,9 +3,9 @@
 Label Elicitation (Entropy-Only)
 
 Standalone entropy-prioritized label elicitation runner that only:
-1. Loads rubric/user model context.
+1. Loads rubric/user context.
 2. Samples agent runs.
-3. Estimates user output distributions p_u(y | x, z, r).
+3. Estimates user output distributions p_u(y | x, c, r).
 4. Computes Shannon entropy H[p_u] on rubric agreement keys.
 5. Prints highest-entropy runs (descending).
 6. Generates labeling requests for top-ranked runs from p_u outcomes + reasoning.
@@ -46,11 +46,11 @@ from docent_core.docent.ai_tools.rubric.elicit import (
     RunDistributionEstimate,
     SchemaSelectableField,
     build_agent_run_dashboard_url,
-    build_user_model_inference_prompt_with_agent_runs,
+    build_user_context_inference_prompt_with_agent_runs,
     estimate_user_distributions_for_agent_runs,
     generate_labeling_requests,
     get_enum_boolean_fields_from_schema,
-    infer_user_model_from_user_data,
+    infer_user_context_from_user_data,
     normalize_output_distribution,
     render_text_with_citation_footnotes,
 )
@@ -102,7 +102,7 @@ def _require_openai_api_key() -> str:
 
 def _load_user_data(initial_rubric: str, user_data_json_path: str | None) -> UserData:
     if user_data_json_path is None:
-        console.print("No user data JSON provided; user model will be inferred from rubric only")
+        console.print("No user data JSON provided; user context will be inferred from rubric only")
         return UserData(initial_rubric=initial_rubric)
 
     path = Path(user_data_json_path)
@@ -127,7 +127,7 @@ def _load_user_data(initial_rubric: str, user_data_json_path: str | None) -> Use
     labeled_run_count = len(labeled_entries)
     labeled_key_count = sum(len(label.label_value) for _, label in labeled_entries)
     console.print(
-        f"Loaded user data JSON with {len(user_data.agent_run_feedback)} feedback unit(s), "
+        f"Loaded user data JSON with {len(user_data.agent_run_feedbacks)} feedback unit(s), "
         f"{answered_qa_count} answered QA, {skipped_qa_count} skipped QA, "
         f"{labeled_run_count} labeled run(s), and {labeled_key_count} labeled key(s): {path}"
     )
@@ -135,7 +135,7 @@ def _load_user_data(initial_rubric: str, user_data_json_path: str | None) -> Use
 
 
 def _get_user_data_agent_run_ids(user_data: UserData) -> list[str]:
-    return sorted({feedback.agent_run_id for feedback in user_data.agent_run_feedback})
+    return sorted({feedback.agent_run_id for feedback in user_data.agent_run_feedbacks})
 
 
 def _load_user_data_agent_runs(
@@ -237,12 +237,12 @@ def _render_current_rubric(rubric: Rubric) -> None:
     console.print(Panel(schema_text, title="[bold]output_schema[/bold]", expand=False))
 
 
-def _render_user_model(user_model_text: str) -> None:
-    console.print("\n[bold cyan]INFERRED USER MODEL[/bold cyan]")
+def _render_user_context(user_context_text: str) -> None:
+    console.print("\n[bold cyan]INFERRED USER CONTEXT[/bold cyan]")
     console.print(
         Panel(
-            user_model_text,
-            title="[bold]Initial User Model[/bold]",
+            user_context_text,
+            title="[bold]Initial User Context[/bold]",
             expand=False,
         )
     )
@@ -595,9 +595,7 @@ def _collect_focus_answers(
         if selected_label == skip_option:
             qa_pairs.append(
                 QAPair(
-                    question=focus.question,
-                    question_citations=list(focus.citations),
-                    sample_answers=list(focus.sample_answers),
+                    focus_item=focus.model_copy(deep=True),
                     selected_sample_index=None,
                     answer="",
                     explanation=None,
@@ -620,9 +618,7 @@ def _collect_focus_answers(
         if not selected_answer:
             qa_pairs.append(
                 QAPair(
-                    question=focus.question,
-                    question_citations=list(focus.citations),
-                    sample_answers=list(focus.sample_answers),
+                    focus_item=focus.model_copy(deep=True),
                     selected_sample_index=None,
                     answer="",
                     explanation=None,
@@ -640,9 +636,7 @@ def _collect_focus_answers(
 
         qa_pairs.append(
             QAPair(
-                question=focus.question,
-                question_citations=list(focus.citations),
-                sample_answers=list(focus.sample_answers),
+                focus_item=focus.model_copy(deep=True),
                 selected_sample_index=selected_sample_index,
                 answer=selected_answer,
                 explanation=qa_explanation,
@@ -733,19 +727,22 @@ def _build_run_feedback_candidate(
             label_value=label_value,
             explanation=label_explanation,
             metadata=metadata.model_dump(mode="json"),
-            labeling_request=labeling_request,
         )
 
-    title = labeling_request.title if labeling_request is not None else "Label this run"
-    review_context = labeling_request.review_context if labeling_request is not None else ""
-    review_context_citations = (
-        list(labeling_request.review_context_citations) if labeling_request is not None else []
+    effective_labeling_request = (
+        labeling_request
+        if labeling_request is not None
+        else LabelingRequest(
+            agent_run_id=estimate.agent_run_id,
+            title="Label this run",
+            review_context="",
+            review_context_citations=[],
+            review_focus=[],
+        )
     )
     return AgentRunFeedback(
         agent_run_id=estimate.agent_run_id,
-        title=title,
-        review_context=review_context,
-        review_context_citations=review_context_citations,
+        labeling_request=effective_labeling_request,
         qa_pairs=list(qa_pairs),
         label=label,
     )
@@ -759,7 +756,7 @@ def persist_run_feedback_with_overwrite_gate(
     """Persist one run feedback entry unless overwrite confirmation is missing."""
     has_existing = any(
         feedback.agent_run_id == run_feedback.agent_run_id
-        for feedback in user_data.agent_run_feedback
+        for feedback in user_data.agent_run_feedbacks
     )
     if has_existing and not overwrite_confirmed:
         return False
@@ -769,7 +766,7 @@ def persist_run_feedback_with_overwrite_gate(
 
 def get_excluded_agent_run_ids(user_data: UserData) -> set[str]:
     """Return run IDs that should be excluded from future sampling."""
-    return {feedback.agent_run_id for feedback in user_data.agent_run_feedback}
+    return {feedback.agent_run_id for feedback in user_data.agent_run_feedbacks}
 
 
 def _collect_run_feedback_for_run(
@@ -1087,18 +1084,18 @@ async def run_entropy_elicitation(
         user_data_json_path=user_data_json_path,
     )
     user_data_agent_runs = _load_user_data_agent_runs(dc, collection_id, user_data)
-    user_data_summary, _ = await build_user_model_inference_prompt_with_agent_runs(
+    user_data_summary, _ = await build_user_context_inference_prompt_with_agent_runs(
         user_data=user_data,
         agent_runs_by_id=user_data_agent_runs,
         llm_svc=llm_svc,
     )
     _render_user_data_prompt_summary(user_data_summary)
-    user_model_text = await infer_user_model_from_user_data(
+    user_context_text = await infer_user_context_from_user_data(
         user_data,
         llm_svc,
         user_data_summary=user_data_summary,
     )
-    _render_user_model(user_model_text)
+    _render_user_context(user_context_text)
 
     excluded_ids = get_excluded_agent_run_ids(user_data)
 
@@ -1121,7 +1118,7 @@ async def run_entropy_elicitation(
     estimates = await estimate_user_distributions_for_agent_runs(
         agent_runs=agent_runs,
         rubric=rubric,
-        user_model_text=user_model_text,
+        user_context_text=user_context_text,
         llm_svc=llm_svc,
     )
 
@@ -1190,7 +1187,7 @@ async def run_entropy_elicitation(
         agent_runs=top_runs,
         estimates=top_estimates,
         rubric=rubric,
-        user_model_text=user_model_text,
+        user_context_text=user_context_text,
         llm_svc=llm_svc,
         max_requests=len(top_estimates),
         priority_scores_by_run_id=top_entropies_by_run_id,
@@ -1242,7 +1239,7 @@ async def run_entropy_elicitation(
         f"Collected feedback for {len(collected_feedback)}/{displayed_runs} displayed run(s)."
     )
     console.print(
-        f"Current totals: {len(user_data.agent_run_feedback)} feedback unit(s), "
+        f"Current totals: {len(user_data.agent_run_feedbacks)} feedback unit(s), "
         f"{answered_qa_count} answered QA, {skipped_qa_count} skipped QA, "
         f"{labeled_run_count} labeled run(s), {labeled_key_count} labeled key(s)."
     )
@@ -1267,7 +1264,7 @@ def main() -> None:
         default=None,
         help=(
             "Optional path to an existing UserData JSON file. "
-            "If provided, labels/QA history are loaded before user model inference."
+            "If provided, labels/QA history are loaded before user context inference."
         ),
     )
     parser.add_argument(

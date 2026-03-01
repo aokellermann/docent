@@ -60,7 +60,7 @@ DEFAULT_MODEL_OPTION = ModelOption(
 #     reasoning_effort=None,
 # )
 DEFAULT_USER_REASONING_FALLBACK = (
-    "No explicit reasoning provided. This probability is inferred from the user model and "
+    "No explicit reasoning provided. This probability is inferred from the user context and "
     "available user QA/label history."
 )
 USER_DATA_PROMPT_TOKEN_LIMIT = 12_000
@@ -121,7 +121,7 @@ class SelectedLabelMetadata(BaseModel):
 
 
 class SelectedLabelPayload(BaseModel):
-    """Structured label evidence block used in user-model prompt summaries."""
+    """Structured label evidence block used in user-context prompt summaries."""
 
     label_value: dict[str, Any]
     explanation: str | None = None
@@ -167,10 +167,19 @@ def _create_agent_run_feedback_summary_prompt(
     run_feedback: "AgentRunFeedback",
     agent_run_text: str,
 ) -> str:
+    labeling_request = run_feedback.labeling_request
+    review_focus_payload = [
+        {
+            "question": focus.question,
+            "sample_answers": focus.sample_answers,
+            "citations": [citation.model_dump(mode="json") for citation in focus.citations],
+        }
+        for focus in labeling_request.review_focus
+    ]
     qa_pairs_payload = [
         {
-            "question": qa_pair.question,
-            "sample_answers": qa_pair.sample_answers,
+            "question": qa_pair.focus_item.question,
+            "sample_answers": qa_pair.focus_item.sample_answers,
             "selected_sample_index": qa_pair.selected_sample_index,
             "answer": qa_pair.answer,
             "explanation": qa_pair.explanation,
@@ -186,14 +195,19 @@ def _create_agent_run_feedback_summary_prompt(
         else None
     )
     run_feedback_payload = {
-        "run_title": run_feedback.title,
-        "review_context": run_feedback.review_context,
+        "run_title": labeling_request.title,
+        "review_context": labeling_request.review_context,
+        "review_context_citations": [
+            citation.model_dump(mode="json")
+            for citation in labeling_request.review_context_citations
+        ],
+        "review_focus": review_focus_payload,
         "qa_pairs": qa_pairs_payload,
         # Keep label at the end so the model sees it as the final source-of-truth decision.
         "label": label_payload,
     }
     run_feedback_payload_json = json.dumps(run_feedback_payload, indent=2)
-    return f"""You are summarizing all human feedback for one agent run for user-model inference.
+    return f"""You are summarizing all human feedback for one agent run for user-context inference.
 
 AGENT RUN CONTEXT:
 {agent_run_text}
@@ -310,11 +324,12 @@ def _format_user_data_qa_block(
     run_feedback: "AgentRunFeedback",
     qa_pair: "QAPair",
 ) -> str:
+    labeling_request = run_feedback.labeling_request
     lines = [
         f"--- Example {idx + 1} (run: {run_feedback.agent_run_id}) ---",
-        f"Title: {run_feedback.title or 'N/A'}",
-        f"Situation: {run_feedback.review_context or 'N/A'}",
-        f"Question asked: {qa_pair.question}",
+        f"Title: {labeling_request.title or 'N/A'}",
+        f"Situation: {labeling_request.review_context or 'N/A'}",
+        f"Question asked: {qa_pair.focus_item.question}",
         f"User's answer: {qa_pair.answer}",
         f"Custom response: {'Yes' if qa_pair.is_custom_response else 'No'}",
     ]
@@ -344,7 +359,7 @@ def _format_run_feedback_qa_evidence_block(run_feedback: "AgentRunFeedback") -> 
             [
                 f"QA {qa_idx + 1}:",
                 f"- status: {qa_pair.status}",
-                f"- question: {qa_pair.question}",
+                f"- question: {qa_pair.focus_item.question}",
                 f"- answer: {qa_pair.answer}",
                 f"- human_explanation: {qa_pair.explanation or 'N/A'}",
             ]
@@ -521,7 +536,7 @@ async def summarize_user_data_for_prompt_with_agent_runs(
     if max_tokens <= 0:
         raise ValueError("max_tokens must be > 0")
 
-    feedback_units = user_data.agent_run_feedback
+    feedback_units = user_data.agent_run_feedbacks
     total_feedback_units = len(feedback_units)
     total_source_qa_pairs = sum(len(feedback.qa_pairs) for feedback in feedback_units)
     total_labels = sum(1 for feedback in feedback_units if feedback.label is not None)
@@ -640,11 +655,11 @@ async def summarize_user_data_for_prompt_with_agent_runs(
     return summary
 
 
-def _create_user_model_inference_prompt(
+def _create_user_context_inference_prompt(
     initial_rubric: str,
     user_data_summary: str,
 ) -> str:
-    return f"""You are building a user model for rubric-based labeling. The model should be a **curated collection of richly annotated examples** that a downstream LLM can reason from by analogy — NOT a set of abstract principles.
+    return f"""You are building a user context for rubric-based labeling. The context should be a **curated collection of richly annotated examples** that a downstream LLM can reason from by analogy — NOT a set of abstract principles.
 
 INITIAL RUBRIC:
 {initial_rubric}
@@ -683,13 +698,13 @@ CRITICAL RULES:
 - Treat any "User label evidence (selected JSON fields)" block as source-of-truth evidence. Do not contradict or overwrite user-provided wording; when referencing user-stated explanation text, quote it exactly.
 
 Return your response in this format:
-<user_model>
-[Your example-based user model in markdown]
-</user_model>
+<user_context>
+[Your example-based user context in markdown]
+</user_context>
 """
 
 
-def build_user_model_inference_prompt(
+def build_user_context_inference_prompt(
     user_data: "UserData",
     max_tokens: int = USER_DATA_PROMPT_TOKEN_LIMIT,
     log_truncation_warning: bool = True,
@@ -700,14 +715,14 @@ def build_user_model_inference_prompt(
         max_tokens=max_tokens,
         log_truncation_warning=log_truncation_warning,
     )
-    prompt = _create_user_model_inference_prompt(
+    prompt = _create_user_context_inference_prompt(
         initial_rubric=user_data.initial_rubric,
         user_data_summary=user_data_summary,
     )
     return user_data_summary, prompt
 
 
-async def build_user_model_inference_prompt_with_agent_runs(
+async def build_user_context_inference_prompt_with_agent_runs(
     user_data: "UserData",
     agent_runs_by_id: dict[str, AgentRun],
     llm_svc: BaseLLMService,
@@ -722,16 +737,16 @@ async def build_user_model_inference_prompt_with_agent_runs(
         max_tokens=max_tokens,
         log_truncation_warning=log_truncation_warning,
     )
-    prompt = _create_user_model_inference_prompt(
+    prompt = _create_user_context_inference_prompt(
         initial_rubric=user_data.initial_rubric,
         user_data_summary=user_data_summary,
     )
     return user_data_summary, prompt
 
 
-def create_user_model_inference_prompt(user_data: "UserData") -> str:
-    """Create prompt for inferring textual user model z from run-centric user feedback."""
-    _, prompt = build_user_model_inference_prompt(
+def create_user_context_inference_prompt(user_data: "UserData") -> str:
+    """Create prompt for inferring textual user context c from run-centric user feedback."""
+    _, prompt = build_user_context_inference_prompt(
         user_data=user_data,
         max_tokens=USER_DATA_PROMPT_TOKEN_LIMIT,
         log_truncation_warning=True,
@@ -739,25 +754,25 @@ def create_user_model_inference_prompt(user_data: "UserData") -> str:
     return prompt
 
 
-async def infer_user_model_from_user_data(
+async def infer_user_context_from_user_data(
     user_data: "UserData",
     llm_svc: BaseLLMService,
     user_data_summary: str | None = None,
 ) -> str:
-    """Infer textual user model z from U. Falls back to initial rubric on failure."""
+    """Infer textual user context c from U. Falls back to initial rubric on failure."""
     has_answered_qa = any(True for _ in user_data.iter_answered_qa_entries())
     has_labels = any(True for _ in user_data.iter_labeled_entries())
     if not has_answered_qa and not has_labels:
         return user_data.initial_rubric
 
     if user_data_summary is None:
-        _, prompt = build_user_model_inference_prompt(
+        _, prompt = build_user_context_inference_prompt(
             user_data=user_data,
             max_tokens=USER_DATA_PROMPT_TOKEN_LIMIT,
             log_truncation_warning=True,
         )
     else:
-        prompt = _create_user_model_inference_prompt(
+        prompt = _create_user_context_inference_prompt(
             initial_rubric=user_data.initial_rubric,
             user_data_summary=user_data_summary,
         )
@@ -771,11 +786,11 @@ async def infer_user_model_from_user_data(
     output = outputs[0]
 
     if output.did_error:
-        logger.warning(f"Failed to infer user model from user data: {output.errors}")
+        logger.warning(f"Failed to infer user context from user data: {output.errors}")
         return user_data.initial_rubric
 
     response_text = output.completions[0].text or ""
-    match = re.search(r"<user_model>(.*?)</user_model>", response_text, re.DOTALL)
+    match = re.search(r"<user_context>(.*?)</user_context>", response_text, re.DOTALL)
     if match:
         return match.group(1).strip()
 
@@ -787,13 +802,13 @@ def create_user_distribution_prompt(
     agent_run_text: str,
     rubric_text: str,
     output_schema: dict[str, Any],
-    user_model_text: str,
+    user_context_text: str,
     citation_instructions: str,
 ) -> str:
-    """Create prompt for p_u(y | x, z, r)."""
+    """Create prompt for p_u(y | x, c, r)."""
     schema_text = json.dumps(output_schema, indent=2)
 
-    return f"""You are estimating p_u(y | x, z, r), where y follows the rubric output schema.
+    return f"""You are estimating p_u(y | x, c, r), where y follows the rubric output schema.
 
 {citation_instructions}
 
@@ -803,33 +818,33 @@ Rubric:
 Output schema:
 {schema_text}
 
-User model z:
-{user_model_text}
+User context c:
+{user_context_text}
 
 Agent run:
 {agent_run_text}
 
 Task:
-Given the user model, what would you anticipate the user says?
+Given the user context, what would you anticipate the user says?
 Estimate the distribution using this reasoning procedure:
-1. Reason through the rubric as applied to this specific agent run, using user model z as your evidence base.
+1. Reason through the rubric as applied to this specific agent run, using user context c as your evidence base.
 2. While reasoning, explicitly track uncertainties that matter for the rubric outcome.
-3. For each uncertainty, assess evidence coverage in z:
-   - If z has relevant direct/indirect/conflicting evidence, treat it as partially informed (less uncertain).
-   - If z does not address it, treat it as unaddressed (more uncertain).
+3. For each uncertainty, assess evidence coverage in c:
+   - If c has relevant direct/indirect/conflicting evidence, treat it as partially informed (less uncertain).
+   - If c does not address it, treat it as unaddressed (more uncertain).
 4. At the end, synthesize uncertainties into a short set of generalized key cruxes (not overfit to this one run), where each crux is written as a concrete, operationalized question that is understandable without reading this specific agent run.
 5. For each key crux question, describe how the output distribution would shift if the crux resolved one way vs the opposite way.
 6. Holistically synthesize all cruxes and evidence to produce the final probability distribution.
 
 Guidance:
 - Anchor reasoning to rubric-relevant factors only.
-- Prefer concrete evidence from z over speculation.
+- Prefer concrete evidence from c over speculation.
 - Explicitly note unresolved, sparse, missing, or conflicting evidence and how it changes uncertainty.
 - Distinguish clearly between "partially informed" uncertainty vs "unaddressed" uncertainty.
 - Key cruxes should be abstract enough to generalize to similar cases.
 - Each key crux must be phrased as a concrete, operationalized, mostly self-contained question with clearly defined opposite resolutions, such that a reader who has not read this specific agent run can still understand what the question means.
 - Include counterfactual distribution impacts for each crux ("if resolved A vs B, probability mass moves how?").
-- Connect the final distribution to specific user-model signals.
+- Connect the final distribution to specific user-context signals.
 - Probabilities should sum to 1.
 - Keep the JSON schema exactly as specified.
 
@@ -944,10 +959,10 @@ def parse_output_distribution_response(
 async def estimate_user_distributions_for_agent_runs(
     agent_runs: list[AgentRun],
     rubric: Rubric,
-    user_model_text: str,
+    user_context_text: str,
     llm_svc: BaseLLMService,
 ) -> list[RunDistributionEstimate]:
-    """Estimate p_u for each run using only the inferred user model."""
+    """Estimate p_u for each run using only the inferred user context."""
     if not agent_runs:
         return []
 
@@ -968,7 +983,7 @@ async def estimate_user_distributions_for_agent_runs(
             agent_run_text=agent_run_text,
             rubric_text=rubric.rubric_text,
             output_schema=rubric.output_schema,
-            user_model_text=user_model_text,
+            user_context_text=user_context_text,
             citation_instructions=citation_instructions,
         )
 
@@ -1230,7 +1245,7 @@ def create_labeling_request_prompt(
     citation_instructions: str,
     rubric_text: str,
     rubric_output_schema: dict[str, Any],
-    user_model_text: str,
+    user_context_text: str,
     user_distribution: OutputDistribution,
     priority_score: float | None = None,
     priority_metric_name: str = "H[p_u]",
@@ -1246,9 +1261,9 @@ def create_labeling_request_prompt(
 
 Background:
 We are running an active learning loop to elicit a user's rubric for evaluating agent runs.
-- z is the current user model: a summary of the user's known preferences and evaluation criteria.
-- p_u(y | x, z, r) is the anticipated user distribution, predicted from z.
-- The run is prioritized when p_u indicates high uncertainty, because labeling this case is likely to improve the user model.
+- c is the current user context: a summary of the user's known preferences and evaluation criteria.
+- p_u(y | x, c, r) is the anticipated user distribution, predicted from c.
+- The run is prioritized when p_u indicates high uncertainty, because labeling this case is likely to improve the user context.
 
 Original rubric r (source of truth for what should be evaluated):
 {rubric_text}
@@ -1256,10 +1271,10 @@ Original rubric r (source of truth for what should be evaluated):
 Rubric output schema (allowed label fields):
 {rubric_schema_text}
 
-User model z:
-{user_model_text}
+User context c:
+{user_context_text}
 
-Anticipated user distribution p_u(y | x, z, r):
+Anticipated user distribution p_u(y | x, c, r):
 {user_summary}
 
 Run priority score {priority_metric_name}:
@@ -1307,7 +1322,7 @@ def parse_labeling_request_payload(
     agent_run_id: str,
     context: LLMContext,
 ) -> LabelingRequest:
-    """Parse one labeling-request payload into a structured LabelingRequest."""
+    """Parse one labeling-request payload into a structured labeling request."""
     raw_title = parsed.get("title")
     raw_review_context = parsed.get("review_context")
 
@@ -1357,7 +1372,7 @@ async def generate_labeling_requests(
     agent_runs: list[AgentRun],
     estimates: list[RunDistributionEstimate],
     rubric: Rubric,
-    user_model_text: str,
+    user_context_text: str,
     llm_svc: BaseLLMService,
     max_requests: int | None = None,
     priority_scores_by_run_id: dict[str, float] | None = None,
@@ -1414,7 +1429,7 @@ async def generate_labeling_requests(
             citation_instructions=citation_instructions,
             rubric_text=rubric.rubric_text,
             rubric_output_schema=rubric.output_schema,
-            user_model_text=user_model_text,
+            user_context_text=user_context_text,
             user_distribution=user_distribution,
             priority_score=priority_score,
             priority_metric_name=priority_metric_name,

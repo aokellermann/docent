@@ -41,8 +41,8 @@ from docent.judges.runner import run_rubric
 from docent.judges.types import JudgeResult, ResultType, Rubric
 from docent_core._env_util import ENV
 from docent_core.docent.ai_tools.rubric.elicit import (
-    build_user_model_inference_prompt_with_agent_runs,
-    infer_user_model_from_user_data,
+    build_user_context_inference_prompt_with_agent_runs,
+    infer_user_context_from_user_data,
 )
 from docent_core.docent.ai_tools.rubric.rewrite import rewrite_rubric
 from docent_core.docent.ai_tools.rubric.user_model import AgentRunFeedback, LabeledRun, UserData
@@ -51,7 +51,7 @@ console = Console()
 
 _USER_DATA_TOP_LEVEL_KEYS = {
     "initial_rubric",
-    "agent_run_feedback",
+    "agent_run_feedbacks",
     "created_at",
     "last_updated",
 }
@@ -201,7 +201,9 @@ def _extract_labeled_runs(feedback_units: Sequence[AgentRunFeedback]) -> list[La
         if feedback.label.agent_run_id == feedback.agent_run_id:
             labeled_runs.append(feedback.label)
             continue
-        labeled_runs.append(feedback.label.model_copy(update={"agent_run_id": feedback.agent_run_id}))
+        labeled_runs.append(
+            feedback.label.model_copy(update={"agent_run_id": feedback.agent_run_id})
+        )
     return labeled_runs
 
 
@@ -212,12 +214,12 @@ def _build_train_user_data(
 ) -> UserData:
     train_user_data = user_data.model_copy(deep=True)
     train_user_data.initial_rubric = initial_rubric
-    train_user_data.agent_run_feedback = train_feedback_units
+    train_user_data.agent_run_feedbacks = train_feedback_units
     return train_user_data
 
 
 def _get_user_data_agent_run_ids(user_data: UserData) -> list[str]:
-    return sorted({feedback.agent_run_id for feedback in user_data.agent_run_feedback})
+    return sorted({feedback.agent_run_id for feedback in user_data.agent_run_feedbacks})
 
 
 def _load_agent_runs_by_ids(
@@ -629,12 +631,12 @@ async def run_holdout_k_rubrics_evaluation(
         user_data_json_path=user_data_json_path,
     )
     train_feedback_units, test_feedback_units = _split_feedback_units(
-        user_data.agent_run_feedback, train_ratio=train_ratio, seed=seed
+        user_data.agent_run_feedbacks, train_ratio=train_ratio, seed=seed
     )
     train_labels = _extract_labeled_runs(train_feedback_units)
     test_labels_all = _extract_labeled_runs(test_feedback_units)
     _render_split_summary(
-        total_feedback_units=len(user_data.agent_run_feedback),
+        total_feedback_units=len(user_data.agent_run_feedbacks),
         train_feedback_units=train_feedback_units,
         test_feedback_units=test_feedback_units,
         train_labeled_runs=train_labels,
@@ -662,12 +664,12 @@ async def run_holdout_k_rubrics_evaluation(
         progress_desc="Fetching train-context runs",
     )
 
-    user_data_summary, _ = await build_user_model_inference_prompt_with_agent_runs(
+    user_data_summary, _ = await build_user_context_inference_prompt_with_agent_runs(
         user_data=train_user_data,
         agent_runs_by_id=train_agent_runs_by_id,
         llm_svc=llm_svc,
     )
-    user_model_text = await infer_user_model_from_user_data(
+    user_model_text = await infer_user_context_from_user_data(
         user_data=train_user_data,
         llm_svc=llm_svc,
         user_data_summary=user_data_summary,
@@ -755,7 +757,7 @@ async def run_holdout_k_rubrics_evaluation(
         test_feedback_agent_run_ids=[unit.agent_run_id for unit in test_feedback_units],
         train_labeled_agent_run_ids=[label.agent_run_id for label in train_labels],
         test_labeled_agent_run_ids=[label.agent_run_id for label in test_labels_all],
-        num_total_feedback_units=len(user_data.agent_run_feedback),
+        num_total_feedback_units=len(user_data.agent_run_feedbacks),
         num_train_feedback_units=len(train_feedback_units),
         num_test_feedback_units=len(test_feedback_units),
         num_total_labeled_units=len(train_labels) + len(test_labels_all),
