@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from docent.data_models.citation import InlineCitation
 
@@ -74,6 +74,15 @@ class AgentRunFeedback(BaseModel):
     qa_pairs: list[QAPair] = Field(default_factory=list[QAPair])
     label: LabeledRun | None = None
 
+    @model_validator(mode="after")
+    def validate_nested_agent_run_ids(self) -> "AgentRunFeedback":
+        """Ensure nested run IDs are consistent with the top-level run ID."""
+        if self.labeling_request.agent_run_id != self.agent_run_id:
+            raise ValueError("labeling_request.agent_run_id must match agent_run_id")
+        if self.label is not None and self.label.agent_run_id != self.agent_run_id:
+            raise ValueError("label.agent_run_id must match agent_run_id")
+        return self
+
 
 class UserData(BaseModel):
     """User Data (U) for user-context inference and downstream evaluation."""
@@ -88,29 +97,18 @@ class UserData(BaseModel):
     def upsert_run_feedback(self, agent_run_feedback: AgentRunFeedback) -> None:
         """Insert or replace feedback for an agent run ID, updating timestamps."""
         now = datetime.now()
-        normalized_feedback = agent_run_feedback.model_copy(deep=True)
-        if (
-            normalized_feedback.label is not None
-            and normalized_feedback.label.agent_run_id != normalized_feedback.agent_run_id
-        ):
-            normalized_feedback.label = normalized_feedback.label.model_copy(
-                update={"agent_run_id": normalized_feedback.agent_run_id}
-            )
-        if normalized_feedback.labeling_request.agent_run_id != normalized_feedback.agent_run_id:
-            normalized_feedback.labeling_request = normalized_feedback.labeling_request.model_copy(
-                update={"agent_run_id": normalized_feedback.agent_run_id}
-            )
-        normalized_feedback.last_updated = now
+        upserted_feedback = agent_run_feedback.model_copy(deep=True)
+        upserted_feedback.last_updated = now
 
         for idx, existing in enumerate(self.agent_run_feedbacks):
-            if existing.agent_run_id != normalized_feedback.agent_run_id:
+            if existing.agent_run_id != upserted_feedback.agent_run_id:
                 continue
-            normalized_feedback.created_at = existing.created_at
-            self.agent_run_feedbacks[idx] = normalized_feedback
+            upserted_feedback.created_at = existing.created_at
+            self.agent_run_feedbacks[idx] = upserted_feedback
             self.last_updated = now
             return
 
-        self.agent_run_feedbacks.append(normalized_feedback)
+        self.agent_run_feedbacks.append(upserted_feedback)
         self.last_updated = now
 
     def iter_answered_qa_entries(self) -> Iterator[tuple[AgentRunFeedback, QAPair]]:
