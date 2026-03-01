@@ -480,12 +480,6 @@ def _render_generated_labeling_requests(
             text=request.review_context,
             citations=request.review_context_citations,
         )
-        _append_section_with_citations(
-            body_lines=body_lines,
-            title="Priority Rationale",
-            text=request.priority_rationale,
-            citations=request.priority_rationale_citations,
-        )
         body_lines.extend(["", "[bold]Review Focus:[/bold]"])
         if request.review_focus:
             for focus in request.review_focus:
@@ -747,17 +741,11 @@ def _build_run_feedback_candidate(
     review_context_citations = (
         list(labeling_request.review_context_citations) if labeling_request is not None else []
     )
-    priority_rationale = labeling_request.priority_rationale if labeling_request is not None else ""
-    priority_rationale_citations = (
-        list(labeling_request.priority_rationale_citations) if labeling_request is not None else []
-    )
     return AgentRunFeedback(
         agent_run_id=estimate.agent_run_id,
         title=title,
         review_context=review_context,
         review_context_citations=review_context_citations,
-        priority_rationale=priority_rationale,
-        priority_rationale_citations=priority_rationale_citations,
         qa_pairs=list(qa_pairs),
         label=label,
     )
@@ -822,12 +810,6 @@ def _collect_run_feedback_for_run(
             title="Review Context",
             text=labeling_request.review_context,
             citations=labeling_request.review_context_citations,
-        )
-        _append_section_with_citations(
-            body_lines=body_lines,
-            title="Priority Rationale",
-            text=labeling_request.priority_rationale,
-            citations=labeling_request.priority_rationale_citations,
         )
         body_lines.extend(["", "[bold]Review Focus:[/bold]"])
         if labeling_request.review_focus:

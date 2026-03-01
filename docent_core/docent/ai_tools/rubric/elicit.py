@@ -188,7 +188,6 @@ def _create_agent_run_feedback_summary_prompt(
     run_feedback_payload = {
         "run_title": run_feedback.title,
         "review_context": run_feedback.review_context,
-        "priority_rationale": run_feedback.priority_rationale,
         "qa_pairs": qa_pairs_payload,
         # Keep label at the end so the model sees it as the final source-of-truth decision.
         "label": label_payload,
@@ -1274,7 +1273,6 @@ Craft a labeling request that helps the user quickly adjudicate this run.
 
 Other fields:
 - title: concise and scannable.
-- priority_rationale: why this run is high-priority for user feedback, with citation(s).
 - review_context: brief context and key events with citations.
 - review_focus: a checklist of specific rubric-related questions to inspect; this field can be more detailed than review_context.
   Each review_focus item must include:
@@ -1289,7 +1287,6 @@ Scope requirement:
 Return JSON:
 {{
   "title": "<short title>",
-  "priority_rationale": "<why this run is prioritized, with citations>",
   "review_context": "<succinct context and key events with citations>",
   "review_focus": [
     {{
@@ -1312,18 +1309,11 @@ def parse_labeling_request_payload(
 ) -> LabelingRequest:
     """Parse one labeling-request payload into a structured LabelingRequest."""
     raw_title = parsed.get("title")
-    raw_priority_rationale = parsed.get("priority_rationale")
     raw_review_context = parsed.get("review_context")
 
     title = raw_title if isinstance(raw_title, str) else "Label this run"
-    priority_rationale_text = (
-        raw_priority_rationale if isinstance(raw_priority_rationale, str) else ""
-    )
     review_context_text = raw_review_context if isinstance(raw_review_context, str) else ""
 
-    priority_rationale, priority_rationale_citations = resolve_citations_with_context(
-        priority_rationale_text, context, validate_text_ranges=True
-    )
     review_context, review_context_citations = resolve_citations_with_context(
         review_context_text, context, validate_text_ranges=True
     )
@@ -1357,8 +1347,6 @@ def parse_labeling_request_payload(
     return LabelingRequest(
         agent_run_id=agent_run_id,
         title=title,
-        priority_rationale=priority_rationale,
-        priority_rationale_citations=priority_rationale_citations,
         review_context=review_context,
         review_context_citations=review_context_citations,
         review_focus=review_focus_items,
@@ -1462,7 +1450,7 @@ async def generate_labeling_requests(
         response_text = output.completions[0].text or ""
         parsed = parse_llm_json_response(
             response_text,
-            keys=("title", "priority_rationale", "review_context", "review_focus"),
+            keys=("title", "review_context", "review_focus"),
         )
         if parsed is None:
             results.append(

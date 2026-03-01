@@ -36,8 +36,6 @@ class LabelingRequest(BaseModel):
 
     agent_run_id: str
     title: str
-    priority_rationale: str
-    priority_rationale_citations: list[InlineCitation] = Field(default_factory=list[InlineCitation])
     review_context: str
     review_context_citations: list[InlineCitation] = Field(default_factory=list[InlineCitation])
     review_focus: list[LabelingRequestFocusItem] = Field(
@@ -63,8 +61,6 @@ class AgentRunFeedback(BaseModel):
     title: str
     review_context: str
     review_context_citations: list[InlineCitation] = Field(default_factory=list[InlineCitation])
-    priority_rationale: str
-    priority_rationale_citations: list[InlineCitation] = Field(default_factory=list[InlineCitation])
     qa_pairs: list[QAPair] = Field(default_factory=list[QAPair])
     label: LabeledRun | None = None
     created_at: datetime = Field(default_factory=datetime.now)
