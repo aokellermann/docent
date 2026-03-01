@@ -26,7 +26,6 @@ if TYPE_CHECKING:
     from docent_core.docent.ai_tools.rubric.user_model import (
         AgentRunFeedback,
         LabeledRun,
-        QAPair,
         UserData,
     )
 
@@ -63,9 +62,16 @@ DEFAULT_USER_REASONING_FALLBACK = (
     "No explicit reasoning provided. This probability is inferred from the user context and "
     "available user QA/label history."
 )
-USER_DATA_PROMPT_TOKEN_LIMIT = 12_000
-USER_DATA_SUMMARY_AGENT_RUN_TOK_LIMIT = 20_000
-USER_DATA_SUMMARY_MAX_NEW_TOKENS = 1_200
+LABEL_METADATA_SEMANTICS_TEXT = (
+    "IMPORTANT metadata semantics:\n"
+    "- In label.metadata.user_distribution, the p_u distribution and reasoning is the initial seed\n"
+    "  shown to the user before they provided the final label.\n"
+    "- This metadata is not user-authored text. User-authored signals are QA answers/explanations and\n"
+    "  the final label explanation."
+)
+USER_DATA_PROMPT_TOKEN_LIMIT = 50_000
+USER_DATA_SUMMARY_AGENT_RUN_TOK_LIMIT = 50_000
+USER_DATA_SUMMARY_MAX_NEW_TOKENS = 4096
 
 
 class DistributionOutcome(BaseModel):
@@ -215,11 +221,15 @@ AGENT RUN CONTEXT:
 RUN FEEDBACK ENTRY:
 {run_feedback_payload_json}
 
+{LABEL_METADATA_SEMANTICS_TEXT}
+
 Write a concrete, rich summary (6-10 sentences) that captures:
 - the relevant run context (what happened and why this case matters),
 - how the user responded across the QA pairs (including extra context if provided),
 - the user's final label decision for this run (place this near the end of your summary; include
-  label values and explanation/metadata if provided),
+  label values and explanation if provided),
+- whether the user appears to agree or disagree with the initial p_u seed distribution/reasoning
+  and what parts of that seed reasoning they seem to respond to,
 - what this combined feedback suggests about this user's rubric reasoning in this case.
 
 Stay grounded in specific details from this run and this feedback entry. Do not write abstract
@@ -287,194 +297,44 @@ def _build_selected_label_payload(labeled_run: "LabeledRun") -> SelectedLabelPay
     )
 
 
-def _format_selected_label_entry(labeled_run: "LabeledRun") -> str:
-    payload = _build_selected_label_payload(labeled_run)
-    return json.dumps(payload.model_dump(mode="json"), indent=2, sort_keys=True)
-
-
-def _get_user_label_evidence_fields_description() -> str:
-    return (
-        "User label evidence fields:\n"
-        "- label_value: the user's selected rubric output for this run.\n"
-        "- explanation: the user's own rationale for the chosen label, when provided.\n"
-        "- metadata.user_distribution: the model-estimated p_u distribution shown during labeling, "
-        "including only outcomes and reasoning."
-    )
-
-
 def _format_label_evidence_block(labeled_run: "LabeledRun") -> str:
-    label_payload_json = _format_selected_label_entry(labeled_run)
-    return f"User label evidence (selected JSON fields):\n{label_payload_json}"
-
-
-def _get_answered_qa_entries(
-    user_data: "UserData",
-) -> list[tuple["AgentRunFeedback", "QAPair"]]:
-    return list(user_data.iter_answered_qa_entries())
-
-
-def _get_labeled_entries(
-    user_data: "UserData",
-) -> list[tuple["AgentRunFeedback", "LabeledRun"]]:
-    return list(user_data.iter_labeled_entries())
-
-
-def _format_user_data_qa_block(
-    idx: int,
-    run_feedback: "AgentRunFeedback",
-    qa_pair: "QAPair",
-) -> str:
-    labeling_request = run_feedback.labeling_request
-    lines = [
-        f"--- Example {idx + 1} (run: {run_feedback.agent_run_id}) ---",
-        f"Title: {labeling_request.title or 'N/A'}",
-        f"Situation: {labeling_request.review_context or 'N/A'}",
-        f"Question asked: {qa_pair.focus_item.question}",
-        f"User's answer: {qa_pair.answer}",
-        f"Custom response: {'Yes' if qa_pair.is_custom_response else 'No'}",
-    ]
-    if qa_pair.explanation:
-        lines.append(f"Extra context: {qa_pair.explanation}")
-    return "\n".join(lines)
-
-
-def _format_user_data_label_line(
-    idx: int,
-    run_feedback: "AgentRunFeedback",
-    label: "LabeledRun",
-) -> str:
+    payload = _build_selected_label_payload(labeled_run)
+    label_value_text = json.dumps(payload.label_value, sort_keys=True)
+    user_distribution = payload.metadata.user_distribution
+    user_distribution_text = (
+        json.dumps(user_distribution.model_dump(mode="json"), sort_keys=True)
+        if user_distribution is not None
+        else "N/A"
+    )
     return (
-        f"--- Label {idx + 1} (run: {run_feedback.agent_run_id}) ---\n"
-        f"{_format_label_evidence_block(label)}"
+        "User-provided label:\n"
+        f"User label: {label_value_text}\n"
+        f"User explanation: {payload.explanation or 'N/A'}\n"
+        "p_u distribution and reasoning "
+        "(initial seed metadata shown before final label; not user-authored): "
+        f"{user_distribution_text}"
     )
 
 
 def _format_run_feedback_qa_evidence_block(run_feedback: "AgentRunFeedback") -> str:
+    lines = ["User-provided question/answer pairs:"]
     if not run_feedback.qa_pairs:
-        return "Raw QA evidence:\nNo QA pairs recorded for this run."
+        lines.append("None recorded for this run.")
+        return "\n".join(lines)
 
-    lines = ["Raw QA evidence:"]
     for qa_idx, qa_pair in enumerate(run_feedback.qa_pairs):
+        qa_tag = f"qa_{qa_idx + 1}"
         lines.extend(
             [
-                f"QA {qa_idx + 1}:",
-                f"- status: {qa_pair.status}",
-                f"- question: {qa_pair.focus_item.question}",
-                f"- answer: {qa_pair.answer}",
-                f"- human_explanation: {qa_pair.explanation or 'N/A'}",
+                f"<{qa_tag}>",
+                f"Question: {qa_pair.focus_item.question}",
+                f"User answer: {qa_pair.answer}",
+                f"User explanation: {qa_pair.explanation or 'N/A'}",
+                f"Status: {qa_pair.status}",
+                f"</{qa_tag}>",
             ]
         )
     return "\n".join(lines)
-
-
-def _build_user_data_summary_text(
-    qa_blocks: list[str],
-    label_lines: list[str],
-    total_qa_pairs: int,
-    total_labels: int,
-) -> str:
-    qa_section = "\n\n".join(qa_blocks) if qa_blocks else "No QA pairs."
-    if label_lines:
-        label_section = f"{_get_user_label_evidence_fields_description()}\n\n" + "\n".join(
-            label_lines
-        )
-    else:
-        label_section = "No labels."
-    return (
-        f"QA Pairs ({len(qa_blocks)}/{total_qa_pairs} shown):\n{qa_section}\n\n"
-        f"Labels ({len(label_lines)}/{total_labels} shown):\n{label_section}"
-    )
-
-
-def summarize_user_data_for_prompt(
-    user_data: "UserData",
-    max_tokens: int = USER_DATA_PROMPT_TOKEN_LIMIT,
-    log_truncation_warning: bool = True,
-) -> str:
-    if max_tokens <= 0:
-        raise ValueError("max_tokens must be > 0")
-
-    answered_qa_entries = _get_answered_qa_entries(user_data)
-    labeled_entries = _get_labeled_entries(user_data)
-    total_qa_pairs = len(answered_qa_entries)
-    total_labels = len(labeled_entries)
-
-    qa_blocks: list[str] = []
-    label_lines: list[str] = []
-
-    omitted_qa_pairs = 0
-    for qa_idx, (run_feedback, qa_pair) in enumerate(answered_qa_entries):
-        candidate_block = _format_user_data_qa_block(
-            idx=qa_idx,
-            run_feedback=run_feedback,
-            qa_pair=qa_pair,
-        )
-        candidate_summary = _build_user_data_summary_text(
-            qa_blocks=qa_blocks + [candidate_block],
-            label_lines=label_lines,
-            total_qa_pairs=total_qa_pairs,
-            total_labels=total_labels,
-        )
-        if get_token_count(candidate_summary) <= max_tokens:
-            qa_blocks.append(candidate_block)
-            continue
-
-        omitted_qa_pairs = total_qa_pairs - len(qa_blocks)
-        break
-
-    omitted_labels = 0
-    for label_idx, (run_feedback, label) in enumerate(labeled_entries):
-        candidate_line = _format_user_data_label_line(
-            idx=label_idx,
-            run_feedback=run_feedback,
-            label=label,
-        )
-        candidate_summary = _build_user_data_summary_text(
-            qa_blocks=qa_blocks,
-            label_lines=label_lines + [candidate_line],
-            total_qa_pairs=total_qa_pairs,
-            total_labels=total_labels,
-        )
-        if get_token_count(candidate_summary) <= max_tokens:
-            label_lines.append(candidate_line)
-            continue
-
-        omitted_labels = total_labels - len(label_lines)
-        break
-
-    summary = _build_user_data_summary_text(
-        qa_blocks=qa_blocks,
-        label_lines=label_lines,
-        total_qa_pairs=total_qa_pairs,
-        total_labels=total_labels,
-    )
-    used_tokens = get_token_count(summary)
-    logger.info(
-        (
-            "Built user-data summary for prompt: %d/%d tokens, "
-            "%d/%d QA pairs included, %d/%d labels included"
-        ),
-        used_tokens,
-        max_tokens,
-        len(qa_blocks),
-        total_qa_pairs,
-        len(label_lines),
-        total_labels,
-    )
-
-    if log_truncation_warning and (omitted_qa_pairs > 0 or omitted_labels > 0):
-        logger.warning(
-            (
-                "User-data summary hit token limit (%d/%d). "
-                "Omitted %d QA pair(s) and %d label(s) from prompt context."
-            ),
-            used_tokens,
-            max_tokens,
-            omitted_qa_pairs,
-            omitted_labels,
-        )
-
-    return summary
 
 
 def _build_generated_user_data_summary_text(
@@ -484,14 +344,10 @@ def _build_generated_user_data_summary_text(
     total_labels: int,
 ) -> str:
     run_section = "\n\n".join(run_blocks) if run_blocks else "No run summaries."
-    if total_labels > 0:
-        label_evidence_section = _get_user_label_evidence_fields_description()
-    else:
-        label_evidence_section = "No labels in source user data."
     return (
+        f"{LABEL_METADATA_SEMANTICS_TEXT}\n\n"
         f"Run Summaries ({len(run_blocks)}/{total_feedback_units} shown):\n{run_section}\n\n"
-        f"Source feedback totals: {total_source_qa_pairs} QA pair(s), {total_labels} label(s).\n\n"
-        f"{label_evidence_section}"
+        f"Source feedback totals: {total_source_qa_pairs} QA pair(s), {total_labels} label(s)."
     )
 
 
@@ -606,16 +462,22 @@ async def summarize_user_data_for_prompt_with_agent_runs(
             label_evidence_entry = (
                 _format_label_evidence_block(run_feedback.label)
                 if run_feedback.label is not None
-                else "No user label evidence recorded for this run."
+                else (
+                    "User-provided label:\n"
+                    "User label: N/A\n"
+                    "User explanation: N/A\n"
+                    "p_u distribution and reasoning "
+                    "(initial seed metadata shown before final label; not user-authored): N/A"
+                )
             )
             run_blocks.append(
                 (
                     f"--- Run Summary {summary_task.run_index + 1} "
                     f"(run: {summary_task.agent_run_id}) ---\n"
-                    f"QA pairs in this feedback unit: {len(run_feedback.qa_pairs)}\n"
+                    f"Generated contextual summary:\n{summary_text}\n\n"
                     f"{qa_evidence_entry}\n\n"
                     f"{label_evidence_entry}\n\n"
-                    f"Generated contextual summary:\n{summary_text}"
+                    f"QA pairs in this feedback unit: {len(run_feedback.qa_pairs)}"
                 )
             )
 
@@ -695,31 +557,15 @@ CRITICAL RULES:
 - Preserve rich situational detail — the downstream LLM needs enough context to reason by analogy to new cases.
 - If two examples seem contradictory, keep BOTH and note the tension in "What this reveals."
 - The "Connecting patterns" section should be SHORT (2-4 bullets). It exists to help orient a reader, not to replace the examples.
-- Treat any "User label evidence (selected JSON fields)" block as source-of-truth evidence. Do not contradict or overwrite user-provided wording; when referencing user-stated explanation text, quote it exactly.
+- Treat each "User-provided label" block as source-of-truth for what the user ultimately decided.
+- In a "User-provided label" block, "p_u distribution and reasoning" is metadata from the initial p_u judge seed shown before labeling, not what the user said. Use this to analyze agreement/disagreement with the final user label/explanation and what seed reasoning the user appears to accept or reject.
+- Do not contradict or overwrite user-provided wording; when referencing user-stated explanation text, quote it exactly.
 
 Return your response in this format:
 <user_context>
 [Your example-based user context in markdown]
 </user_context>
 """
-
-
-def build_user_context_inference_prompt(
-    user_data: "UserData",
-    max_tokens: int = USER_DATA_PROMPT_TOKEN_LIMIT,
-    log_truncation_warning: bool = True,
-) -> tuple[str, str]:
-    """Render user-data summary and inference prompt in one place."""
-    user_data_summary = summarize_user_data_for_prompt(
-        user_data=user_data,
-        max_tokens=max_tokens,
-        log_truncation_warning=log_truncation_warning,
-    )
-    prompt = _create_user_context_inference_prompt(
-        initial_rubric=user_data.initial_rubric,
-        user_data_summary=user_data_summary,
-    )
-    return user_data_summary, prompt
 
 
 async def build_user_context_inference_prompt_with_agent_runs(
@@ -744,38 +590,21 @@ async def build_user_context_inference_prompt_with_agent_runs(
     return user_data_summary, prompt
 
 
-def create_user_context_inference_prompt(user_data: "UserData") -> str:
-    """Create prompt for inferring textual user context c from run-centric user feedback."""
-    _, prompt = build_user_context_inference_prompt(
-        user_data=user_data,
-        max_tokens=USER_DATA_PROMPT_TOKEN_LIMIT,
-        log_truncation_warning=True,
-    )
-    return prompt
-
-
 async def infer_user_context_from_user_data(
     user_data: "UserData",
     llm_svc: BaseLLMService,
-    user_data_summary: str | None = None,
+    user_data_summary: str,
 ) -> str:
-    """Infer textual user context c from U. Falls back to initial rubric on failure."""
+    """Infer textual user context c from a provided user-data summary."""
     has_answered_qa = any(True for _ in user_data.iter_answered_qa_entries())
     has_labels = any(True for _ in user_data.iter_labeled_entries())
     if not has_answered_qa and not has_labels:
         return user_data.initial_rubric
 
-    if user_data_summary is None:
-        _, prompt = build_user_context_inference_prompt(
-            user_data=user_data,
-            max_tokens=USER_DATA_PROMPT_TOKEN_LIMIT,
-            log_truncation_warning=True,
-        )
-    else:
-        prompt = _create_user_context_inference_prompt(
-            initial_rubric=user_data.initial_rubric,
-            user_data_summary=user_data_summary,
-        )
+    prompt = _create_user_context_inference_prompt(
+        initial_rubric=user_data.initial_rubric,
+        user_data_summary=user_data_summary,
+    )
 
     outputs = await llm_svc.get_completions(
         inputs=[[{"role": "user", "content": prompt}]],

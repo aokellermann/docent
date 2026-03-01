@@ -77,9 +77,9 @@
 python3 label_elicitation.py \
     117967cf-d3bb-42e9-947d-eee82e97738f \
     433f5140-10cd-4d10-b192-0d4b01f665bb \
-    --label-num-samples 50 \
+    --label-num-samples 25 \
     --top-n 10 \
-    --user-data-json outputs/user_data_20260228_220614_gitignore.json
+    --user-data-json outputs/user_data_20260301_203845_gitignore.json
 
 # python3 rubric_bon.py \
 #     117967cf-d3bb-42e9-947d-eee82e97738f \

@@ -68,6 +68,8 @@ AGENT_RUN_FETCH_MAX_CONCURRENCY = 25
 
 
 class EntropyLabelMetadata(BaseModel):
+    # Initial p_u seed shown to the user before they submitted the final label.
+    # This is metadata for analysis, not user-authored text.
     user_distribution: OutputDistribution
     entropy_nats: float
 

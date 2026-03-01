@@ -52,6 +52,8 @@ class LabeledRun(BaseModel):
     """A human label for one agent run."""
 
     agent_run_id: str
+    # Stores machine-generated metadata shown before the final label (for example,
+    # label.metadata.user_distribution from the initial p_u seed), not user-authored text.
     metadata: dict[str, Any] | None = None
     timestamp: datetime = Field(default_factory=datetime.now)
 
