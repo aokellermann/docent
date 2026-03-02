@@ -5,8 +5,9 @@ import math
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, cast
 
+import jsonschema
 from pydantic import BaseModel, Field, ValidationError
 
 from docent._llm_util.llm_svc import BaseLLMService
@@ -16,12 +17,16 @@ from docent.data_models._tiktoken_util import get_token_count, truncate_to_token
 from docent.data_models.agent_run import AgentRun
 from docent.data_models.citation import InlineCitation
 from docent.judges.types import Rubric
+from docent.judges.util.voting import (
+    DistributionOutcome,
+    OutputDistribution,
+    assert_agreement_only_output_schema,
+    normalize_output_distribution,
+)
 from docent.sdk.llm_context import LLMContext, resolve_citations_with_context
 from docent_core.docent.ai_tools.rubric.user_model import (
-    DistributionOutcome,
     LabelingRequest,
     LabelingRequestFocusItem,
-    OutputDistribution,
 )
 
 if TYPE_CHECKING:
@@ -83,13 +88,6 @@ class RunDistributionEstimate(BaseModel):
     user_distribution: OutputDistribution | None = None
     reasoning: str | None = None
     reasoning_citations: list[InlineCitation] = Field(default_factory=list[InlineCitation])
-
-
-class SchemaSelectableField(BaseModel):
-    """Top-level rubric output field that can be selected during interactive labeling."""
-
-    kind: Literal["boolean", "enum"]
-    options: list[Any] = Field(default_factory=list[Any])
 
 
 class _RawDistributionOutcome(BaseModel):
@@ -643,6 +641,7 @@ Return JSON:
 def parse_output_distribution_response(
     llm_response: str,
     context: LLMContext | None,
+    output_schema: dict[str, Any],
     require_reasoning: bool = False,
     missing_reasoning_fallback: str = DEFAULT_USER_REASONING_FALLBACK,
 ) -> tuple[OutputDistribution, str | None, list[InlineCitation]] | None:
@@ -681,6 +680,11 @@ def parse_output_distribution_response(
             outcome_reasoning_text = raw_outcome.reasoning or raw_outcome.explanation
             if isinstance(outcome_reasoning_text, str) and outcome_reasoning_text.strip():
                 outcome_reasoning.append(outcome_reasoning_text.strip())
+
+        try:
+            jsonschema.validate(raw_outcome.output, output_schema)
+        except (jsonschema.ValidationError, jsonschema.SchemaError):
+            return None
 
         extracted_outputs.append(raw_outcome.output)
         extracted_probs.append(_coerce_probability(raw_outcome.probability))
@@ -736,6 +740,8 @@ async def estimate_user_distributions_for_agent_runs(
     llm_svc: BaseLLMService,
 ) -> list[RunDistributionEstimate]:
     """Estimate p_u for each run using only the inferred user context."""
+    assert_agreement_only_output_schema(rubric.output_schema)
+
     if not agent_runs:
         return []
 
@@ -786,6 +792,7 @@ async def estimate_user_distributions_for_agent_runs(
         parsed_distribution = parse_output_distribution_response(
             user_text,
             context=context,
+            output_schema=rubric.output_schema,
             require_reasoning=True,
             missing_reasoning_fallback=DEFAULT_USER_REASONING_FALLBACK,
         )
@@ -812,36 +819,6 @@ async def estimate_user_distributions_for_agent_runs(
         len(valid_estimates),
     )
     return results
-
-
-def get_enum_boolean_fields_from_schema(
-    output_schema: dict[str, Any],
-) -> dict[str, SchemaSelectableField]:
-    """Extract top-level enum/boolean fields with option metadata from a JSON schema."""
-    properties = _coerce_string_keyed_dict(output_schema.get("properties"))
-    if properties is None:
-        return {}
-
-    fields: dict[str, SchemaSelectableField] = {}
-    for key_obj, field_schema_obj in properties.items():
-        field_schema = _coerce_string_keyed_dict(field_schema_obj)
-        if field_schema is None:
-            continue
-
-        field_type = field_schema.get("type")
-
-        if isinstance(field_type, str) and field_type == "boolean":
-            fields[key_obj] = SchemaSelectableField(kind="boolean", options=[True, False])
-            continue
-
-        enum_values = field_schema.get("enum")
-        if isinstance(enum_values, list):
-            enum_options: list[Any] = []
-            for enum_value in cast(list[object], enum_values):
-                enum_options.append(enum_value)
-            fields[key_obj] = SchemaSelectableField(kind="enum", options=enum_options)
-
-    return fields
 
 
 # === Labeling Request Generation ===
@@ -1155,6 +1132,8 @@ async def generate_labeling_requests(
     priority_metric_name: str = "H[p_u]",
 ) -> list[LabelingRequest]:
     """Generate user-facing labeling requests for high-priority runs."""
+    assert_agreement_only_output_schema(rubric.output_schema)
+
     if not agent_runs or not estimates:
         return []
 
@@ -1285,10 +1264,6 @@ def parse_llm_json_response(response: str, keys: Sequence[str]) -> dict[str, Any
     return None
 
 
-def _stable_json_dict(value: dict[str, Any]) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"))
-
-
 def _truncate_for_prompt(text: str, max_chars: int = 600) -> str:
     if len(text) <= max_chars:
         return text
@@ -1312,39 +1287,3 @@ def _coerce_probability(value: Any) -> float | None:
     if not math.isfinite(prob) or prob < 0:
         return None
     return prob
-
-
-def normalize_output_distribution(distribution: OutputDistribution) -> OutputDistribution:
-    """Normalize probabilities and merge duplicate outcomes by canonical JSON output."""
-    if not distribution.outcomes:
-        return OutputDistribution()
-
-    merged: dict[str, DistributionOutcome] = {}
-    for outcome in distribution.outcomes:
-        key = _stable_json_dict(outcome.output)
-        existing = merged.get(key)
-        if existing is None:
-            merged[key] = DistributionOutcome(
-                output=outcome.output,
-                probability=max(0.0, outcome.probability),
-            )
-            continue
-
-        existing.probability += max(0.0, outcome.probability)
-
-    merged_outcomes = list(merged.values())
-    if not merged_outcomes:
-        return OutputDistribution()
-
-    total_probability = sum(item.probability for item in merged_outcomes)
-    if total_probability <= 0:
-        uniform_prob = 1.0 / len(merged_outcomes)
-        for item in merged_outcomes:
-            item.probability = uniform_prob
-    else:
-        for item in merged_outcomes:
-            item.probability = item.probability / total_probability
-
-    merged_outcomes.sort(key=lambda item: item.probability, reverse=True)
-
-    return OutputDistribution(outcomes=merged_outcomes)

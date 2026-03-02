@@ -39,6 +39,7 @@ from docent._llm_util.providers.preference_types import ModelOption
 from docent.data_models.agent_run import AgentRun
 from docent.judges.runner import run_rubric
 from docent.judges.types import JudgeResult, ResultType, Rubric
+from docent.judges.util.voting import assert_agreement_only_output_schema
 from docent_core._env_util import ENV
 from docent_core.docent.ai_tools.rubric.elicit import (
     build_user_context_inference_prompt_with_agent_runs,
@@ -370,6 +371,10 @@ async def _generate_rubric_candidates(
             ],
             llm_svc=llm_svc,
         )
+        try:
+            assert_agreement_only_output_schema(rewritten.output_schema)
+        except ValueError as exc:
+            raise ValueError(f"Candidate {idx + 1}/{k} has invalid output_schema: {exc}") from exc
         unique_id = str(uuid4())
         rewritten_with_unique_id = rewritten.model_copy(update={"id": unique_id})
         candidates[idx] = rewritten_with_unique_id
@@ -624,12 +629,14 @@ async def run_holdout_k_rubrics_evaluation(
     llm_svc = BaseLLMService(max_concurrency=max_llm_concurrency)
 
     base_rubric = dc.get_rubric(collection_id, rubric_id)
+    agreement_keys = assert_agreement_only_output_schema(base_rubric.output_schema)
     console.print(f"Loaded base rubric {base_rubric.id} v{base_rubric.version}")
 
     user_data = _load_user_data(
         initial_rubric=base_rubric.rubric_text,
         user_data_json_path=user_data_json_path,
     )
+    user_data.validate_against_agreement_keys(set(agreement_keys))
     train_feedback_units, test_feedback_units = _split_feedback_units(
         user_data.agent_run_feedbacks, train_ratio=train_ratio, seed=seed
     )

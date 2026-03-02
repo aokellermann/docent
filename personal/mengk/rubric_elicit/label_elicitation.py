@@ -20,7 +20,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import math
 import random
 import sys
 from collections.abc import Sequence
@@ -39,18 +38,22 @@ from docent._llm_util.llm_svc import BaseLLMService
 from docent.data_models.agent_run import AgentRun
 from docent.data_models.citation import InlineCitation
 from docent.judges.types import Rubric
+from docent.judges.util.voting import (
+    AgreementValue,
+    OutputDistribution,
+    assert_agreement_only_output_schema,
+    compute_entropy,
+    get_agreement_key_options,
+    normalize_output_distribution,
+)
 from docent_core._env_util import ENV
 from docent_core.docent.ai_tools.rubric.elicit import (
-    OutputDistribution,
     RunDistributionEstimate,
-    SchemaSelectableField,
     build_agent_run_dashboard_url,
     build_user_context_inference_prompt_with_agent_runs,
     estimate_user_distributions_for_agent_runs,
     generate_labeling_requests,
-    get_enum_boolean_fields_from_schema,
     infer_user_context_from_user_data,
-    normalize_output_distribution,
     render_text_with_citation_footnotes,
 )
 from docent_core.docent.ai_tools.rubric.user_model import (
@@ -253,84 +256,17 @@ def _render_user_data_prompt_summary(user_data_summary: str) -> None:
     )
 
 
-def _stable_json_dict(value: dict[str, Any]) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"))
-
-
-def _get_schema_property_keys(output_schema: dict[str, Any]) -> list[str]:
-    properties = _coerce_string_keyed_dict(output_schema.get("properties"))
-    if properties is None:
-        return []
-    return list(properties.keys())
-
-
-def _get_entropy_agreement_keys(output_schema: dict[str, Any]) -> list[str]:
-    return list(get_enum_boolean_fields_from_schema(output_schema).keys())
-
-
-def _project_output_for_entropy(output: dict[str, Any], agreement_keys: set[str]) -> dict[str, Any]:
-    return {key: output[key] for key in agreement_keys if key in output}
-
-
-def _aggregate_projected_items(
+def _format_distribution(
     distribution: OutputDistribution,
-    agreement_keys: set[str],
-) -> list[tuple[dict[str, Any], float]]:
-    normalized = normalize_output_distribution(distribution)
-    if not normalized.outcomes:
-        return []
-
-    projected_prob_map: dict[str, tuple[dict[str, Any], float]] = {}
-    for outcome in normalized.outcomes:
-        projected_output = _project_output_for_entropy(outcome.output, agreement_keys)
-        projected_key = _stable_json_dict(projected_output)
-        existing = projected_prob_map.get(projected_key)
-        if existing is None:
-            projected_prob_map[projected_key] = (
-                projected_output,
-                outcome.probability,
-            )
-        else:
-            projected_prob_map[projected_key] = (
-                projected_output,
-                existing[1] + outcome.probability,
-            )
-
-    total_mass = sum(prob for _, prob in projected_prob_map.values())
-    if total_mass <= 0:
-        return []
-
-    projected = [(output, prob / total_mass) for output, prob in projected_prob_map.values()]
-    return sorted(projected, key=lambda item: item[1], reverse=True)
-
-
-def _compute_entropy(distribution: OutputDistribution, agreement_keys: set[str]) -> float:
-    if not agreement_keys:
-        return 0.0
-
-    aggregated = _aggregate_projected_items(distribution, agreement_keys)
-    if not aggregated:
-        return 0.0
-
-    entropy = 0.0
-    for _, probability in aggregated:
-        if probability > 0:
-            entropy -= probability * math.log(probability)
-    return entropy
-
-
-def _format_projected_distribution(
-    distribution: OutputDistribution,
-    agreement_keys: set[str],
     max_outcomes: int = 3,
 ) -> str:
-    aggregated = _aggregate_projected_items(distribution, agreement_keys)
-    if not aggregated:
+    normalized = normalize_output_distribution(distribution)
+    if not normalized.outcomes:
         return "No outcomes"
 
     lines: list[str] = []
-    for output, probability in aggregated[:max_outcomes]:
-        lines.append(f"{probability:.3f} -> {json.dumps(output, sort_keys=True)}")
+    for outcome in normalized.outcomes[:max_outcomes]:
+        lines.append(f"{outcome.probability:.3f} -> {json.dumps(outcome.output, sort_keys=True)}")
     return "\n".join(lines)
 
 
@@ -371,7 +307,6 @@ def _render_entropy_rankings(
     )
     console.print(f"Showing top {min(top_n, len(ranked))} of {len(ranked)} valid run(s)\n")
 
-    key_set = set(agreement_keys)
     for idx, (estimate, entropy) in enumerate(ranked[:top_n], 1):
         user_distribution = _require_user_distribution(estimate)
         distribution_reasoning = (estimate.reasoning or "").strip() or None
@@ -383,8 +318,8 @@ def _render_entropy_rankings(
             ),
             f"[bold]Entropy H[p_u]:[/bold] {entropy:.6f} nats",
             "",
-            "[bold]p_u projected to agreement keys[/bold]",
-            _format_projected_distribution(user_distribution, key_set),
+            "[bold]p_u outcomes[/bold]",
+            _format_distribution(user_distribution),
         ]
         if distribution_reasoning:
             reasoning_text, reasoning_footnotes = render_text_with_citation_footnotes(
@@ -436,7 +371,6 @@ def _render_generated_labeling_requests(
         return
 
     estimates_by_id = {estimate.agent_run_id: (estimate, entropy) for estimate, entropy in ranked}
-    agreement_key_set = set(agreement_keys)
     for idx, request in enumerate(request_results, 1):
         estimate_tuple = estimates_by_id.get(request.agent_run_id)
         entropy_text = "N/A"
@@ -488,8 +422,8 @@ def _render_generated_labeling_requests(
             body_lines.extend(
                 [
                     "",
-                    "[bold]p_u projected to agreement keys[/bold]",
-                    _format_projected_distribution(user_distribution, agreement_key_set),
+                    "[bold]p_u outcomes[/bold]",
+                    _format_distribution(user_distribution),
                 ]
             )
             if distribution_reasoning:
@@ -623,17 +557,14 @@ def _collect_focus_answers(
 
 
 def _collect_label_keys_for_run(
-    all_schema_keys: list[str],
-    selectable_fields: dict[str, SchemaSelectableField],
+    agreement_keys: list[str],
+    agreement_key_options: dict[str, list[AgreementValue]],
 ) -> dict[str, Any]:
     import beaupy
 
     label_value: dict[str, Any] = {}
-    for key in all_schema_keys:
-        field_info = selectable_fields.get(key)
-        if field_info is None:
-            continue
-        raw_options = field_info.options
+    for key in agreement_keys:
+        raw_options = agreement_key_options.get(key, [])
         if not raw_options:
             continue
 
@@ -747,9 +678,8 @@ def _collect_run_feedback_for_run(
     rank_idx: int,
     estimate: RunDistributionEstimate,
     entropy: float,
-    all_schema_keys: list[str],
-    selectable_fields: dict[str, SchemaSelectableField],
-    agreement_keys: set[str],
+    agreement_keys: list[str],
+    agreement_key_options: dict[str, list[AgreementValue]],
     labeling_request: LabelingRequest | None,
     has_existing_feedback: bool,
     collection_id: str,
@@ -812,8 +742,8 @@ def _collect_run_feedback_for_run(
     body_lines.extend(
         [
             "",
-            "[bold]p_u projected to agreement keys[/bold]",
-            _format_projected_distribution(user_distribution, agreement_keys),
+            "[bold]p_u outcomes[/bold]",
+            _format_distribution(user_distribution),
         ]
     )
     if distribution_reasoning:
@@ -854,8 +784,8 @@ def _collect_run_feedback_for_run(
         else []
     )
     label_value = _collect_label_keys_for_run(
-        all_schema_keys=all_schema_keys,
-        selectable_fields=selectable_fields,
+        agreement_keys=agreement_keys,
+        agreement_key_options=agreement_key_options,
     )
     explicit_explanation = (
         Prompt.ask(
@@ -904,8 +834,8 @@ def _collect_run_feedback_for_run(
 
         if selected_review == "[Edit label keys]":
             label_value = _collect_label_keys_for_run(
-                all_schema_keys=all_schema_keys,
-                selectable_fields=selectable_fields,
+                agreement_keys=agreement_keys,
+                agreement_key_options=agreement_key_options,
             )
             if not label_value:
                 label_explanation = None
@@ -962,8 +892,7 @@ def _collect_entropy_feedback(
     if not ranked:
         return [], False, 0
 
-    all_schema_keys = _get_schema_property_keys(output_schema)
-    selectable_fields = get_enum_boolean_fields_from_schema(output_schema)
+    agreement_key_options = get_agreement_key_options(output_schema, agreement_keys)
 
     console.print("\n" + "=" * 80)
     console.print("[bold cyan]INTERACTIVE LABEL COLLECTION[/bold cyan]")
@@ -972,8 +901,10 @@ def _collect_entropy_feedback(
         "This phase records answers in memory and supports skipping runs/keys at any point."
     )
 
-    if not all_schema_keys:
-        console.print("[yellow]Rubric output_schema has no top-level properties to label.[/yellow]")
+    if not agreement_keys:
+        console.print(
+            "[yellow]Rubric output_schema has no top-level enum/boolean keys to label.[/yellow]"
+        )
 
     skip_stage_option = "[Skip labeling phase]"
     stage_selection = beaupy.select(
@@ -987,16 +918,14 @@ def _collect_entropy_feedback(
 
     collected_feedback: list[CollectedRunFeedback] = []
     displayed_runs = 0
-    agreement_key_set = set(agreement_keys)
     for rank_idx, (estimate, entropy) in enumerate(ranked, 1):
         displayed_runs += 1
         collected_run_feedback, should_skip_future_runs = _collect_run_feedback_for_run(
             rank_idx=rank_idx,
             estimate=estimate,
             entropy=entropy,
-            all_schema_keys=all_schema_keys,
-            selectable_fields=selectable_fields,
-            agreement_keys=agreement_key_set,
+            agreement_keys=agreement_keys,
+            agreement_key_options=agreement_key_options,
             labeling_request=labeling_requests_by_run_id.get(estimate.agent_run_id),
             has_existing_feedback=estimate.agent_run_id in existing_feedback_run_ids,
             collection_id=collection_id,
@@ -1049,6 +978,7 @@ async def run_entropy_elicitation(
     llm_svc = BaseLLMService(max_concurrency=100)
 
     rubric = dc.get_rubric(collection_id, rubric_id)
+    agreement_keys = assert_agreement_only_output_schema(rubric.output_schema)
     console.print(f"Loaded rubric {rubric.id} v{rubric.version}")
     _render_current_rubric(rubric)
 
@@ -1056,6 +986,7 @@ async def run_entropy_elicitation(
         initial_rubric=rubric.rubric_text,
         user_data_json_path=user_data_json_path,
     )
+    user_data.validate_against_agreement_keys(set(agreement_keys))
     user_data_agent_runs = _load_user_data_agent_runs(dc, collection_id, user_data)
     user_data_summary, _ = await build_user_context_inference_prompt_with_agent_runs(
         user_data=user_data,
@@ -1115,13 +1046,11 @@ async def run_entropy_elicitation(
     # )
     # raise
 
-    agreement_keys = _get_entropy_agreement_keys(rubric.output_schema)
-
     ranked: list[tuple[RunDistributionEstimate, float]] = []
     for estimate in estimates:
         if estimate.user_distribution is None:
             continue
-        entropy = _compute_entropy(estimate.user_distribution, set(agreement_keys))
+        entropy = compute_entropy(estimate.user_distribution)
         ranked.append((estimate, entropy))
     ranked.sort(key=lambda item: item[1], reverse=True)
 

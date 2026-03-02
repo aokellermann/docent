@@ -7,19 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from docent.data_models.citation import InlineCitation
-
-
-class DistributionOutcome(BaseModel):
-    """Single outcome and probability mass for a predictive distribution."""
-
-    output: dict[str, Any]
-    probability: float
-
-
-class OutputDistribution(BaseModel):
-    """Probability distribution over rubric-compliant outputs."""
-
-    outcomes: list[DistributionOutcome] = Field(default_factory=list[DistributionOutcome])
+from docent.judges.util.voting import OutputDistribution
 
 
 class LabelingRequestFocusItem(BaseModel):
@@ -124,6 +112,42 @@ class UserData(BaseModel):
 
         self.agent_run_feedbacks.append(upserted_feedback)
         self.last_updated = now
+
+    def validate_against_agreement_keys(self, agreement_keys: set[str]) -> None:
+        """Validate stored labels and p_u outcomes against rubric agreement keys."""
+        for feedback in self.agent_run_feedbacks:
+            run_id = feedback.agent_run_id
+
+            label = feedback.label
+            if label is not None:
+                invalid_label_keys = sorted(set(label.label_value.keys()) - agreement_keys)
+                if invalid_label_keys:
+                    raise ValueError(
+                        "Run "
+                        f"{run_id} has label_value keys outside rubric agreement keys: "
+                        + ", ".join(invalid_label_keys)
+                    )
+
+            user_distribution = feedback.labeling_request.user_distribution
+            if user_distribution is None:
+                continue
+
+            for outcome_idx, outcome in enumerate(user_distribution.outcomes, start=1):
+                invalid_output_keys = sorted(set(outcome.output.keys()) - agreement_keys)
+                if invalid_output_keys:
+                    raise ValueError(
+                        "Run "
+                        f"{run_id} has user_distribution outcome #{outcome_idx} keys outside "
+                        "rubric agreement keys: " + ", ".join(invalid_output_keys)
+                    )
+                for key, value in outcome.output.items():
+                    if isinstance(value, (str, bool, int, float)):
+                        continue
+                    raise ValueError(
+                        "Run "
+                        f"{run_id} has user_distribution outcome #{outcome_idx} non-scalar "
+                        f"value for key '{key}': {type(value).__name__}"
+                    )
 
     def iter_answered_qa_entries(self) -> Iterator[tuple[AgentRunFeedback, QAPair]]:
         """Iterate answered QA pairs with their parent run feedback."""

@@ -1,7 +1,12 @@
+import json
+import math
 from collections import Counter
 from typing import Any, TypedDict, cast
 
 import numpy as np
+from pydantic import BaseModel, Field
+
+AgreementValue = str | bool | int | float
 
 
 class EstimateWithCI(TypedDict):
@@ -11,19 +16,112 @@ class EstimateWithCI(TypedDict):
     ci_95: float
 
 
-JudgeOutputDistribution = dict[str | bool | int | float, EstimateWithCI]
+JudgeOutputDistribution = dict[AgreementValue, EstimateWithCI]
+
+
+class DistributionOutcome(BaseModel):
+    """Single outcome and probability mass for a predictive distribution."""
+
+    output: dict[str, Any]
+    probability: float
+
+
+class OutputDistribution(BaseModel):
+    """Probability distribution over rubric-compliant outputs."""
+
+    outcomes: list[DistributionOutcome] = Field(default_factory=list[DistributionOutcome])
+
+
+def _stable_json_dict(value: dict[str, Any]) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def normalize_output_distribution(distribution: OutputDistribution) -> OutputDistribution:
+    """Normalize probabilities and merge duplicate outcomes by canonical JSON output."""
+    if not distribution.outcomes:
+        return OutputDistribution()
+
+    merged: dict[str, DistributionOutcome] = {}
+    for outcome in distribution.outcomes:
+        key = _stable_json_dict(outcome.output)
+        existing = merged.get(key)
+        if existing is None:
+            merged[key] = DistributionOutcome(
+                output=outcome.output,
+                probability=max(0.0, outcome.probability),
+            )
+            continue
+
+        existing.probability += max(0.0, outcome.probability)
+
+    merged_outcomes = list(merged.values())
+    if not merged_outcomes:
+        return OutputDistribution()
+
+    total_probability = sum(item.probability for item in merged_outcomes)
+    if total_probability <= 0:
+        uniform_prob = 1.0 / len(merged_outcomes)
+        for item in merged_outcomes:
+            item.probability = uniform_prob
+    else:
+        for item in merged_outcomes:
+            item.probability = item.probability / total_probability
+
+    merged_outcomes.sort(key=lambda item: item.probability, reverse=True)
+
+    return OutputDistribution(outcomes=merged_outcomes)
+
+
+def assert_agreement_only_output_schema(schema: dict[str, Any]) -> list[str]:
+    """Validate agreement-only schema contract for elicitation and entropy workflows.
+
+    Contract:
+    - Every top-level property must be an agreement key (enum or boolean),
+    - ``additionalProperties`` must be explicitly ``False``, and
+    - At least one agreement key must exist.
+    """
+    # if schema.get("additionalProperties") is not False:
+    #     raise ValueError(
+    #         "Rubric output_schema must set additionalProperties to false for "
+    #         "agreement-only entropy workflows."
+    #     )
+
+    properties_obj = schema.get("properties")
+    if not isinstance(properties_obj, dict):
+        raise ValueError("Rubric output_schema must define an object-valued properties field.")
+    properties = cast(dict[str, Any], properties_obj)
+
+    agreement_keys = get_agreement_keys(schema)
+    if not agreement_keys:
+        raise ValueError(
+            "Rubric output_schema must include at least one top-level agreement key "
+            "(enum or boolean)."
+        )
+
+    non_agreement_keys = sorted(set(properties.keys()) - set(agreement_keys))
+    if non_agreement_keys:
+        details: list[str] = []
+        for key in non_agreement_keys:
+            field_obj = properties.get(key, {})
+            if isinstance(field_obj, dict):
+                field_schema = cast(dict[str, Any], field_obj)
+                field_type = field_schema.get("type")
+                field_type_text = field_type if isinstance(field_type, str) else "unknown"
+                has_enum = "enum" in field_schema
+                details.append(f"{key} (type={field_type_text}, enum={has_enum})")
+            else:
+                details.append(f"{key} (type=invalid-schema)")
+        raise ValueError(
+            "Rubric output_schema includes non-agreement top-level keys: " + ", ".join(details)
+        )
+
+    return agreement_keys
 
 
 def get_agreement_keys(schema: dict[str, Any]) -> list[str]:
-    """Get list of top-level keys in schema that we want to measure agreement on.
+    """Get top-level schema keys that support agreement computations.
 
-    This includes top-level enum and bool fields.
-
-    Args:
-        schema: JSON schema dict
-
-    Returns:
-        List of field names (keys) that should be used for measuring agreement
+    This includes top-level enum and boolean fields.
     """
     agreement_keys: list[str] = []
 
@@ -38,14 +136,52 @@ def get_agreement_keys(schema: dict[str, Any]) -> list[str]:
         field_type = field_schema.get("type")
         assert isinstance(field_type, str)
 
-        # Include boolean fields
         if field_type == "boolean":
             agreement_keys.append(key)
-        # Include enum fields (strings and numbers must be in this category)
         elif "enum" in field_schema:
             agreement_keys.append(key)
 
     return agreement_keys
+
+
+def get_agreement_key_options(
+    schema: dict[str, Any],
+    agreement_keys: list[str] | None = None,
+) -> dict[str, list[AgreementValue]]:
+    """Return possible output options for each agreement key from schema."""
+    if agreement_keys is None:
+        agreement_keys = get_agreement_keys(schema)
+
+    properties = schema.get("properties", {})
+    assert isinstance(properties, dict)
+    properties = cast(dict[str, Any], properties)
+
+    key_options: dict[str, list[AgreementValue]] = {}
+    for key in agreement_keys:
+        field_schema_obj = properties.get(key, {})
+        assert isinstance(field_schema_obj, dict)
+        field_schema = cast(dict[str, Any], field_schema_obj)
+
+        field_type = field_schema.get("type")
+        assert isinstance(field_type, str)
+
+        if field_type == "boolean":
+            key_options[key] = [True, False]
+            continue
+
+        if "enum" in field_schema:
+            enum_values = field_schema.get("enum")
+            assert isinstance(enum_values, list)
+            options: list[AgreementValue] = []
+            for enum_value in cast(list[object], enum_values):
+                assert isinstance(enum_value, (str, bool, int, float))
+                options.append(enum_value)
+            key_options[key] = options
+            continue
+
+        key_options[key] = []
+
+    return key_options
 
 
 def find_modal_result(indep_results: list[dict[str, Any]], agreement_keys: list[str]):
@@ -125,16 +261,9 @@ def compute_output_distributions(
         AssertionError: If an observed value is not one of the schema-derived possible values.
     """
 
-    def _get_possible_values(key: str) -> list[str | bool | int | float]:
-        if "enum" in output_schema.get("properties", {}).get(key, {}):
-            return output_schema.get("properties", {}).get(key, {}).get("enum", [])
-        elif output_schema.get("properties", {}).get(key, {}).get("type") == "boolean":
-            return [True, False]
-        else:
-            return []
-
-    raw_counts: dict[str, dict[str | bool | int | float, int]] = {
-        key: {value: 0 for value in _get_possible_values(key)} for key in agreement_keys
+    key_options = get_agreement_key_options(output_schema, agreement_keys)
+    raw_counts: dict[str, dict[AgreementValue, int]] = {
+        key: {value: 0 for value in key_options.get(key, [])} for key in agreement_keys
     }
     # Collect counts for each possible value
     for result in eq_weighted_outputs:
@@ -167,3 +296,17 @@ def compute_output_distributions(
             distributions[agt_key][output_key] = estimate
 
     return distributions
+
+
+def compute_entropy(distribution: OutputDistribution) -> float:
+    """Compute Shannon entropy over normalized outcomes in nats."""
+    normalized = normalize_output_distribution(distribution)
+    if not normalized.outcomes:
+        return 0.0
+
+    entropy = 0.0
+    for outcome in normalized.outcomes:
+        probability = outcome.probability
+        if probability > 0:
+            entropy -= probability * math.log(probability)
+    return entropy
