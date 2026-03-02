@@ -17,7 +17,7 @@ JudgeOutputDistribution = dict[str | bool | int | float, EstimateWithCI]
 def get_agreement_keys(schema: dict[str, Any]) -> list[str]:
     """Get list of top-level keys in schema that we want to measure agreement on.
 
-    This includes enum and bool fields.
+    This includes top-level enum and bool fields.
 
     Args:
         schema: JSON schema dict
@@ -94,8 +94,37 @@ def find_modal_result(indep_results: list[dict[str, Any]], agreement_keys: list[
 
 
 def compute_output_distributions(
-    indep_results: list[dict[str, Any]], output_schema: dict[str, Any], agreement_keys: list[str]
-):
+    eq_weighted_outputs: list[dict[str, Any]],
+    output_schema: dict[str, Any],
+    agreement_keys: list[str],
+) -> dict[str, JudgeOutputDistribution]:
+    """Estimate per-key output value distributions from equally weighted outputs.
+
+    For each key in ``agreement_keys``, this function:
+    1. Enumerates allowed values from the schema (``enum`` or ``boolean``),
+    2. Counts observed non-null values in ``eq_weighted_outputs``,
+    3. Normalizes counts into empirical probabilities, and
+    4. Computes per-value summary statistics:
+       - ``mean``: empirical probability ``p``
+       - ``var``: Bernoulli variance ``p * (1 - p)``
+       - ``n``: number of observed (non-null) values for that key
+       - ``ci_95``: normal-approximation 95% CI half-width ``1.96 * sqrt(var / n)``
+
+    Optional fields that are missing in some results are skipped (not counted toward ``n``).
+    If no values are observed for a key, all value probabilities are set to ``0.0`` and ``n=0``.
+
+    Args:
+        eq_weighted_outputs: Output objects to aggregate, each counted with equal weight.
+        output_schema: JSON schema used to validate/define allowed output values.
+        agreement_keys: Keys to include in the distribution computation.
+
+    Returns:
+        Mapping from agreement key to per-value distribution estimates.
+
+    Raises:
+        AssertionError: If an observed value is not one of the schema-derived possible values.
+    """
+
     def _get_possible_values(key: str) -> list[str | bool | int | float]:
         if "enum" in output_schema.get("properties", {}).get(key, {}):
             return output_schema.get("properties", {}).get(key, {}).get("enum", [])
@@ -108,7 +137,7 @@ def compute_output_distributions(
         key: {value: 0 for value in _get_possible_values(key)} for key in agreement_keys
     }
     # Collect counts for each possible value
-    for result in indep_results:
+    for result in eq_weighted_outputs:
         for key in agreement_keys:
             if (value := result.get(key)) is not None:  # Could be none if the key is optional
                 assert value in raw_counts[key], (

@@ -9,6 +9,19 @@ from pydantic import BaseModel, Field, model_validator
 from docent.data_models.citation import InlineCitation
 
 
+class DistributionOutcome(BaseModel):
+    """Single outcome and probability mass for a predictive distribution."""
+
+    output: dict[str, Any]
+    probability: float
+
+
+class OutputDistribution(BaseModel):
+    """Probability distribution over rubric-compliant outputs."""
+
+    outcomes: list[DistributionOutcome] = Field(default_factory=list[DistributionOutcome])
+
+
 class LabelingRequestFocusItem(BaseModel):
     """Specific rubric-related question the human labeler should inspect."""
 
@@ -46,15 +59,14 @@ class LabelingRequest(BaseModel):
     review_focus: list[LabelingRequestFocusItem] = Field(
         default_factory=list[LabelingRequestFocusItem]
     )
+    user_distribution: OutputDistribution | None = None
+    user_distribution_reasoning: str | None = None
 
 
 class LabeledRun(BaseModel):
     """A human label for one agent run."""
 
     agent_run_id: str
-    # Stores machine-generated metadata shown before the final label (for example,
-    # label.metadata.user_distribution from the initial p_u seed), not user-authored text.
-    metadata: dict[str, Any] | None = None
     timestamp: datetime = Field(default_factory=datetime.now)
 
     # What the user responded

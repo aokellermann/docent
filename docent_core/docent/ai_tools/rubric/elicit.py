@@ -18,14 +18,15 @@ from docent.data_models.citation import InlineCitation
 from docent.judges.types import Rubric
 from docent.sdk.llm_context import LLMContext, resolve_citations_with_context
 from docent_core.docent.ai_tools.rubric.user_model import (
+    DistributionOutcome,
     LabelingRequest,
     LabelingRequestFocusItem,
+    OutputDistribution,
 )
 
 if TYPE_CHECKING:
     from docent_core.docent.ai_tools.rubric.user_model import (
         AgentRunFeedback,
-        LabeledRun,
         UserData,
     )
 
@@ -63,10 +64,11 @@ DEFAULT_USER_REASONING_FALLBACK = (
     "available user QA/label history."
 )
 LABEL_METADATA_SEMANTICS_TEXT = (
-    "IMPORTANT metadata semantics:\n"
-    "- In label.metadata.user_distribution, the p_u distribution and reasoning is the initial seed\n"
-    "  shown to the user before they provided the final label.\n"
-    "- This metadata is not user-authored text. User-authored signals are QA answers/explanations and\n"
+    "IMPORTANT seed semantics:\n"
+    "- In labeling_request.user_distribution and labeling_request.user_distribution_reasoning,\n"
+    "  the p_u distribution/reasoning is the initial seed shown to the user before they\n"
+    "  provided the final label.\n"
+    "- This seed data is not user-authored text. User-authored signals are QA answers/explanations and\n"
     "  the final label explanation."
 )
 USER_DATA_PROMPT_TOKEN_LIMIT = 50_000
@@ -74,36 +76,13 @@ USER_DATA_SUMMARY_AGENT_RUN_TOK_LIMIT = 50_000
 USER_DATA_SUMMARY_MAX_NEW_TOKENS = 4096
 
 
-class DistributionOutcome(BaseModel):
-    """Single outcome and probability mass for a predictive distribution."""
-
-    output: dict[str, Any]
-    probability: float
-
-
-class OutputDistribution(BaseModel):
-    """Probability distribution over rubric-compliant outputs."""
-
-    outcomes: list[DistributionOutcome] = Field(default_factory=list[DistributionOutcome])
-    point_estimate: bool = False
-    reasoning: str | None = None
-    reasoning_citations: list[InlineCitation] = Field(default_factory=list[InlineCitation])
-
-
 class RunDistributionEstimate(BaseModel):
     """Estimated user distribution for one run."""
 
     agent_run_id: str
     user_distribution: OutputDistribution | None = None
-    error: str | None = None
-
-
-class LabelingRequestResult(BaseModel):
-    """Best-effort wrapper for labeling request generation."""
-
-    agent_run_id: str
-    request: LabelingRequest | None = None
-    error: str | None = None
+    reasoning: str | None = None
+    reasoning_citations: list[InlineCitation] = Field(default_factory=list[InlineCitation])
 
 
 class SchemaSelectableField(BaseModel):
@@ -111,27 +90,6 @@ class SchemaSelectableField(BaseModel):
 
     kind: Literal["boolean", "enum"]
     options: list[Any] = Field(default_factory=list[Any])
-
-
-class LabelMetadataUserDistribution(BaseModel):
-    """Subset of p_u persisted in label metadata for prompt construction."""
-
-    outcomes: list[DistributionOutcome] | None = None
-    reasoning: str | None = None
-
-
-class SelectedLabelMetadata(BaseModel):
-    """Metadata fields included when summarizing existing labels."""
-
-    user_distribution: LabelMetadataUserDistribution | None = None
-
-
-class SelectedLabelPayload(BaseModel):
-    """Structured label evidence block used in user-context prompt summaries."""
-
-    label_value: dict[str, Any]
-    explanation: str | None = None
-    metadata: SelectedLabelMetadata = Field(default_factory=SelectedLabelMetadata)
 
 
 class _RawDistributionOutcome(BaseModel):
@@ -195,11 +153,7 @@ def _create_agent_run_feedback_summary_prompt(
         }
         for qa_pair in run_feedback.qa_pairs
     ]
-    label_payload = (
-        _build_selected_label_payload(run_feedback.label).model_dump(mode="json")
-        if run_feedback.label is not None
-        else None
-    )
+    label_payload = _build_selected_label_payload(run_feedback) if run_feedback.label else None
     run_feedback_payload = {
         "run_title": labeling_request.title,
         "review_context": labeling_request.review_context,
@@ -261,58 +215,54 @@ def _coerce_string_keyed_dict(value: object) -> dict[str, Any] | None:
     return parsed
 
 
-def _extract_metadata_user_distribution(
-    metadata: dict[str, Any] | None,
-) -> LabelMetadataUserDistribution | None:
-    if metadata is None:
-        return None
+def _build_selected_label_payload(run_feedback: "AgentRunFeedback") -> dict[str, Any]:
+    labeled_run = run_feedback.label
+    if labeled_run is None:
+        raise ValueError("run_feedback.label must be present for selected label payload")
 
-    raw_user_distribution = _coerce_string_keyed_dict(metadata.get("user_distribution"))
-    if raw_user_distribution is None:
-        return None
-
-    raw_outcomes = raw_user_distribution.get("outcomes")
-    raw_reasoning = raw_user_distribution.get("reasoning")
-    payload: dict[str, Any] = {}
-    if isinstance(raw_outcomes, list):
-        payload["outcomes"] = raw_outcomes
-    if isinstance(raw_reasoning, str):
-        payload["reasoning"] = raw_reasoning
-    if not payload:
-        return None
-
-    try:
-        return LabelMetadataUserDistribution.model_validate(payload)
-    except ValidationError:
-        logger.warning("Failed to parse label metadata user_distribution payload.")
-        return None
+    user_distribution = run_feedback.labeling_request.user_distribution
+    return {
+        "label_value": labeled_run.label_value,
+        "explanation": labeled_run.explanation,
+        "user_distribution": (
+            user_distribution.model_dump(mode="json") if user_distribution is not None else None
+        ),
+        "user_distribution_reasoning": run_feedback.labeling_request.user_distribution_reasoning,
+    }
 
 
-def _build_selected_label_payload(labeled_run: "LabeledRun") -> SelectedLabelPayload:
-    user_distribution = _extract_metadata_user_distribution(labeled_run.metadata)
-    return SelectedLabelPayload(
-        label_value=labeled_run.label_value,
-        explanation=labeled_run.explanation,
-        metadata=SelectedLabelMetadata(user_distribution=user_distribution),
-    )
+def _format_label_evidence_block(run_feedback: "AgentRunFeedback") -> str:
+    payload = _build_selected_label_payload(run_feedback)
+    label_value = cast(dict[str, Any], payload["label_value"])
+    label_value_text = json.dumps(label_value, sort_keys=True)
 
-
-def _format_label_evidence_block(labeled_run: "LabeledRun") -> str:
-    payload = _build_selected_label_payload(labeled_run)
-    label_value_text = json.dumps(payload.label_value, sort_keys=True)
-    user_distribution = payload.metadata.user_distribution
+    user_distribution_payload = payload.get("user_distribution")
     user_distribution_text = (
-        json.dumps(user_distribution.model_dump(mode="json"), sort_keys=True)
-        if user_distribution is not None
+        json.dumps(user_distribution_payload, sort_keys=True)
+        if isinstance(user_distribution_payload, dict)
         else "N/A"
     )
+
+    user_distribution_reasoning = payload.get("user_distribution_reasoning")
+    user_distribution_reasoning_text = (
+        user_distribution_reasoning.strip()
+        if isinstance(user_distribution_reasoning, str) and user_distribution_reasoning.strip()
+        else "N/A"
+    )
+
+    explanation = payload.get("explanation")
+    explanation_text = (
+        explanation.strip() if isinstance(explanation, str) and explanation.strip() else "N/A"
+    )
+
     return (
         "User-provided label:\n"
         f"User label: {label_value_text}\n"
-        f"User explanation: {payload.explanation or 'N/A'}\n"
-        "p_u distribution and reasoning "
-        "(initial seed metadata shown before final label; not user-authored): "
-        f"{user_distribution_text}"
+        f"User explanation: {explanation_text}\n"
+        "p_u distribution (initial seed shown before final label; not user-authored): "
+        f"{user_distribution_text}\n"
+        "p_u reasoning (initial seed shown before final label; not user-authored): "
+        f"{user_distribution_reasoning_text}"
     )
 
 
@@ -345,9 +295,9 @@ def _build_generated_user_data_summary_text(
 ) -> str:
     run_section = "\n\n".join(run_blocks) if run_blocks else "No run summaries."
     return (
-        f"{LABEL_METADATA_SEMANTICS_TEXT}\n\n"
         f"Run Summaries ({len(run_blocks)}/{total_feedback_units} shown):\n{run_section}\n\n"
-        f"Source feedback totals: {total_source_qa_pairs} QA pair(s), {total_labels} label(s)."
+        f"Source feedback totals: {total_source_qa_pairs} QA pair(s), {total_labels} label(s).\n\n"
+        f"{LABEL_METADATA_SEMANTICS_TEXT}"
     )
 
 
@@ -460,14 +410,14 @@ async def summarize_user_data_for_prompt_with_agent_runs(
             run_feedback = feedback_units[summary_task.run_index]
             qa_evidence_entry = _format_run_feedback_qa_evidence_block(run_feedback)
             label_evidence_entry = (
-                _format_label_evidence_block(run_feedback.label)
+                _format_label_evidence_block(run_feedback)
                 if run_feedback.label is not None
                 else (
                     "User-provided label:\n"
                     "User label: N/A\n"
                     "User explanation: N/A\n"
                     "p_u distribution and reasoning "
-                    "(initial seed metadata shown before final label; not user-authored): N/A"
+                    "(initial seed shown before final label; not user-authored): N/A"
                 )
             )
             run_blocks.append(
@@ -693,10 +643,9 @@ Return JSON:
 def parse_output_distribution_response(
     llm_response: str,
     context: LLMContext | None,
-    point_estimate: bool,
     require_reasoning: bool = False,
     missing_reasoning_fallback: str = DEFAULT_USER_REASONING_FALLBACK,
-) -> OutputDistribution | None:
+) -> tuple[OutputDistribution, str | None, list[InlineCitation]] | None:
     """Parse distribution JSON from LLM response, resolve citations, normalize probabilities."""
     parsed = parse_llm_json_response(llm_response, keys=("outcomes", "distribution", "output"))
     if parsed is None:
@@ -776,13 +725,8 @@ def parse_output_distribution_response(
         )
     ]
 
-    distribution = OutputDistribution(
-        outcomes=outcomes,
-        point_estimate=point_estimate,
-        reasoning=overall_reasoning,
-        reasoning_citations=overall_reasoning_citations,
-    )
-    return normalize_output_distribution(distribution)
+    distribution = normalize_output_distribution(OutputDistribution(outcomes=outcomes))
+    return distribution, overall_reasoning, overall_reasoning_citations
 
 
 async def estimate_user_distributions_for_agent_runs(
@@ -830,46 +774,38 @@ async def estimate_user_distributions_for_agent_runs(
     results: list[RunDistributionEstimate] = []
     for (agent_run_id, context), user_output in zip(run_metadata, user_outputs):
         if user_output.did_error:
-            error_msg = "; ".join(str(e) for e in user_output.errors)
-            results.append(
-                RunDistributionEstimate(
-                    agent_run_id=agent_run_id,
-                    error=f"User distribution error: {error_msg}",
-                )
+            logger.warning(
+                "User distribution error for run %s: %s",
+                agent_run_id,
+                "; ".join(str(e) for e in user_output.errors),
             )
+            results.append(RunDistributionEstimate(agent_run_id=agent_run_id))
             continue
 
         user_text = user_output.completions[0].text or ""
-        user_distribution = parse_output_distribution_response(
+        parsed_distribution = parse_output_distribution_response(
             user_text,
             context=context,
-            point_estimate=False,
             require_reasoning=True,
             missing_reasoning_fallback=DEFAULT_USER_REASONING_FALLBACK,
         )
 
-        if user_distribution is None:
-            results.append(
-                RunDistributionEstimate(
-                    agent_run_id=agent_run_id,
-                    error="Failed to parse user distribution response",
-                )
-            )
+        if parsed_distribution is None:
+            logger.warning("Failed to parse user distribution response for run %s", agent_run_id)
+            results.append(RunDistributionEstimate(agent_run_id=agent_run_id))
             continue
+        user_distribution, reasoning, reasoning_citations = parsed_distribution
 
         results.append(
             RunDistributionEstimate(
                 agent_run_id=agent_run_id,
                 user_distribution=user_distribution,
-                error=None,
+                reasoning=reasoning,
+                reasoning_citations=reasoning_citations,
             )
         )
 
-    valid_estimates = [
-        estimate
-        for estimate in results
-        if estimate.error is None and estimate.user_distribution is not None
-    ]
+    valid_estimates = [estimate for estimate in results if estimate.user_distribution is not None]
     logger.info(
         "Finished sampled user distribution estimates: %d total, %d valid.",
         len(results),
@@ -913,10 +849,12 @@ def get_enum_boolean_fields_from_schema(
 
 def _distribution_summary_for_prompt(
     distribution: OutputDistribution,
+    reasoning: str | None,
     max_outcomes: int = 5,
 ) -> str:
     return format_user_distribution_for_display(
         distribution=distribution,
+        reasoning=reasoning,
         max_outcomes=max_outcomes,
         max_reasoning_chars=220,
     )
@@ -924,6 +862,7 @@ def _distribution_summary_for_prompt(
 
 def format_user_distribution_for_display(
     distribution: OutputDistribution,
+    reasoning: str | None = None,
     max_outcomes: int = 5,
     max_reasoning_chars: int | None = None,
 ) -> str:
@@ -938,7 +877,7 @@ def format_user_distribution_for_display(
             }
         )
 
-    reasoning_text = normalized.reasoning or ""
+    reasoning_text = reasoning or ""
     if max_reasoning_chars is not None:
         reasoning_text = _truncate_for_prompt(reasoning_text, max_reasoning_chars)
 
@@ -1076,11 +1015,15 @@ def create_labeling_request_prompt(
     rubric_output_schema: dict[str, Any],
     user_context_text: str,
     user_distribution: OutputDistribution,
+    user_distribution_reasoning: str | None = None,
     priority_score: float | None = None,
     priority_metric_name: str = "H[p_u]",
 ) -> str:
     """Create prompt for constructing a user-facing labeling request with citations."""
-    user_summary = _distribution_summary_for_prompt(user_distribution)
+    user_summary = _distribution_summary_for_prompt(
+        distribution=user_distribution,
+        reasoning=user_distribution_reasoning,
+    )
     rubric_schema_text = json.dumps(rubric_output_schema, indent=2, sort_keys=True)
     priority_score_text = f"{priority_score:.6f}" if priority_score is not None else "N/A"
 
@@ -1150,6 +1093,8 @@ def parse_labeling_request_payload(
     parsed: dict[str, Any],
     agent_run_id: str,
     context: LLMContext,
+    user_distribution: OutputDistribution | None = None,
+    user_distribution_reasoning: str | None = None,
 ) -> LabelingRequest:
     """Parse one labeling-request payload into a structured labeling request."""
     raw_title = parsed.get("title")
@@ -1194,6 +1139,8 @@ def parse_labeling_request_payload(
         review_context=review_context,
         review_context_citations=review_context_citations,
         review_focus=review_focus_items,
+        user_distribution=user_distribution,
+        user_distribution_reasoning=user_distribution_reasoning,
     )
 
 
@@ -1206,16 +1153,14 @@ async def generate_labeling_requests(
     max_requests: int | None = None,
     priority_scores_by_run_id: dict[str, float] | None = None,
     priority_metric_name: str = "H[p_u]",
-) -> list[LabelingRequestResult]:
+) -> list[LabelingRequest]:
     """Generate user-facing labeling requests for high-priority runs."""
     if not agent_runs or not estimates:
         return []
 
     runs_by_id = {run.id: run for run in agent_runs}
     viable_estimates = [
-        estimate
-        for estimate in estimates
-        if estimate.error is None and estimate.user_distribution is not None
+        estimate for estimate in estimates if estimate.user_distribution is not None
     ]
     if priority_scores_by_run_id is None:
         ranked_estimates = viable_estimates
@@ -1232,8 +1177,7 @@ async def generate_labeling_requests(
         ranked_estimates = ranked_estimates[:max_requests]
 
     prompts: list[list[dict[str, str]]] = []
-    contexts: list[LLMContext] = []
-    estimate_ids: list[str] = []
+    request_metadata: list[tuple[str, LLMContext, OutputDistribution, str | None]] = []
     for estimate in ranked_estimates:
         run = runs_by_id.get(estimate.agent_run_id)
         if run is None:
@@ -1260,12 +1204,14 @@ async def generate_labeling_requests(
             rubric_output_schema=rubric.output_schema,
             user_context_text=user_context_text,
             user_distribution=user_distribution,
+            user_distribution_reasoning=estimate.reasoning,
             priority_score=priority_score,
             priority_metric_name=priority_metric_name,
         )
         prompts.append([{"role": "user", "content": prompt}])
-        contexts.append(context)
-        estimate_ids.append(estimate.agent_run_id)
+        request_metadata.append(
+            (estimate.agent_run_id, context, user_distribution, estimate.reasoning)
+        )
 
     if not prompts:
         return []
@@ -1278,16 +1224,15 @@ async def generate_labeling_requests(
         timeout=180.0,
     )
 
-    results: list[LabelingRequestResult] = []
-    for agent_run_id, context, output in zip(estimate_ids, contexts, outputs):
+    results: list[LabelingRequest] = []
+    for (agent_run_id, context, user_distribution, user_distribution_reasoning), output in zip(
+        request_metadata, outputs
+    ):
         if output.did_error:
-            error_msg = "; ".join(str(e) for e in output.errors)
-            results.append(
-                LabelingRequestResult(
-                    agent_run_id=agent_run_id,
-                    request=None,
-                    error=f"LLM error while generating request: {error_msg}",
-                )
+            logger.warning(
+                "LLM error while generating labeling request for run %s: %s",
+                agent_run_id,
+                "; ".join(str(e) for e in output.errors),
             )
             continue
 
@@ -1297,23 +1242,17 @@ async def generate_labeling_requests(
             keys=("title", "review_context", "review_focus"),
         )
         if parsed is None:
-            results.append(
-                LabelingRequestResult(
-                    agent_run_id=agent_run_id,
-                    request=None,
-                    error="Failed to parse labeling request JSON",
-                )
-            )
+            logger.warning("Failed to parse labeling request JSON for run %s", agent_run_id)
             continue
 
         request = parse_labeling_request_payload(
             parsed=parsed,
             agent_run_id=agent_run_id,
             context=context,
+            user_distribution=user_distribution,
+            user_distribution_reasoning=user_distribution_reasoning,
         )
-        results.append(
-            LabelingRequestResult(agent_run_id=agent_run_id, request=request, error=None)
-        )
+        results.append(request)
 
     return results
 
@@ -1378,11 +1317,7 @@ def _coerce_probability(value: Any) -> float | None:
 def normalize_output_distribution(distribution: OutputDistribution) -> OutputDistribution:
     """Normalize probabilities and merge duplicate outcomes by canonical JSON output."""
     if not distribution.outcomes:
-        return OutputDistribution(
-            point_estimate=distribution.point_estimate,
-            reasoning=distribution.reasoning,
-            reasoning_citations=list(distribution.reasoning_citations),
-        )
+        return OutputDistribution()
 
     merged: dict[str, DistributionOutcome] = {}
     for outcome in distribution.outcomes:
@@ -1399,11 +1334,7 @@ def normalize_output_distribution(distribution: OutputDistribution) -> OutputDis
 
     merged_outcomes = list(merged.values())
     if not merged_outcomes:
-        return OutputDistribution(
-            point_estimate=distribution.point_estimate,
-            reasoning=distribution.reasoning,
-            reasoning_citations=list(distribution.reasoning_citations),
-        )
+        return OutputDistribution()
 
     total_probability = sum(item.probability for item in merged_outcomes)
     if total_probability <= 0:
@@ -1416,19 +1347,4 @@ def normalize_output_distribution(distribution: OutputDistribution) -> OutputDis
 
     merged_outcomes.sort(key=lambda item: item.probability, reverse=True)
 
-    if distribution.point_estimate:
-        best = merged_outcomes[0]
-        best.probability = 1.0
-        return OutputDistribution(
-            outcomes=[best],
-            point_estimate=True,
-            reasoning=distribution.reasoning,
-            reasoning_citations=list(distribution.reasoning_citations),
-        )
-
-    return OutputDistribution(
-        outcomes=merged_outcomes,
-        point_estimate=False,
-        reasoning=distribution.reasoning,
-        reasoning_citations=list(distribution.reasoning_citations),
-    )
+    return OutputDistribution(outcomes=merged_outcomes)

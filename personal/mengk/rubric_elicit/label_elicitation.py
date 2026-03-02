@@ -41,7 +41,6 @@ from docent.data_models.citation import InlineCitation
 from docent.judges.types import Rubric
 from docent_core._env_util import ENV
 from docent_core.docent.ai_tools.rubric.elicit import (
-    LabelingRequestResult,
     OutputDistribution,
     RunDistributionEstimate,
     SchemaSelectableField,
@@ -65,13 +64,6 @@ from docent_core.docent.ai_tools.rubric.user_model import (
 
 console = Console()
 AGENT_RUN_FETCH_MAX_CONCURRENCY = 25
-
-
-class EntropyLabelMetadata(BaseModel):
-    # Initial p_u seed shown to the user before they submitted the final label.
-    # This is metadata for analysis, not user-authored text.
-    user_distribution: OutputDistribution
-    entropy_nats: float
 
 
 class CollectedRunFeedback(BaseModel):
@@ -382,7 +374,7 @@ def _render_entropy_rankings(
     key_set = set(agreement_keys)
     for idx, (estimate, entropy) in enumerate(ranked[:top_n], 1):
         user_distribution = _require_user_distribution(estimate)
-        distribution_reasoning = (user_distribution.reasoning or "").strip() or None
+        distribution_reasoning = (estimate.reasoning or "").strip() or None
         body_lines = [
             *_run_reference_lines(
                 frontend_url=frontend_url,
@@ -397,7 +389,7 @@ def _render_entropy_rankings(
         if distribution_reasoning:
             reasoning_text, reasoning_footnotes = render_text_with_citation_footnotes(
                 text=distribution_reasoning,
-                citations=user_distribution.reasoning_citations,
+                citations=estimate.reasoning_citations,
             )
             body_lines.extend(["", "[bold]p_u reasoning[/bold]", reasoning_text])
             if reasoning_footnotes:
@@ -430,7 +422,7 @@ def _append_section_with_citations(
 
 def _render_generated_labeling_requests(
     ranked: list[tuple[RunDistributionEstimate, float]],
-    request_results: list[LabelingRequestResult],
+    request_results: list[LabelingRequest],
     agreement_keys: list[str],
     collection_id: str,
     frontend_url: str,
@@ -445,28 +437,18 @@ def _render_generated_labeling_requests(
 
     estimates_by_id = {estimate.agent_run_id: (estimate, entropy) for estimate, entropy in ranked}
     agreement_key_set = set(agreement_keys)
-    for idx, request_result in enumerate(request_results, 1):
-        estimate_tuple = estimates_by_id.get(request_result.agent_run_id)
+    for idx, request in enumerate(request_results, 1):
+        estimate_tuple = estimates_by_id.get(request.agent_run_id)
         entropy_text = "N/A"
         user_distribution: OutputDistribution | None = None
+        estimate_reasoning: str | None = None
+        estimate_reasoning_citations: list[InlineCitation] = []
         if estimate_tuple is not None:
             estimate, entropy = estimate_tuple
             entropy_text = f"{entropy:.6f}"
             user_distribution = estimate.user_distribution
-
-        if request_result.error is not None or request_result.request is None:
-            run_url = build_agent_run_dashboard_url(
-                frontend_url=frontend_url,
-                collection_id=collection_id,
-                agent_run_id=request_result.agent_run_id,
-            )
-            console.print(
-                f"{idx}. {request_result.agent_run_id} ({run_url}) "
-                f"[red]ERROR[/red]: {request_result.error}"
-            )
-            continue
-
-        request = request_result.request
+            estimate_reasoning = estimate.reasoning
+            estimate_reasoning_citations = estimate.reasoning_citations
         body_lines = [
             *_run_reference_lines(
                 frontend_url=frontend_url,
@@ -502,7 +484,7 @@ def _render_generated_labeling_requests(
             body_lines.append("- (No focus items returned)")
 
         if user_distribution is not None:
-            distribution_reasoning = (user_distribution.reasoning or "").strip() or None
+            distribution_reasoning = (estimate_reasoning or "").strip() or None
             body_lines.extend(
                 [
                     "",
@@ -513,7 +495,7 @@ def _render_generated_labeling_requests(
             if distribution_reasoning:
                 reasoning_text, reasoning_footnotes = render_text_with_citation_footnotes(
                     text=distribution_reasoning,
-                    citations=user_distribution.reasoning_citations,
+                    citations=estimate_reasoning_citations,
                 )
                 body_lines.extend(["", "[bold]p_u reasoning[/bold]", reasoning_text])
                 if reasoning_footnotes:
@@ -541,16 +523,6 @@ def _require_user_distribution(estimate: RunDistributionEstimate) -> OutputDistr
     if user_distribution is None:
         raise ValueError(f"Missing user distribution for run {estimate.agent_run_id}")
     return user_distribution
-
-
-def _build_label_metadata(
-    estimate: RunDistributionEstimate,
-    entropy: float,
-) -> EntropyLabelMetadata:
-    return EntropyLabelMetadata(
-        user_distribution=_require_user_distribution(estimate),
-        entropy_nats=entropy,
-    )
 
 
 def _build_label_explanation(explicit_explanation: str) -> str | None:
@@ -712,7 +684,6 @@ def _build_run_feedback_preview(
 
 def _build_run_feedback_candidate(
     estimate: RunDistributionEstimate,
-    entropy: float,
     labeling_request: LabelingRequest | None,
     qa_pairs: list[QAPair],
     label_value: dict[str, Any],
@@ -720,18 +691,13 @@ def _build_run_feedback_candidate(
 ) -> AgentRunFeedback:
     label: LabeledRun | None = None
     if label_value:
-        metadata = _build_label_metadata(
-            estimate=estimate,
-            entropy=entropy,
-        )
         label = LabeledRun(
             agent_run_id=estimate.agent_run_id,
             label_value=label_value,
             explanation=label_explanation,
-            metadata=metadata.model_dump(mode="json"),
         )
 
-    effective_labeling_request = (
+    effective_labeling_request_base = (
         labeling_request
         if labeling_request is not None
         else LabelingRequest(
@@ -741,6 +707,12 @@ def _build_run_feedback_candidate(
             review_context_citations=[],
             review_focus=[],
         )
+    )
+    effective_labeling_request = effective_labeling_request_base.model_copy(
+        update={
+            "user_distribution": _require_user_distribution(estimate),
+            "user_distribution_reasoning": estimate.reasoning,
+        }
     )
     return AgentRunFeedback(
         agent_run_id=estimate.agent_run_id,
@@ -836,7 +808,7 @@ def _collect_run_feedback_for_run(
             ]
         )
 
-    distribution_reasoning = (user_distribution.reasoning or "").strip() or None
+    distribution_reasoning = (estimate.reasoning or "").strip() or None
     body_lines.extend(
         [
             "",
@@ -847,7 +819,7 @@ def _collect_run_feedback_for_run(
     if distribution_reasoning:
         reasoning_text, reasoning_footnotes = render_text_with_citation_footnotes(
             text=distribution_reasoning,
-            citations=user_distribution.reasoning_citations,
+            citations=estimate.reasoning_citations,
         )
         body_lines.extend(["", "[bold]p_u reasoning[/bold]", reasoning_text])
         if reasoning_footnotes:
@@ -953,7 +925,6 @@ def _collect_run_feedback_for_run(
 
         run_feedback_candidate = _build_run_feedback_candidate(
             estimate=estimate,
-            entropy=entropy,
             labeling_request=labeling_request,
             qa_pairs=qa_pairs,
             label_value=label_value,
@@ -1126,9 +1097,9 @@ async def run_entropy_elicitation(
 
     # # TODO(mengk): remove this temporary p_u reasoning JSON dump once debugging is done.
     # sampled_p_u_reasoning_blocks = [
-    #     (estimate.user_distribution.reasoning or "").strip()
+    #     (estimate.reasoning or "").strip()
     #     for estimate in estimates
-    #     if estimate.user_distribution is not None
+    #     if estimate.user_distribution is not None and estimate.reasoning is not None
     # ]
     # p_u_reasoning_dump_path = (
     #     Path("outputs")
@@ -1148,17 +1119,21 @@ async def run_entropy_elicitation(
 
     ranked: list[tuple[RunDistributionEstimate, float]] = []
     for estimate in estimates:
-        if estimate.error is not None or estimate.user_distribution is None:
+        if estimate.user_distribution is None:
             continue
         entropy = _compute_entropy(estimate.user_distribution, set(agreement_keys))
         ranked.append((estimate, entropy))
     ranked.sort(key=lambda item: item[1], reverse=True)
 
-    num_errors = sum(1 for estimate in estimates if estimate.error is not None)
-    console.print(
-        f"Computed entropy for {len(ranked)}/{len(estimates)} run(s); errors: {num_errors}"
+    num_missing_distributions = sum(
+        1 for estimate in estimates if estimate.user_distribution is None
     )
-    if num_errors:
+    console.print(
+        "Computed entropy for "
+        f"{len(ranked)}/{len(estimates)} run(s); "
+        f"missing distributions: {num_missing_distributions}"
+    )
+    if num_missing_distributions:
         console.print(
             "[yellow]Some runs failed p_u estimation and were excluded from ranking.[/yellow]"
         )
@@ -1202,11 +1177,7 @@ async def run_entropy_elicitation(
         collection_id=collection_id,
         frontend_url=frontend_url,
     )
-    labeling_requests_by_run_id = {
-        result.agent_run_id: result.request
-        for result in request_results
-        if result.request is not None
-    }
+    labeling_requests_by_run_id = {request.agent_run_id: request for request in request_results}
 
     collected_feedback, stage_skipped, displayed_runs = _collect_entropy_feedback(
         ranked=top_ranked,
