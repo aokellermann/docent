@@ -201,18 +201,6 @@ def _extract_summary_text(raw_response: str) -> str:
     return raw_response.strip()
 
 
-def _coerce_string_keyed_dict(value: object) -> dict[str, Any] | None:
-    if not isinstance(value, dict):
-        return None
-
-    parsed: dict[str, Any] = {}
-    for key, item in cast(dict[object, object], value).items():
-        if not isinstance(key, str):
-            return None
-        parsed[key] = item
-    return parsed
-
-
 def _build_selected_label_payload(run_feedback: "AgentRunFeedback") -> dict[str, Any]:
     labeled_run = run_feedback.label
     if labeled_run is None:
@@ -1092,9 +1080,7 @@ def parse_labeling_request_payload(
             raw_focus.append(focus_item)
 
     for focus_item_raw in raw_focus:
-        focus_item = _coerce_string_keyed_dict(focus_item_raw)
-        if focus_item is None:
-            continue
+        focus_item = cast(dict[str, Any], focus_item_raw)
         question_raw = focus_item.get("question")
         if not isinstance(question_raw, str):
             continue

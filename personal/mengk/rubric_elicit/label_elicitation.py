@@ -26,7 +26,7 @@ from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from pydantic import BaseModel
 from rich.console import Console
@@ -73,18 +73,6 @@ class CollectedRunFeedback(BaseModel):
     run_feedback: AgentRunFeedback
 
 
-def _coerce_string_keyed_dict(value: object) -> dict[str, Any] | None:
-    if not isinstance(value, dict):
-        return None
-
-    parsed: dict[str, Any] = {}
-    for key, item in cast(dict[object, object], value).items():
-        if not isinstance(key, str):
-            return None
-        parsed[key] = item
-    return parsed
-
-
 def _require_docent_client() -> Docent:
     _ = ENV  # load env
     return Docent()
@@ -107,9 +95,7 @@ def _load_user_data(initial_rubric: str, user_data_json_path: str | None) -> Use
         raise ValueError(f"--user-data-json file does not exist: {path}")
 
     payload_raw = json.loads(path.read_text(encoding="utf-8"))
-    payload_dict = _coerce_string_keyed_dict(payload_raw)
-    if payload_dict is None:
-        raise ValueError("--user-data-json must contain a JSON object matching UserData")
+    payload_dict = payload_raw
 
     user_data = UserData.model_validate(payload_dict)
     if user_data.initial_rubric != initial_rubric:

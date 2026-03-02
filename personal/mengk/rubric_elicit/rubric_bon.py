@@ -125,17 +125,6 @@ class HoldoutEvaluationReport(BaseModel):
     candidate_evaluations: list[CandidateEvaluation]
 
 
-def _coerce_string_keyed_dict(value: object) -> dict[str, Any] | None:
-    if not isinstance(value, dict):
-        return None
-    parsed: dict[str, Any] = {}
-    for key, item in cast(dict[object, object], value).items():
-        if not isinstance(key, str):
-            return None
-        parsed[key] = item
-    return parsed
-
-
 def _require_docent_client() -> Docent:
     _ = ENV
     return Docent()
@@ -152,9 +141,7 @@ def _load_user_data(initial_rubric: str, user_data_json_path: str) -> UserData:
         raise ValueError(f"--user-data-json file does not exist: {path}")
 
     payload_raw = json.loads(path.read_text(encoding="utf-8"))
-    payload_dict = _coerce_string_keyed_dict(payload_raw)
-    if payload_dict is None:
-        raise ValueError("--user-data-json must contain a JSON object matching UserData")
+    payload_dict = payload_raw
 
     extra_keys = sorted(set(payload_dict.keys()) - _USER_DATA_TOP_LEVEL_KEYS)
     if extra_keys:
