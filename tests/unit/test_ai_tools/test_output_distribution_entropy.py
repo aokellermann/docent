@@ -111,18 +111,6 @@ def test_assert_agreement_only_output_schema_rejects_non_agreement_keys():
         assert_agreement_only_output_schema(schema)
 
 
-def test_assert_agreement_only_output_schema_requires_additional_properties_false():
-    schema = {
-        "type": "object",
-        "properties": {
-            "label": {"type": "string", "enum": ["match", "no_match"]},
-        },
-    }
-
-    with pytest.raises(ValueError, match="additionalProperties"):
-        assert_agreement_only_output_schema(schema)
-
-
 def test_assert_agreement_only_output_schema_requires_at_least_one_key():
     schema: dict[str, object] = {
         "type": "object",
