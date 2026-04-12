@@ -3726,8 +3726,8 @@ class MonoService:
                 )
 
                 session.add(acl_entry)
-            print("SUBJECT_FIELDS", subject_fields)
-            print("RESOURCE_FIELDS", resource_fields)
+            logger.debug("SUBJECT_FIELDS %s", subject_fields)
+            logger.debug("RESOURCE_FIELDS %s", resource_fields)
             # Set the fields
             for field, value in subject_fields.items():
                 setattr(acl_entry, field, value)
