@@ -76,6 +76,7 @@ export default function UploadRunsDialog({
   const [progressCurrent, setProgressCurrent] = useState<number>(0);
   const [progressTotal, setProgressTotal] = useState<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const completionHandledRef = useRef(false);
   const [triggerPreview] = usePreviewImportRunsFromFileMutation();
   const [triggerImportStream, importStreamState] =
     useLazyImportRunsFromFileStreamQuery();
@@ -161,6 +162,13 @@ export default function UploadRunsDialog({
     onClose();
   }, [onClose]);
 
+  // Reset completion guard when dialog opens for a new upload
+  useEffect(() => {
+    if (isOpen) {
+      completionHandledRef.current = false;
+    }
+  }, [isOpen]);
+
   // Reflect streaming progress from RTK Query into local UI state
   useEffect(() => {
     const data = importStreamState.data as any;
@@ -169,7 +177,8 @@ export default function UploadRunsDialog({
     setProgressCurrent(data.uploaded);
     setProgressTotal(data.total);
 
-    if (data.phase === 'complete') {
+    if (data.phase === 'complete' && !completionHandledRef.current) {
+      completionHandledRef.current = true;
       toast.success(`${data.uploaded} runs have been imported successfully.`);
       if (onImportSuccess) {
         onImportSuccess();
