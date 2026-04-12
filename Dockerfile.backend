@@ -1,43 +1,50 @@
-FROM python:3.12-slim
+FROM python:3.12-slim AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Install uv - it's way faster than pip
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-#################################
-# Install external dependencies #
-#################################
-# Do this first to prevent unnecessary dep re-installs when the core app is changed but not deps
+# Copy only dependency metadata first for layer caching.
+# Changes to application code won't re-install dependencies.
+COPY pyproject.toml uv.lock ./
+COPY docent/pyproject.toml docent/pyproject.toml
 
-# Need this here so that the core app can build
+# Install dependencies into a virtual environment (no source code needed yet).
+# --no-install-project skips installing the root project itself.
+# --no-install-workspace skips installing workspace members (docent SDK).
+# This means only third-party deps are installed in this cached layer.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project --no-install-workspace
+
+# Now copy the actual source code and install the project + workspace members.
 COPY docent docent
-# Convert uv.lock to a locked requirements.txt that pip can install
-COPY pyproject.toml .
-COPY uv.lock .
-RUN uv export --format requirements-txt > requirements.txt
-# Ensure a minimum pip version (needed for dependency resolution fixes)
-RUN uv pip install --system "pip>=25.3"
-# Then install the requirements.txt
-RUN uv pip install --system -r requirements.txt
-
-#################################
-# Install the core application #
-#################################
-
-# TODO(mengk): ignore the _web folder which has no Python code
 COPY docent_core docent_core
-RUN uv pip install --system -e .
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
 
-# Strip bundled frontend artifacts from inspect_ai that aren't needed at runtime
-# and clear the uv cache (must be after all installs)
-RUN rm -rf /usr/local/lib/python*/site-packages/inspect_ai/_view/www \
-    && rm -rf /root/.cache/uv
+# Strip bundled frontend artifacts from inspect_ai that aren't needed at runtime.
+RUN rm -rf /app/.venv/lib/python*/site-packages/inspect_ai/_view/www
 
-# Copy .env and scripts for startup
+# --- Runtime stage: only what's needed to run ---
+FROM python:3.12-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV PATH="/app/.venv/bin:$PATH"
+
+WORKDIR /app
+
+# Copy the virtual environment and source packages from the builder stage.
+# Source is needed because uv installs workspace members as editable by default,
+# and docent_core resolves .env relative to __file__ (Path(__file__).parent.parent.parent).
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/docent /app/docent
+COPY --from=builder /app/docent_core /app/docent_core
+
+# Copy runtime files
 COPY alembic alembic
 COPY alembic.ini alembic.ini
 COPY .env .env

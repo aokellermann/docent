@@ -18,6 +18,19 @@ docent_core web --port 3000 --backend-url http://localhost:8888
 docent_core worker --workers 2 --queue all
 ```
 
+## Docker
+
+Build config is in `docker-bake.hcl`. Use `docker buildx bake` to build images:
+
+```bash
+# Build all images (backend + frontend)
+docker buildx bake --load
+
+# Build a specific target
+docker buildx bake --load backend
+docker buildx bake --load frontend
+```
+
 ## Python
 
 ### Automated checks
