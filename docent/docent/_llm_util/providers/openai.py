@@ -239,7 +239,8 @@ def _build_response_format(
     backoff.expo,
     exception=(Exception,),
     giveup=lambda e: not _is_retryable_error(e),
-    max_tries=5,
+    max_tries=12,
+    max_time=300,
     factor=3.0,
     on_backoff=_print_backoff_message,
 )
@@ -430,7 +431,8 @@ def update_llm_output(llm_output_partial: LLMOutputPartial | None, chunk: ChatCo
     backoff.expo,
     exception=(Exception,),
     giveup=lambda e: not _is_retryable_error(e),
-    max_tries=5,
+    max_tries=12,
+    max_time=300,
     factor=3.0,
     on_backoff=_print_backoff_message,
 )
@@ -531,7 +533,8 @@ def chunk_and_tokenize(
     backoff.expo,
     exception=(Exception,),
     giveup=lambda e: not _is_retryable_error(e),
-    max_tries=5,
+    max_tries=12,
+    max_time=300,
     factor=3.0,
     on_backoff=_print_backoff_message,
 )

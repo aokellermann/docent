@@ -221,7 +221,8 @@ def _convert_anthropic_error(e: Exception):
     backoff.expo,
     exception=(Exception),
     giveup=lambda e: not _is_retryable_error(e),
-    max_tries=5,
+    max_tries=12,
+    max_time=300,
     factor=3.0,
     on_backoff=_print_backoff_message,
 )
@@ -417,7 +418,8 @@ def update_llm_output(
     backoff.expo,
     exception=(Exception),
     giveup=lambda e: not _is_retryable_error(e),
-    max_tries=5,
+    max_tries=12,
+    max_time=300,
     factor=3.0,
     on_backoff=_print_backoff_message,
 )

@@ -88,7 +88,8 @@ def _build_response_format_config(
     backoff.expo,
     exception=(Exception),
     giveup=lambda e: not _is_retryable_error(e),
-    max_tries=3,
+    max_tries=12,
+    max_time=300,
     factor=2.0,
     on_backoff=_print_backoff_message,
 )
@@ -156,7 +157,8 @@ async def get_google_chat_completion_async(
     backoff.expo,
     exception=(Exception),
     giveup=lambda e: not _is_retryable_error(e),
-    max_tries=3,
+    max_tries=12,
+    max_time=300,
     factor=2.0,
     on_backoff=_print_backoff_message,
 )
