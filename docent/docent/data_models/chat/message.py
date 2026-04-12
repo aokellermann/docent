@@ -1,7 +1,7 @@
 from logging import getLogger
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Discriminator
+from pydantic import BaseModel, Discriminator, field_validator
 
 from docent.data_models.chat.content import Content, ContentText
 from docent.data_models.chat.tool import ToolCall
@@ -24,6 +24,11 @@ class BaseChatMessage(BaseModel):
     content: str | list[Content]
     role: Literal["system", "user", "assistant", "tool"]
     metadata: dict[str, Any] | None = None
+
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def _coerce_none_metadata(cls, v: Any) -> dict[str, Any]:
+        return v if v is not None else {}
 
     @property
     def text(self) -> str:

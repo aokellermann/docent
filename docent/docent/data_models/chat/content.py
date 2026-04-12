@@ -55,8 +55,47 @@ class ContentReasoning(BaseContent):
         return self.summary if self.redacted and self.summary else self.reasoning
 
 
+class ContentImage(BaseContent):
+    """Image content for chat messages.
+
+    Attributes:
+        type: Fixed as "image" to identify this content type.
+        image: The image data (URL or base64-encoded string).
+        detail: Level of detail for image processing.
+    """
+
+    type: Literal["image"] = "image"  # type: ignore
+    image: str
+    detail: str | None = None
+
+
+class ContentAudio(BaseContent):
+    """Audio content for chat messages.
+
+    Attributes:
+        type: Fixed as "audio" to identify this content type.
+        audio: The audio data (URL or base64-encoded string).
+    """
+
+    type: Literal["audio"] = "audio"  # type: ignore
+    audio: str
+
+
+class ContentVideo(BaseContent):
+    """Video content for chat messages.
+
+    Attributes:
+        type: Fixed as "video" to identify this content type.
+        video: The video data (URL or base64-encoded string).
+    """
+
+    type: Literal["video"] = "video"  # type: ignore
+    video: str
+
+
 # Content type discriminated union
-Content = Annotated[ContentText | ContentReasoning, Discriminator("type")]
-"""Discriminated union of possible content types using the 'type' field.
-Can be either ContentText or ContentReasoning.
-"""
+Content = Annotated[
+    ContentText | ContentReasoning | ContentImage | ContentAudio | ContentVideo,
+    Discriminator("type"),
+]
+"""Discriminated union of possible content types using the 'type' field."""
