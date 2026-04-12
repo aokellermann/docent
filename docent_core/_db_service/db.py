@@ -258,7 +258,8 @@ class DocentDB:
             # Check if the database exists
             async with temp_engine.connect() as conn:
                 result = await conn.execute(
-                    text(f"SELECT 1 FROM pg_database WHERE datname = '{database_name}'")
+                    text("SELECT 1 FROM pg_database WHERE datname = :db_name"),
+                    {"db_name": database_name},
                 )
                 exists = result.scalar() is not None
 
@@ -270,7 +271,10 @@ class DocentDB:
                 conn = await temp_engine.connect()
                 conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
                 try:
-                    await conn.execute(text(f"CREATE DATABASE {database_name}"))
+                    # Database identifiers can't be parameterized; validate the name
+                    if not database_name.isidentifier():
+                        raise ValueError(f"Invalid database name: {database_name}")
+                    await conn.execute(text(f'CREATE DATABASE "{database_name}"'))
                     logger.info(f"Database '{database_name}' created successfully")
                 finally:
                     await conn.close()
