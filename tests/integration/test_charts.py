@@ -98,7 +98,7 @@ async def test_available_metadata_keys(
             "rubric_text": "Evaluate the quality of the response",
             "judge_model": {
                 "provider": "anthropic",
-                "model_name": "claude-3-5-sonnet-20241022",
+                "model_name": "claude-sonnet-4-6",
                 "reasoning_effort": "low",
             },
             "output_schema": {

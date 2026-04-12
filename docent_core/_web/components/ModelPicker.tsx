@@ -2,17 +2,27 @@ import { KeyRound } from 'lucide-react';
 import {
   Tooltip,
   TooltipContent,
+  TooltipPortal,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { ModelOption } from '@/app/types/rubricTypes';
+import { ModelOption } from '@/app/store/rubricSlice';
 import { cn } from '@/lib/utils';
 import { useMemo } from 'react';
-import { SingleCombobox, type ComboboxOption } from '@/app/components/Combobox';
+import { Combobox, type ComboboxOption } from '@/app/components/Combobox';
 
 function nameModel(model: ModelOption, shortenName = false) {
   if (shortenName) {
-    const shortName = model.model_name;
+    let shortName = model.model_name;
+
+    // TODO: more general/clean way to shorten names like this
+    if (model.model_name.startsWith('claude-opus-4-')) {
+      shortName = 'claude-opus-4';
+    } else if (model.model_name.startsWith('claude-sonnet-4-')) {
+      shortName = 'claude-sonnet-4';
+    } else if (model.model_name.startsWith('claude-haiku-4-')) {
+      shortName = 'claude-haiku-4';
+    }
 
     // Add reasoning effort if it exists
     if (model.reasoning_effort) {
@@ -123,7 +133,7 @@ export default function ModelPicker({
 
   return (
     <TooltipProvider>
-      <SingleCombobox
+      <Combobox
         value={selectedValue}
         onChange={(value) => {
           const selected = valueToModel.get(value);
@@ -131,7 +141,6 @@ export default function ModelPicker({
           onChange(selected);
         }}
         options={options}
-        popoverAlign="start"
         placeholder="Select model"
         searchPlaceholder="Search models..."
         emptyMessage="No models found"
@@ -160,9 +169,11 @@ export default function ModelPicker({
                   <TooltipTrigger asChild>
                     <KeyRound className="h-3 w-3 flex-shrink-0" />
                   </TooltipTrigger>
-                  <TooltipContent side="top">
-                    <p>This model uses your own API key</p>
-                  </TooltipContent>
+                  <TooltipPortal>
+                    <TooltipContent side="top">
+                      <p>This model uses your own API key</p>
+                    </TooltipContent>
+                  </TooltipPortal>
                 </Tooltip>
               )}
             </span>
@@ -181,9 +192,11 @@ export default function ModelPicker({
                   <TooltipTrigger asChild>
                     <KeyRound className="h-3 w-3 flex-shrink-0" />
                   </TooltipTrigger>
-                  <TooltipContent>
-                    <p>This model uses your own API key</p>
-                  </TooltipContent>
+                  <TooltipPortal>
+                    <TooltipContent>
+                      <p>This model uses your own API key</p>
+                    </TooltipContent>
+                  </TooltipPortal>
                 </Tooltip>
               )}
             </span>

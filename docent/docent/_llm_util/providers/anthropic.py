@@ -582,7 +582,7 @@ async def is_anthropic_api_key_valid(api_key: str) -> bool:
     try:
         # Attempt to make a simple API call with minimal tokens/cost
         await client.messages.create(
-            model="claude-3-haiku-20240307",
+            model="claude-haiku-4-5",
             max_tokens=1,
             messages=[{"role": "user", "content": "hi"}],
         )
