@@ -37,6 +37,18 @@ Docker Compose is the easiest way to get started, but you may want a manual inst
     !!! note
         If you're not using `localhost`, make sure `DOCENT_HOST` is set to the correct domain. Ensure that it's **prefixed correctly** with `http://` or `https://`.
 
+    Once all containers are running, apply the database migrations:
+
+    === "As non-root"
+        ```bash
+        docker compose exec backend alembic upgrade head
+        ```
+
+    === "As root"
+        ```bash
+        sudo docker compose exec backend alembic upgrade head
+        ```
+
     Cold build + start should take a few minutes. Once finished, you can run
 
     === "As non-root"
