@@ -407,11 +407,12 @@ export const collectionApi = createApi({
       query: ({ collectionId, file }) => {
         const formData = new FormData();
         formData.append('file', file);
+        // Cast needed: RTK Query's FetchArgs type doesn't support FormData body
         return {
           url: `/${collectionId}/preview_import_runs_from_file`,
           method: 'POST',
           body: formData,
-        } as any;
+        } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
       },
     }),
     importRunsFromFileStream: build.query<

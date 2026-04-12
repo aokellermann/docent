@@ -1638,7 +1638,7 @@ class Docent:
             collection_id: ID of the Collection.
 
         Returns:
-            str: JSON string containing the list of agent run IDs.
+            list[str]: List of agent run IDs.
 
         Raises:
             requests.exceptions.HTTPError: If the API request fails.

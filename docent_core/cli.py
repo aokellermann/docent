@@ -45,12 +45,9 @@ def server(
 
     # Run the server with appropriate arguments
     cmd = ["uvicorn", "docent_core._server.api:asgi_app"]
-    if host:
-        cmd.extend(["--host", host])
-    if port:
-        cmd.extend(["--port", str(port)])
-    if workers:
-        cmd.extend(["--workers", str(workers)])
+    cmd.extend(["--host", host])
+    cmd.extend(["--port", str(port)])
+    cmd.extend(["--workers", str(workers)])
     if reload:
         cmd.append("--reload")
     if use_ddog:

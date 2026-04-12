@@ -22,9 +22,9 @@ export async function exportChartToPng(chartId: string, filename: string) {
     (tableEl as HTMLElement) || (svgEl as unknown as HTMLElement) || exportRoot;
 
   const targetScrollWidth =
-    (nodeToCapture as any).scrollWidth || nodeToCapture.clientWidth;
+    nodeToCapture.scrollWidth || nodeToCapture.clientWidth;
   const targetScrollHeight =
-    (nodeToCapture as any).scrollHeight || nodeToCapture.clientHeight;
+    nodeToCapture.scrollHeight || nodeToCapture.clientHeight;
 
   const dataUrl = await toPng(nodeToCapture, {
     cacheBust: true,
@@ -44,7 +44,7 @@ export async function exportChartToPng(chartId: string, filename: string) {
   link.click();
 }
 
-function escapeCsvField(value: any): string {
+function escapeCsvField(value: unknown): string {
   if (value === null || value === undefined) return '';
   const str = String(value);
   if (str.includes('"')) {

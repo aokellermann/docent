@@ -569,7 +569,10 @@ class DocentTracer:
             # Check for OTEL_SPAN_ATTRIBUTE_COUNT_LIMIT environment variable
             default_attribute_limit = 1024 * 16
             env_value = os.environ.get("OTEL_SPAN_ATTRIBUTE_COUNT_LIMIT", "0")
-            env_limit = int(env_value) if env_value.isdigit() else 0
+            try:
+                env_limit = int(env_value)
+            except ValueError:
+                env_limit = 0
             attribute_limit = max(env_limit, default_attribute_limit)
 
             # Expand span event budget to avoid dropping events on streaming spans
