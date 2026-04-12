@@ -33,7 +33,7 @@ def function_name(self) -> list[ModelOption]:
     return [
         ModelOption(
             provider="anthropic",
-            model_name="claude-sonnet-4-20250514",
+            model_name="claude-sonnet-4-6",
             reasoning_effort="medium"  # only for reasoning models
         ),
         ModelOption(
