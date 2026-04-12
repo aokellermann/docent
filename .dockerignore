@@ -186,7 +186,7 @@ personal/lijie/robust_latentqa/test2.ipynb
 ######
 
 # dependencies
-/node_modules
+**/node_modules
 /.pnp
 .pnp.js
 .yarn/install-state.gz
@@ -195,7 +195,7 @@ personal/lijie/robust_latentqa/test2.ipynb
 /coverage
 
 # next.js
-/.next/
+**/.next/
 /out/
 
 # production

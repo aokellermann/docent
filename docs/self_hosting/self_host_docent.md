@@ -21,17 +21,19 @@ Docker Compose is the easiest way to get started, but you may want a manual inst
 
 === "Docker Compose (recommended)"
 
-    First ensure [Docker Engine](https://docs.docker.com/engine/install/) and [Docker Compose](https://docs.docker.com/compose/install/) are installed. Then run:
+    First ensure [Docker Engine](https://docs.docker.com/engine/install/) and [Docker Compose](https://docs.docker.com/compose/install/) are installed. Then build and start the services:
 
     === "As non-root"
         ```bash
-        DOCENT_HOST=http://localhost DOCENT_SERVER_PORT=8889 DOCENT_WEB_PORT=3001 docker compose up --build
+        DOCENT_HOST=http://localhost DOCENT_SERVER_PORT=8889 DOCENT_WEB_PORT=3001 docker buildx bake --load
+        DOCENT_HOST=http://localhost DOCENT_SERVER_PORT=8889 DOCENT_WEB_PORT=3001 docker compose up -d
         ```
 
     === "As root"
         ```bash
         # Note that `sudo` strips environment variables, so you have to set them *inside* the command.
-        sudo DOCENT_HOST=http://localhost DOCENT_SERVER_PORT=8889 DOCENT_WEB_PORT=3001 docker compose up --build
+        sudo DOCENT_HOST=http://localhost DOCENT_SERVER_PORT=8889 DOCENT_WEB_PORT=3001 docker buildx bake --load
+        sudo DOCENT_HOST=http://localhost DOCENT_SERVER_PORT=8889 DOCENT_WEB_PORT=3001 docker compose up -d
         ```
 
     !!! note
@@ -49,28 +51,19 @@ Docker Compose is the easiest way to get started, but you may want a manual inst
         sudo docker compose exec backend alembic upgrade head
         ```
 
-    Cold build + start should take a few minutes. Once finished, you can run
+    You can verify all five containers are running with:
 
     === "As non-root"
         ```bash
-        docker ps
+        docker compose ps
         ```
 
     === "As root"
         ```bash
-        sudo docker ps
+        sudo docker compose ps
         ```
 
-    to check that the four following containers are running:
-    ```bash
-    CONTAINER ID   IMAGE             COMMAND                  CREATED          STATUS          PORTS                                         NAMES
-    b8bba5b86251   docent-backend    "bash -c 'bash /app/…"   34 seconds ago   Up 33 seconds   0.0.0.0:8889->8889/tcp, [::]:8889->8889/tcp   docent_backend
-    0cfc73d80407   docent-frontend   "docent web --build …"   34 seconds ago   Up 33 seconds   0.0.0.0:3001->3001/tcp, [::]:3001->3001/tcp   docent_frontend
-    c80f4302db12   postgres:15       "docker-entrypoint.s…"   34 seconds ago   Up 33 seconds   0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp   docent_postgres
-    f9d86be37643   redis:alpine      "docker-entrypoint.s…"   34 seconds ago   Up 33 seconds   0.0.0.0:6379->6379/tcp, [::]:6379->6379/tcp   docent_redis
-    ```
-
-    To shut Docent down, either press `Ctrl+C` in the terminal or run:
+    To shut Docent down, run:
 
     === "As non-root"
         ```bash
@@ -83,7 +76,7 @@ Docker Compose is the easiest way to get started, but you may want a manual inst
         ```
 
     !!! note
-        If you make changes to the codebase, you'll need to stop the containers, then rebuild by **keeping the `--build` argument**. If `--build` is omitted, your changes will not be reflected.
+        If you make changes to the codebase, you'll need to stop the containers, then rebuild with `docker buildx bake --load` before starting again.
 
 === "Manual"
 
