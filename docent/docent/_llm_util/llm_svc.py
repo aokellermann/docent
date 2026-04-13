@@ -214,10 +214,13 @@ async def _parallelize_calls(
                             logger.error(
                                 f"LLM call raised an exception that is not an LLMException: {e}. Failure traceback:\n{traceback.format_exc()}"
                             )
-                            llm_exception = LLMException(e)
+                            llm_exception = LLMException(str(e) or repr(e))
+                            llm_exception.user_message = f"The model failed to respond: {e}"
                             llm_exception.__cause__ = e
                         else:
                             llm_exception = e
+                            if llm_exception.user_message == LLMException.user_message:
+                                llm_exception.user_message = f"The model failed to respond: {e}"
 
                         error_message = f"Call to {model_name} failed even with backoff: {e.__class__.__name__}."
 

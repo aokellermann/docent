@@ -284,11 +284,11 @@ class ProviderPreferences(PublicProviderPreferences):
             ),
             ModelOption(
                 provider="google",
-                model_name="gemini-3-pro-preview",
+                model_name="gemini-3.1-pro-preview",
             ),
             ModelOption(
                 provider="google",
-                model_name="gemini-3-pro-preview",
+                model_name="gemini-3.1-pro-preview",
                 reasoning_effort="medium",
             ),
             ModelOption(
@@ -308,7 +308,7 @@ class ProviderPreferences(PublicProviderPreferences):
         return [
             ModelOption(
                 provider="google",
-                model_name="gemini-2.5-flash-lite",
+                model_name="gemini-3.1-flash-lite-preview",
                 reasoning_effort="low",
             ),
             ModelOption(provider="openrouter", model_name="openai/gpt-5", reasoning_effort="low"),
@@ -338,7 +338,7 @@ class ProviderPreferences(PublicProviderPreferences):
             ),
             ModelOption(
                 provider="google",
-                model_name="gemini-2.5-flash-preview-05-20",
+                model_name="gemini-3-flash-preview",
             ),
             ModelOption(
                 provider="openai",
@@ -369,7 +369,7 @@ class ProviderPreferences(PublicProviderPreferences):
         return [
             ModelOption(
                 provider="google",
-                model_name="gemini-2.5-flash",
+                model_name="gemini-3-flash-preview",
                 reasoning_effort="medium",
             ),
             ModelOption(provider="openrouter", model_name="openai/gpt-5", reasoning_effort="low"),
@@ -477,7 +477,7 @@ class ProviderPreferences(PublicProviderPreferences):
             ),
             ModelOption(
                 provider="google",
-                model_name="gemini-2.5-flash-preview-05-20",
+                model_name="gemini-3-flash-preview",
             ),
         ]
 
