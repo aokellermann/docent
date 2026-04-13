@@ -7,7 +7,6 @@ import { ResultResponse, useGetResultQuery } from '@/app/api/resultSetApi';
 import { PanelCitationProvider } from '@/components/sliding-panels';
 import {
   MarkdownWithCitations,
-  TextWithCitations,
   hasTextWithCitations,
 } from '@/components/CitationRenderer';
 import { InlineCitation } from '@/app/types/citationTypes';
@@ -53,9 +52,9 @@ function JsonObjectDisplay({ data }: { data: Record<string, unknown> }) {
         <div key={key} className="text-xs">
           <span className="font-semibold">{key}:</span>{' '}
           {hasTextWithCitations(value) ? (
-            <TextWithCitations text={value.text} citations={value.citations} />
+            <MarkdownWithCitations text={value.text} citations={value.citations} />
           ) : typeof value === 'string' ? (
-            <span className="whitespace-pre-wrap">{value}</span>
+            <MarkdownWithCitations text={value} citations={[]} />
           ) : typeof value === 'number' || typeof value === 'boolean' ? (
             <span>{String(value)}</span>
           ) : value === null ? (

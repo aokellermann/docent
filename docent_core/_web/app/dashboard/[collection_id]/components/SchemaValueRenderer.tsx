@@ -17,7 +17,7 @@ import {
 import { LabelSet } from '@/app/api/labelApi';
 import { SchemaDefinition, SchemaProperty } from '@/app/types/schema';
 import { Tag, Pencil, X, ChevronRight, ChevronDown } from 'lucide-react';
-import { TextWithCitations } from '@/components/CitationRenderer';
+import { MarkdownWithCitations } from '@/components/CitationRenderer';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1244,13 +1244,11 @@ function StringRenderer({
           :
         </span>{' '}
         {citations.length > 0 ? (
-          <TextWithCitations text={displayText} citations={citations} />
+          <MarkdownWithCitations text={displayText} citations={citations} />
+        ) : displayText ? (
+          <MarkdownWithCitations text={displayText} citations={[]} />
         ) : (
-          <span className="whitespace-pre-wrap break-words">
-            {displayText ?? (
-              <span className="italic text-muted-foreground">null</span>
-            )}
-          </span>
+          <span className="italic text-muted-foreground">null</span>
         )}
       </div>
       {renderLabelUI()}
