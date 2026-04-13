@@ -54,6 +54,17 @@ class ValidationFailedException(LLMException):
         self.failed_output = failed_output
 
 
+class ModelNotFoundException(LLMException):
+    error_type_id = "model_not_found"
+    user_message = "The specified model was not found. Please check the model name."
+
+    def __init__(self, model_name: str = ""):
+        msg = f"Model not found: {model_name}" if model_name else "Model not found"
+        super().__init__(msg)
+        if model_name:
+            self.user_message = f"Model '{model_name}' was not found. Please check the model name."
+
+
 class TimeoutException(LLMException):
     error_type_id = "timeout"
     user_message = "The request timed out. The model took too long to respond."
@@ -67,5 +78,6 @@ LLM_ERROR_TYPES: list[type[LLMException]] = [
     NoResponseException,
     DocentUsageLimitException,
     ValidationFailedException,
+    ModelNotFoundException,
     TimeoutException,
 ]

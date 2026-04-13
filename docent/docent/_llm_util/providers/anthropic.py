@@ -42,6 +42,7 @@ from backoff.types import Details
 from docent._llm_util.data_models.exceptions import (
     CompletionTooLongException,
     ContextWindowException,
+    ModelNotFoundException,
     NoResponseException,
     RateLimitException,
 )
@@ -208,12 +209,14 @@ def _build_output_format(response_format: ResponseFormat | None) -> dict[str, An
     }
 
 
-def _convert_anthropic_error(e: Exception):
+def _convert_anthropic_error(e: Exception, model_name: str = ""):
     if isinstance(e, BadRequestError):
         if "context limit" in e.message.lower() or "prompt is too long" in e.message.lower():
             return ContextWindowException()
     if isinstance(e, RateLimitError):
         return RateLimitException(e)
+    if isinstance(e, NotFoundError):
+        return ModelNotFoundException(model_name)
     return None
 
 
@@ -294,8 +297,8 @@ async def get_anthropic_chat_completion_streaming_async(
             else:
                 # Streaming did not produce anything
                 return LLMOutput(model=model_name, completions=[], errors=[NoResponseException()])
-    except (RateLimitError, BadRequestError) as e:
-        if e2 := _convert_anthropic_error(e):
+    except (RateLimitError, BadRequestError, NotFoundError) as e:
+        if e2 := _convert_anthropic_error(e, model_name):
             raise e2 from e
         else:
             raise
@@ -490,8 +493,8 @@ async def get_anthropic_chat_completion_async(
                 )
 
             return output
-    except (RateLimitError, BadRequestError) as e:
-        if e2 := _convert_anthropic_error(e):
+    except (RateLimitError, BadRequestError, NotFoundError) as e:
+        if e2 := _convert_anthropic_error(e, model_name):
             raise e2 from e
         else:
             raise

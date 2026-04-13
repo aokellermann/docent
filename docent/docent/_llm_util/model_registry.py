@@ -55,20 +55,16 @@ _REGISTRY: list[tuple[str, ModelInfo]] = [
         ModelInfo(rate={"input": 1.10, "output": 4.40}, context_window=100_000),
     ),
     (
-        "claude-sonnet-4",
-        ModelInfo(rate={"input": 3.0, "output": 15.0}, context_window=200_000),
+        "claude-opus-4-6",
+        ModelInfo(rate={"input": 5.0, "output": 25.0}, context_window=1_000_000),
     ),
     (
-        "claude-sonnet-4-5",
+        "claude-sonnet-4-6",
         ModelInfo(rate={"input": 3.0, "output": 15.0}, context_window=200_000),
     ),
     (
         "claude-haiku-4-5",
         ModelInfo(rate={"input": 1.0, "output": 5.0}, context_window=200_000),
-    ),
-    (
-        "claude-opus-4-5-20251101",
-        ModelInfo(rate={"input": 5.0, "output": 25.0}, context_window=200_000),
     ),
     (
         "gemini-2.5-flash-lite",

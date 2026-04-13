@@ -17,7 +17,7 @@ from docent_core.docent.db.schemas.tables import SQLAModelApiKey, SQLAModelUsage
 from docent_core.docent.services.llms import LLMService
 from docent_core.docent.services.usage import UsageService
 
-PLATFORM_MODEL = ModelOption(provider="anthropic", model_name="claude-sonnet-4")
+PLATFORM_MODEL = ModelOption(provider="anthropic", model_name="claude-sonnet-4-6")
 
 TEST_INPUTS: list[MessagesInput] = [[{"role": "user", "content": "Hello, world!"}]]
 
@@ -44,7 +44,7 @@ def mock_llm_call() -> Any:
     """Context manager to mock LLM API calls."""
     success_response = [
         LLMOutput(
-            model="claude-sonnet-4",
+            model="claude-sonnet-4-6",
             completions=[
                 LLMCompletion(text="Hello! How can I help you today?", finish_reason="stop")
             ],
@@ -124,7 +124,7 @@ async def test_byok_users_bypass_usage_limits(
     """BYOK users bypass usage limits even when over free cap."""
     api_key = await create_byok_key(db_session, test_user)
     llm_service = LLMService(session_cm_factory, test_user, UsageService(session_cm_factory))
-    model_options = [ModelOption(provider="anthropic", model_name="claude-sonnet-4")]
+    model_options = [ModelOption(provider="anthropic", model_name="claude-sonnet-4-6")]
 
     with mock_usage_check(within_limit=False), mock_llm_call() as mock_llm:
         outputs = await llm_service.get_completions(
@@ -149,7 +149,7 @@ async def test_old_usage_outside_window_not_counted(
         id=str(uuid4()),
         user_id=test_user.id,
         api_key_id=None,
-        model={"model_name": "claude-sonnet-4"},
+        model={"model_name": "claude-sonnet-4-6"},
         bucket_start=old_timestamp.replace(second=0, microsecond=0),
         metric_name="input",
         value=1_000_000,  # Would cost ~$300 if counted
@@ -159,7 +159,7 @@ async def test_old_usage_outside_window_not_counted(
 
     llm_service = LLMService(session_cm_factory, test_user, UsageService(session_cm_factory))
     usage_service = UsageService(session_cm_factory)
-    model_options = [ModelOption(provider="anthropic", model_name="claude-sonnet-4")]
+    model_options = [ModelOption(provider="anthropic", model_name="claude-sonnet-4-6")]
 
     with mock_llm_call() as mock_llm:
         outputs = await llm_service.get_completions(

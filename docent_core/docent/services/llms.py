@@ -260,7 +260,7 @@ class ProviderPreferences(PublicProviderPreferences):
         return [
             ModelOption(
                 provider="anthropic",
-                model_name="claude-sonnet-4-5",
+                model_name="claude-sonnet-4-6",
             ),
             ModelOption(
                 provider="openai",
@@ -279,7 +279,7 @@ class ProviderPreferences(PublicProviderPreferences):
             ),
             ModelOption(
                 provider="anthropic",
-                model_name="claude-sonnet-4-5",
+                model_name="claude-sonnet-4-6",
                 reasoning_effort="medium",
             ),
             ModelOption(
@@ -316,10 +316,10 @@ class ProviderPreferences(PublicProviderPreferences):
                 provider="openrouter", model_name="openai/gpt-5", reasoning_effort="medium"
             ),
             ModelOption(provider="openrouter", model_name="openai/gpt-5", reasoning_effort="high"),
-            ModelOption(provider="openrouter", model_name="anthropic/claude-sonnet-4-5"),
+            ModelOption(provider="openrouter", model_name="anthropic/claude-sonnet-4-6"),
             ModelOption(
                 provider="openrouter",
-                model_name="anthropic/claude-sonnet-4-5",
+                model_name="anthropic/claude-sonnet-4-6",
                 reasoning_effort="medium",
             ),
         ]
@@ -394,7 +394,7 @@ class ProviderPreferences(PublicProviderPreferences):
             ),
             ModelOption(
                 provider="openrouter",
-                model_name="anthropic/claude-sonnet-4-5",
+                model_name="anthropic/claude-sonnet-4-6",
                 reasoning_effort="medium",
             ),
             ModelOption(
@@ -458,7 +458,7 @@ class ProviderPreferences(PublicProviderPreferences):
             ),
             ModelOption(
                 provider="anthropic",
-                model_name="claude-sonnet-4-5",
+                model_name="claude-sonnet-4-6",
                 reasoning_effort="medium",
             ),
         ]
@@ -473,7 +473,7 @@ class ProviderPreferences(PublicProviderPreferences):
             ),
             ModelOption(
                 provider="anthropic",
-                model_name="claude-sonnet-4-5",
+                model_name="claude-sonnet-4-6",
             ),
             ModelOption(
                 provider="google",
