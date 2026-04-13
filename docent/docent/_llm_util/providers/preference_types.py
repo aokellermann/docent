@@ -93,11 +93,13 @@ class PublicProviderPreferences(BaseModel):
             ModelOption(provider="openai", model_name="gpt-5-mini", reasoning_effort="low"),
             ModelOption(provider="openai", model_name="gpt-5-mini", reasoning_effort="medium"),
             ModelOption(provider="openai", model_name="gpt-5-mini", reasoning_effort="high"),
+            ModelOption(provider="anthropic", model_name="claude-opus-4-6"),
             ModelOption(
                 provider="anthropic",
                 model_name="claude-sonnet-4-6",
                 reasoning_effort="medium",
             ),
+            ModelOption(provider="anthropic", model_name="claude-haiku-4-5"),
             ModelOption(
                 provider="google",
                 model_name="gemini-3-flash-preview",

@@ -258,10 +258,14 @@ class ProviderPreferences(PublicProviderPreferences):
     def default_chat_models(self) -> list[ModelOption]:
         """Models that can be used for chat if the user does not provide their own API key."""
         return [
+            ModelOption(provider="anthropic", model_name="claude-opus-4-6"),
+            ModelOption(provider="anthropic", model_name="claude-sonnet-4-6"),
             ModelOption(
                 provider="anthropic",
                 model_name="claude-sonnet-4-6",
+                reasoning_effort="medium",
             ),
+            ModelOption(provider="anthropic", model_name="claude-haiku-4-5"),
             ModelOption(
                 provider="openai",
                 model_name="gpt-5",
@@ -276,11 +280,6 @@ class ProviderPreferences(PublicProviderPreferences):
                 provider="openai",
                 model_name="gpt-5",
                 reasoning_effort="high",
-            ),
-            ModelOption(
-                provider="anthropic",
-                model_name="claude-sonnet-4-6",
-                reasoning_effort="medium",
             ),
             ModelOption(
                 provider="google",
@@ -316,12 +315,14 @@ class ProviderPreferences(PublicProviderPreferences):
                 provider="openrouter", model_name="openai/gpt-5", reasoning_effort="medium"
             ),
             ModelOption(provider="openrouter", model_name="openai/gpt-5", reasoning_effort="high"),
+            ModelOption(provider="openrouter", model_name="anthropic/claude-opus-4-6"),
             ModelOption(provider="openrouter", model_name="anthropic/claude-sonnet-4-6"),
             ModelOption(
                 provider="openrouter",
                 model_name="anthropic/claude-sonnet-4-6",
                 reasoning_effort="medium",
             ),
+            ModelOption(provider="openrouter", model_name="anthropic/claude-haiku-4-5"),
         ]
 
     @cached_property
@@ -334,7 +335,7 @@ class ProviderPreferences(PublicProviderPreferences):
         return [
             ModelOption(
                 provider="anthropic",
-                model_name="claude-sonnet-4-20250514",
+                model_name="claude-sonnet-4-6",
             ),
             ModelOption(
                 provider="google",
@@ -392,11 +393,14 @@ class ProviderPreferences(PublicProviderPreferences):
                 model_name="openai/gpt-5-mini",
                 reasoning_effort="high",
             ),
+            ModelOption(provider="openrouter", model_name="anthropic/claude-opus-4-6"),
+            ModelOption(provider="openrouter", model_name="anthropic/claude-sonnet-4-6"),
             ModelOption(
                 provider="openrouter",
                 model_name="anthropic/claude-sonnet-4-6",
                 reasoning_effort="medium",
             ),
+            ModelOption(provider="openrouter", model_name="anthropic/claude-haiku-4-5"),
             ModelOption(
                 provider="openrouter",
                 model_name="minimax/minimax-m2",
@@ -451,15 +455,18 @@ class ProviderPreferences(PublicProviderPreferences):
     @cached_property
     def default_analysis_models(self) -> list[ModelOption]:
         return [
-            ModelOption(provider="openai", model_name="gpt-5-mini", reasoning_effort="low"),
-            ModelOption(
-                provider="google",
-                model_name="gemini-3-flash-preview",
-            ),
+            ModelOption(provider="anthropic", model_name="claude-opus-4-6"),
+            ModelOption(provider="anthropic", model_name="claude-sonnet-4-6"),
             ModelOption(
                 provider="anthropic",
                 model_name="claude-sonnet-4-6",
                 reasoning_effort="medium",
+            ),
+            ModelOption(provider="anthropic", model_name="claude-haiku-4-5"),
+            ModelOption(provider="openai", model_name="gpt-5-mini", reasoning_effort="low"),
+            ModelOption(
+                provider="google",
+                model_name="gemini-3-flash-preview",
             ),
         ]
 
@@ -471,10 +478,7 @@ class ProviderPreferences(PublicProviderPreferences):
                 provider="openai",
                 model_name="gpt-4o",
             ),
-            ModelOption(
-                provider="anthropic",
-                model_name="claude-sonnet-4-6",
-            ),
+            ModelOption(provider="anthropic", model_name="claude-sonnet-4-6"),
             ModelOption(
                 provider="google",
                 model_name="gemini-3-flash-preview",
