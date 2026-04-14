@@ -219,12 +219,11 @@ async def _run_llm_result_job(
                 # Process LLM response
                 if llm_output.did_error:
                     first_error = llm_output.errors[0] if llm_output.errors else None
-                    error_msg = (
-                        first_error.user_message
-                        if first_error
-                        else "Unknown error"
-                    )
-                    if first_error and error_msg == "The model failed to respond. Please try again later.":
+                    error_msg = first_error.user_message if first_error else "Unknown error"
+                    if (
+                        first_error
+                        and error_msg == "The model failed to respond. Please try again later."
+                    ):
                         error_msg = f"The model failed to respond: {first_error}"
                     error_json: dict[str, Any] = {
                         "error": "LLM error",

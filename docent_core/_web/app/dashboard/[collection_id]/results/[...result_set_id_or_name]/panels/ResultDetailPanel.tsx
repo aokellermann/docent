@@ -52,7 +52,10 @@ function JsonObjectDisplay({ data }: { data: Record<string, unknown> }) {
         <div key={key} className="text-xs">
           <span className="font-semibold">{key}:</span>{' '}
           {hasTextWithCitations(value) ? (
-            <MarkdownWithCitations text={value.text} citations={value.citations} />
+            <MarkdownWithCitations
+              text={value.text}
+              citations={value.citations}
+            />
           ) : typeof value === 'string' ? (
             <MarkdownWithCitations text={value} citations={[]} />
           ) : typeof value === 'number' || typeof value === 'boolean' ? (
