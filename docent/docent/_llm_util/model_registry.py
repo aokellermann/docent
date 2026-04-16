@@ -55,7 +55,7 @@ _REGISTRY: list[tuple[str, ModelInfo]] = [
         ModelInfo(rate={"input": 1.10, "output": 4.40}, context_window=100_000),
     ),
     (
-        "claude-opus-4-6",
+        "claude-opus-4-7",
         ModelInfo(rate={"input": 5.0, "output": 25.0}, context_window=1_000_000),
     ),
     (
